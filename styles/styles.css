@@ -1,0 +1,104 @@
+body,
+html {
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+}
+
+#bit-groups {
+  width: 80px;
+  background-color: #f0f0f0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#canvas-container {
+  flex-grow: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: #e0e0e0;
+}
+
+#material-params {
+  width: 250px;
+  background-color: #f0f0f0;
+  padding: 20px;
+}
+
+#canvas {
+  background-color: white;
+  border: 1px solid #ccc;
+}
+
+.bit-group {
+  margin-bottom: 20px;
+  cursor: pointer;
+  position: relative;
+}
+
+.bit-group svg {
+  display: block;
+}
+
+.bit-list {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  background-color: white;
+  border: 1px solid #ccc;
+  padding: 10px;
+  z-index: 10;
+}
+
+.bit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-right: 10px;
+  position: relative;
+}
+
+.bit span {
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.bit svg {
+  display: block;
+}
+
+.action-icons {
+  display: none;
+  position: absolute;
+  bottom: -20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: white;
+  border-radius: 10px;
+  padding: 2px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+.bit:hover .action-icons {
+  display: flex;
+}
+
+.action-icons svg {
+  width: 15px;
+  height: 15px;
+  margin: 0 2px;
+  cursor: pointer;
+}
+
+.action-icons svg:hover {
+  transform: scale(1.1);
+}
