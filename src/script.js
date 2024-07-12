@@ -1,3 +1,5 @@
+import { angleToRad } from "./utils/math.js";
+
 // Router bit database (updated with more detailed parameters)
 const routerBits = {
   cylindrical: [
@@ -68,11 +70,10 @@ function createSVGIcon(shape, params, size = 50) {
       );
       break;
     case "ballNose":
-      innerShape = document.createElementNS(svgNS, "path");
-      innerShape.setAttribute(
-        "d",
-        `M0,${size / 2} Q${size / 4},0 ${size / 2},${size / 2}`
-      );
+      innerShape = document.createElementNS(svgNS, "circle");
+      innerShape.setAttribute("cx", size / 4);
+      innerShape.setAttribute("cy", size / 4);
+      innerShape.setAttribute("r", size / 4);
       break;
     default:
       if (params) {
@@ -176,7 +177,10 @@ function createActionIcon(action) {
 
 // Create bit groups
 function createBitGroups() {
-  for (const [groupName, bits] of Object.entries(routerBits)) {
+  const groupOrder = ["cylindrical", "conical", "ballNose"];
+
+  groupOrder.forEach((groupName) => {
+    const bits = routerBits[groupName];
     const groupDiv = document.createElement("div");
     groupDiv.className = "bit-group";
 
@@ -226,41 +230,39 @@ function createBitGroups() {
     );
 
     bitGroups.appendChild(groupDiv);
-  }
+  });
 }
 
 // Initialize SVG elements
 function initializeSVG() {
+  // Create layers
+  const materialLayer = document.createElementNS(svgNS, "g");
+  materialLayer.id = "material-layer";
+  canvas.appendChild(materialLayer);
+
+  const bitsLayer = document.createElementNS(svgNS, "g");
+  bitsLayer.id = "bits-layer";
+  canvas.appendChild(bitsLayer);
+
   // Create material rectangle
   materialRect = document.createElementNS(svgNS, "rect");
-  canvas.appendChild(materialRect);
-
-  // Create a group for bit shapes
-  const bitGroup = document.createElementNS(svgNS, "g");
-  bitGroup.id = "bit-group";
-  canvas.appendChild(bitGroup);
+  materialLayer.appendChild(materialRect);
 
   // Initial draw of material shape
   updateMaterialShape();
 }
 
-// Draw material shape
+// Update material shape
 function updateMaterialShape() {
-  // Clear previous shapes
-  canvas.getElementsByTagNameNS(svgNS, "rect")[0].remove();
-  console.log(canvas.children);
-  console.log(canvas.getElementsByTagNameNS(svgNS, "rect"));
-
-  // Create rectangle
-  const rect = document.createElementNS(svgNS, "rect");
-  rect.setAttribute("x", (canvasParameters.width - materialWidth) / 2);
-  rect.setAttribute("y", (canvasParameters.height - materialThickness) / 2);
-  rect.setAttribute("width", materialWidth);
-  rect.setAttribute("height", materialThickness);
-  rect.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
-  rect.setAttribute("stroke", "black");
-
-  canvas.appendChild(rect);
+  materialRect.setAttribute("x", (canvasParameters.width - materialWidth) / 2);
+  materialRect.setAttribute(
+    "y",
+    (canvasParameters.height - materialThickness) / 2
+  );
+  materialRect.setAttribute("width", materialWidth);
+  materialRect.setAttribute("height", materialThickness);
+  materialRect.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
+  materialRect.setAttribute("stroke", "black");
 }
 
 // Update material parameters
@@ -270,65 +272,55 @@ function updateMaterialParams() {
   updateMaterialShape();
 }
 
+// Global variables for bit management
+let bitsOnCanvas = [];
+let bitCounter = 0;
+
 // Draw bit shape
 function drawBitShape(bit, groupName) {
-  const bitGroup = document.getElementById("bit-group");
-  bitGroup.innerHTML = ""; // Clear previous bit shapes
+  const bitsLayer = document.getElementById("bits-layer");
 
   updateMaterialParams();
-  const centerX = (canvasParameters.width - materialWidth) / 2;
-  const centerY = canvasParameters.height / 2 - materialThickness / 2;
-
-  //*! Remove previous bit shape
-  /* const previousBit = canvas.querySelector(".bit-shape");
-  if (previousBit) {
-    previousBit.remove();
-  } */
+  const materialX = (canvasParameters.width - materialWidth) / 2;
+  const materialY = (canvasParameters.height - materialThickness) / 2;
+  const centerX = materialX + materialWidth / 2;
+  const centerY = materialY;
 
   let shape;
+  let x, y;
   switch (groupName) {
     case "cylindrical":
+      x = centerX - bit.diameter / 2;
+      y = centerY - bit.length;
       shape = document.createElementNS(svgNS, "rect");
-      shape.setAttribute("x", centerX - bit.diameter / 2);
-      shape.setAttribute("y", centerY - bit.length);
+      shape.setAttribute("x", x);
+      shape.setAttribute("y", y);
       shape.setAttribute("width", bit.diameter);
       shape.setAttribute("height", bit.length);
       shape.setAttribute("fill", "rgba(0, 140, 255, 0.30)");
-
       break;
     case "conical":
       const oppositeAngle = bit.angle;
       const hypotenuse = bit.diameter;
-      const angleRad = (oppositeAngle * Math.PI) / 180;
-
-      // Вычисляем высоту треугольника
-      const height = (hypotenuse / 2) * (1 / Math.tan(angleRad / 2));
-
-      // Вычисляем половину основания
-      const halfBase = (Math.cos(angleRad) * hypotenuse) / 2;
-      console.log(oppositeAngle, hypotenuse, height, halfBase);
-      // Определяем координаты вершин
+      const height =
+        (hypotenuse / 2) * (1 / Math.tan(angleToRad(oppositeAngle) / 2));
+      x = centerX;
+      y = centerY - height;
       const points = [
-        `${centerX},${centerY}`,
-        `${centerX - hypotenuse / 2},${centerY - height}`,
-        `${centerX + hypotenuse / 2},${centerY - height}`,
+        `${x},${centerY}`,
+        `${x - hypotenuse / 2},${y}`,
+        `${x + hypotenuse / 2},${y}`,
       ].join(" ");
-
-      /* const points = `${centerX},${centerY} 
-                            ${centerX - bit.diameter / 2},${
-        centerY - bit.length
-      } 
-                            ${centerX + bit.diameter / 2},${
-        centerY - bit.length
-      }`; */
       shape = document.createElementNS(svgNS, "polygon");
       shape.setAttribute("points", points);
       shape.setAttribute("fill", "rgba(26, 255, 0, 0.30)");
       break;
     case "ballNose":
+      x = centerX;
+      y = centerY - bit.diameter / 2;
       shape = document.createElementNS(svgNS, "circle");
-      shape.setAttribute("cx", centerX);
-      shape.setAttribute("cy", centerY - bit.diameter / 2);
+      shape.setAttribute("cx", x);
+      shape.setAttribute("cy", y);
       shape.setAttribute("r", bit.diameter / 2);
       shape.setAttribute("fill", "rgba(255, 0, 0, 0.30)");
       break;
@@ -336,15 +328,42 @@ function drawBitShape(bit, groupName) {
 
   shape.setAttribute("stroke", "black");
   shape.classList.add("bit-shape");
-  //shape.setAttribute("name", bit.name);
-  canvas.appendChild(shape);
+  bitsLayer.appendChild(shape);
+
+  // Add bit to the list and update the sheet
+  bitCounter++;
+  const newBit = {
+    number: bitCounter,
+    name: bit.name,
+    x: Math.round(x - materialX),
+    y: Math.round(y - materialY),
+    shape: shape,
+  };
+  bitsOnCanvas.push(newBit);
+  updateBitsSheet();
+}
+
+// Update bits sheet
+function updateBitsSheet() {
+  const sheetBody = document.getElementById("bits-sheet-body");
+  sheetBody.innerHTML = "";
+
+  bitsOnCanvas.forEach((bit) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${bit.number}</td>
+      <td>${bit.name}</td>
+      <td>${bit.x}</td>
+      <td>${bit.y}</td>
+    `;
+    sheetBody.appendChild(row);
+  });
 }
 
 // Initialize
 function initialize() {
   createBitGroups();
   initializeSVG();
-  //!updateMaterialShape();
 
   // Add event listeners for material parameter inputs
   materialWidthInput.addEventListener("input", updateMaterialParams);
@@ -353,3 +372,8 @@ function initialize() {
 
 // Call initialize function when the page loads
 window.addEventListener("load", initialize);
+
+// todo: add material rectangle to separate div
+// todo: sort bit groups as they appear in the DOM
+// todo: create SVG icon for each bit type
+// todo: create SVG icon for each bit

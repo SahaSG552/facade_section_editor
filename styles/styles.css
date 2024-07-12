@@ -28,9 +28,18 @@ html {
 }
 
 #material-params {
-  width: 250px;
-  background-color: #f0f0f0;
-  padding: 20px;
+  margin-bottom: 20px;
+}
+
+#material-params h3,
+#bits-sheet h3 {
+  margin-top: 0;
+}
+
+#material-params label,
+#material-params input {
+  display: block;
+  margin-bottom: 10px;
 }
 
 #canvas {
@@ -101,4 +110,36 @@ html {
 
 .action-icons svg:hover {
   transform: scale(1.1);
+}
+
+#bits-sheet {
+  margin-top: 20px;
+}
+
+#bits-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#bits-sheet th,
+#bits-sheet td {
+  border: 1px solid #ddd;
+  padding: 8px;
+  text-align: left;
+}
+
+#bits-sheet th {
+  background-color: #f2f2f2;
+}
+
+#right-menu {
+  width: 250px;
+  background-color: #f0f0f0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+#bits-sheet tbody tr:nth-child(even) {
+  background-color: #f8f8f8;
 }
