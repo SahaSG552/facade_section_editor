@@ -7,13 +7,14 @@ const routerBits = {
     { name: "D12H25", diameter: 12, length: 25 },
   ],
   conical: [
-    { name: "V90D25", diameter: 25, length: 15, angle: 90 },
-    { name: "V120D32", diameter: 32, length: 20, angle: 120 },
+    { name: "V90D25", diameter: 25.4, length: 19, angle: 90 },
+    { name: "V120D32", diameter: 32, length: 13.2, angle: 120 },
+    { name: "V120D50", diameter: 50, length: 20.6, angle: 120 },
   ],
   ballNose: [
     { name: "U10", diameter: 10, length: 20 },
     { name: "U19", diameter: 19, length: 25 },
-    { name: "U38", diameter: 38, length: 38 },
+    { name: "U38", diameter: 38.1, length: 22 },
   ],
 };
 
@@ -177,7 +178,7 @@ function createActionIcon(action) {
 
 // Create bit groups
 function createBitGroups() {
-  const groupOrder = ["cylindrical", "conical", "ballNose"];
+  const groupOrder = Object.keys(routerBits);
 
   groupOrder.forEach((groupName) => {
     const bits = routerBits[groupName];
@@ -309,6 +310,8 @@ function drawBitShape(bit, groupName) {
       const points = [
         `${x},${centerY}`,
         `${x - hypotenuse / 2},${y}`,
+        `${x - hypotenuse / 2},${centerY - bit.length}`,
+        `${x + hypotenuse / 2},${centerY - bit.length}`,
         `${x + hypotenuse / 2},${y}`,
       ].join(" ");
       shape = document.createElementNS(svgNS, "polygon");
@@ -318,10 +321,19 @@ function drawBitShape(bit, groupName) {
     case "ballNose":
       x = centerX;
       y = centerY - bit.diameter / 2;
-      shape = document.createElementNS(svgNS, "circle");
+      /* shape = document.createElementNS(svgNS, "circle");
       shape.setAttribute("cx", x);
       shape.setAttribute("cy", y);
-      shape.setAttribute("r", bit.diameter / 2);
+      shape.setAttribute("r", bit.diameter / 2); */
+      shape = document.createElementNS(svgNS, "path");
+      shape.setAttribute(
+        "d",
+        `M ${x + bit.diameter / 2} ${y} A ${bit.diameter / 2} ${
+          bit.diameter / 2
+        } 0 0 1 ${x - bit.diameter / 2} ${y} 
+        L ${x - bit.diameter / 2} ${centerY - bit.length}
+        L ${x + bit.diameter / 2} ${centerY - bit.length} Z`
+      );
       shape.setAttribute("fill", "rgba(255, 0, 0, 0.30)");
       break;
   }
@@ -354,7 +366,7 @@ function updateBitsSheet() {
     row.setAttribute("data-index", index);
     row.innerHTML = `
           <td class="drag-handle">☰</td>
-          <td>${bit.number}</td>
+          <td>${index + 1}</td>
           <td>${bit.name}</td>
           <td>${bit.x}</td>
           <td>${bit.y}</td>
@@ -436,3 +448,19 @@ window.addEventListener("load", initialize);
 
 // todo: create SVG icon for each bit type
 // todo: create SVG icon for each bit
+// todo: create add new bit button (+) right after last bit icon. It should add new bit after last bit
+// todo: create bit preferences editor menu. each type of bit has own parameters
+// todo: make copy bit button work
+// todo: make delete bit button work
+// todo: make bits draggable
+// todo: make bits position editable by changing X, Y values in table
+// todo: edit table - dragable area only in dragging column (first column)
+// todo: make bits replaceble - if bit selected on canvas or in table and i choose another bit - replace it in place
+// todo: in table - operation selector - dropdown list with options
+// profile operations (along, inside, outside)
+// engraving for conical bits
+// pocketing
+// chamfering
+// re-machining, clear corners
+// drilling
+// cut out
