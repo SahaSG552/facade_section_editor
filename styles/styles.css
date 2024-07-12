@@ -128,10 +128,6 @@ html {
   text-align: left;
 }
 
-#bits-sheet th {
-  background-color: #f2f2f2;
-}
-
 #right-menu {
   width: 250px;
   background-color: #f0f0f0;
@@ -142,4 +138,17 @@ html {
 
 #bits-sheet tbody tr:nth-child(even) {
   background-color: #f8f8f8;
+}
+
+#bits-sheet th {
+  background-color: #e0e0e0;
+}
+
+.drag-handle {
+  cursor: move;
+  user-select: none;
+}
+
+#bits-sheet tbody tr:hover {
+  background-color: #e8e8e8;
 }

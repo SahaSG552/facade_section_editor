@@ -348,15 +348,76 @@ function updateBitsSheet() {
   const sheetBody = document.getElementById("bits-sheet-body");
   sheetBody.innerHTML = "";
 
-  bitsOnCanvas.forEach((bit) => {
+  bitsOnCanvas.forEach((bit, index) => {
     const row = document.createElement("tr");
+    row.draggable = true;
+    row.setAttribute("data-index", index);
     row.innerHTML = `
-      <td>${bit.number}</td>
-      <td>${bit.name}</td>
-      <td>${bit.x}</td>
-      <td>${bit.y}</td>
-    `;
+          <td class="drag-handle">☰</td>
+          <td>${bit.number}</td>
+          <td>${bit.name}</td>
+          <td>${bit.x}</td>
+          <td>${bit.y}</td>
+      `;
+    row.addEventListener("dragstart", handleDragStart);
+    row.addEventListener("dragover", handleDragOver);
+    row.addEventListener("drop", handleDrop);
+    row.addEventListener("dragend", handleDragEnd);
     sheetBody.appendChild(row);
+  });
+}
+
+let dragSrcElement = null;
+
+function handleDragStart(e) {
+  dragSrcElement = this;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/html", this.outerHTML);
+  this.style.opacity = "0.4";
+}
+
+function handleDragOver(e) {
+  if (e.preventDefault) {
+    e.preventDefault();
+  }
+  e.dataTransfer.dropEffect = "move";
+  return false;
+}
+
+function handleDrop(e) {
+  if (e.stopPropagation) {
+    e.stopPropagation();
+  }
+
+  if (dragSrcElement != this) {
+    const srcIndex = parseInt(dragSrcElement.getAttribute("data-index"));
+    const destIndex = parseInt(this.getAttribute("data-index"));
+
+    // Reorder the bitsOnCanvas array
+    const [removed] = bitsOnCanvas.splice(srcIndex, 1);
+    bitsOnCanvas.splice(destIndex, 0, removed);
+
+    // Update the bits sheet
+    updateBitsSheet();
+
+    // Redraw bits on canvas in the new order
+    redrawBitsOnCanvas();
+  }
+
+  return false;
+}
+
+function handleDragEnd(e) {
+  this.style.opacity = "1";
+}
+
+function redrawBitsOnCanvas() {
+  const bitsLayer = document.getElementById("bits-layer");
+  bitsLayer.innerHTML = ""; // Clear all bits
+
+  bitsOnCanvas.forEach((bit, index) => {
+    bit.number = index + 1; // Update bit number
+    bitsLayer.appendChild(bit.shape);
   });
 }
 
@@ -373,7 +434,5 @@ function initialize() {
 // Call initialize function when the page loads
 window.addEventListener("load", initialize);
 
-// todo: add material rectangle to separate div
-// todo: sort bit groups as they appear in the DOM
 // todo: create SVG icon for each bit type
 // todo: create SVG icon for each bit
