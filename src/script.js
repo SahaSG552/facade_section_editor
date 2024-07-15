@@ -18,7 +18,6 @@ const routerBits = {
   ],
 };
 
-console.log(JSON.stringify(routerBits));
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -199,7 +198,7 @@ function createBitGroups() {
     const bitList = document.createElement("div");
     bitList.className = "bit-list";
 
-    bits.forEach((bit) => {
+    bits.forEach((bit, index) => {
       const bitDiv = document.createElement("div");
       bitDiv.className = "bit";
 
@@ -218,6 +217,50 @@ function createBitGroups() {
           e.stopPropagation();
           console.log(`${action} clicked for ${bit.name}`);
           // Implement action functionality here
+
+          function handleCopyClick(e, bit) {
+            const name = `${bit.name} (${getNextCopyNumber(bit.name)})`;
+            const newBit = { ...bit };
+            newBit.name = name;
+            bits.splice(++index, 0, newBit);
+
+            // Redraw bits on canvas
+            redrawBitsOnCanvas();
+          }
+
+          function getNextCopyNumber(name) {
+            const bits = Object.values(routerBits).flat();
+            const existingCopies = bits.filter((bit) =>
+              bit.name.startsWith(`${name} (`)
+            );
+            const maxCopyNumber = existingCopies.reduce((max, bit) => {
+              const match = bit.name.match(/\((\d+)\)$/);
+              return match ? Math.max(max, parseInt(match[1])) : max;
+            }, 0);
+            return maxCopyNumber + 1;
+          }
+
+          function handleDeleteClick(e, bit) {
+            if (confirm(`Are you sure you want to delete ${bit.name}?`)) {
+              bits.splice(index, 1);
+              // Redraw bits on canvas
+              redrawBitsOnCanvas();
+            }
+          }
+
+          switch (action) {
+            case "edit":
+              //openEditBitMenu(bit, groupName);
+              break;
+            case "copy":
+              handleCopyClick(e, bit);
+              break;
+            case "remove":
+              handleDeleteClick(e, bit);
+              break;
+          }
+          // Refresh bit groups
+          refreshBitGroups();
         });
         actionIcons.appendChild(actionIcon);
       });
@@ -289,25 +332,32 @@ function getGroupSpecificInputs(groupName) {
     case "cylindrical":
       return `
         <label for="bit-diameter">Diameter:</label>
-        <input type="number" id="bit-diameter" required>
+        <input type="number" id="bit-diameter" min="0" 
+        max="1000" step="0.01" required>
         <label for="bit-length">Length:</label>
-        <input type="number" id="bit-length" required>
+        <input type="number" id="bit-length" min="0" 
+        max="1000" step="0.01" required>
       `;
     case "conical":
       return `
         <label for="bit-diameter">Diameter:</label>
-        <input type="number" id="bit-diameter" required>
+        <input type="number" id="bit-diameter" min="0" 
+        max="1000" step="0.01" required>
         <label for="bit-length">Length:</label>
-        <input type="number" id="bit-length" required>
+        <input type="number" id="bit-length" min="0" 
+        max="1000" step="0.01" required>
         <label for="bit-angle">Angle:</label>
-        <input type="number" id="bit-angle" required>
+        <input type="number" id="bit-angle" min="0" 
+        max="1000" step="0.01" required>
       `;
     case "ballNose":
       return `
         <label for="bit-diameter">Diameter:</label>
-        <input type="number" id="bit-diameter" required>
+        <input type="number" id="bit-diameter" min="0" 
+        max="1000" step="0.01" required>
         <label for="bit-length">Length:</label>
-        <input type="number" id="bit-length" required>
+        <input type="number" id="bit-length" min="0" 
+        max="1000" step="0.01" required>
       `;
     default:
       return "";
@@ -350,6 +400,7 @@ function isBitNameDuplicate(name) {
 function refreshBitGroups() {
   bitGroups.innerHTML = "";
   createBitGroups();
+  console.log(JSON.stringify(routerBits));
 }
 
 // Initialize SVG elements
