@@ -18,6 +18,7 @@ const routerBits = {
   ],
 };
 
+console.log(JSON.stringify(routerBits));
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -54,7 +55,6 @@ function createSVGIcon(shape, params, size = 50) {
   svg.appendChild(circle);
 
   const innerGroup = document.createElementNS(svgNS, "g");
-  innerGroup.setAttribute("transform", `translate(${size / 4}, ${size / 4})`);
 
   let innerShape;
   switch (shape) {
@@ -67,7 +67,7 @@ function createSVGIcon(shape, params, size = 50) {
       innerShape = document.createElementNS(svgNS, "polygon");
       innerShape.setAttribute(
         "points",
-        `0,${size / 2} ${size / 4},0 ${size / 2},${size / 2}`
+        `${size / 4},${size / 2} ${size / 2},0 0,0`
       );
       break;
     case "ballNose":
@@ -76,13 +76,20 @@ function createSVGIcon(shape, params, size = 50) {
       innerShape.setAttribute("cy", size / 4);
       innerShape.setAttribute("r", size / 4);
       break;
+    case "newBit":
+      innerShape = document.createElementNS(svgNS, "path");
+      innerShape.setAttribute(
+        "d",
+        `M${size / 4} 0V${size / 2}M0 ${size / 4}H${size / 2}`
+      );
+      break;
     default:
       if (params) {
         // Create specific bit shape based on parameters
         innerShape = createBitShape(shape, params, size / 2);
       }
   }
-
+  innerGroup.setAttribute("transform", `translate(${size / 4}, ${size / 4})`);
   if (innerShape) {
     innerShape.setAttribute("fill", "white");
     innerShape.setAttribute("stroke", "black");
@@ -115,6 +122,7 @@ function createBitShape(groupName, params, size) {
           size / 2 + halfWidth
         },${height}`
       );
+      console.log(halfWidth);
       break;
     case "ballNose":
       shape = document.createElementNS(svgNS, "path");
@@ -222,7 +230,14 @@ function createBitGroups() {
     // Add '+' button
     const addButton = document.createElement("div");
     addButton.className = "bit add-bit";
-    addButton.innerHTML = createAddBitIcon();
+
+    const addBitName = document.createElement("span");
+    addBitName.textContent = "New";
+    addButton.appendChild(addBitName);
+    const addBitIcon = createSVGIcon("newBit", "newBit", 40);
+    addButton.appendChild(addBitIcon);
+
+    //addButton.innerHTML = createAddBitIcon();
     addButton.addEventListener("click", () => openNewBitMenu(groupName));
 
     bitList.appendChild(addButton);
@@ -240,15 +255,6 @@ function createBitGroups() {
 
     bitGroups.appendChild(groupDiv);
   });
-}
-
-function createAddBitIcon() {
-  return `
-    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="20" cy="20" r="19" fill="white" stroke="black" stroke-width="2"/>
-      <path d="M20 10V30M10 20H30" stroke="black" stroke-width="2"/>
-    </svg>
-  `;
 }
 
 function openNewBitMenu(groupName) {
@@ -433,10 +439,6 @@ function drawBitShape(bit, groupName) {
     case "ballNose":
       x = centerX;
       y = centerY - bit.diameter / 2;
-      /* shape = document.createElementNS(svgNS, "circle");
-      shape.setAttribute("cx", x);
-      shape.setAttribute("cy", y);
-      shape.setAttribute("r", bit.diameter / 2); */
       shape = document.createElementNS(svgNS, "path");
       shape.setAttribute(
         "d",
