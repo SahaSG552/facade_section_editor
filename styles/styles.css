@@ -10,6 +10,13 @@ html {
   height: 100vh;
 }
 
+#bits-title {
+  margin-top: 0;
+  width: 80%;
+  text-align: left;
+  padding-left: 10px;
+}
+
 #bit-groups {
   width: 80px;
   background-color: #f0f0f0;
