@@ -219,6 +219,14 @@ function createBitGroups() {
       bitList.appendChild(bitDiv);
     });
 
+    // Add '+' button
+    const addButton = document.createElement("div");
+    addButton.className = "bit add-bit";
+    addButton.innerHTML = createAddBitIcon();
+    addButton.addEventListener("click", () => openNewBitMenu(groupName));
+
+    bitList.appendChild(addButton);
+
     groupDiv.appendChild(bitList);
 
     groupDiv.addEventListener(
@@ -232,6 +240,110 @@ function createBitGroups() {
 
     bitGroups.appendChild(groupDiv);
   });
+}
+
+function createAddBitIcon() {
+  return `
+    <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="20" cy="20" r="19" fill="white" stroke="black" stroke-width="2"/>
+      <path d="M20 10V30M10 20H30" stroke="black" stroke-width="2"/>
+    </svg>
+  `;
+}
+
+function openNewBitMenu(groupName) {
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2>New Bit Parameters</h2>
+      <form id="new-bit-form">
+        <label for="bit-name">Name:</label>
+        <input type="text" id="bit-name" required>
+        ${getGroupSpecificInputs(groupName)}
+        <div class="button-group">
+          <button type="button" id="cancel-btn">Cancel</button>
+          <button type="submit">OK</button>
+        </div>
+      </form>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const form = modal.querySelector("#new-bit-form");
+  form.addEventListener("submit", (e) => handleNewBitSubmit(e, groupName));
+
+  const cancelBtn = modal.querySelector("#cancel-btn");
+  cancelBtn.addEventListener("click", () => document.body.removeChild(modal));
+}
+
+function getGroupSpecificInputs(groupName) {
+  switch (groupName) {
+    case "cylindrical":
+      return `
+        <label for="bit-diameter">Diameter:</label>
+        <input type="number" id="bit-diameter" required>
+        <label for="bit-length">Length:</label>
+        <input type="number" id="bit-length" required>
+      `;
+    case "conical":
+      return `
+        <label for="bit-diameter">Diameter:</label>
+        <input type="number" id="bit-diameter" required>
+        <label for="bit-length">Length:</label>
+        <input type="number" id="bit-length" required>
+        <label for="bit-angle">Angle:</label>
+        <input type="number" id="bit-angle" required>
+      `;
+    case "ballNose":
+      return `
+        <label for="bit-diameter">Diameter:</label>
+        <input type="number" id="bit-diameter" required>
+        <label for="bit-length">Length:</label>
+        <input type="number" id="bit-length" required>
+      `;
+    default:
+      return "";
+  }
+}
+
+function handleNewBitSubmit(e, groupName) {
+  e.preventDefault();
+  const form = e.target;
+  const name = form.querySelector("#bit-name").value;
+
+  if (isBitNameDuplicate(name)) {
+    alert(
+      "A bit with this name already exists. Please choose a different name."
+    );
+    return;
+  }
+
+  const newBit = {
+    name: name,
+    diameter: parseFloat(form.querySelector("#bit-diameter").value),
+    length: parseFloat(form.querySelector("#bit-length").value),
+  };
+
+  if (groupName === "conical") {
+    newBit.angle = parseFloat(form.querySelector("#bit-angle").value);
+  }
+
+  routerBits[groupName].push(newBit);
+  document.body.removeChild(form.closest(".modal"));
+  refreshBitGroups();
+}
+
+function isBitNameDuplicate(name) {
+  return Object.values(routerBits).some((group) =>
+    group.some((bit) => bit.name === name)
+  );
+}
+
+function refreshBitGroups() {
+  bitGroups.innerHTML = "";
+  createBitGroups();
 }
 
 // Initialize SVG elements
@@ -445,22 +557,3 @@ function initialize() {
 
 // Call initialize function when the page loads
 window.addEventListener("load", initialize);
-
-// todo: create SVG icon for each bit type
-// todo: create SVG icon for each bit
-// todo: create add new bit button (+) right after last bit icon. It should add new bit after last bit
-// todo: create bit preferences editor menu. each type of bit has own parameters
-// todo: make copy bit button work
-// todo: make delete bit button work
-// todo: make bits draggable
-// todo: make bits position editable by changing X, Y values in table
-// todo: edit table - dragable area only in dragging column (first column)
-// todo: make bits replaceble - if bit selected on canvas or in table and i choose another bit - replace it in place
-// todo: in table - operation selector - dropdown list with options
-// profile operations (along, inside, outside)
-// engraving for conical bits
-// pocketing
-// chamfering
-// re-machining, clear corners
-// drilling
-// cut out
