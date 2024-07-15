@@ -12,7 +12,7 @@ This project aims to create furniture facade cross sections using router bits an
 - [ ] Create SVG icon for each bit type
 - [ ] Create SVG icon for each bit
 - [ ] Create add new bit button (+) right after last bit icon. It should add new bit after last bit
-- [ ] Create bit preferences editor menu. Each type of bit has own parameters
+- [ ] Create bit preferences menu. Each type of bit has own parameters. Bit names shouldn't have duplicates. Every parameter shold be filled in.
 - [ ] Make copy bit button work
 - [ ] Make delete bit button work
 - [ ] Make bits draggable
