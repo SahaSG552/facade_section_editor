@@ -14,6 +14,7 @@ const materialThicknessInput = document.getElementById("material-thickness");
 let materialRect;
 let materialWidth = 400;
 let materialThickness = 18;
+let materialAnchor = "top-left"; // "top-left" or "bottom-left"
 
 const canvasParameters = {
     width: canvas.getAttribute("width"),
@@ -512,6 +513,11 @@ function initializeSVG() {
     materialRect = document.createElementNS(svgNS, "rect");
     materialLayer.appendChild(materialRect);
 
+    // Create material anchor indicator (always visible)
+    const materialAnchorIndicator = document.createElementNS(svgNS, "g");
+    materialAnchorIndicator.id = "material-anchor-indicator";
+    materialLayer.appendChild(materialAnchorIndicator);
+
     // Initial draw of material shape and grid
     updateMaterialShape();
     drawGrid();
@@ -538,10 +544,77 @@ function initializeSVG() {
 
     // Add grid scale input listener
     document.getElementById("grid-scale").addEventListener("input", (e) => {
-        gridSize = parseInt(e.target.value) || 10;
+        gridSize = parseFloat(e.target.value) || 10;
         if (gridEnabled) {
             drawGrid();
         }
+    });
+
+    // Setup material anchor button
+    const materialAnchorBtn = document.getElementById("material-anchor-btn");
+    materialAnchorBtn.appendChild(createMaterialAnchorButton(materialAnchor));
+    materialAnchorBtn.addEventListener("click", cycleMaterialAnchor);
+}
+
+// Cycle material anchor
+function cycleMaterialAnchor() {
+    // Cycle between "top-left" and "bottom-left"
+    materialAnchor = materialAnchor === "top-left" ? "bottom-left" : "top-left";
+
+    // Update button icon
+    const materialAnchorBtn = document.getElementById("material-anchor-btn");
+    materialAnchorBtn.innerHTML = "";
+    materialAnchorBtn.appendChild(createMaterialAnchorButton(materialAnchor));
+
+    // Recalculate bit positions relative to new anchor
+    updateBitsForNewAnchor();
+
+    // Update grid alignment
+    if (gridEnabled) {
+        drawGrid();
+    }
+
+    // Update indicator
+    updateMaterialAnchorIndicator();
+}
+
+// Update bit positions when material anchor changes
+function updateBitsForNewAnchor() {
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+    const oldAnchor =
+        materialAnchor === "top-left" ? "bottom-left" : "top-left";
+    const currentAnchorX = materialX;
+    const currentAnchorY =
+        oldAnchor === "top-left" ? materialY : materialY + materialThickness;
+    const newAnchorX = materialX;
+    const newAnchorY =
+        materialAnchor === "top-left"
+            ? materialY
+            : materialY + materialThickness;
+
+    bitsOnCanvas.forEach((bit) => {
+        // Current physical position
+        const physicalX = currentAnchorX + bit.x;
+        const physicalY = currentAnchorY + bit.y;
+
+        // New relative position based on new anchor
+        const newX = physicalX - newAnchorX;
+        const newY = physicalY - newAnchorY;
+
+        // Update bit logical position
+        bit.x = newX;
+        bit.y = newY;
+
+        // Update table
+        updateBitsSheet();
+
+        // Update canvas position
+        const newAbsX = newAnchorX + newX;
+        const newAbsY = newAnchorY + newY;
+        const dx = newAbsX - bit.baseAbsX;
+        const dy = newAbsY - bit.baseAbsY;
+        bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
     });
 }
 
@@ -559,19 +632,86 @@ function updateMaterialShape() {
     materialRect.setAttribute("height", materialThickness);
     materialRect.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
     materialRect.setAttribute("stroke", "black");
+
+    updateMaterialAnchorIndicator();
+}
+
+// Update material anchor indicator (always visible)
+function updateMaterialAnchorIndicator() {
+    const indicator = document.getElementById("material-anchor-indicator");
+    indicator.innerHTML = ""; // Clear
+
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+
+    let anchorX, anchorY;
+    if (materialAnchor === "top-left") {
+        anchorX = materialX;
+        anchorY = materialY;
+    } else if (materialAnchor === "bottom-left") {
+        anchorX = materialX;
+        anchorY = materialY + materialThickness;
+    }
+
+    // Draw a small cross
+    const crossSize = 5;
+    const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+    const horizontal = document.createElementNS(svgNS, "line");
+    horizontal.setAttribute("x1", anchorX - crossSize);
+    horizontal.setAttribute("y1", anchorY);
+    horizontal.setAttribute("x2", anchorX + crossSize);
+    horizontal.setAttribute("y2", anchorY);
+    horizontal.setAttribute("stroke", "red");
+    horizontal.setAttribute("stroke-width", thickness);
+    indicator.appendChild(horizontal);
+
+    const vertical = document.createElementNS(svgNS, "line");
+    vertical.setAttribute("x1", anchorX);
+    vertical.setAttribute("y1", anchorY - crossSize);
+    vertical.setAttribute("x2", anchorX);
+    vertical.setAttribute("y2", anchorY + crossSize);
+    vertical.setAttribute("stroke", "red");
+    vertical.setAttribute("stroke-width", thickness);
+    indicator.appendChild(vertical);
 }
 
 // Update material parameters
 function updateMaterialParams() {
-    // guard against empty inputs
+    // Save old anchor position
+    const oldMaterialX = (canvasParameters.width - materialWidth) / 2;
+    const oldMaterialY = (canvasParameters.height - materialThickness) / 2;
+    const oldMaterialAnchorOffset = getMaterialAnchorOffset();
+    const oldMaterialAnchorX = oldMaterialX + oldMaterialAnchorOffset.x;
+    const oldMaterialAnchorY = oldMaterialY + oldMaterialAnchorOffset.y;
+
+    // Update material dimensions
     materialWidth = parseInt(materialWidthInput.value) || materialWidth;
     materialThickness =
         parseInt(materialThicknessInput.value) || materialThickness;
-    updateMaterialShape();
 
-    // After material changed, recalc positions of all bits so their anchor (center-bottom)
-    // stays at coordinates relative to material top-left (bit.x, bit.y).
-    updateBitsPositions();
+    // New anchor position
+    const newMaterialX = (canvasParameters.width - materialWidth) / 2;
+    const newMaterialY = (canvasParameters.height - materialThickness) / 2;
+    const newMaterialAnchorOffset = getMaterialAnchorOffset();
+    const newMaterialAnchorX = newMaterialX + newMaterialAnchorOffset.x;
+    const newMaterialAnchorY = newMaterialY + newMaterialAnchorOffset.y;
+
+    // Update bits to keep physical position
+    bitsOnCanvas.forEach((bit) => {
+        const physicalX = oldMaterialAnchorX + bit.x;
+        const physicalY = oldMaterialAnchorY + bit.y;
+        bit.x = physicalX - newMaterialAnchorX;
+        bit.y = physicalY - newMaterialAnchorY;
+
+        // Update canvas position
+        const newAbsX = newMaterialAnchorX + bit.x;
+        const newAbsY = newMaterialAnchorY + bit.y;
+        const dx = newAbsX - bit.baseAbsX;
+        const dy = newAbsY - bit.baseAbsY;
+        bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
+    });
+
+    updateMaterialShape();
 }
 
 // New: reposition all bits according to current material origin and their stored logical coords
@@ -690,6 +830,55 @@ function createAlignmentButton(alignment) {
     return svg;
 }
 
+// Create material anchor button SVG
+function createMaterialAnchorButton(anchor) {
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", "20");
+    svg.setAttribute("height", "20");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.style.cursor = "pointer";
+
+    // Background rectangle (material)
+    const bg = document.createElementNS(svgNS, "rect");
+    bg.setAttribute("width", "20");
+    bg.setAttribute("height", "20");
+    bg.setAttribute("fill", "rgba(155, 155, 155, 0.5)");
+    bg.setAttribute("stroke", "black");
+    bg.setAttribute("stroke-width", "1");
+    svg.appendChild(bg);
+
+    // Red cross at the anchor position
+    const crossSize = 2;
+    let crossX, crossY;
+    if (anchor === "top-left") {
+        crossX = 3;
+        crossY = 3;
+    } else if (anchor === "bottom-left") {
+        crossX = 3;
+        crossY = 17;
+    }
+
+    const horizontal = document.createElementNS(svgNS, "line");
+    horizontal.setAttribute("x1", crossX - crossSize);
+    horizontal.setAttribute("y1", crossY);
+    horizontal.setAttribute("x2", crossX + crossSize);
+    horizontal.setAttribute("y2", crossY);
+    horizontal.setAttribute("stroke", "red");
+    horizontal.setAttribute("stroke-width", "1");
+    svg.appendChild(horizontal);
+
+    const vertical = document.createElementNS(svgNS, "line");
+    vertical.setAttribute("x1", crossX);
+    vertical.setAttribute("y1", crossY - crossSize);
+    vertical.setAttribute("x2", crossX);
+    vertical.setAttribute("y2", crossY + crossSize);
+    vertical.setAttribute("stroke", "red");
+    vertical.setAttribute("stroke-width", "1");
+    svg.appendChild(vertical);
+
+    return svg;
+}
+
 // Draw bit shape
 function drawBitShape(bit, groupName) {
     const bitsLayer = document.getElementById("bits-layer");
@@ -710,8 +899,8 @@ function drawBitShape(bit, groupName) {
 
     bitCounter++;
 
-    const x = Math.round(centerX - materialX);
-    const y = Math.round(centerY - materialY);
+    const x = centerX - materialX;
+    const y = centerY - materialY;
 
     const newBit = {
         number: bitCounter,
@@ -726,6 +915,7 @@ function drawBitShape(bit, groupName) {
     };
     bitsOnCanvas.push(newBit);
     updateBitsSheet();
+    updateStrokeWidths();
 }
 
 // Update bits sheet
@@ -774,9 +964,11 @@ function updateBitsSheet() {
         const xCell = document.createElement("td");
         const xInput = document.createElement("input");
         xInput.type = "number";
-        xInput.value = bit.x;
+        const anchorOffset = getAnchorOffset(bit);
+        xInput.value = bit.x + anchorOffset.x;
         xInput.addEventListener("change", () => {
-            const newX = parseFloat(xInput.value) || 0;
+            const newAnchorX = parseFloat(xInput.value) || 0;
+            const newX = newAnchorX - anchorOffset.x;
             updateBitPosition(index, newX, bit.y);
         });
         xCell.appendChild(xInput);
@@ -786,9 +978,10 @@ function updateBitsSheet() {
         const yCell = document.createElement("td");
         const yInput = document.createElement("input");
         yInput.type = "number";
-        yInput.value = bit.y;
+        yInput.value = bit.y + anchorOffset.y;
         yInput.addEventListener("change", () => {
-            const newY = parseFloat(yInput.value) || 0;
+            const newAnchorY = parseFloat(yInput.value) || 0;
+            const newY = newAnchorY - anchorOffset.y;
             updateBitPosition(index, bit.x, newY);
         });
         yCell.appendChild(yInput);
@@ -873,29 +1066,18 @@ function cycleAlignment(index) {
     const nextIdx = (currentIdx + 1) % alignmentStates.length;
     const newAlignment = alignmentStates[nextIdx];
 
-    // Calculate offset adjustment based on bit diameter
-    const bitData = bit.bitData;
-    const halfDiameter = (bitData.diameter || 0) / 2;
-    let xOffset = 0;
-
-    if (bit.alignment === "center" && newAlignment === "left") {
-        xOffset = -halfDiameter;
-    } else if (bit.alignment === "center" && newAlignment === "right") {
-        xOffset = halfDiameter;
-    } else if (bit.alignment === "left" && newAlignment === "center") {
-        xOffset = halfDiameter;
-    } else if (bit.alignment === "left" && newAlignment === "right") {
-        xOffset = 2 * halfDiameter;
-    } else if (bit.alignment === "right" && newAlignment === "center") {
-        xOffset = -halfDiameter;
-    } else if (bit.alignment === "right" && newAlignment === "left") {
-        xOffset = -2 * halfDiameter;
-    }
-
-    // Update alignment and position
+    // Calculate offset adjustment to keep anchor position the same
+    const oldOffset = getAnchorOffset(bit);
     bit.alignment = newAlignment;
-    const newX = bit.x + xOffset;
-    updateBitPosition(index, newX, bit.y);
+    const newOffset = getAnchorOffset(bit);
+    const deltaX = oldOffset.x - newOffset.x;
+    const deltaY = oldOffset.y - newOffset.y;
+
+    if (deltaX !== 0 || deltaY !== 0) {
+        const newX = bit.x + deltaX;
+        const newY = bit.y + deltaY;
+        updateBitPosition(index, newX, newY);
+    }
 
     // Update the table to show new alignment button
     updateBitsSheet();
@@ -925,12 +1107,15 @@ function selectBit(index) {
             const newFill = currentFill.replace(/0\.\d+\)/, "1)"); // Remove transparency
             shape.setAttribute("fill", newFill);
             shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-            shape.setAttribute("stroke-width", "2");
+            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+            shape.setAttribute("stroke-width", thickness);
         }
     }
 
     // Update table row highlighting
     updateBitsSheet();
+    // Update anchor point visibility
+    redrawBitsOnCanvas();
 }
 
 // Reset bit highlight to original state
@@ -944,7 +1129,9 @@ function resetBitHighlight(index) {
                 "stroke",
                 shape.dataset.originalStroke || "black"
             );
-            shape.setAttribute("stroke-width", "1");
+            // Set to scaled thickness instead of default "1"
+            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+            shape.setAttribute("stroke-width", thickness);
             delete shape.dataset.originalFill;
             delete shape.dataset.originalStroke;
         }
@@ -961,6 +1148,7 @@ document.addEventListener("click", (e) => {
             resetBitHighlight(selectedBitIndex);
             selectedBitIndex = null;
             updateBitsSheet();
+            redrawBitsOnCanvas();
         }
     }
 });
@@ -968,13 +1156,17 @@ document.addEventListener("click", (e) => {
 function updateBitPosition(index, newX, newY) {
     // update material params to get correct material origin
     updateMaterialParams();
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
+    const materialAnchorOffset = getMaterialAnchorOffset();
+    const materialAnchorX =
+        (canvasParameters.width - materialWidth) / 2 + materialAnchorOffset.x;
+    const materialAnchorY =
+        (canvasParameters.height - materialThickness) / 2 +
+        materialAnchorOffset.y;
 
     const bit = bitsOnCanvas[index];
-    // compute absolute positions the user expects (relative to material origin)
-    const newAbsX = materialX + newX;
-    const newAbsY = materialY + newY;
+    // compute absolute positions the user expects (relative to material anchor)
+    const newAbsX = materialAnchorX + newX;
+    const newAbsY = materialAnchorY + newY;
 
     // compute translation relative to base creation coordinates
     const dx = newAbsX - bit.baseAbsX;
@@ -984,8 +1176,8 @@ function updateBitPosition(index, newX, newY) {
     bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
 
     // save new logical positions
-    bit.x = Math.round(newX);
-    bit.y = Math.round(newY);
+    bit.x = newX;
+    bit.y = newY;
 
     // DO NOT call updateBitsSheet() here - it recreates inputs and breaks focus
     // redraw layer order if needed
@@ -1077,13 +1269,14 @@ function redrawBitsOnCanvas() {
 
         // Draw a small cross
         const crossSize = 3;
+        const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
         const horizontal = document.createElementNS(svgNS, "line");
         horizontal.setAttribute("x1", anchorX - crossSize);
         horizontal.setAttribute("y1", anchorY);
         horizontal.setAttribute("x2", anchorX + crossSize);
         horizontal.setAttribute("y2", anchorY);
         horizontal.setAttribute("stroke", "red");
-        horizontal.setAttribute("stroke-width", "1");
+        horizontal.setAttribute("stroke-width", thickness);
         anchorPoint.appendChild(horizontal);
 
         const vertical = document.createElementNS(svgNS, "line");
@@ -1092,7 +1285,7 @@ function redrawBitsOnCanvas() {
         vertical.setAttribute("x2", anchorX);
         vertical.setAttribute("y2", anchorY + crossSize);
         vertical.setAttribute("stroke", "red");
-        vertical.setAttribute("stroke-width", "1");
+        vertical.setAttribute("stroke-width", thickness);
         anchorPoint.appendChild(vertical);
 
         // Only show anchor point for selected bit
@@ -1116,11 +1309,22 @@ function drawGrid() {
 
     // Calculate line thickness based on zoom level
     // Thicker lines when zoomed out (zoomLevel < 1), thinner when zoomed in (zoomLevel > 1)
-    const baseThickness = 0.5;
-    const thickness = Math.max(0.1, baseThickness / Math.sqrt(zoomLevel));
+    const baseThickness = 0.1;
+    const thickness = Math.max(0.01, baseThickness / Math.sqrt(zoomLevel));
+
+    // Align grid to material's anchor point
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+    let anchorX = materialX;
+    let anchorY =
+        materialAnchor === "top-left"
+            ? materialY
+            : materialY + materialThickness;
+    const xOffset = anchorX % gridSize;
+    const yOffset = anchorY % gridSize;
 
     // Draw vertical lines
-    for (let x = 0; x <= canvasParameters.width; x += gridSize) {
+    for (let x = xOffset; x <= canvasParameters.width; x += gridSize) {
         const line = document.createElementNS(svgNS, "line");
         line.setAttribute("x1", x);
         line.setAttribute("y1", 0);
@@ -1132,7 +1336,7 @@ function drawGrid() {
     }
 
     // Draw horizontal lines
-    for (let y = 0; y <= canvasParameters.height; y += gridSize) {
+    for (let y = yOffset; y <= canvasParameters.height; y += gridSize) {
         const line = document.createElementNS(svgNS, "line");
         line.setAttribute("x1", 0);
         line.setAttribute("y1", y);
@@ -1142,6 +1346,18 @@ function drawGrid() {
         line.setAttribute("stroke-width", thickness);
         gridLayer.appendChild(line);
     }
+}
+
+// Update stroke widths based on zoom level
+function updateStrokeWidths() {
+    const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+    materialRect.setAttribute("stroke-width", thickness);
+    bitsOnCanvas.forEach((bit) => {
+        const shape = bit.group.querySelector(".bit-shape");
+        if (shape) {
+            shape.setAttribute("stroke-width", thickness);
+        }
+    });
 }
 
 // Update viewBox based on current zoom and pan
@@ -1160,6 +1376,8 @@ function updateViewBox() {
     if (gridEnabled) {
         drawGrid();
     }
+    // Update stroke widths
+    updateStrokeWidths();
 }
 
 // Zoom functions
@@ -1213,6 +1431,13 @@ function snapToGrid(value) {
     return Math.round(value / gridSize) * gridSize;
 }
 
+// Helper function to get material anchor offset
+function getMaterialAnchorOffset() {
+    return materialAnchor === "top-left"
+        ? { x: 0, y: 0 }
+        : { x: 0, y: materialThickness };
+}
+
 // Helper function to get anchor offset based on alignment
 function getAnchorOffset(bit) {
     const bitData = bit.bitData;
@@ -1233,21 +1458,30 @@ function getAnchorOffset(bit) {
 function handleZoom(e) {
     e.preventDefault();
 
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    zoomLevel *= zoomFactor;
-
-    // Zoom towards mouse position
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
 
-    // Convert mouse position to SVG coordinates
-    const svgX = (mouseX / rect.width) * canvasParameters.width;
-    const svgY = (mouseY / rect.height) * canvasParameters.height;
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    const oldZoom = zoomLevel;
+    zoomLevel *= zoomFactor;
 
-    // Adjust pan to zoom towards mouse
-    panX = svgX;
-    panY = svgY;
+    const oldViewBoxWidth = canvasParameters.width / oldZoom;
+    const oldViewBoxHeight = canvasParameters.height / oldZoom;
+    const oldViewBoxX = panX - oldViewBoxWidth / 2;
+    const oldViewBoxY = panY - oldViewBoxHeight / 2;
+
+    const svgX = oldViewBoxX + (mouseX / rect.width) * oldViewBoxWidth;
+    const svgY = oldViewBoxY + (mouseY / rect.height) * oldViewBoxHeight;
+
+    const newViewBoxWidth = canvasParameters.width / zoomLevel;
+    const newViewBoxHeight = canvasParameters.height / zoomLevel;
+
+    const newViewBoxX = svgX - (mouseX / rect.width) * newViewBoxWidth;
+    const newViewBoxY = svgY - (mouseY / rect.height) * newViewBoxHeight;
+
+    panX = newViewBoxX + newViewBoxWidth / 2;
+    panY = newViewBoxY + newViewBoxHeight / 2;
 
     updateViewBox();
 }
@@ -1318,17 +1552,26 @@ function handleMouseMove(e) {
         const bit = bitsOnCanvas[draggedBitIndex];
         const anchorOffset = getAnchorOffset(bit);
 
-        // Calculate new position relative to material origin
-        const materialX = (canvasParameters.width - materialWidth) / 2;
-        const materialY = (canvasParameters.height - materialThickness) / 2;
+        // Calculate new position relative to material anchor
+        const materialAnchorOffset = getMaterialAnchorOffset();
+        const materialAnchorX =
+            (canvasParameters.width - materialWidth) / 2 +
+            materialAnchorOffset.x;
+        const materialAnchorY =
+            (canvasParameters.height - materialThickness) / 2 +
+            materialAnchorOffset.y;
 
-        // New position accounting for anchor point
-        let newX = svgX - materialX - anchorOffset.x;
-        let newY = svgY - materialY - anchorOffset.y;
+        // Calculate desired anchor position
+        let anchorX = svgX - materialAnchorX;
+        let anchorY = svgY - materialAnchorY;
 
-        // Snap to grid
-        newX = snapToGrid(newX);
-        newY = snapToGrid(newY);
+        // Snap anchor to grid
+        anchorX = snapToGrid(anchorX);
+        anchorY = snapToGrid(anchorY);
+
+        // Then center position = anchorX - anchorOffset.x
+        let newX = anchorX - anchorOffset.x;
+        let newY = anchorY - anchorOffset.y;
 
         // Update bit position
         updateBitPosition(draggedBitIndex, newX, newY);
@@ -1371,15 +1614,16 @@ function updateTableCoordinates(bitIndex, newX, newY) {
 
     if (rows[bitIndex]) {
         const cells = rows[bitIndex].querySelectorAll("td");
+        const anchorOffset = getAnchorOffset(bitsOnCanvas[bitIndex]);
         if (cells[3]) {
             // X column
             const xInput = cells[3].querySelector("input");
-            if (xInput) xInput.value = Math.round(newX);
+            if (xInput) xInput.value = newX + anchorOffset.x;
         }
         if (cells[4]) {
             // Y column
             const yInput = cells[4].querySelector("input");
-            if (yInput) yInput.value = Math.round(newY);
+            if (yInput) yInput.value = newY + anchorOffset.y;
         }
     }
 }
