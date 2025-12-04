@@ -150,20 +150,7 @@ html {
   transform: none;
 }
 
-/* Невидимая зона между иконкой и меню для сохранения hover */
-.bit-group::after {
-  content: '';
-  position: fixed;
-  width: 10px;
-  height: 80px;
-  pointer-events: auto;
-  z-index: 29;
-  display: none;
-}
 
-.bit-group:hover::after {
-  display: block;
-}
 
 /* Показать меню при наведении на группу или на невидимую зону */
 .bit-group:hover .bit-list,
@@ -172,9 +159,7 @@ html {
   flex-direction: row;
 }
 
-.bit-list::before {
-  display: none;
-}
+
 
 .bit {
   display: flex;
@@ -293,6 +278,22 @@ html {
   z-index: 5;
 }
 
+/* Колонки = и № - 20px каждая */
+#bits-sheet th:nth-child(6),
+#bits-sheet td:nth-child(6),
+#bits-sheet th:nth-child(7),
+#bits-sheet td:nth-child(7) {
+  width: 30px;
+}
+
+/* Колонки = и № - 20px каждая */
+#bits-sheet th:nth-child(1),
+#bits-sheet td:nth-child(1),
+#bits-sheet th:nth-child(2),
+#bits-sheet td:nth-child(2){
+  width: 20px;
+}
+
 /* Колонка Name - шире на 150px и выравнена по левому краю */
 #bits-sheet th:nth-child(3),
 #bits-sheet td:nth-child(3) {
@@ -301,32 +302,95 @@ html {
   padding-left: 8px;
 }
 
-/* Колонки X и Y - 40px каждая */
-#bits-sheet th:nth-child(4),
-#bits-sheet td:nth-child(4),
-#bits-sheet th:nth-child(5),
-#bits-sheet td:nth-child(5) {
-  width: 40px;
-}
-
 #bits-sheet td input {
   width: 100%;  /* Инпут занимает всю ширину колонки */
   box-sizing: border-box;
   font-size: 11px;
   padding: 2px;
+
   border: 1px solid #ccc;
   height: 24px;
 }
 
+/* ===== MODAL ===== */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 400px;
+  width: 90%;
+  max-height: 80%;
+  overflow-y: auto;
+}
+
+.modal-content h2 {
+  margin-top: 0;
+  font-size: 18px;
+}
+
+.modal-content label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 14px;
+}
+
+.modal-content input {
+  width: 100%;
+  padding: 8px;
+  margin-bottom: 15px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+  font-size: 14px;
+}
+
+.button-group {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.button-group button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.button-group button[type="button"] {
+  background-color: #ccc;
+  color: black;
+}
+
+.button-group button[type="submit"] {
+  background-color: #007bff;
+  color: white;
+}
+
 /* Остальные колонки - авто ширина */
-#bits-sheet th:nth-child(1),
-#bits-sheet td:nth-child(1),
-#bits-sheet th:nth-child(2),
-#bits-sheet td:nth-child(2),
-#bits-sheet th:nth-child(6),
-#bits-sheet td:nth-child(6),
-#bits-sheet th:nth-child(7),
-#bits-sheet td:nth-child(7) {
-  width: auto;
-  min-width: 40px;
+#bits-sheet th:nth-child(4),
+#bits-sheet td:nth-child(4),
+#bits-sheet th:nth-child(5),
+#bits-sheet td:nth-child(5) {
+  width: 50px;
+}
+
+/* Highlight selected row */
+.selected-bit-row {
+  background-color: #cce7ff;
 }

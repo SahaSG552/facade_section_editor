@@ -20,6 +20,8 @@ const canvasParameters = {
     height: canvas.getAttribute("height"),
 };
 
+// ===== SVG and Icon Creation Functions =====
+
 // Create bit shape element based on parameters
 function createBitShapeElement(bit, groupName, x = 0, y = 0) {
     let shape;
@@ -393,68 +395,19 @@ function getGroupSpecificInputs(groupName, defaults = {}) {
     const l = defaults.length !== undefined ? defaults.length : "";
     const a = defaults.angle !== undefined ? defaults.angle : "";
 
-    switch (groupName) {
-        case "cylindrical":
-            return `
+    let inputs = `
         <label for="bit-diameter">Diameter:</label>
-        <input type="number" id="bit-diameter" min="0" 
-        max="1000" step="0.01" required value="${d}">
+        <input type="number" id="bit-diameter" min="0" max="1000" step="0.01" required value="${d}">
         <label for="bit-length">Length:</label>
-        <input type="number" id="bit-length" min="0" 
-        max="1000" step="0.01" required value="${l}">
-      `;
-        case "conical":
-            return `
-        <label for="bit-diameter">Diameter:</label>
-        <input type="number" id="bit-diameter" min="0" 
-        max="1000" step="0.01" required value="${d}">
-        <label for="bit-length">Length:</label>
-        <input type="number" id="bit-length" min="0" 
-        max="1000" step="0.01" required value="${l}">
-        <label for="bit-angle">Angle:</label>
-        <input type="number" id="bit-angle" min="0" 
-        max="1000" step="0.01" required value="${a}">
-      `;
-        case "ballNose":
-            return `
-        <label for="bit-diameter">Diameter:</label>
-        <input type="number" id="bit-diameter" min="0" 
-        max="1000" step="0.01" required value="${d}">
-        <label for="bit-length">Length:</label>
-        <input type="number" id="bit-length" min="0" 
-        max="1000" step="0.01" required value="${l}">
-      `;
-        default:
-            return "";
-    }
-}
-
-function handleNewBitSubmit(e, groupName) {
-    e.preventDefault();
-    const form = e.target;
-    const name = form.querySelector("#bit-name").value;
-
-    if (isBitNameDuplicate(name)) {
-        alert(
-            "A bit with this name already exists. Please choose a different name."
-        );
-        return;
-    }
-
-    const newBit = {
-        name: name,
-        diameter: parseFloat(form.querySelector("#bit-diameter").value),
-        length: parseFloat(form.querySelector("#bit-length").value),
-    };
-
+        <input type="number" id="bit-length" min="0" max="1000" step="0.01" required value="${l}">
+    `;
     if (groupName === "conical") {
-        newBit.angle = parseFloat(form.querySelector("#bit-angle").value);
+        inputs += `
+        <label for="bit-angle">Angle:</label>
+        <input type="number" id="bit-angle" min="0" max="1000" step="0.01" required value="${a}">
+        `;
     }
-
-    // Используем API хранения
-    addBit(groupName, newBit);
-    document.body.removeChild(form.closest(".modal"));
-    refreshBitGroups();
+    return inputs;
 }
 
 function isBitNameDuplicate(name, excludeId = null) {
@@ -515,7 +468,6 @@ function handleDeleteClick(e, bit) {
 function refreshBitGroups() {
     bitGroups.innerHTML = "";
     createBitGroups();
-    console.log(JSON.stringify(getBits()));
 }
 
 // Initialize SVG elements
@@ -767,7 +719,6 @@ function updateBitsSheet() {
         const xInput = document.createElement("input");
         xInput.type = "number";
         xInput.value = bit.x;
-        xInput.style.width = "80px";
         xInput.addEventListener("change", () => {
             const newX = parseFloat(xInput.value) || 0;
             updateBitPosition(index, newX, bit.y);
@@ -780,7 +731,6 @@ function updateBitsSheet() {
         const yInput = document.createElement("input");
         yInput.type = "number";
         yInput.value = bit.y;
-        yInput.style.width = "80px";
         yInput.addEventListener("change", () => {
             const newY = parseFloat(yInput.value) || 0;
             updateBitPosition(index, bit.x, newY);
