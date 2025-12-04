@@ -20,6 +20,23 @@ const canvasParameters = {
     height: canvas.getAttribute("height"),
 };
 
+// Zoom and pan variables
+let zoomLevel = 1;
+let panX = 400;
+let panY = 300;
+let isDragging = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+let gridEnabled = true;
+let gridLayer;
+let gridSize = 10; // Default grid size in pixels (1mm = 10px)
+
+// Drag variables for selected bit
+let isDraggingBit = false;
+let draggedBitIndex = null;
+let dragStartX = 0;
+let dragStartY = 0;
+
 // ===== SVG and Icon Creation Functions =====
 
 // Create bit shape element based on parameters
@@ -472,7 +489,17 @@ function refreshBitGroups() {
 
 // Initialize SVG elements
 function initializeSVG() {
-    // Create layers
+    // Set viewBox for zoom and pan
+    canvas.setAttribute(
+        "viewBox",
+        `0 0 ${canvasParameters.width} ${canvasParameters.height}`
+    );
+
+    // Create layers (grid layer first, then material, then bits)
+    gridLayer = document.createElementNS(svgNS, "g");
+    gridLayer.id = "grid-layer";
+    canvas.appendChild(gridLayer);
+
     const materialLayer = document.createElementNS(svgNS, "g");
     materialLayer.id = "material-layer";
     canvas.appendChild(materialLayer);
@@ -485,8 +512,37 @@ function initializeSVG() {
     materialRect = document.createElementNS(svgNS, "rect");
     materialLayer.appendChild(materialRect);
 
-    // Initial draw of material shape
+    // Initial draw of material shape and grid
     updateMaterialShape();
+    drawGrid();
+
+    // Add zoom and pan event listeners
+    canvas.addEventListener("wheel", handleZoom);
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
+    canvas.addEventListener("mouseleave", handleMouseUp);
+
+    // Add zoom button event listeners
+    document.getElementById("zoom-in-btn").addEventListener("click", zoomIn);
+    document.getElementById("zoom-out-btn").addEventListener("click", zoomOut);
+    document
+        .getElementById("fit-scale-btn")
+        .addEventListener("click", fitToScale);
+    document
+        .getElementById("zoom-selected-btn")
+        .addEventListener("click", zoomToSelected);
+    document
+        .getElementById("toggle-grid-btn")
+        .addEventListener("click", toggleGrid);
+
+    // Add grid scale input listener
+    document.getElementById("grid-scale").addEventListener("input", (e) => {
+        gridSize = parseInt(e.target.value) || 10;
+        if (gridEnabled) {
+            drawGrid();
+        }
+    });
 }
 
 // Update material shape
@@ -1004,7 +1060,328 @@ function redrawBitsOnCanvas() {
         bit.number = index + 1; // Update bit number
         // append group (contains shape and transform)
         bitsLayer.appendChild(bit.group);
+
+        // Remove existing anchor points
+        bit.group
+            .querySelectorAll(".anchor-point")
+            .forEach((ap) => ap.remove());
+
+        // Add anchor point visualization
+        const anchorPoint = document.createElementNS(svgNS, "g");
+        anchorPoint.classList.add("anchor-point");
+
+        // Create a small cross or circle at the anchor point
+        const anchorOffset = getAnchorOffset(bit);
+        const anchorX = anchorOffset.x + bit.baseAbsX;
+        const anchorY = anchorOffset.y + bit.baseAbsY;
+
+        // Draw a small cross
+        const crossSize = 3;
+        const horizontal = document.createElementNS(svgNS, "line");
+        horizontal.setAttribute("x1", anchorX - crossSize);
+        horizontal.setAttribute("y1", anchorY);
+        horizontal.setAttribute("x2", anchorX + crossSize);
+        horizontal.setAttribute("y2", anchorY);
+        horizontal.setAttribute("stroke", "red");
+        horizontal.setAttribute("stroke-width", "1");
+        anchorPoint.appendChild(horizontal);
+
+        const vertical = document.createElementNS(svgNS, "line");
+        vertical.setAttribute("x1", anchorX);
+        vertical.setAttribute("y1", anchorY - crossSize);
+        vertical.setAttribute("x2", anchorX);
+        vertical.setAttribute("y2", anchorY + crossSize);
+        vertical.setAttribute("stroke", "red");
+        vertical.setAttribute("stroke-width", "1");
+        anchorPoint.appendChild(vertical);
+
+        // Only show anchor point for selected bit
+        if (index === selectedBitIndex) {
+            anchorPoint.setAttribute("visibility", "visible");
+        } else {
+            anchorPoint.setAttribute("visibility", "hidden");
+        }
+
+        bit.group.appendChild(anchorPoint);
     });
+}
+
+// ===== ZOOM AND PAN FUNCTIONS =====
+
+// Draw millimeter grid
+function drawGrid() {
+    if (!gridEnabled) return;
+
+    gridLayer.innerHTML = ""; // Clear existing grid
+
+    // Calculate line thickness based on zoom level
+    // Thicker lines when zoomed out (zoomLevel < 1), thinner when zoomed in (zoomLevel > 1)
+    const baseThickness = 0.5;
+    const thickness = Math.max(0.1, baseThickness / Math.sqrt(zoomLevel));
+
+    // Draw vertical lines
+    for (let x = 0; x <= canvasParameters.width; x += gridSize) {
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", x);
+        line.setAttribute("y1", 0);
+        line.setAttribute("x2", x);
+        line.setAttribute("y2", canvasParameters.height);
+        line.setAttribute("stroke", "#e0e0e0");
+        line.setAttribute("stroke-width", thickness);
+        gridLayer.appendChild(line);
+    }
+
+    // Draw horizontal lines
+    for (let y = 0; y <= canvasParameters.height; y += gridSize) {
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", 0);
+        line.setAttribute("y1", y);
+        line.setAttribute("x2", canvasParameters.width);
+        line.setAttribute("y2", y);
+        line.setAttribute("stroke", "#e0e0e0");
+        line.setAttribute("stroke-width", thickness);
+        gridLayer.appendChild(line);
+    }
+}
+
+// Update viewBox based on current zoom and pan
+function updateViewBox() {
+    const viewBoxWidth = canvasParameters.width / zoomLevel;
+    const viewBoxHeight = canvasParameters.height / zoomLevel;
+    const viewBoxX = panX - viewBoxWidth / 2;
+    const viewBoxY = panY - viewBoxHeight / 2;
+
+    canvas.setAttribute(
+        "viewBox",
+        `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`
+    );
+
+    // Redraw grid with new thickness based on zoom level
+    if (gridEnabled) {
+        drawGrid();
+    }
+}
+
+// Zoom functions
+function zoomIn() {
+    zoomLevel *= 1.2;
+    updateViewBox();
+}
+
+function zoomOut() {
+    zoomLevel /= 1.2;
+    updateViewBox();
+}
+
+function fitToScale() {
+    zoomLevel = 1;
+    panX = canvasParameters.width / 2;
+    panY = canvasParameters.height / 2;
+    updateViewBox();
+}
+
+function zoomToSelected() {
+    if (selectedBitIndex === null || !bitsOnCanvas[selectedBitIndex]) return;
+
+    const bit = bitsOnCanvas[selectedBitIndex];
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+
+    // Calculate the absolute position of the selected bit
+    const bitAbsX = materialX + bit.x;
+    const bitAbsY = materialY + bit.y;
+
+    // Zoom to fit the bit with some padding
+    zoomLevel = 2; // Fixed zoom level for selected bit
+    panX = bitAbsX;
+    panY = bitAbsY;
+
+    updateViewBox();
+}
+
+function toggleGrid() {
+    gridEnabled = !gridEnabled;
+    if (gridEnabled) {
+        drawGrid();
+    } else {
+        gridLayer.innerHTML = "";
+    }
+}
+
+// Helper function to snap value to grid
+function snapToGrid(value) {
+    return Math.round(value / gridSize) * gridSize;
+}
+
+// Helper function to get anchor offset based on alignment
+function getAnchorOffset(bit) {
+    const bitData = bit.bitData;
+    const halfDiameter = (bitData.diameter || 0) / 2;
+
+    switch (bit.alignment) {
+        case "left":
+            return { x: -halfDiameter, y: 0 };
+        case "right":
+            return { x: halfDiameter, y: 0 };
+        case "center":
+        default:
+            return { x: 0, y: 0 };
+    }
+}
+
+// Mouse event handlers for zoom and pan
+function handleZoom(e) {
+    e.preventDefault();
+
+    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+    zoomLevel *= zoomFactor;
+
+    // Zoom towards mouse position
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    // Convert mouse position to SVG coordinates
+    const svgX = (mouseX / rect.width) * canvasParameters.width;
+    const svgY = (mouseY / rect.height) * canvasParameters.height;
+
+    // Adjust pan to zoom towards mouse
+    panX = svgX;
+    panY = svgY;
+
+    updateViewBox();
+}
+
+function handleMouseDown(e) {
+    if (e.button === 0) {
+        // Left mouse button
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Convert mouse position to SVG coordinates
+        const svgX =
+            panX -
+            canvasParameters.width / zoomLevel / 2 +
+            (mouseX / rect.width) * (canvasParameters.width / zoomLevel);
+        const svgY =
+            panY -
+            canvasParameters.height / zoomLevel / 2 +
+            (mouseY / rect.height) * (canvasParameters.height / zoomLevel);
+
+        // Check if clicking on a selected bit
+        if (selectedBitIndex !== null && bitsOnCanvas[selectedBitIndex]) {
+            const bit = bitsOnCanvas[selectedBitIndex];
+            const materialX = (canvasParameters.width - materialWidth) / 2;
+            const materialY = (canvasParameters.height - materialThickness) / 2;
+            const bitAbsX = materialX + bit.x;
+            const bitAbsY = materialY + bit.y;
+
+            // Check if click is near the bit (within 20px)
+            const distance = Math.sqrt(
+                (svgX - bitAbsX) ** 2 + (svgY - bitAbsY) ** 2
+            );
+            if (distance <= 20) {
+                isDraggingBit = true;
+                draggedBitIndex = selectedBitIndex;
+                dragStartX = svgX;
+                dragStartY = svgY;
+                canvas.style.cursor = "grabbing";
+                return;
+            }
+        }
+
+        // Otherwise, start panning
+        isDragging = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        canvas.style.cursor = "grabbing";
+    }
+}
+
+function handleMouseMove(e) {
+    if (isDraggingBit && draggedBitIndex !== null) {
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Convert mouse position to SVG coordinates
+        const svgX =
+            panX -
+            canvasParameters.width / zoomLevel / 2 +
+            (mouseX / rect.width) * (canvasParameters.width / zoomLevel);
+        const svgY =
+            panY -
+            canvasParameters.height / zoomLevel / 2 +
+            (mouseY / rect.height) * (canvasParameters.height / zoomLevel);
+
+        const bit = bitsOnCanvas[draggedBitIndex];
+        const anchorOffset = getAnchorOffset(bit);
+
+        // Calculate new position relative to material origin
+        const materialX = (canvasParameters.width - materialWidth) / 2;
+        const materialY = (canvasParameters.height - materialThickness) / 2;
+
+        // New position accounting for anchor point
+        let newX = svgX - materialX - anchorOffset.x;
+        let newY = svgY - materialY - anchorOffset.y;
+
+        // Snap to grid
+        newX = snapToGrid(newX);
+        newY = snapToGrid(newY);
+
+        // Update bit position
+        updateBitPosition(draggedBitIndex, newX, newY);
+
+        // Update table inputs
+        updateTableCoordinates(draggedBitIndex, newX, newY);
+    } else if (isDragging) {
+        const deltaX = e.clientX - lastMouseX;
+        const deltaY = e.clientY - lastMouseY;
+
+        // Convert screen delta to SVG delta based on zoom level
+        const svgDeltaX = deltaX / zoomLevel;
+        const svgDeltaY = deltaY / zoomLevel;
+
+        panX -= svgDeltaX;
+        panY -= svgDeltaY;
+
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+
+        updateViewBox();
+    }
+}
+
+function handleMouseUp(e) {
+    if (isDraggingBit) {
+        isDraggingBit = false;
+        draggedBitIndex = null;
+        canvas.style.cursor = "grab";
+    } else if (isDragging) {
+        isDragging = false;
+        canvas.style.cursor = "grab";
+    }
+}
+
+// Update table coordinates without recreating the entire table
+function updateTableCoordinates(bitIndex, newX, newY) {
+    const sheetBody = document.getElementById("bits-sheet-body");
+    const rows = sheetBody.querySelectorAll("tr");
+
+    if (rows[bitIndex]) {
+        const cells = rows[bitIndex].querySelectorAll("td");
+        if (cells[3]) {
+            // X column
+            const xInput = cells[3].querySelector("input");
+            if (xInput) xInput.value = Math.round(newX);
+        }
+        if (cells[4]) {
+            // Y column
+            const yInput = cells[4].querySelector("input");
+            if (yInput) yInput.value = Math.round(newY);
+        }
+    }
 }
 
 // Initialize
