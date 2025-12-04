@@ -1,22 +1,5 @@
 import { angleToRad } from "./utils/math.js";
-
-// Router bit database (updated with more detailed parameters)
-const routerBits = {
-    cylindrical: [
-        { name: "D10H20", diameter: 10, length: 20 },
-        { name: "D12H25", diameter: 12, length: 25 },
-    ],
-    conical: [
-        { name: "V90D25", diameter: 25.4, length: 19, angle: 90 },
-        { name: "V120D32", diameter: 32, length: 13.2, angle: 120 },
-        { name: "V120D50", diameter: 50, length: 20.6, angle: 120 },
-    ],
-    ballNose: [
-        { name: "U10", diameter: 10, length: 20 },
-        { name: "U19", diameter: 19, length: 25 },
-        { name: "U38", diameter: 38.1, length: 22 },
-    ],
-};
+import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
 
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
@@ -75,8 +58,8 @@ function createBitShapeElement(bit, groupName, x = 0, y = 0) {
                 `M ${x + bit.diameter / 2} ${y} A ${bit.diameter / 2} ${
                     bit.diameter / 2
                 } 0 0 1 ${x - bit.diameter / 2} ${y} 
-        L ${x - bit.diameter / 2} ${y - bit.length}
-        L ${x + bit.diameter / 2} ${y - bit.length} Z`
+        L ${x - bit.diameter / 2} ${y - bit.length + bit.diameter / 2}
+        L ${x + bit.diameter / 2} ${y - bit.length + bit.diameter / 2} Z`
             );
             shape.setAttribute("fill", "rgba(255, 0, 0, 0.30)");
             break;
@@ -113,14 +96,16 @@ function createSVGIcon(shape, params, size = 50) {
 
     if (shape !== "newBit" && params && params.diameter !== undefined) {
         // Use actual bit shape if parameters are provided
-        innerShape = createBitShapeElement(params, shape, 0, size / 4);
+        innerShape = createBitShapeElement(params, shape, 0, params.length / 2);
         // Adjust transform for proper scaling in icon
-        innerShape.setAttribute("transform", `scale(${size / 100})`);
+        innerShape.setAttribute("transform", `scale(${size / 80})`);
     } else {
         // Use placeholder shapes for new bit button
         switch (shape) {
             case "cylindrical":
                 innerShape = document.createElementNS(svgNS, "rect");
+                innerShape.setAttribute("x", -size / 4);
+                innerShape.setAttribute("y", -size / 4);
                 innerShape.setAttribute("width", size / 2);
                 innerShape.setAttribute("height", size / 2);
                 break;
@@ -128,20 +113,22 @@ function createSVGIcon(shape, params, size = 50) {
                 innerShape = document.createElementNS(svgNS, "polygon");
                 innerShape.setAttribute(
                     "points",
-                    `${size / 4},${size / 2} ${size / 2},0 0,0`
+                    `0,${size / 4} ${-size / 4},${-size / 4} ${size / 4},${
+                        -size / 4
+                    }`
                 );
                 break;
             case "ballNose":
                 innerShape = document.createElementNS(svgNS, "circle");
-                innerShape.setAttribute("cx", size / 4);
-                innerShape.setAttribute("cy", size / 4);
+                innerShape.setAttribute("cx", 0);
+                innerShape.setAttribute("cy", 0);
                 innerShape.setAttribute("r", size / 4);
                 break;
             case "newBit":
                 innerShape = document.createElementNS(svgNS, "path");
                 innerShape.setAttribute(
                     "d",
-                    `M${size / 4} 0V${size / 2}M0 ${size / 4}H${size / 2}`
+                    `M0 ${-size / 6}V${size / 6}M${-size / 6} 0H${size / 6}`
                 );
                 break;
         }
@@ -207,10 +194,16 @@ function createActionIcon(action) {
 
 // Create bit groups
 function createBitGroups() {
-    const groupOrder = Object.keys(routerBits);
+    const allBits = getBits();
+    const groupOrder = Object.keys(allBits);
 
     groupOrder.forEach((groupName) => {
-        const bits = routerBits[groupName];
+        // sort by diameter asc, then length asc (work on a shallow copy to avoid mutating storage)
+        const bits = (allBits[groupName] || []).slice().sort((a, b) => {
+            const d = (a.diameter || 0) - (b.diameter || 0);
+            if (d !== 0) return d;
+            return (a.length || 0) - (b.length || 0);
+        });
         const groupDiv = document.createElement("div");
         groupDiv.className = "bit-group";
 
@@ -228,7 +221,6 @@ function createBitGroups() {
             bitName.textContent = bit.name;
             bitDiv.appendChild(bitName);
 
-            // Pass bit parameters to createSVGIcon
             const bitIcon = createSVGIcon(groupName, bit, 40);
             bitDiv.appendChild(bitIcon);
 
@@ -238,52 +230,11 @@ function createBitGroups() {
                 const actionIcon = createActionIcon(action);
                 actionIcon.addEventListener("click", (e) => {
                     e.stopPropagation();
-                    console.log(`${action} clicked for ${bit.name}`);
-                    // Implement action functionality here
-
-                    function handleCopyClick(e, bit) {
-                        const name = `${bit.name} (${getNextCopyNumber(
-                            bit.name
-                        )})`;
-                        const newBit = { ...bit };
-                        newBit.name = name;
-                        bits.splice(++index, 0, newBit);
-
-                        // Redraw bits on canvas
-                        redrawBitsOnCanvas();
-                    }
-
-                    function getNextCopyNumber(name) {
-                        const bits = Object.values(routerBits).flat();
-                        const existingCopies = bits.filter((bit) =>
-                            bit.name.startsWith(`${name} (`)
-                        );
-                        const maxCopyNumber = existingCopies.reduce(
-                            (max, bit) => {
-                                const match = bit.name.match(/\((\d+)\)$/);
-                                return match
-                                    ? Math.max(max, parseInt(match[1]))
-                                    : max;
-                            },
-                            0
-                        );
-                        return maxCopyNumber + 1;
-                    }
-
-                    function handleDeleteClick(e, bit) {
-                        if (
-                            confirm(
-                                `Are you sure you want to delete ${bit.name}?`
-                            )
-                        ) {
-                            bits.splice(index, 1);
-                            // Redraw bits on canvas
-                            redrawBitsOnCanvas();
-                        }
-                    }
 
                     switch (action) {
                         case "edit":
+                            // open edit modal for this bit
+                            openBitModal(groupName, bit);
                             break;
                         case "copy":
                             handleCopyClick(e, bit);
@@ -292,7 +243,6 @@ function createBitGroups() {
                             handleDeleteClick(e, bit);
                             break;
                     }
-                    // Refresh bit groups
                     refreshBitGroups();
                 });
                 actionIcons.appendChild(actionIcon);
@@ -315,7 +265,6 @@ function createBitGroups() {
         const addBitIcon = createSVGIcon("newBit", "newBit", 40);
         addButton.appendChild(addBitIcon);
 
-        //addButton.innerHTML = createAddBitIcon();
         addButton.addEventListener("click", () => openNewBitMenu(groupName));
 
         bitList.appendChild(addButton);
@@ -336,15 +285,35 @@ function createBitGroups() {
 }
 
 function openNewBitMenu(groupName) {
+    // reuse unified modal for create/edit - open as "new"
+    openBitModal(groupName, null);
+}
+
+// Unified create/edit modal
+function openBitModal(groupName, bit = null) {
+    const isEdit = !!bit;
+    const defaultToolNumber =
+        bit && bit.toolNumber !== undefined ? bit.toolNumber : 1;
+    const defaultDiameter = bit ? bit.diameter : "";
+    const defaultLength = bit ? bit.length : "";
+    const defaultAngle = bit ? bit.angle : "";
+    const defaultName = bit ? bit.name : "";
+
     const modal = document.createElement("div");
     modal.className = "modal";
     modal.innerHTML = `
     <div class="modal-content">
-      <h2>New Bit Parameters</h2>
-      <form id="new-bit-form">
+      <h2>${isEdit ? "Edit Bit" : "New Bit Parameters"}</h2>
+      <form id="bit-form">
         <label for="bit-name">Name:</label>
-        <input type="text" id="bit-name" required>
-        ${getGroupSpecificInputs(groupName)}
+        <input type="text" id="bit-name" required value="${defaultName}">
+        ${getGroupSpecificInputs(groupName, {
+            diameter: defaultDiameter,
+            length: defaultLength,
+            angle: defaultAngle,
+        })}
+        <label for="bit-toolnumber">Tool Number:</label>
+        <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
         <div class="button-group">
           <button type="button" id="cancel-btn">Cancel</button>
           <button type="submit">OK</button>
@@ -355,44 +324,85 @@ function openNewBitMenu(groupName) {
 
     document.body.appendChild(modal);
 
-    const form = modal.querySelector("#new-bit-form");
-    form.addEventListener("submit", (e) => handleNewBitSubmit(e, groupName));
+    const form = modal.querySelector("#bit-form");
+    form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const name = form.querySelector("#bit-name").value.trim();
+
+        if (isBitNameDuplicate(name, isEdit ? bit.id : null)) {
+            alert(
+                "A bit with this name already exists. Please choose a different name."
+            );
+            return;
+        }
+
+        const diameter = parseFloat(form.querySelector("#bit-diameter").value);
+        const length = parseFloat(form.querySelector("#bit-length").value);
+        const toolNumber =
+            parseInt(form.querySelector("#bit-toolnumber").value, 10) || 1;
+
+        const payload = {
+            name,
+            diameter,
+            length,
+            toolNumber,
+        };
+
+        if (groupName === "conical") {
+            payload.angle = parseFloat(form.querySelector("#bit-angle").value);
+        }
+
+        if (isEdit) {
+            updateBit(groupName, bit.id, payload);
+        } else {
+            addBit(groupName, payload);
+        }
+
+        document.body.removeChild(modal);
+        refreshBitGroups();
+    });
 
     const cancelBtn = modal.querySelector("#cancel-btn");
-    cancelBtn.addEventListener("click", () => document.body.removeChild(modal));
+    cancelBtn.addEventListener("click", () => {
+        document.body.removeChild(modal);
+    });
 }
 
-function getGroupSpecificInputs(groupName) {
+function getGroupSpecificInputs(groupName, defaults = {}) {
+    const d = defaults.diameter !== undefined ? defaults.diameter : "";
+    const l = defaults.length !== undefined ? defaults.length : "";
+    const a = defaults.angle !== undefined ? defaults.angle : "";
+
     switch (groupName) {
         case "cylindrical":
             return `
         <label for="bit-diameter">Diameter:</label>
         <input type="number" id="bit-diameter" min="0" 
-        max="1000" step="0.01" required>
+        max="1000" step="0.01" required value="${d}">
         <label for="bit-length">Length:</label>
         <input type="number" id="bit-length" min="0" 
-        max="1000" step="0.01" required>
+        max="1000" step="0.01" required value="${l}">
       `;
         case "conical":
             return `
         <label for="bit-diameter">Diameter:</label>
         <input type="number" id="bit-diameter" min="0" 
-        max="1000" step="0.01" required>
+        max="1000" step="0.01" required value="${d}">
         <label for="bit-length">Length:</label>
         <input type="number" id="bit-length" min="0" 
-        max="1000" step="0.01" required>
+        max="1000" step="0.01" required value="${l}">
         <label for="bit-angle">Angle:</label>
         <input type="number" id="bit-angle" min="0" 
-        max="1000" step="0.01" required>
+        max="1000" step="0.01" required value="${a}">
       `;
         case "ballNose":
             return `
         <label for="bit-diameter">Diameter:</label>
         <input type="number" id="bit-diameter" min="0" 
-        max="1000" step="0.01" required>
+        max="1000" step="0.01" required value="${d}">
         <label for="bit-length">Length:</label>
         <input type="number" id="bit-length" min="0" 
-        max="1000" step="0.01" required>
+        max="1000" step="0.01" required value="${l}">
       `;
         default:
             return "";
@@ -421,21 +431,23 @@ function handleNewBitSubmit(e, groupName) {
         newBit.angle = parseFloat(form.querySelector("#bit-angle").value);
     }
 
-    routerBits[groupName].push(newBit);
+    // Используем API хранения
+    addBit(groupName, newBit);
     document.body.removeChild(form.closest(".modal"));
     refreshBitGroups();
 }
 
-function isBitNameDuplicate(name) {
-    return Object.values(routerBits).some((group) =>
-        group.some((bit) => bit.name === name)
-    );
+function isBitNameDuplicate(name, excludeId = null) {
+    const all = getBits();
+    return Object.values(all || {})
+        .flat()
+        .some((bit) => bit.name === name && bit.id !== excludeId);
 }
 
 function refreshBitGroups() {
     bitGroups.innerHTML = "";
     createBitGroups();
-    console.log(JSON.stringify(routerBits));
+    console.log(JSON.stringify(getBits()));
 }
 
 // Initialize SVG elements
@@ -483,6 +495,7 @@ function updateMaterialParams() {
 // Global variables for bit management
 let bitsOnCanvas = [];
 let bitCounter = 0;
+let dragSrcRow = null;
 
 // Draw bit shape
 function drawBitShape(bit, groupName) {
@@ -494,36 +507,28 @@ function drawBitShape(bit, groupName) {
     const centerX = materialX + materialWidth / 2;
     const centerY = materialY;
 
-    // Use the new function to create the shape
+    // create shape at absolute coords, wrap in group so we can translate later
     const shape = createBitShapeElement(bit, groupName, centerX, centerY);
+    const g = document.createElementNS(svgNS, "g");
+    g.appendChild(shape);
+    // store transform relative to creation point
+    g.setAttribute("transform", `translate(0, 0)`);
+    bitsLayer.appendChild(g);
 
-    bitsLayer.appendChild(shape);
-
-    // Add bit to the list and update the sheet
     bitCounter++;
 
-    // Calculate x, y based on the shape's actual position
-    let x, y;
-    if (groupName === "cylindrical") {
-        x = centerX - bit.diameter / 2;
-        y = centerY - bit.length;
-    } else if (groupName === "conical") {
-        const hypotenuse = bit.diameter;
-        const height =
-            (hypotenuse / 2) * (1 / Math.tan(angleToRad(bit.angle) / 2));
-        x = centerX - hypotenuse / 2;
-        y = centerY - height;
-    } else if (groupName === "ballNose") {
-        x = centerX - bit.diameter / 2;
-        y = centerY - bit.diameter / 2;
-    }
+    const x = Math.round(centerX - materialX);
+    const y = Math.round(centerY - materialY);
 
     const newBit = {
         number: bitCounter,
         name: bit.name,
-        x: Math.round(x - materialX),
-        y: Math.round(y - materialY),
-        shape: shape,
+        x: x,
+        y: y,
+        group: g, // group that contains the shape
+        baseAbsX: centerX, // absolute coords where shape was created
+        baseAbsY: centerY,
+        bitData: bit,
     };
     bitsOnCanvas.push(newBit);
     updateBitsSheet();
@@ -536,57 +541,118 @@ function updateBitsSheet() {
 
     bitsOnCanvas.forEach((bit, index) => {
         const row = document.createElement("tr");
-        row.draggable = true;
         row.setAttribute("data-index", index);
-        row.innerHTML = `
-          <td class="drag-handle">☰</td>
-          <td>${index + 1}</td>
-          <td>${bit.name}</td>
-          <td>${bit.x}</td>
-          <td>${bit.y}</td>
-      `;
-        row.addEventListener("dragstart", handleDragStart);
+
+        // Drag handle cell (only this cell is draggable)
+        const dragCell = document.createElement("td");
+        dragCell.className = "drag-handle";
+        dragCell.draggable = true;
+        dragCell.textContent = "☰";
+        dragCell.addEventListener("dragstart", handleDragStart);
+        dragCell.addEventListener("dragend", handleDragEnd);
+        row.appendChild(dragCell);
+
+        // Number
+        const numCell = document.createElement("td");
+        numCell.textContent = index + 1;
+        row.appendChild(numCell);
+
+        // Name
+        const nameCell = document.createElement("td");
+        nameCell.textContent = bit.name;
+        row.appendChild(nameCell);
+
+        // X editable
+        const xCell = document.createElement("td");
+        const xInput = document.createElement("input");
+        xInput.type = "number";
+        xInput.value = bit.x;
+        xInput.style.width = "80px";
+        xInput.addEventListener("change", () => {
+            const newX = parseFloat(xInput.value) || 0;
+            updateBitPosition(index, newX, bit.y);
+        });
+        xCell.appendChild(xInput);
+        row.appendChild(xCell);
+
+        // Y editable
+        const yCell = document.createElement("td");
+        const yInput = document.createElement("input");
+        yInput.type = "number";
+        yInput.value = bit.y;
+        yInput.style.width = "80px";
+        yInput.addEventListener("change", () => {
+            const newY = parseFloat(yInput.value) || 0;
+            updateBitPosition(index, bit.x, newY);
+        });
+        yCell.appendChild(yInput);
+        row.appendChild(yCell);
+
+        // Row drop/dragover handlers (drop allowed anywhere on row)
         row.addEventListener("dragover", handleDragOver);
         row.addEventListener("drop", handleDrop);
-        row.addEventListener("dragend", handleDragEnd);
+
         sheetBody.appendChild(row);
     });
 }
 
-let dragSrcElement = null;
+function updateBitPosition(index, newX, newY) {
+    // update material params to get correct material origin
+    updateMaterialParams();
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+
+    const bit = bitsOnCanvas[index];
+    // compute absolute positions the user expects (relative to material origin)
+    const newAbsX = materialX + newX;
+    const newAbsY = materialY + newY;
+
+    // compute translation relative to base creation coordinates
+    const dx = newAbsX - bit.baseAbsX;
+    const dy = newAbsY - bit.baseAbsY;
+
+    // apply transform to group's transform
+    bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
+
+    // save new logical positions
+    bit.x = Math.round(newX);
+    bit.y = Math.round(newY);
+
+    // update sheet (keeps inputs consistent)
+    updateBitsSheet();
+
+    // redraw layer order if needed
+    redrawBitsOnCanvas();
+}
 
 function handleDragStart(e) {
-    dragSrcElement = this;
+    // this is the drag-handle cell; find its row
+    dragSrcRow = this.closest("tr");
     e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/html", this.outerHTML);
-    this.style.opacity = "0.4";
+    e.dataTransfer.setData("text/plain", dragSrcRow.getAttribute("data-index"));
+    dragSrcRow.style.opacity = "0.4";
 }
 
 function handleDragOver(e) {
-    if (e.preventDefault) {
-        e.preventDefault();
-    }
+    if (e.preventDefault) e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     return false;
 }
 
 function handleDrop(e) {
-    if (e.stopPropagation) {
-        e.stopPropagation();
-    }
+    if (e.stopPropagation) e.stopPropagation();
 
-    if (dragSrcElement != this) {
-        const srcIndex = parseInt(dragSrcElement.getAttribute("data-index"));
-        const destIndex = parseInt(this.getAttribute("data-index"));
+    // this is the row where drop occurs
+    if (!dragSrcRow) return false;
+    const srcIndex = parseInt(dragSrcRow.getAttribute("data-index"), 10);
+    const destIndex = parseInt(this.getAttribute("data-index"), 10);
 
-        // Reorder the bitsOnCanvas array
+    if (srcIndex !== destIndex) {
         const [removed] = bitsOnCanvas.splice(srcIndex, 1);
         bitsOnCanvas.splice(destIndex, 0, removed);
 
-        // Update the bits sheet
+        // update sheet and canvas
         updateBitsSheet();
-
-        // Redraw bits on canvas in the new order
         redrawBitsOnCanvas();
     }
 
@@ -594,16 +660,19 @@ function handleDrop(e) {
 }
 
 function handleDragEnd(e) {
-    this.style.opacity = "1";
+    if (dragSrcRow) dragSrcRow.style.opacity = "1";
+    dragSrcRow = null;
 }
 
+// Redraw bits on canvas preserving their group transforms
 function redrawBitsOnCanvas() {
     const bitsLayer = document.getElementById("bits-layer");
     bitsLayer.innerHTML = ""; // Clear all bits
 
     bitsOnCanvas.forEach((bit, index) => {
         bit.number = index + 1; // Update bit number
-        bitsLayer.appendChild(bit.shape);
+        // append group (contains shape and transform)
+        bitsLayer.appendChild(bit.group);
     });
 }
 
