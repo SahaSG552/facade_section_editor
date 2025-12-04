@@ -135,6 +135,15 @@ html {
   text-align: left;
 }
 
+#bits-sheet-body tr.selected-bit-row {
+    background-color: #e0f4ff;
+    font-weight: bold;
+}
+
+#bits-sheet-body tr.selected-bit-row:hover {
+    background-color: #d0e8ff;
+}
+
 #right-menu {
   width: 250px;
   background-color: #f0f0f0;

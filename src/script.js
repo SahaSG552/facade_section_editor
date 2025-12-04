@@ -487,15 +487,46 @@ function updateMaterialShape() {
 
 // Update material parameters
 function updateMaterialParams() {
-    materialWidth = parseInt(materialWidthInput.value);
-    materialThickness = parseInt(materialThicknessInput.value);
+    // guard against empty inputs
+    materialWidth = parseInt(materialWidthInput.value) || materialWidth;
+    materialThickness =
+        parseInt(materialThicknessInput.value) || materialThickness;
     updateMaterialShape();
+
+    // After material changed, recalc positions of all bits so their anchor (center-bottom)
+    // stays at coordinates relative to material top-left (bit.x, bit.y).
+    updateBitsPositions();
+}
+
+// New: reposition all bits according to current material origin and their stored logical coords
+function updateBitsPositions() {
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+
+    bitsOnCanvas.forEach((bit) => {
+        // desired absolute anchor position = material origin + logical coords
+        const desiredAbsX = materialX + (bit.x || 0);
+        const desiredAbsY = materialY + (bit.y || 0);
+
+        // compute translation relative to the element's original absolute coords
+        const dx = desiredAbsX - bit.baseAbsX;
+        const dy = desiredAbsY - bit.baseAbsY;
+
+        // apply transform to group's transform
+        if (bit.group) {
+            bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
+        }
+    });
+
+    // ensure canvas shows updated order/positions
+    redrawBitsOnCanvas();
 }
 
 // Global variables for bit management
 let bitsOnCanvas = [];
 let bitCounter = 0;
 let dragSrcRow = null;
+let selectedBitIndex = null;
 
 // Draw bit shape
 function drawBitShape(bit, groupName) {
@@ -542,6 +573,16 @@ function updateBitsSheet() {
     bitsOnCanvas.forEach((bit, index) => {
         const row = document.createElement("tr");
         row.setAttribute("data-index", index);
+
+        // Add click handler for row selection (but NOT on inputs)
+        row.addEventListener("click", (e) => {
+            // Don't select if clicking on input
+            if (e.target.tagName === "INPUT") {
+                return;
+            }
+            e.stopPropagation();
+            selectBit(index);
+        });
 
         // Drag handle cell (only this cell is draggable)
         const dragCell = document.createElement("td");
@@ -592,9 +633,78 @@ function updateBitsSheet() {
         row.addEventListener("dragover", handleDragOver);
         row.addEventListener("drop", handleDrop);
 
+        // Apply selection style if this is the selected bit
+        if (index === selectedBitIndex) {
+            row.classList.add("selected-bit-row");
+        }
+
         sheetBody.appendChild(row);
     });
 }
+
+// Select a bit and highlight it on canvas
+function selectBit(index) {
+    // Deselect previous bit
+    if (selectedBitIndex !== null && bitsOnCanvas[selectedBitIndex]) {
+        resetBitHighlight(selectedBitIndex);
+    }
+
+    // Select new bit
+    selectedBitIndex = index;
+    const bit = bitsOnCanvas[index];
+
+    if (bit && bit.group) {
+        // Find the shape element in the group
+        const shape = bit.group.querySelector(".bit-shape");
+        if (shape) {
+            // Store original attributes
+            shape.dataset.originalFill = shape.getAttribute("fill");
+            shape.dataset.originalStroke = shape.getAttribute("stroke");
+
+            // Apply highlight
+            const currentFill = shape.getAttribute("fill");
+            const newFill = currentFill.replace(/0\.\d+\)/, "1)"); // Remove transparency
+            shape.setAttribute("fill", newFill);
+            shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+            shape.setAttribute("stroke-width", "2");
+        }
+    }
+
+    // Update table row highlighting
+    updateBitsSheet();
+}
+
+// Reset bit highlight to original state
+function resetBitHighlight(index) {
+    const bit = bitsOnCanvas[index];
+    if (bit && bit.group) {
+        const shape = bit.group.querySelector(".bit-shape");
+        if (shape && shape.dataset.originalFill) {
+            shape.setAttribute("fill", shape.dataset.originalFill);
+            shape.setAttribute(
+                "stroke",
+                shape.dataset.originalStroke || "black"
+            );
+            shape.setAttribute("stroke-width", "1");
+            delete shape.dataset.originalFill;
+            delete shape.dataset.originalStroke;
+        }
+    }
+}
+
+// Clear selection when clicking outside
+document.addEventListener("click", (e) => {
+    // Check if click is inside the table
+    const bitsSheet = document.getElementById("bits-sheet");
+    if (bitsSheet && !bitsSheet.contains(e.target)) {
+        // Clicked outside table
+        if (selectedBitIndex !== null) {
+            resetBitHighlight(selectedBitIndex);
+            selectedBitIndex = null;
+            updateBitsSheet();
+        }
+    }
+});
 
 function updateBitPosition(index, newX, newY) {
     // update material params to get correct material origin
@@ -618,9 +728,7 @@ function updateBitPosition(index, newX, newY) {
     bit.x = Math.round(newX);
     bit.y = Math.round(newY);
 
-    // update sheet (keeps inputs consistent)
-    updateBitsSheet();
-
+    // DO NOT call updateBitsSheet() here - it recreates inputs and breaks focus
     // redraw layer order if needed
     redrawBitsOnCanvas();
 }
@@ -650,6 +758,26 @@ function handleDrop(e) {
     if (srcIndex !== destIndex) {
         const [removed] = bitsOnCanvas.splice(srcIndex, 1);
         bitsOnCanvas.splice(destIndex, 0, removed);
+
+        // Update selectedBitIndex if the selected bit was moved
+        if (selectedBitIndex === srcIndex) {
+            selectedBitIndex = destIndex;
+        } else if (selectedBitIndex !== null) {
+            // Adjust selectedBitIndex if another bit moved past it
+            if (
+                srcIndex < destIndex &&
+                selectedBitIndex > srcIndex &&
+                selectedBitIndex <= destIndex
+            ) {
+                selectedBitIndex--;
+            } else if (
+                srcIndex > destIndex &&
+                selectedBitIndex >= destIndex &&
+                selectedBitIndex < srcIndex
+            ) {
+                selectedBitIndex++;
+            }
+        }
 
         // update sheet and canvas
         updateBitsSheet();
