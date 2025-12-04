@@ -271,14 +271,34 @@ function createBitGroups() {
 
         groupDiv.appendChild(bitList);
 
-        groupDiv.addEventListener(
-            "mouseenter",
-            () => (bitList.style.display = "flex")
-        );
-        groupDiv.addEventListener(
-            "mouseleave",
-            () => (bitList.style.display = "none")
-        );
+        groupDiv.addEventListener("mouseenter", (e) => {
+            const rect = groupDiv.getBoundingClientRect();
+            bitList.style.display = "flex";
+            bitList.style.left = rect.right + 5 + "px";
+            bitList.style.top = rect.top + rect.height / 2 + "px";
+            bitList.style.transform = "translateY(-50%)";
+
+            // Позиционировать невидимую зону для hover bridge
+            const afterElement = groupDiv.getAttribute("data-after-element");
+            // Установить ::after динамически через JS (для невидимой зоны)
+        });
+
+        groupDiv.addEventListener("mouseleave", (e) => {
+            // Не скрывать меню сразу - дать пользователю время дотянуться до него
+            setTimeout(() => {
+                if (!bitList.matches(":hover")) {
+                    bitList.style.display = "none";
+                }
+            }, 100);
+        });
+
+        bitList.addEventListener("mouseenter", () => {
+            bitList.style.display = "flex";
+        });
+
+        bitList.addEventListener("mouseleave", () => {
+            bitList.style.display = "none";
+        });
 
         bitGroups.appendChild(groupDiv);
     });
@@ -444,6 +464,54 @@ function isBitNameDuplicate(name, excludeId = null) {
         .some((bit) => bit.name === name && bit.id !== excludeId);
 }
 
+function handleCopyClick(e, bit) {
+    const baseName = bit.name;
+    const all = getBits();
+    // count existing copies with same baseName
+    const existingCopies = Object.values(all)
+        .flat()
+        .filter((b) => b.name.startsWith(`${baseName} (`));
+    const maxCopyNumber = existingCopies.reduce((max, b) => {
+        const m = b.name.match(/\((\d+)\)$/);
+        return m ? Math.max(max, parseInt(m[1], 10)) : max;
+    }, 0);
+    const name = `${baseName} (${maxCopyNumber + 1})`;
+    const newBit = { ...bit, name };
+    delete newBit.id; // ensure new id created
+
+    // Find the group name for this bit
+    const allBits = getBits();
+    let groupName = null;
+    for (const group in allBits) {
+        if (allBits[group].some((b) => b.id === bit.id)) {
+            groupName = group;
+            break;
+        }
+    }
+
+    if (groupName) {
+        addBit(groupName, newBit);
+    }
+}
+
+function handleDeleteClick(e, bit) {
+    if (confirm(`Are you sure you want to delete ${bit.name}?`)) {
+        // Find the group name for this bit
+        const allBits = getBits();
+        let groupName = null;
+        for (const group in allBits) {
+            if (allBits[group].some((b) => b.id === bit.id)) {
+                groupName = group;
+                break;
+            }
+        }
+
+        if (groupName) {
+            deleteBit(groupName, bit.id);
+        }
+    }
+}
+
 function refreshBitGroups() {
     bitGroups.innerHTML = "";
     createBitGroups();
@@ -528,6 +596,92 @@ let bitCounter = 0;
 let dragSrcRow = null;
 let selectedBitIndex = null;
 
+// Alignment states: 'center', 'left', 'right'
+const alignmentStates = ["center", "left", "right"];
+
+// Create alignment button SVG
+function createAlignmentButton(alignment) {
+    const svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("width", "20");
+    svg.setAttribute("height", "20");
+    svg.setAttribute("viewBox", "0 0 20 20");
+    svg.style.cursor = "pointer";
+
+    // Background rectangle
+    const bg = document.createElementNS(svgNS, "rect");
+    bg.setAttribute("width", "20");
+    bg.setAttribute("height", "20");
+    bg.setAttribute("fill", "white");
+    bg.setAttribute("stroke", "black");
+    bg.setAttribute("stroke-width", "1");
+    svg.appendChild(bg);
+
+    // Draw alignment indicator
+    if (alignment === "center") {
+        // Center line (vertical dashed)
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", "10");
+        line.setAttribute("y1", "3");
+        line.setAttribute("x2", "10");
+        line.setAttribute("y2", "17");
+        line.setAttribute("stroke", "black");
+        line.setAttribute("stroke-width", "1");
+        line.setAttribute("stroke-dasharray", "2,2");
+        svg.appendChild(line);
+
+        // Center square
+        const square = document.createElementNS(svgNS, "rect");
+        square.setAttribute("x", "7");
+        square.setAttribute("y", "8");
+        square.setAttribute("width", "6");
+        square.setAttribute("height", "4");
+        square.setAttribute("fill", "black");
+        svg.appendChild(square);
+    } else if (alignment === "left") {
+        // Left line (vertical dashed)
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", "5");
+        line.setAttribute("y1", "3");
+        line.setAttribute("x2", "5");
+        line.setAttribute("y2", "17");
+        line.setAttribute("stroke", "black");
+        line.setAttribute("stroke-width", "1");
+        line.setAttribute("stroke-dasharray", "2,2");
+        svg.appendChild(line);
+
+        // Left square
+        const square = document.createElementNS(svgNS, "rect");
+        square.setAttribute("x", "2");
+        square.setAttribute("y", "8");
+        square.setAttribute("width", "6");
+        square.setAttribute("height", "4");
+        square.setAttribute("fill", "black");
+        svg.appendChild(square);
+    } else if (alignment === "right") {
+        // Right line (vertical dashed)
+        const line = document.createElementNS(svgNS, "line");
+        line.setAttribute("x1", "15");
+        line.setAttribute("y1", "3");
+        line.setAttribute("x2", "15");
+        line.setAttribute("y2", "17");
+        line.setAttribute("stroke", "black");
+        line.setAttribute("stroke-width", "1");
+        line.setAttribute("stroke-dasharray", "2,2");
+        svg.appendChild(line);
+
+        // Right square
+        const square = document.createElementNS(svgNS, "rect");
+        square.setAttribute("x", "12");
+        square.setAttribute("y", "8");
+        square.setAttribute("width", "6");
+        square.setAttribute("height", "4");
+        square.setAttribute("fill", "black");
+        svg.appendChild(square);
+    }
+
+    return svg;
+}
+
 // Draw bit shape
 function drawBitShape(bit, groupName) {
     const bitsLayer = document.getElementById("bits-layer");
@@ -556,6 +710,7 @@ function drawBitShape(bit, groupName) {
         name: bit.name,
         x: x,
         y: y,
+        alignment: "center", // default alignment
         group: g, // group that contains the shape
         baseAbsX: centerX, // absolute coords where shape was created
         baseAbsY: centerY,
@@ -574,10 +729,14 @@ function updateBitsSheet() {
         const row = document.createElement("tr");
         row.setAttribute("data-index", index);
 
-        // Add click handler for row selection (but NOT on inputs)
+        // Add click handler for row selection (but NOT on inputs or buttons)
         row.addEventListener("click", (e) => {
-            // Don't select if clicking on input
-            if (e.target.tagName === "INPUT") {
+            // Don't select if clicking on input or button
+            if (
+                e.target.tagName === "INPUT" ||
+                e.target.closest("button") ||
+                e.target.closest("svg")
+            ) {
                 return;
             }
             e.stopPropagation();
@@ -629,6 +788,36 @@ function updateBitsSheet() {
         yCell.appendChild(yInput);
         row.appendChild(yCell);
 
+        // Alignment button
+        const alignCell = document.createElement("td");
+        const alignBtn = document.createElement("button");
+        alignBtn.type = "button";
+        alignBtn.style.background = "none";
+        alignBtn.style.border = "none";
+        alignBtn.style.padding = "0";
+        alignBtn.style.cursor = "pointer";
+        alignBtn.appendChild(createAlignmentButton(bit.alignment || "center"));
+        alignBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            cycleAlignment(index);
+        });
+        alignCell.appendChild(alignBtn);
+        row.appendChild(alignCell);
+
+        // Delete button
+        const delCell = document.createElement("td");
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "del-btn";
+        delBtn.textContent = "✕";
+        delBtn.title = "Delete bit from canvas";
+        delBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            deleteBitFromCanvas(index);
+        });
+        delCell.appendChild(delBtn);
+        row.appendChild(delCell);
+
         // Row drop/dragover handlers (drop allowed anywhere on row)
         row.addEventListener("dragover", handleDragOver);
         row.addEventListener("drop", handleDrop);
@@ -640,6 +829,70 @@ function updateBitsSheet() {
 
         sheetBody.appendChild(row);
     });
+}
+
+// Delete bit from canvas
+function deleteBitFromCanvas(index) {
+    if (index < 0 || index >= bitsOnCanvas.length) return;
+
+    const bit = bitsOnCanvas[index];
+
+    // Remove from canvas
+    if (bit.group && bit.group.parentNode) {
+        bit.group.parentNode.removeChild(bit.group);
+    }
+
+    // Remove from array
+    bitsOnCanvas.splice(index, 1);
+
+    // Reset selection if needed
+    if (selectedBitIndex === index) {
+        selectedBitIndex = null;
+    } else if (selectedBitIndex !== null && selectedBitIndex > index) {
+        selectedBitIndex--;
+    }
+
+    // Update table
+    updateBitsSheet();
+    redrawBitsOnCanvas();
+}
+
+// Cycle alignment state
+function cycleAlignment(index) {
+    const bit = bitsOnCanvas[index];
+    if (!bit) return;
+
+    // Cycle to next alignment state
+    const currentIdx = alignmentStates.indexOf(bit.alignment || "center");
+    const nextIdx = (currentIdx + 1) % alignmentStates.length;
+    const newAlignment = alignmentStates[nextIdx];
+
+    // Calculate offset adjustment based on bit diameter
+    const bitData = bit.bitData;
+    const halfDiameter = (bitData.diameter || 0) / 2;
+    let xOffset = 0;
+
+    if (bit.alignment === "center" && newAlignment === "left") {
+        xOffset = -halfDiameter;
+    } else if (bit.alignment === "center" && newAlignment === "right") {
+        xOffset = halfDiameter;
+    } else if (bit.alignment === "left" && newAlignment === "center") {
+        xOffset = halfDiameter;
+    } else if (bit.alignment === "left" && newAlignment === "right") {
+        xOffset = 2 * halfDiameter;
+    } else if (bit.alignment === "right" && newAlignment === "center") {
+        xOffset = -halfDiameter;
+    } else if (bit.alignment === "right" && newAlignment === "left") {
+        xOffset = -2 * halfDiameter;
+    }
+
+    // Update alignment and position
+    bit.alignment = newAlignment;
+    const newX = bit.x + xOffset;
+    updateBitPosition(index, newX, bit.y);
+
+    // Update the table to show new alignment button
+    updateBitsSheet();
 }
 
 // Select a bit and highlight it on canvas
