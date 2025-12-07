@@ -4,6 +4,16 @@ import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
+// Function to evaluate math expressions
+function evaluateMathExpression(value) {
+    if (!value || typeof value !== "string") return value;
+    try {
+        return Parser.evaluate(value);
+    } catch (e) {
+        return value; // if not a valid expression, return as is
+    }
+}
+
 // Get DOM elements
 const bitGroups = document.getElementById("bit-groups");
 const canvas = document.getElementById("canvas");
@@ -72,8 +82,9 @@ function createBitShapeElement(bit, groupName, x = 0, y = 0) {
             break;
         case "ballNose":
             // Радиус дуги (формула через хорду и стрелу подъёма)
-            const arcRad = (bit.diameter * bit.diameter) / (8 * bit.height);
-
+            const arcRad =
+                bit.height / 2 +
+                (bit.diameter * bit.diameter) / (8 * bit.height);
             shape = document.createElementNS(svgNS, "path");
             shape.setAttribute(
                 "d",
@@ -382,10 +393,18 @@ function openBitModal(groupName, bit = null) {
             return;
         }
 
-        const diameter = parseFloat(form.querySelector("#bit-diameter").value);
-        const length = parseFloat(form.querySelector("#bit-length").value);
-        const toolNumber =
-            parseInt(form.querySelector("#bit-toolnumber").value, 10) || 1;
+        const diameterStr = evaluateMathExpression(
+            form.querySelector("#bit-diameter").value
+        );
+        const diameter = parseFloat(diameterStr);
+        const lengthStr = evaluateMathExpression(
+            form.querySelector("#bit-length").value
+        );
+        const length = parseFloat(lengthStr);
+        const toolNumberStr = evaluateMathExpression(
+            form.querySelector("#bit-toolnumber").value
+        );
+        const toolNumber = parseInt(toolNumberStr, 10) || 1;
 
         const payload = {
             name,
@@ -395,13 +414,17 @@ function openBitModal(groupName, bit = null) {
         };
 
         if (groupName === "conical") {
-            payload.angle = parseFloat(form.querySelector("#bit-angle").value);
+            const angleStr = evaluateMathExpression(
+                form.querySelector("#bit-angle").value
+            );
+            payload.angle = parseFloat(angleStr);
         }
 
         if (groupName === "ballNose") {
-            payload.height = parseFloat(
+            const heightStr = evaluateMathExpression(
                 form.querySelector("#bit-height").value
             );
+            payload.height = parseFloat(heightStr);
         }
 
         if (isEdit) {
@@ -428,20 +451,20 @@ function getGroupSpecificInputs(groupName, defaults = {}) {
 
     let inputs = `
         <label for="bit-diameter">Diameter:</label>
-        <input type="number" id="bit-diameter" min="0" max="1000" step="0.01" required value="${d}">
+        <input type="text" id="bit-diameter" required value="${d}">
         <label for="bit-length">Length:</label>
-        <input type="number" id="bit-length" min="0" max="1000" step="0.01" required value="${l}">
+        <input type="text" id="bit-length" required value="${l}">
     `;
     if (groupName === "conical") {
         inputs += `
         <label for="bit-angle">Angle:</label>
-        <input type="number" id="bit-angle" min="0" max="1000" step="0.01" required value="${a}">
+        <input type="text" id="bit-angle" required value="${a}">
         `;
     }
     if (groupName === "ballNose") {
         inputs += `
         <label for="bit-height">Height:</label>
-        <input type="number" id="bit-height" min="0" max="1000" step="0.01" required value="${h}">
+        <input type="text" id="bit-height" required value="${h}">
         `;
     }
     return inputs;
@@ -562,8 +585,10 @@ function initializeSVG() {
         .addEventListener("click", toggleGrid);
 
     // Add grid scale input listener
-    document.getElementById("grid-scale").addEventListener("input", (e) => {
-        gridSize = parseFloat(e.target.value) || 10;
+    document.getElementById("grid-scale").addEventListener("blur", (e) => {
+        const val = evaluateMathExpression(e.target.value);
+        e.target.value = val;
+        gridSize = parseFloat(val) || 10;
         if (gridEnabled) {
             drawGrid();
         }
@@ -696,52 +721,27 @@ function updateMaterialAnchorIndicator() {
 
 // Update material parameters
 function updateMaterialParams() {
-    // Save old anchor position
-    const oldMaterialX = (canvasParameters.width - materialWidth) / 2;
-    const oldMaterialY = (canvasParameters.height - materialThickness) / 2;
-    const oldMaterialAnchorOffset = getMaterialAnchorOffset();
-    const oldMaterialAnchorX = oldMaterialX + oldMaterialAnchorOffset.x;
-    const oldMaterialAnchorY = oldMaterialY + oldMaterialAnchorOffset.y;
-
     // Update material dimensions
     materialWidth = parseInt(materialWidthInput.value) || materialWidth;
     materialThickness =
         parseInt(materialThicknessInput.value) || materialThickness;
 
-    // New anchor position
-    const newMaterialX = (canvasParameters.width - materialWidth) / 2;
-    const newMaterialY = (canvasParameters.height - materialThickness) / 2;
-    const newMaterialAnchorOffset = getMaterialAnchorOffset();
-    const newMaterialAnchorX = newMaterialX + newMaterialAnchorOffset.x;
-    const newMaterialAnchorY = newMaterialY + newMaterialAnchorOffset.y;
-
-    // Update bits to keep physical position
-    bitsOnCanvas.forEach((bit) => {
-        const physicalX = oldMaterialAnchorX + bit.x;
-        const physicalY = oldMaterialAnchorY + bit.y;
-        bit.x = physicalX - newMaterialAnchorX;
-        bit.y = physicalY - newMaterialAnchorY;
-
-        // Update canvas position
-        const newAbsX = newMaterialAnchorX + bit.x;
-        const newAbsY = newMaterialAnchorY + bit.y;
-        const dx = newAbsX - bit.baseAbsX;
-        const dy = newAbsY - bit.baseAbsY;
-        bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
-    });
-
     updateMaterialShape();
+    updateBitsPositions();
 }
 
-// New: reposition all bits according to current material origin and their stored logical coords
+// New: reposition all bits according to current material anchor and their stored logical coords
 function updateBitsPositions() {
     const materialX = (canvasParameters.width - materialWidth) / 2;
     const materialY = (canvasParameters.height - materialThickness) / 2;
+    const anchorOffset = getMaterialAnchorOffset();
+    const anchorX = materialX + anchorOffset.x;
+    const anchorY = materialY + anchorOffset.y;
 
     bitsOnCanvas.forEach((bit) => {
-        // desired absolute anchor position = material origin + logical coords
-        const desiredAbsX = materialX + (bit.x || 0);
-        const desiredAbsY = materialY + (bit.y || 0);
+        // desired absolute position = anchor + logical coords
+        const desiredAbsX = anchorX + (bit.x || 0);
+        const desiredAbsY = anchorY + (bit.y || 0);
 
         // compute translation relative to the element's original absolute coords
         const dx = desiredAbsX - bit.baseAbsX;
@@ -982,11 +982,13 @@ function updateBitsSheet() {
         // X editable
         const xCell = document.createElement("td");
         const xInput = document.createElement("input");
-        xInput.type = "number";
+        xInput.type = "text";
         const anchorOffset = getAnchorOffset(bit);
         xInput.value = bit.x + anchorOffset.x;
         xInput.addEventListener("change", () => {
-            const newAnchorX = parseFloat(xInput.value) || 0;
+            const val = evaluateMathExpression(xInput.value);
+            xInput.value = val;
+            const newAnchorX = parseFloat(val) || 0;
             const newX = newAnchorX - anchorOffset.x;
             updateBitPosition(index, newX, bit.y);
         });
@@ -996,10 +998,12 @@ function updateBitsSheet() {
         // Y editable
         const yCell = document.createElement("td");
         const yInput = document.createElement("input");
-        yInput.type = "number";
+        yInput.type = "text";
         yInput.value = bit.y + anchorOffset.y;
         yInput.addEventListener("change", () => {
-            const newAnchorY = parseFloat(yInput.value) || 0;
+            const val = evaluateMathExpression(yInput.value);
+            yInput.value = val;
+            const newAnchorY = parseFloat(val) || 0;
             const newY = newAnchorY - anchorOffset.y;
             updateBitPosition(index, bit.x, newY);
         });
@@ -1423,13 +1427,16 @@ function zoomToSelected() {
     const bit = bitsOnCanvas[selectedBitIndex];
     const materialX = (canvasParameters.width - materialWidth) / 2;
     const materialY = (canvasParameters.height - materialThickness) / 2;
+    const anchorOffset = getMaterialAnchorOffset();
+    const anchorX = materialX + anchorOffset.x;
+    const anchorY = materialY + anchorOffset.y;
 
     // Calculate the absolute position of the selected bit
-    const bitAbsX = materialX + bit.x;
-    const bitAbsY = materialY + bit.y;
+    const bitAbsX = anchorX + bit.x;
+    const bitAbsY = anchorY + bit.y;
 
     // Zoom to fit the bit with some padding
-    zoomLevel = 2; // Fixed zoom level for selected bit
+    zoomLevel = 5; // Fixed zoom level for selected bit
     panX = bitAbsX;
     panY = bitAbsY;
 
@@ -1655,6 +1662,20 @@ function initialize() {
     // Add event listeners for material parameter inputs
     materialWidthInput.addEventListener("input", updateMaterialParams);
     materialThicknessInput.addEventListener("input", updateMaterialParams);
+
+    // Add math evaluation on blur
+    materialWidthInput.addEventListener("blur", () => {
+        materialWidthInput.value = evaluateMathExpression(
+            materialWidthInput.value
+        );
+        updateMaterialParams();
+    });
+    materialThicknessInput.addEventListener("blur", () => {
+        materialThicknessInput.value = evaluateMathExpression(
+            materialThicknessInput.value
+        );
+        updateMaterialParams();
+    });
 }
 
 // Call initialize function when the page loads
