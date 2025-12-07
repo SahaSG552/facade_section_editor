@@ -21,8 +21,8 @@ export default {
         },
     ],
     ballNose: [
-        { id: "bn-1", name: "U10", diameter: 10, length: 20 },
-        { id: "bn-2", name: "U19", diameter: 19, length: 25 },
-        { id: "bn-3", name: "U38", diameter: 38.1, length: 22 },
+        { id: "bn-1", name: "U10", diameter: 10, length: 20, height: 5 },
+        { id: "bn-2", name: "U19", diameter: 19, length: 25, height: 9.5 },
+        { id: "bn-3", name: "U38", diameter: 38.1, length: 22, height: 19.05 },
     ],
 };

@@ -71,15 +71,19 @@ function createBitShapeElement(bit, groupName, x = 0, y = 0) {
             shape.setAttribute("fill", "rgba(26, 255, 0, 0.30)");
             break;
         case "ballNose":
-            y = y - bit.diameter / 2;
+            // Радиус дуги (формула через хорду и стрелу подъёма)
+            const arcRad = (bit.diameter * bit.diameter) / (8 * bit.height);
+
             shape = document.createElementNS(svgNS, "path");
             shape.setAttribute(
                 "d",
-                `M ${x + bit.diameter / 2} ${y} A ${bit.diameter / 2} ${
-                    bit.diameter / 2
-                } 0 0 1 ${x - bit.diameter / 2} ${y} 
-        L ${x - bit.diameter / 2} ${y - bit.length + bit.diameter / 2}
-        L ${x + bit.diameter / 2} ${y - bit.length + bit.diameter / 2} Z`
+                `M ${x + bit.diameter / 2} ${
+                    y - bit.height
+                } A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${
+                    y - bit.height
+                } 
+        L ${x - bit.diameter / 2} ${y - bit.length}
+        L ${x + bit.diameter / 2} ${y - bit.length} Z`
             );
             shape.setAttribute("fill", "rgba(255, 0, 0, 0.30)");
             break;
@@ -337,6 +341,7 @@ function openBitModal(groupName, bit = null) {
     const defaultDiameter = bit ? bit.diameter : "";
     const defaultLength = bit ? bit.length : "";
     const defaultAngle = bit ? bit.angle : "";
+    const defaultHeight = bit ? bit.height : "";
     const defaultName = bit ? bit.name : "";
 
     const modal = document.createElement("div");
@@ -351,6 +356,7 @@ function openBitModal(groupName, bit = null) {
             diameter: defaultDiameter,
             length: defaultLength,
             angle: defaultAngle,
+            height: defaultHeight,
         })}
         <label for="bit-toolnumber">Tool Number:</label>
         <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
@@ -392,6 +398,12 @@ function openBitModal(groupName, bit = null) {
             payload.angle = parseFloat(form.querySelector("#bit-angle").value);
         }
 
+        if (groupName === "ballNose") {
+            payload.height = parseFloat(
+                form.querySelector("#bit-height").value
+            );
+        }
+
         if (isEdit) {
             updateBit(groupName, bit.id, payload);
         } else {
@@ -412,6 +424,7 @@ function getGroupSpecificInputs(groupName, defaults = {}) {
     const d = defaults.diameter !== undefined ? defaults.diameter : "";
     const l = defaults.length !== undefined ? defaults.length : "";
     const a = defaults.angle !== undefined ? defaults.angle : "";
+    const h = defaults.height !== undefined ? defaults.height : "";
 
     let inputs = `
         <label for="bit-diameter">Diameter:</label>
@@ -423,6 +436,12 @@ function getGroupSpecificInputs(groupName, defaults = {}) {
         inputs += `
         <label for="bit-angle">Angle:</label>
         <input type="number" id="bit-angle" min="0" max="1000" step="0.01" required value="${a}">
+        `;
+    }
+    if (groupName === "ballNose") {
+        inputs += `
+        <label for="bit-height">Height:</label>
+        <input type="number" id="bit-height" min="0" max="1000" step="0.01" required value="${h}">
         `;
     }
     return inputs;
