@@ -25,4 +25,24 @@ export default {
         { id: "bn-2", name: "U19", diameter: 19, length: 25, height: 9.5 },
         { id: "bn-3", name: "U38", diameter: 38.1, length: 22, height: 19.05 },
     ],
+    fillet: [
+        {
+            id: "fil-1",
+            name: "D10R2",
+            diameter: 10,
+            length: 20,
+            height: 5,
+            cornerRadius: 2,
+            flat: 0,
+        },
+        {
+            id: "fil-2",
+            name: "D12R3F2",
+            diameter: 12,
+            length: 25,
+            height: 8,
+            cornerRadius: 3,
+            flat: 2,
+        },
+    ],
 };

@@ -98,6 +98,36 @@ function createBitShapeElement(bit, groupName, x = 0, y = 0) {
             );
             shape.setAttribute("fill", "rgba(255, 0, 0, 0.30)");
             break;
+        case "fillet":
+            // Fillet cutter: cylindrical part + fillet profile
+            const cylHeight2 = bit.length - bit.height;
+            const filletStartY2 = y - cylHeight2;
+            const flatHalf2 = bit.flat / 2;
+
+            let pathData2 = `M ${x - bit.diameter / 2} ${y} 
+                L ${x - bit.diameter / 2} ${filletStartY2} 
+                L ${x - bit.diameter / 2 + flatHalf2} ${filletStartY2} 
+                Q ${
+                    x - bit.diameter / 2 + flatHalf2 + bit.cornerRadius
+                } ${filletStartY2} ${
+                x - bit.diameter / 2 + flatHalf2 + bit.cornerRadius
+            } ${filletStartY2 - bit.cornerRadius} 
+                L ${x - bit.diameter / 2 + flatHalf2 + bit.cornerRadius} ${
+                y - bit.length
+            } 
+                L ${x + bit.diameter / 2 - flatHalf2 - bit.cornerRadius} ${
+                y - bit.length
+            } 
+                Q ${x + bit.diameter / 2 - flatHalf2} ${y - bit.length} ${
+                x + bit.diameter / 2 - flatHalf2
+            } ${y - bit.length + bit.cornerRadius} 
+                L ${x + bit.diameter / 2 - flatHalf2} ${filletStartY2} 
+                L ${x + bit.diameter / 2} ${filletStartY2} 
+                L ${x + bit.diameter / 2} ${y} Z`;
+            shape = document.createElementNS(svgNS, "path");
+            shape.setAttribute("d", pathData2);
+            shape.setAttribute("fill", "rgba(128, 0, 128, 0.30)"); // Purple color
+            break;
     }
 
     if (shape) {
@@ -158,6 +188,15 @@ function createSVGIcon(shape, params, size = 50) {
                 innerShape.setAttribute("cx", 0);
                 innerShape.setAttribute("cy", 0);
                 innerShape.setAttribute("r", size / 4);
+                break;
+            case "fillet":
+                innerShape = document.createElementNS(svgNS, "path");
+                innerShape.setAttribute(
+                    "d",
+                    `M ${-size / 4} ${-size / 4} L ${size / 4} ${-size / 4} L ${
+                        size / 4
+                    } ${size / 4} L ${-size / 4} ${size / 4} Z`
+                );
                 break;
             case "newBit":
                 innerShape = document.createElementNS(svgNS, "path");
@@ -353,6 +392,8 @@ function openBitModal(groupName, bit = null) {
     const defaultLength = bit ? bit.length : "";
     const defaultAngle = bit ? bit.angle : "";
     const defaultHeight = bit ? bit.height : "";
+    const defaultCornerRadius = bit ? bit.cornerRadius : "";
+    const defaultFlat = bit ? bit.flat : "";
     const defaultName = bit ? bit.name : "";
 
     const modal = document.createElement("div");
@@ -368,6 +409,8 @@ function openBitModal(groupName, bit = null) {
             length: defaultLength,
             angle: defaultAngle,
             height: defaultHeight,
+            cornerRadius: defaultCornerRadius,
+            flat: defaultFlat,
         })}
         <label for="bit-toolnumber">Tool Number:</label>
         <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
@@ -427,10 +470,30 @@ function openBitModal(groupName, bit = null) {
             payload.height = parseFloat(heightStr);
         }
 
+        if (groupName === "fillet") {
+            const heightStr = evaluateMathExpression(
+                form.querySelector("#bit-height").value
+            );
+            payload.height = parseFloat(heightStr);
+            const cornerRadiusStr = evaluateMathExpression(
+                form.querySelector("#bit-cornerRadius").value
+            );
+            payload.cornerRadius = parseFloat(cornerRadiusStr);
+            const flatStr = evaluateMathExpression(
+                form.querySelector("#bit-flat").value
+            );
+            payload.flat = parseFloat(flatStr);
+        }
+
+        let updatedBit;
         if (isEdit) {
-            updateBit(groupName, bit.id, payload);
+            updatedBit = updateBit(groupName, bit.id, payload);
         } else {
-            addBit(groupName, payload);
+            updatedBit = addBit(groupName, payload);
+        }
+
+        if (isEdit) {
+            updateCanvasBitsForBitId(updatedBit.id);
         }
 
         document.body.removeChild(modal);
@@ -448,6 +511,8 @@ function getGroupSpecificInputs(groupName, defaults = {}) {
     const l = defaults.length !== undefined ? defaults.length : "";
     const a = defaults.angle !== undefined ? defaults.angle : "";
     const h = defaults.height !== undefined ? defaults.height : "";
+    const cr = defaults.cornerRadius !== undefined ? defaults.cornerRadius : "";
+    const f = defaults.flat !== undefined ? defaults.flat : "";
 
     let inputs = `
         <label for="bit-diameter">Diameter:</label>
@@ -465,6 +530,16 @@ function getGroupSpecificInputs(groupName, defaults = {}) {
         inputs += `
         <label for="bit-height">Height:</label>
         <input type="text" id="bit-height" required value="${h}">
+        `;
+    }
+    if (groupName === "fillet") {
+        inputs += `
+        <label for="bit-height">Height:</label>
+        <input type="text" id="bit-height" required value="${h}">
+        <label for="bit-cornerRadius">Corner Radius:</label>
+        <input type="text" id="bit-cornerRadius" required value="${cr}">
+        <label for="bit-flat">Flat:</label>
+        <input type="text" id="bit-flat" required value="${f}">
         `;
     }
     return inputs;
@@ -898,6 +973,50 @@ function createMaterialAnchorButton(anchor) {
     return svg;
 }
 
+// Update canvas bits when a bit in the library is changed
+function updateCanvasBitsForBitId(bitId) {
+    // Get the updated bit from the library
+    const allBits = getBits();
+    let updatedBitData = null;
+    for (const group in allBits) {
+        const found = allBits[group].find((b) => b.id === bitId);
+        if (found) {
+            updatedBitData = found;
+            break;
+        }
+    }
+    if (!updatedBitData) return;
+
+    bitsOnCanvas.forEach((bit) => {
+        if (bit.bitData.id === bitId) {
+            // Update reference to the new bit data
+            bit.bitData = updatedBitData;
+            // Update name
+            bit.name = updatedBitData.name;
+
+            // Redraw shape
+            const oldShape = bit.group.querySelector(".bit-shape");
+            if (oldShape) {
+                bit.group.removeChild(oldShape);
+            }
+            const newShape = createBitShapeElement(
+                updatedBitData,
+                bit.groupName,
+                bit.baseAbsX,
+                bit.baseAbsY
+            );
+            bit.group.insertBefore(newShape, bit.group.firstChild); // insert before anchor point if exists
+
+            // Update stroke width
+            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+            newShape.setAttribute("stroke-width", thickness);
+        }
+    });
+
+    // Update the table
+    updateBitsSheet();
+}
+
 // Draw bit shape
 function drawBitShape(bit, groupName) {
     const bitsLayer = document.getElementById("bits-layer");
@@ -931,6 +1050,7 @@ function drawBitShape(bit, groupName) {
         baseAbsX: centerX, // absolute coords where shape was created
         baseAbsY: centerY,
         bitData: bit,
+        groupName: groupName, // store the group name for updates
     };
     bitsOnCanvas.push(newBit);
     updateBitsSheet();

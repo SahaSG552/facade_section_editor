@@ -14,6 +14,20 @@ function load() {
     if (raw) {
         try {
             bits = JSON.parse(raw);
+            // Merge with defaults to add any missing groups
+            let hasNewGroups = false;
+            Object.keys(defaultBits).forEach((groupName) => {
+                if (!bits[groupName]) {
+                    bits[groupName] = defaultBits[groupName].map((b) => ({
+                        id: b.id || genId(),
+                        ...b,
+                    }));
+                    hasNewGroups = true;
+                }
+            });
+            if (hasNewGroups) {
+                save();
+            }
             return;
         } catch (e) {
             console.warn(
