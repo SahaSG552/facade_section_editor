@@ -1,4 +1,4 @@
-import { angleToRad } from "./utils/math.js";
+import { angleToRad, distancePtToPt } from "./utils/math.js";
 import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
 
 // SVG namespace
@@ -8,7 +8,7 @@ const svgNS = "http://www.w3.org/2000/svg";
 function evaluateMathExpression(value) {
     if (!value || typeof value !== "string") return value;
     try {
-        return Parser.evaluate(value);
+        return math.evaluate(value);
     } catch (e) {
         return value; // if not a valid expression, return as is
     }
@@ -45,14 +45,18 @@ let gridSize = 10; // Default grid size in pixels (1mm = 10px)
 // Drag variables for selected bit
 let isDraggingBit = false;
 let draggedBitIndex = null;
-let dragStartX = 0;
-let dragStartY = 0;
 
 // ===== SVG and Icon Creation Functions =====
 
 // Create bit shape element based on parameters
 function createBitShapeElement(bit, groupName, x = 0, y = 0) {
     let shape;
+    // Радиус дуги (формула через хорду и стрелу подъёма)
+    let A = { x: x + bit.diameter / 2, y: y - bit.height };
+    let B = { x: x - bit.diameter / 2, y: y - bit.height };
+    let arcRad =
+        bit.height / 2 +
+        (distancePtToPt(A, B) * distancePtToPt(A, B)) / (8 * bit.height);
 
     switch (groupName) {
         case "cylindrical":
@@ -80,11 +84,7 @@ function createBitShapeElement(bit, groupName, x = 0, y = 0) {
             shape.setAttribute("points", points);
             shape.setAttribute("fill", "rgba(26, 255, 0, 0.30)");
             break;
-        case "ballNose":
-            // Радиус дуги (формула через хорду и стрелу подъёма)
-            const arcRad =
-                bit.height / 2 +
-                (bit.diameter * bit.diameter) / (8 * bit.height);
+        case "ball":
             shape = document.createElementNS(svgNS, "path");
             shape.setAttribute(
                 "d",
@@ -100,33 +100,35 @@ function createBitShapeElement(bit, groupName, x = 0, y = 0) {
             break;
         case "fillet":
             // Fillet cutter: cylindrical part + fillet profile
-            const cylHeight2 = bit.length - bit.height;
-            const filletStartY2 = y - cylHeight2;
-            const flatHalf2 = bit.flat / 2;
-
-            let pathData2 = `M ${x - bit.diameter / 2} ${y} 
-                L ${x - bit.diameter / 2} ${filletStartY2} 
-                L ${x - bit.diameter / 2 + flatHalf2} ${filletStartY2} 
-                Q ${
-                    x - bit.diameter / 2 + flatHalf2 + bit.cornerRadius
-                } ${filletStartY2} ${
-                x - bit.diameter / 2 + flatHalf2 + bit.cornerRadius
-            } ${filletStartY2 - bit.cornerRadius} 
-                L ${x - bit.diameter / 2 + flatHalf2 + bit.cornerRadius} ${
-                y - bit.length
-            } 
-                L ${x + bit.diameter / 2 - flatHalf2 - bit.cornerRadius} ${
-                y - bit.length
-            } 
-                Q ${x + bit.diameter / 2 - flatHalf2} ${y - bit.length} ${
-                x + bit.diameter / 2 - flatHalf2
-            } ${y - bit.length + bit.cornerRadius} 
-                L ${x + bit.diameter / 2 - flatHalf2} ${filletStartY2} 
-                L ${x + bit.diameter / 2} ${filletStartY2} 
-                L ${x + bit.diameter / 2} ${y} Z`;
+            arcRad = bit.cornerRadius;
             shape = document.createElementNS(svgNS, "path");
-            shape.setAttribute("d", pathData2);
+            shape.setAttribute(
+                "d",
+                `M ${x + bit.diameter / 2} ${
+                    y - bit.height
+                } A ${arcRad} ${arcRad} 0 0 0 ${x + bit.flat / 2} ${y} 
+        L ${x - bit.flat / 2} ${y}
+        A ${arcRad} ${arcRad} 0 0 0 ${x - bit.diameter / 2} ${y - bit.height} 
+        L ${x - bit.diameter / 2} ${y - bit.length}
+        L ${x + bit.diameter / 2} ${y - bit.length} Z`
+            );
             shape.setAttribute("fill", "rgba(128, 0, 128, 0.30)"); // Purple color
+            break;
+        case "bull":
+            // Bull-nose cutter: cylindrical part + bullnose profile
+            arcRad = bit.cornerRadius;
+            shape = document.createElementNS(svgNS, "path");
+            shape.setAttribute(
+                "d",
+                `M ${x + bit.diameter / 2} ${
+                    y - bit.height
+                } A ${arcRad} ${arcRad} 0 0 1 ${x + bit.flat / 2} ${y} 
+        L ${x - bit.flat / 2} ${y}
+        A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${y - bit.height} 
+        L ${x - bit.diameter / 2} ${y - bit.length}
+        L ${x + bit.diameter / 2} ${y - bit.length} Z`
+            );
+            shape.setAttribute("fill", "rgba(128, 128, 0, 0.3)"); // Olive color
             break;
     }
 
@@ -166,6 +168,7 @@ function createSVGIcon(shape, params, size = 50) {
         innerShape.setAttribute("transform", `scale(${size / 80})`);
     } else {
         // Use placeholder shapes for new bit button
+        const s = size / 4;
         switch (shape) {
             case "cylindrical":
                 innerShape = document.createElementNS(svgNS, "rect");
@@ -175,27 +178,56 @@ function createSVGIcon(shape, params, size = 50) {
                 innerShape.setAttribute("height", size / 2);
                 break;
             case "conical":
-                innerShape = document.createElementNS(svgNS, "polygon");
+                innerShape = document.createElementNS(svgNS, "path");
                 innerShape.setAttribute(
-                    "points",
-                    `0,${size / 4} ${-size / 4},${-size / 4} ${size / 4},${
-                        -size / 4
-                    }`
+                    "d",
+                    `M ${-s} 0 
+                    L ${-s} ${-s} 
+                    L ${s} ${-s} 
+                    L ${s} 0
+                    L 0 ${s} 
+                    Z`
                 );
                 break;
-            case "ballNose":
-                innerShape = document.createElementNS(svgNS, "circle");
-                innerShape.setAttribute("cx", 0);
-                innerShape.setAttribute("cy", 0);
-                innerShape.setAttribute("r", size / 4);
+            case "ball":
+                innerShape = document.createElementNS(svgNS, "path");
+                innerShape.setAttribute(
+                    "d",
+                    `M ${-s} 0 
+                    L ${-s} ${-s} 
+                    L ${s} ${-s} 
+                    L ${s} 0
+                    A ${s} ${s} 0 0 1 0 ${s} 
+                    A ${s} ${s} 0 0 1 ${-s} 0
+                    Z`
+                );
                 break;
             case "fillet":
                 innerShape = document.createElementNS(svgNS, "path");
                 innerShape.setAttribute(
                     "d",
-                    `M ${-size / 4} ${-size / 4} L ${size / 4} ${-size / 4} L ${
-                        size / 4
-                    } ${size / 4} L ${-size / 4} ${size / 4} Z`
+                    `M ${-s} ${s / 4} 
+                    L ${-s} ${-s} 
+                    L ${s} ${-s} 
+                    L ${s} ${s / 4}
+                    A ${s} ${s} 0 0 0 ${s / 4} ${s} 
+                    L ${-s / 4} ${s}
+                    A ${s} ${s} 0 0 0 ${-s} ${s / 4}
+                    Z`
+                );
+                break;
+            case "bull":
+                innerShape = document.createElementNS(svgNS, "path");
+                innerShape.setAttribute(
+                    "d",
+                    `M ${-s} ${s / 2} 
+                    L ${-s} ${-s} 
+                    L ${s} ${-s} 
+                    L ${s} ${s / 2}
+                    A ${s / 2} ${s / 2} 0 0 1 ${s / 2} ${s} 
+                    L ${-s / 2} ${s}
+                    A ${s / 2} ${s / 2} 0 0 1 ${-s} ${s / 2}
+                    Z`
                 );
                 break;
             case "newBit":
@@ -425,6 +457,14 @@ function openBitModal(groupName, bit = null) {
     document.body.appendChild(modal);
 
     const form = modal.querySelector("#bit-form");
+
+    // Add math evaluation on blur for all text inputs
+    const inputs = form.querySelectorAll('input[type="text"]');
+    inputs.forEach((input) => {
+        input.addEventListener("blur", () => {
+            input.value = evaluateMathExpression(input.value);
+        });
+    });
     form.addEventListener("submit", (e) => {
         e.preventDefault();
         const name = form.querySelector("#bit-name").value.trim();
@@ -463,7 +503,7 @@ function openBitModal(groupName, bit = null) {
             payload.angle = parseFloat(angleStr);
         }
 
-        if (groupName === "ballNose") {
+        if (groupName === "ball") {
             const heightStr = evaluateMathExpression(
                 form.querySelector("#bit-height").value
             );
@@ -526,13 +566,13 @@ function getGroupSpecificInputs(groupName, defaults = {}) {
         <input type="text" id="bit-angle" required value="${a}">
         `;
     }
-    if (groupName === "ballNose") {
+    if (groupName === "ball") {
         inputs += `
         <label for="bit-height">Height:</label>
         <input type="text" id="bit-height" required value="${h}">
         `;
     }
-    if (groupName === "fillet") {
+    if (groupName === "fillet" || groupName === "bull") {
         inputs += `
         <label for="bit-height">Height:</label>
         <input type="text" id="bit-height" required value="${h}">
@@ -1247,7 +1287,7 @@ function selectBit(index) {
 
             // Apply highlight
             const currentFill = shape.getAttribute("fill");
-            const newFill = currentFill.replace(/0\.\d+\)/, "1)"); // Remove transparency
+            const newFill = currentFill.replace(/0\.\d+\)/, "0.6)"); // Change transparency
             shape.setAttribute("fill", newFill);
             shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
             const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
