@@ -45,6 +45,8 @@ let gridSize = 10; // Default grid size in pixels (1mm = 10px)
 // Drag variables for selected bit
 let isDraggingBit = false;
 let draggedBitIndex = null;
+let dragStartX = 0;
+let dragStartY = 0;
 
 // ===== SVG and Icon Creation Functions =====
 
