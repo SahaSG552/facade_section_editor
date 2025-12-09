@@ -1,4 +1,4 @@
-import { angleToRad, distancePtToPt } from "./utils/math.js";
+import { angleToRad, distancePtToPt } from "./utils/utils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
 
 // SVG namespace
