@@ -27,8 +27,8 @@ let materialThickness = 18;
 let materialAnchor = "top-left"; // "top-left" or "bottom-left"
 
 const canvasParameters = {
-    width: canvas.getAttribute("width"),
-    height: canvas.getAttribute("height"),
+    width: window.innerWidth,
+    height: window.innerHeight,
 };
 
 // Zoom and pan variables
@@ -47,6 +47,125 @@ let isDraggingBit = false;
 let draggedBitIndex = null;
 let dragStartX = 0;
 let dragStartY = 0;
+
+// Drag variables for panels
+let isDraggingPanel = false;
+let draggedPanel = null;
+let panelDragStartX = 0;
+let panelDragStartY = 0;
+
+// Panel collapse state
+let collapsedPanels = new Set();
+
+// Panel positioning and snapping
+let panelPositions = {};
+let panelSnapGroups = {}; // Track which panels are snapped together: panelId -> { snappedTo: targetId, direction: "left|right|above|below", offsetX: number, offsetY: number }
+
+// Create snap relationship between panels
+function createPanelSnap(panelId, targetPanelId, direction, draggedPanel) {
+    // Remove any existing snap for this panel
+    removePanelFromSnapGroups(panelId);
+
+    const targetPanel = document.getElementById(targetPanelId);
+    const draggedElement = document.getElementById(panelId);
+
+    if (!targetPanel || !draggedElement) return;
+
+    const targetRect = targetPanel.getBoundingClientRect();
+    const draggedRect = draggedElement.getBoundingClientRect();
+
+    let offsetX = 0;
+    let offsetY = 0;
+
+    // Calculate offset based on direction
+    switch (direction) {
+        case "left":
+            offsetX = draggedRect.left - (targetRect.right + 10);
+            offsetY = draggedRect.top - targetRect.top;
+            break;
+        case "right":
+            offsetX =
+                draggedRect.left - (targetRect.left - 10 - draggedRect.width);
+            offsetY = draggedRect.top - targetRect.top;
+            break;
+        case "above":
+            offsetX = draggedRect.left - targetRect.left;
+            offsetY = draggedRect.top - (targetRect.bottom + 10);
+            break;
+        case "below":
+            offsetX = draggedRect.left - targetRect.left;
+            offsetY =
+                draggedRect.top - (targetRect.top - 10 - draggedRect.height);
+            break;
+    }
+
+    panelSnapGroups[panelId] = {
+        snappedTo: targetPanelId,
+        direction: direction,
+        offsetX: offsetX,
+        offsetY: offsetY,
+    };
+}
+
+// Update position of snapped panel when target moves
+function updateSnappedPanelPosition(panelId) {
+    if (!panelSnapGroups[panelId]) return;
+
+    const snapInfo = panelSnapGroups[panelId];
+    const targetPanel = document.getElementById(snapInfo.snappedTo);
+    const snappedPanel = document.getElementById(panelId);
+
+    if (!targetPanel || !snappedPanel) return;
+
+    const targetRect = targetPanel.getBoundingClientRect();
+
+    let newLeft = targetRect.left + snapInfo.offsetX;
+    let newTop = targetRect.top + snapInfo.offsetY;
+
+    // Apply the calculated position
+    snappedPanel.style.left = newLeft + "px";
+    snappedPanel.style.top = newTop + "px";
+}
+
+// Handle panel expansion/contraction
+function handlePanelSizeChange(panelId, oldHeight, newHeight) {
+    if (!panelSnapGroups[panelId]) return;
+
+    const snapInfo = panelSnapGroups[panelId];
+    const heightDiff = newHeight - oldHeight;
+
+    // If this panel has panels below it, adjust their positions
+    Object.keys(panelSnapGroups).forEach((snappedId) => {
+        const snappedInfo = panelSnapGroups[snappedId];
+        if (
+            snappedInfo.snappedTo === panelId &&
+            snappedInfo.direction === "below"
+        ) {
+            // Panel below this one needs to be moved
+            const snappedPanel = document.getElementById(snappedId);
+            if (snappedPanel) {
+                const currentTop = parseFloat(snappedPanel.style.top) || 0;
+                snappedPanel.style.top = currentTop + heightDiff + "px";
+
+                // Update the stored offset
+                snappedInfo.offsetY += heightDiff;
+            }
+        }
+    });
+}
+
+// Remove panel from all snap groups
+function removePanelFromSnapGroups(panelId) {
+    // Remove this panel from all snap groups
+    Object.keys(panelSnapGroups).forEach((id) => {
+        if (panelSnapGroups[id].snappedTo === panelId) {
+            delete panelSnapGroups[id];
+        }
+    });
+
+    // Remove this panel's snap group
+    delete panelSnapGroups[panelId];
+}
 
 // ===== SVG and Icon Creation Functions =====
 
@@ -381,14 +500,25 @@ function createBitGroups() {
 
         groupDiv.addEventListener("mouseenter", (e) => {
             const rect = groupDiv.getBoundingClientRect();
+            const panelRect = groupDiv
+                .closest(".panel")
+                .getBoundingClientRect();
+            const isLeftPanel = panelRect.left < window.innerWidth / 2;
+
             bitList.style.display = "flex";
-            bitList.style.left = rect.right + 5 + "px";
+
+            if (isLeftPanel) {
+                // Панель слева - меню фрез появляется справа
+                bitList.style.left = rect.right + 5 + "px";
+                bitList.style.right = "auto";
+            } else {
+                // Панель справа - меню фрез появляется слева
+                bitList.style.left = "auto";
+                bitList.style.right = window.innerWidth - rect.left + 5 + "px";
+            }
+
             bitList.style.top = rect.top + rect.height / 2 + "px";
             bitList.style.transform = "translateY(-50%)";
-
-            // Позиционировать невидимую зону для hover bridge
-            const afterElement = groupDiv.getAttribute("data-after-element");
-            // Установить ::after динамически через JS (для невидимой зоны)
         });
 
         groupDiv.addEventListener("mouseleave", (e) => {
@@ -1792,6 +1922,146 @@ function handleMouseUp(e) {
     } else if (isDragging) {
         isDragging = false;
         canvas.style.cursor = "grab";
+    } else if (isDraggingPanel) {
+        // Keep dragged panel on top (don't reset z-index)
+        isDraggingPanel = false;
+        draggedPanel = null;
+        document.body.style.cursor = "default";
+    }
+}
+
+// Panel drag functions
+function handlePanelMouseDown(e) {
+    if (e.button === 0 && e.target.classList.contains("panel-header")) {
+        const panel = e.target.closest(".panel");
+        const panelId = panel.id;
+
+        // Always allow dragging, regardless of collapsed state
+        isDraggingPanel = true;
+        draggedPanel = panel;
+        draggedPanel.style.zIndex = "100";
+        panelDragStartX = e.clientX - draggedPanel.offsetLeft;
+        panelDragStartY = e.clientY - draggedPanel.offsetTop;
+        document.body.style.cursor = "move";
+
+        e.preventDefault();
+    }
+}
+
+// Panel toggle collapse/expand on double click
+function handlePanelDoubleClick(e) {
+    if (e.target.classList.contains("panel-header")) {
+        const panel = e.target.closest(".panel");
+        const panelId = panel.id;
+        const content = panel.querySelector(".panel-content");
+
+        const oldHeight = panel.offsetHeight;
+
+        if (collapsedPanels.has(panelId)) {
+            // Expand
+            collapsedPanels.delete(panelId);
+            content.style.display = "block";
+            panel.style.height = panelPositions[panelId]?.height || "auto";
+        } else {
+            // Collapse
+            collapsedPanels.add(panelId);
+            panelPositions[panelId] = {
+                height: panel.offsetHeight + "px",
+            };
+            content.style.display = "none";
+            panel.style.height = "auto";
+        }
+
+        // Handle size change for snapped panels
+        const newHeight = panel.offsetHeight;
+        handlePanelSizeChange(panelId, oldHeight, newHeight);
+    }
+}
+
+function handlePanelMouseMove(e) {
+    if (isDraggingPanel && draggedPanel) {
+        let newX = e.clientX - panelDragStartX;
+        let newY = e.clientY - panelDragStartY;
+
+        // Remove existing snap groups for this panel
+        removePanelFromSnapGroups(draggedPanel.id);
+
+        // Check for snapping to other panels
+        const snapDistance = 10;
+        const panels = document.querySelectorAll(".panel");
+        let snappedDirection = null;
+
+        panels.forEach((panel) => {
+            if (panel !== draggedPanel) {
+                const panelRect = panel.getBoundingClientRect();
+                const draggedRect = draggedPanel.getBoundingClientRect();
+
+                // Calculate distances to edges (only edges, no centers)
+                const distances = {
+                    left: Math.abs(newX - (panelRect.right + 10)),
+                    right: Math.abs(
+                        newX + draggedRect.width - (panelRect.left - 10)
+                    ),
+                    top: Math.abs(newY - (panelRect.bottom + 10)),
+                    bottom: Math.abs(
+                        newY + draggedRect.height - (panelRect.top - 10)
+                    ),
+                };
+
+                // Find the smallest distance
+                const minDistance = Math.min(...Object.values(distances));
+
+                if (minDistance < snapDistance) {
+                    // Snap to the closest edge
+                    if (distances.left === minDistance) {
+                        newX = panelRect.right + 10;
+                        createPanelSnap(
+                            draggedPanel.id,
+                            panel.id,
+                            "left",
+                            draggedPanel
+                        );
+                    } else if (distances.right === minDistance) {
+                        newX = panelRect.left - 10 - draggedRect.width;
+                        createPanelSnap(
+                            draggedPanel.id,
+                            panel.id,
+                            "right",
+                            draggedPanel
+                        );
+                    } else if (distances.top === minDistance) {
+                        newY = panelRect.bottom + 10;
+                        createPanelSnap(
+                            draggedPanel.id,
+                            panel.id,
+                            "above",
+                            draggedPanel
+                        );
+                    } else if (distances.bottom === minDistance) {
+                        newY = panelRect.top - 10 - draggedRect.height;
+                        createPanelSnap(
+                            draggedPanel.id,
+                            panel.id,
+                            "below",
+                            draggedPanel
+                        );
+                    }
+                }
+            }
+        });
+
+        draggedPanel.style.left = newX + "px";
+        draggedPanel.style.top = newY + "px";
+
+        // Update positions of panels snapped to this one
+        Object.keys(panelSnapGroups).forEach((snappedId) => {
+            if (panelSnapGroups[snappedId].snappedTo === draggedPanel.id) {
+                updateSnappedPanelPosition(snappedId);
+            }
+        });
+
+        // Update z-index for dragged panel
+        draggedPanel.style.zIndex = "100";
     }
 }
 
@@ -1838,6 +2108,12 @@ function initialize() {
         );
         updateMaterialParams();
     });
+
+    // Add panel drag event listeners
+    document.addEventListener("mousedown", handlePanelMouseDown);
+    document.addEventListener("mousemove", handlePanelMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("dblclick", handlePanelDoubleClick);
 }
 
 // Call initialize function when the page loads
