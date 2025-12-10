@@ -1,6 +1,5 @@
 import { angleToRad, distancePtToPt } from "./utils/utils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
-
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -26,6 +25,10 @@ let materialWidth = 400;
 let materialThickness = 18;
 let materialAnchor = "top-left"; // "top-left" or "bottom-left"
 
+const CLIPPER_SCALE = 1000;
+let showPart = false;
+let partPath;
+
 const canvasParameters = {
     width: canvas.getAttribute("width"),
     height: canvas.getAttribute("height"),
@@ -38,9 +41,9 @@ let panY = 300;
 let isDragging = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
-let gridEnabled = true;
+let gridEnabled = false;
 let gridLayer;
-let gridSize = 10; // Default grid size in pixels (1mm = 10px)
+let gridSize = 1; // Default grid size in pixels (1mm = 10px)
 
 // Drag variables for selected bit
 let isDraggingBit = false;
@@ -664,13 +667,23 @@ function initializeSVG() {
     materialLayer.id = "material-layer";
     canvas.appendChild(materialLayer);
 
-    const bitsLayer = document.createElementNS(svgNS, "g");
+    bitsLayer = document.createElementNS(svgNS, "g");
     bitsLayer.id = "bits-layer";
     canvas.appendChild(bitsLayer);
 
     // Create material rectangle
     materialRect = document.createElementNS(svgNS, "rect");
     materialLayer.appendChild(materialRect);
+
+    const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+    // Create part path
+    partPath = document.createElementNS(svgNS, "path");
+    partPath.id = "part-path";
+    partPath.setAttribute("fill", "rgba(71, 64, 64, 0.16)");
+    partPath.setAttribute("stroke", "black");
+    partPath.setAttribute("stroke-width", thickness);
+    partPath.style.display = "none";
+    materialLayer.appendChild(partPath);
 
     // Create material anchor indicator (always visible)
     const materialAnchorIndicator = document.createElementNS(svgNS, "g");
@@ -705,7 +718,7 @@ function initializeSVG() {
     document.getElementById("grid-scale").addEventListener("blur", (e) => {
         const val = evaluateMathExpression(e.target.value);
         e.target.value = val;
-        gridSize = parseFloat(val) || 10;
+        gridSize = parseFloat(val) || 1;
         if (gridEnabled) {
             drawGrid();
         }
@@ -715,6 +728,11 @@ function initializeSVG() {
     const materialAnchorBtn = document.getElementById("material-anchor-btn");
     materialAnchorBtn.appendChild(createMaterialAnchorButton(materialAnchor));
     materialAnchorBtn.addEventListener("click", cycleMaterialAnchor);
+
+    // Setup part button
+    document
+        .getElementById("part-btn")
+        .addEventListener("click", togglePartView);
 }
 
 // Cycle material anchor
@@ -777,6 +795,7 @@ function updateBitsForNewAnchor() {
         const dy = newAbsY - bit.baseAbsY;
         bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
     });
+    if (showPart) updatePartShape();
 }
 
 // Update material shape
@@ -845,6 +864,7 @@ function updateMaterialParams() {
 
     updateMaterialShape();
     updateBitsPositions();
+    if (showPart) updatePartShape();
 }
 
 // New: reposition all bits according to current material anchor and their stored logical coords
@@ -872,6 +892,7 @@ function updateBitsPositions() {
 
     // ensure canvas shows updated order/positions
     redrawBitsOnCanvas();
+    if (showPart) updatePartShape();
 }
 
 // Global variables for bit management
@@ -879,6 +900,7 @@ let bitsOnCanvas = [];
 let bitCounter = 0;
 let dragSrcRow = null;
 let selectedBitIndex = null;
+let bitsLayer;
 
 // Alignment states: 'center', 'left', 'right'
 const alignmentStates = ["center", "left", "right"];
@@ -1057,6 +1079,7 @@ function updateCanvasBitsForBitId(bitId) {
 
     // Update the table
     updateBitsSheet();
+    if (showPart) updatePartShape();
 }
 
 // Draw bit shape
@@ -1097,6 +1120,7 @@ function drawBitShape(bit, groupName) {
     bitsOnCanvas.push(newBit);
     updateBitsSheet();
     updateStrokeWidths();
+    if (showPart) updatePartShape();
 }
 
 // Update bits sheet
@@ -1239,6 +1263,7 @@ function deleteBitFromCanvas(index) {
     // Update table
     updateBitsSheet();
     redrawBitsOnCanvas();
+    if (showPart) updatePartShape();
 }
 
 // Cycle alignment state
@@ -1598,7 +1623,7 @@ function zoomToSelected() {
     const bitAbsY = anchorY + bit.y;
 
     // Zoom to fit the bit with some padding
-    zoomLevel = 5; // Fixed zoom level for selected bit
+    zoomLevel = 8; // Fixed zoom level for selected bit
     panX = bitAbsX;
     panY = bitAbsY;
 
@@ -1813,6 +1838,168 @@ function updateTableCoordinates(bitIndex, newX, newY) {
             const yInput = cells[4].querySelector("input");
             if (yInput) yInput.value = newY + anchorOffset.y;
         }
+    }
+}
+
+// Clipper functions for part subtraction
+function getMaterialPolygon() {
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+    return [
+        {
+            X: Math.round(materialX * CLIPPER_SCALE),
+            Y: Math.round(materialY * CLIPPER_SCALE),
+        },
+        {
+            X: Math.round((materialX + materialWidth) * CLIPPER_SCALE),
+            Y: Math.round(materialY * CLIPPER_SCALE),
+        },
+        {
+            X: Math.round((materialX + materialWidth) * CLIPPER_SCALE),
+            Y: Math.round((materialY + materialThickness) * CLIPPER_SCALE),
+        },
+        {
+            X: Math.round(materialX * CLIPPER_SCALE),
+            Y: Math.round((materialY + materialThickness) * CLIPPER_SCALE),
+        },
+    ];
+}
+
+function getBitPolygon(bit) {
+    const group = bit.group;
+    const transform = group.getAttribute("transform");
+    if (!transform) return [];
+    const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+    if (!match) return [];
+    const dx = parseFloat(match[1]);
+    const dy = parseFloat(match[2]);
+    const shape = group.querySelector(".bit-shape");
+    if (!shape) return [];
+    return getShapePoints(shape, dx, dy);
+}
+
+function getShapePoints(shape, baseX, baseY) {
+    let points = [];
+    if (shape.tagName === "rect") {
+        const x = parseFloat(shape.getAttribute("x")) + baseX;
+        const y = parseFloat(shape.getAttribute("y")) + baseY;
+        const w = parseFloat(shape.getAttribute("width"));
+        const h = parseFloat(shape.getAttribute("height"));
+        points = [
+            { x: x, y: y },
+            { x: x + w, y: y },
+            { x: x + w, y: y + h },
+            { x: x, y: y + h },
+        ];
+    } else if (shape.tagName === "polygon") {
+        const pts = shape.getAttribute("points").trim().split(/\s+/);
+        points = pts.map((p) => {
+            const [px, py] = p.split(",").map(Number);
+            return { x: px + baseX, y: py + baseY };
+        });
+    } else if (shape.tagName === "path") {
+        const path = shape;
+        const totalLength = path.getTotalLength();
+        const numPoints = 200; // Increase sampling points
+        for (let i = 0; i < numPoints; i++) {
+            const length = (i / (numPoints - 1)) * totalLength;
+            const point = path.getPointAtLength(length);
+            points.push({ x: point.x + baseX, y: point.y + baseY });
+        }
+    }
+    // Ensure counter-clockwise orientation
+    points = ensureCounterClockwise(points);
+    return points.map((p) => ({
+        X: Math.round(p.x * CLIPPER_SCALE),
+        Y: Math.round(p.y * CLIPPER_SCALE),
+    }));
+}
+
+// Ensure polygon is oriented counter-clockwise
+function ensureCounterClockwise(points) {
+    if (points.length < 3) return points;
+
+    // Calculate signed area
+    let area = 0;
+    for (let i = 0; i < points.length; i++) {
+        const j = (i + 1) % points.length;
+        area += points[i].x * points[j].y - points[j].x * points[i].y;
+    }
+
+    // If area is negative, polygon is clockwise, so reverse
+    if (area < 0) {
+        points.reverse();
+    }
+
+    return points;
+}
+
+function updatePartShape() {
+    if (!window.ClipperLib) {
+        console.error("ClipperLib not loaded");
+        return;
+    }
+    const ClipperLib = window.ClipperLib;
+    const clipper = new ClipperLib.Clipper();
+    const subj = new ClipperLib.Paths();
+    subj.push(getMaterialPolygon());
+    const clip = new ClipperLib.Paths();
+    bitsOnCanvas.forEach((bit) => {
+        const poly = getBitPolygon(bit);
+        if (poly.length > 0) clip.push(poly);
+    });
+    const unionBits = new ClipperLib.Paths();
+    clipper.AddPaths(clip, ClipperLib.PolyType.ptSubject, true);
+    clipper.Execute(
+        ClipperLib.ClipType.ctUnion,
+        unionBits,
+        ClipperLib.PolyFillType.pftNonZero,
+        ClipperLib.PolyFillType.pftNonZero
+    );
+    const result = new ClipperLib.Paths();
+    clipper.Clear();
+    clipper.AddPaths(subj, ClipperLib.PolyType.ptSubject, true);
+    clipper.AddPaths(unionBits, ClipperLib.PolyType.ptClip, true);
+    clipper.Execute(
+        ClipperLib.ClipType.ctDifference,
+        result,
+        ClipperLib.PolyFillType.pftNonZero,
+        ClipperLib.PolyFillType.pftNonZero
+    );
+    const d = pathsToSvgD(result, CLIPPER_SCALE);
+    partPath.setAttribute("d", d);
+}
+
+function pathsToSvgD(paths, scale) {
+    let d = "";
+    paths.forEach((path) => {
+        if (path.length > 0) {
+            const start = path[0];
+            d += `M ${start.X / scale} ${start.Y / scale}`;
+            for (let i = 1; i < path.length; i++) {
+                d += ` L ${path[i].X / scale} ${path[i].Y / scale}`;
+            }
+            d += " Z";
+        }
+    });
+    return d;
+}
+
+function togglePartView() {
+    if (!bitsLayer || !materialRect || !partPath) {
+        console.error("SVG elements not initialized");
+        return;
+    }
+    showPart = !showPart;
+    if (showPart) {
+        updatePartShape();
+        materialRect.style.display = "none";
+        partPath.style.display = "block";
+        bitsLayer.style.display = "block";
+    } else {
+        materialRect.style.display = "block";
+        partPath.style.display = "none";
+        bitsLayer.style.display = "block";
     }
 }
 
