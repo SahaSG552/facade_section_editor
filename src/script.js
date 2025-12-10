@@ -1,5 +1,6 @@
 import { angleToRad, distancePtToPt } from "./utils/utils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
+import CanvasManager from "./canvas/CanvasManager.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -34,16 +35,21 @@ const canvasParameters = {
     height: canvas.getAttribute("height"),
 };
 
-// Zoom and pan variables
-let zoomLevel = 1;
-let panX = 400;
-let panY = 300;
-let isDragging = false;
+// Canvas manager instance
+let mainCanvasManager;
+let gridSize = 1; // Default grid size in pixels (1mm = 10px)
+
+// Pan variables for manual pan handling
+let isDraggingCanvas = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
-let gridEnabled = false;
-let gridLayer;
-let gridSize = 1; // Default grid size in pixels (1mm = 10px)
+
+// Pan variables for canvas panning
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
+let panStartPanX = 0;
+let panStartPanY = 0;
 
 // Drag variables for selected bit
 let isDraggingBit = false;
@@ -510,116 +516,39 @@ function openBitModal(groupName, bit = null) {
         return true;
     }
 
-    // Preview variables using canvas functions
-    const previewCanvas = modal.querySelector("#bit-preview-canvas");
-    let previewZoomLevel = 1;
-    let previewPanX = 100;
-    let previewPanY = 100;
-    let previewGridEnabled = true;
-    let previewGridLayer;
-    const previewGridSize = 10; // 1mm = 10px in preview
-    const previewCanvasParameters = {
-        width: 200,
-        height: 200,
-    };
-
-    // Preview drag variables
-    let previewIsDragging = false;
-    let previewLastMouseX = 0;
-    let previewLastMouseY = 0;
+    // Preview canvas manager
+    let previewCanvasManager;
     let previewZoomInitialized = false; // Track if initial zoom has been set
 
-    // Initialize preview canvas layers
+    // Initialize preview canvas with CanvasManager
     function initializePreviewCanvas() {
-        previewCanvas.setAttribute(
-            "viewBox",
-            `0 0 ${previewCanvasParameters.width} ${previewCanvasParameters.height}`
-        );
-
-        // Create layers for preview
-        previewGridLayer = document.createElementNS(svgNS, "g");
-        previewGridLayer.id = "preview-grid-layer";
-        previewCanvas.appendChild(previewGridLayer);
-
-        const previewBitsLayer = document.createElementNS(svgNS, "g");
-        previewBitsLayer.id = "preview-bits-layer";
-        previewCanvas.appendChild(previewBitsLayer);
-    }
-
-    // Preview-specific drawGrid function
-    function drawPreviewGrid() {
-        if (!previewGridEnabled) return;
-
-        previewGridLayer.innerHTML = ""; // Clear existing grid
-
-        const thickness = Math.max(0.01, 0.1 / Math.sqrt(previewZoomLevel));
-
-        // Align grid to center
-        const xOffset = (previewPanX % previewGridSize) - previewGridSize / 2;
-        const yOffset = (previewPanY % previewGridSize) - previewGridSize / 2;
-
-        // Draw vertical lines
-        for (
-            let x = xOffset;
-            x <= previewCanvasParameters.width;
-            x += previewGridSize
-        ) {
-            if (x < 0 || x > previewCanvasParameters.width) continue;
-            const line = document.createElementNS(svgNS, "line");
-            line.setAttribute("x1", x);
-            line.setAttribute("y1", 0);
-            line.setAttribute("x2", x);
-            line.setAttribute("y2", previewCanvasParameters.height);
-            line.setAttribute("stroke", "#e0e0e0");
-            line.setAttribute("stroke-width", thickness);
-            previewGridLayer.appendChild(line);
-        }
-
-        // Draw horizontal lines
-        for (
-            let y = yOffset;
-            y <= previewCanvasParameters.height;
-            y += previewGridSize
-        ) {
-            if (y < 0 || y > previewCanvasParameters.height) continue;
-            const line = document.createElementNS(svgNS, "line");
-            line.setAttribute("x1", 0);
-            line.setAttribute("y1", y);
-            line.setAttribute("x2", previewCanvasParameters.width);
-            line.setAttribute("y2", y);
-            line.setAttribute("stroke", "#e0e0e0");
-            line.setAttribute("stroke-width", thickness);
-            previewGridLayer.appendChild(line);
-        }
-    }
-
-    // Preview viewBox update
-    function updatePreviewViewBox() {
-        const viewBoxWidth = previewCanvasParameters.width / previewZoomLevel;
-        const viewBoxHeight = previewCanvasParameters.height / previewZoomLevel;
-        const viewBoxX = previewPanX - viewBoxWidth / 2;
-        const viewBoxY = previewPanY - viewBoxHeight / 2;
-
-        previewCanvas.setAttribute(
-            "viewBox",
-            `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`
-        );
-
-        if (previewGridEnabled) {
-            drawPreviewGrid();
-        }
+        previewCanvasManager = new CanvasManager({
+            canvas: modal.querySelector("#bit-preview-canvas"),
+            width: 200,
+            height: 200,
+            enableZoom: true,
+            enablePan: true,
+            enableGrid: true,
+            enableMouseEvents: true,
+            gridSize: 10, // 1mm = 10px in preview
+            initialZoom: 1,
+            initialPanX: 100,
+            initialPanY: 100,
+            layers: ["grid", "bits"],
+            onZoom: (zoomLevel) => {
+                updatePreviewStrokeWidths(zoomLevel);
+            },
+        });
     }
 
     // Preview zoom functions
     function previewZoomIn() {
-        previewZoomLevel *= 1.2;
-        updatePreviewViewBox();
+        previewCanvasManager.zoomIn();
         updatePreviewStrokeWidths();
     }
 
     function previewZoomOut() {
-        previewZoomLevel /= 1.2;
-        updatePreviewViewBox();
+        previewCanvasManager.zoomOut();
         updatePreviewStrokeWidths();
     }
 
@@ -633,124 +562,50 @@ function openBitModal(groupName, bit = null) {
             const length = parseFloat(
                 evaluateMathExpression(form.querySelector("#bit-length").value)
             );
-            const availableWidth = previewCanvasParameters.width - 40; // 20px padding on each side
-            const availableHeight = previewCanvasParameters.height - 40; // 20px padding on each side
+            const availableWidth = 200 - 40; // 20px padding on each side
+            const availableHeight = 200 - 40; // 20px padding on each side
 
             // Calculate zoom level to fit bit (maximize zoom to fill the canvas)
             const zoomX = availableWidth / diameter;
             const zoomY = availableHeight / length;
-            previewZoomLevel = Math.min(zoomX, zoomY); // Maximize zoom level
+            const zoomLevel = Math.min(zoomX, zoomY); // Maximize zoom level
+
+            // Set zoom and center on the bit (100, 100 is the center where bit is drawn)
+            previewCanvasManager.zoomLevel = zoomLevel;
+            previewCanvasManager.panX = 100;
+            previewCanvasManager.panY = 100;
+            previewCanvasManager.updateViewBox();
         } else {
-            previewZoomLevel = 1;
+            // Reset to default
+            previewCanvasManager.zoomLevel = 1;
+            previewCanvasManager.panX = 100;
+            previewCanvasManager.panY = 100;
+            previewCanvasManager.updateViewBox();
         }
 
-        // Center on the bit (100, 100 is the center where bit is drawn)
-        previewPanX = 100;
-        previewPanY = 100;
-
-        updatePreviewViewBox();
         updatePreviewStrokeWidths();
-        updateBitPreview();
+        // Don't call updateBitPreview() since bit position doesn't change
     }
 
     function togglePreviewGrid() {
-        previewGridEnabled = !previewGridEnabled;
-        if (previewGridEnabled) {
-            drawPreviewGrid();
-        } else {
-            previewGridLayer.innerHTML = "";
-        }
+        previewCanvasManager.toggleGrid();
     }
 
     // Initialize preview canvas
     initializePreviewCanvas();
 
-    // Preview mouse event handlers
-    function handlePreviewZoom(e) {
-        e.preventDefault();
-
-        const rect = previewCanvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-        const oldZoom = previewZoomLevel;
-        previewZoomLevel *= zoomFactor;
-
-        const oldViewBoxWidth = previewCanvasParameters.width / oldZoom;
-        const oldViewBoxHeight = previewCanvasParameters.height / oldZoom;
-        const oldViewBoxX = previewPanX - oldViewBoxWidth / 2;
-        const oldViewBoxY = previewPanY - oldViewBoxHeight / 2;
-
-        const svgX = oldViewBoxX + (mouseX / rect.width) * oldViewBoxWidth;
-        const svgY = oldViewBoxY + (mouseY / rect.height) * oldViewBoxHeight;
-
-        const newViewBoxWidth =
-            previewCanvasParameters.width / previewZoomLevel;
-        const newViewBoxHeight =
-            previewCanvasParameters.height / previewZoomLevel;
-
-        const newViewBoxX = svgX - (mouseX / rect.width) * newViewBoxWidth;
-        const newViewBoxY = svgY - (mouseY / rect.height) * newViewBoxHeight;
-
-        previewPanX = newViewBoxX + newViewBoxWidth / 2;
-        previewPanY = newViewBoxY + newViewBoxHeight / 2;
-
-        updatePreviewViewBox();
-        updatePreviewStrokeWidths();
-        updateBitPreview();
-    }
-
-    function handlePreviewMouseDown(e) {
-        if (e.button === 0) {
-            previewIsDragging = true;
-            previewLastMouseX = e.clientX;
-            previewLastMouseY = e.clientY;
-            previewCanvas.style.cursor = "grabbing";
-        }
-    }
-
-    function handlePreviewMouseMove(e) {
-        if (previewIsDragging) {
-            const deltaX = e.clientX - previewLastMouseX;
-            const deltaY = e.clientY - previewLastMouseY;
-
-            const svgDeltaX = deltaX / previewZoomLevel;
-            const svgDeltaY = deltaY / previewZoomLevel;
-
-            previewPanX -= svgDeltaX;
-            previewPanY -= svgDeltaY;
-
-            previewLastMouseX = e.clientX;
-            previewLastMouseY = e.clientY;
-
-            updatePreviewViewBox();
-        }
-    }
-
-    function handlePreviewMouseUp(e) {
-        if (previewIsDragging) {
-            previewIsDragging = false;
-            previewCanvas.style.cursor = "grab";
-        }
-    }
-
-    // Add preview event listeners
-    previewCanvas.addEventListener("wheel", handlePreviewZoom);
-    previewCanvas.addEventListener("mousedown", handlePreviewMouseDown);
-    previewCanvas.addEventListener("mousemove", handlePreviewMouseMove);
-    previewCanvas.addEventListener("mouseup", handlePreviewMouseUp);
-    previewCanvas.addEventListener("mouseleave", handlePreviewMouseUp);
+    // Event listeners are handled by CanvasManager
 
     // Function to update stroke widths in preview based on zoom level
-    function updatePreviewStrokeWidths() {
-        const thickness = Math.max(0.1, 0.5 / Math.sqrt(previewZoomLevel));
+    function updatePreviewStrokeWidths(
+        zoomLevel = previewCanvasManager?.zoomLevel
+    ) {
+        if (!zoomLevel || !previewCanvasManager) return;
+        const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
 
         // Update stroke width for the bit shape
-        const previewBitsLayer = previewCanvas.querySelector(
-            "#preview-bits-layer"
-        );
-        const shape = previewBitsLayer.querySelector(".bit-shape");
+        const previewBitsLayer = previewCanvasManager.getLayer("bits");
+        const shape = previewBitsLayer?.querySelector(".bit-shape");
         if (shape) {
             shape.setAttribute("stroke-width", thickness);
         }
@@ -759,16 +614,14 @@ function openBitModal(groupName, bit = null) {
     // Function to update bit preview using canvas functions
     function updateBitPreview() {
         // Clear bits layer
-        const previewBitsLayer = previewCanvas.querySelector(
-            "#preview-bits-layer"
-        );
+        const previewBitsLayer = previewCanvasManager.getLayer("bits");
         previewBitsLayer.innerHTML = "";
 
         if (!checkBitParametersFilled()) {
             // Show placeholder text if parameters are not complete
             const text = document.createElementNS(svgNS, "text");
-            text.setAttribute("x", previewPanX);
-            text.setAttribute("y", previewPanY + 10);
+            text.setAttribute("x", previewCanvasManager.panX);
+            text.setAttribute("y", previewCanvasManager.panY + 10);
             text.setAttribute("text-anchor", "middle");
             text.setAttribute("font-size", "14");
             text.setAttribute("fill", "#999");
@@ -827,22 +680,21 @@ function openBitModal(groupName, bit = null) {
         if (!previewZoomInitialized) {
             const bitDiameter = bitParams.diameter;
             const bitLength = bitParams.length;
-            const availableWidth = previewCanvasParameters.width - 40; // 20px padding on each side
-            const availableHeight = previewCanvasParameters.height - 40; // 20px padding on each side
+            const availableWidth = 200 - 40; // 20px padding on each side
+            const availableHeight = 200 - 40; // 20px padding on each side
 
             // Calculate zoom level to fit bit (maximize zoom to fill the canvas)
             const zoomX = availableWidth / bitDiameter;
             const zoomY = availableHeight / bitLength;
-            previewZoomLevel = Math.min(zoomX, zoomY);
+            const zoomLevel = Math.min(zoomX, zoomY);
 
             // Set initial zoom for preview (pan stays at center)
+            previewCanvasManager.zoomLevel = zoomLevel;
+            previewCanvasManager.updateViewBox();
             previewZoomInitialized = true;
-
-            // Update viewBox after setting initial zoom
-            updatePreviewViewBox();
         }
 
-        // Create bit shape always at center (100, 100)
+        // Create bit shape always at center of bit
         const shape = createBitShapeElement(
             bitParams,
             groupName,
@@ -1077,38 +929,44 @@ function refreshBitGroups() {
     createBitGroups();
 }
 
-// Initialize SVG elements
+// Initialize SVG elements using CanvasManager
 function initializeSVG() {
-    // Set viewBox for zoom and pan
-    canvas.setAttribute(
-        "viewBox",
-        `0 0 ${canvasParameters.width} ${canvasParameters.height}`
-    );
-
-    // Create layers (grid layer first, then material, then bits)
-    gridLayer = document.createElementNS(svgNS, "g");
-    gridLayer.id = "grid-layer";
-    canvas.appendChild(gridLayer);
-
-    const materialLayer = document.createElementNS(svgNS, "g");
-    materialLayer.id = "material-layer";
-    canvas.appendChild(materialLayer);
-
-    bitsLayer = document.createElementNS(svgNS, "g");
-    bitsLayer.id = "bits-layer";
-    canvas.appendChild(bitsLayer);
-
-    // Create material rectangle
+    // Create material rectangle first (before CanvasManager to avoid callback issues)
     materialRect = document.createElementNS(svgNS, "rect");
+
+    // Create main canvas manager instance
+    mainCanvasManager = new CanvasManager({
+        canvas: canvas,
+        width: canvasParameters.width,
+        height: canvasParameters.height,
+        enableZoom: true,
+        enablePan: false, // Disable pan - we'll handle it manually to avoid conflicts with bit dragging
+        enableGrid: true,
+        enableMouseEvents: true,
+        gridSize: gridSize,
+        initialZoom: 1,
+        initialPanX: canvasParameters.width / 2,
+        initialPanY: canvasParameters.height / 2,
+        layers: ["grid", "material", "bits", "overlay"],
+        onZoom: (zoomLevel, panX, panY) => {
+            // Update stroke widths when zoom changes
+            updateStrokeWidths(zoomLevel);
+        },
+    });
+
+    // Get layer references
+    const materialLayer = mainCanvasManager.getLayer("material");
+    bitsLayer = mainCanvasManager.getLayer("bits");
+
+    // Add material rectangle to layer
     materialLayer.appendChild(materialRect);
 
-    const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
     // Create part path
     partPath = document.createElementNS(svgNS, "path");
     partPath.id = "part-path";
     partPath.setAttribute("fill", "rgba(71, 64, 64, 0.16)");
     partPath.setAttribute("stroke", "black");
-    partPath.setAttribute("stroke-width", thickness);
+    partPath.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     partPath.style.display = "none";
     materialLayer.appendChild(partPath);
 
@@ -1117,23 +975,19 @@ function initializeSVG() {
     materialAnchorIndicator.id = "material-anchor-indicator";
     materialLayer.appendChild(materialAnchorIndicator);
 
-    // Initial draw of material shape and grid
+    // Initial draw of material shape
     updateMaterialShape();
-    drawGrid();
 
     // Initial fit to scale
     fitToScale();
 
-    // Add zoom and pan event listeners
-    canvas.addEventListener("wheel", handleZoom);
-    canvas.addEventListener("mousedown", handleMouseDown);
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mouseup", handleMouseUp);
-    canvas.addEventListener("mouseleave", handleMouseUp);
-
     // Add zoom button event listeners
-    document.getElementById("zoom-in-btn").addEventListener("click", zoomIn);
-    document.getElementById("zoom-out-btn").addEventListener("click", zoomOut);
+    document
+        .getElementById("zoom-in-btn")
+        .addEventListener("click", () => mainCanvasManager.zoomIn());
+    document
+        .getElementById("zoom-out-btn")
+        .addEventListener("click", () => mainCanvasManager.zoomOut());
     document
         .getElementById("fit-scale-btn")
         .addEventListener("click", fitToScale);
@@ -1142,15 +996,17 @@ function initializeSVG() {
         .addEventListener("click", zoomToSelected);
     document
         .getElementById("toggle-grid-btn")
-        .addEventListener("click", toggleGrid);
+        .addEventListener("click", () => mainCanvasManager.toggleGrid());
 
     // Add grid scale input listener
     document.getElementById("grid-scale").addEventListener("blur", (e) => {
         const val = evaluateMathExpression(e.target.value);
         e.target.value = val;
         gridSize = parseFloat(val) || 1;
-        if (gridEnabled) {
-            drawGrid();
+        // Update grid size in canvas manager
+        mainCanvasManager.config.gridSize = gridSize;
+        if (mainCanvasManager.gridEnabled) {
+            mainCanvasManager.drawGrid();
         }
     });
 
@@ -1163,6 +1019,11 @@ function initializeSVG() {
     document
         .getElementById("part-btn")
         .addEventListener("click", togglePartView);
+
+    // Add mouse event listeners for bit dragging
+    canvas.addEventListener("mousedown", handleMouseDown);
+    canvas.addEventListener("mousemove", handleMouseMove);
+    canvas.addEventListener("mouseup", handleMouseUp);
 }
 
 // Cycle material anchor
@@ -1178,10 +1039,7 @@ function cycleMaterialAnchor() {
     // Recalculate bit positions relative to new anchor
     updateBitsForNewAnchor();
 
-    // Update grid alignment
-    if (gridEnabled) {
-        drawGrid();
-    }
+    // Update grid alignment - handled by CanvasManager
 
     // Update indicator
     updateMaterialAnchorIndicator();
@@ -1265,7 +1123,10 @@ function updateMaterialAnchorIndicator() {
 
     // Draw a small cross
     const crossSize = 5;
-    const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+    const thickness = Math.max(
+        0.1,
+        0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+    );
     const horizontal = document.createElementNS(svgNS, "line");
     horizontal.setAttribute("x1", anchorX - crossSize);
     horizontal.setAttribute("y1", anchorY);
@@ -1432,7 +1293,7 @@ function createMaterialAnchorButton(anchor) {
     bg.setAttribute("height", "20");
     bg.setAttribute("fill", "rgba(155, 155, 155, 0.5)");
     bg.setAttribute("stroke", "black");
-    bg.setAttribute("stroke-width", "1");
+    bg.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     svg.appendChild(bg);
 
     // Red cross at the anchor position
@@ -1452,7 +1313,7 @@ function createMaterialAnchorButton(anchor) {
     horizontal.setAttribute("x2", crossX + crossSize);
     horizontal.setAttribute("y2", crossY);
     horizontal.setAttribute("stroke", "red");
-    horizontal.setAttribute("stroke-width", "1");
+    horizontal.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     svg.appendChild(horizontal);
 
     const vertical = document.createElementNS(svgNS, "line");
@@ -1461,7 +1322,7 @@ function createMaterialAnchorButton(anchor) {
     vertical.setAttribute("x2", crossX);
     vertical.setAttribute("y2", crossY + crossSize);
     vertical.setAttribute("stroke", "red");
-    vertical.setAttribute("stroke-width", "1");
+    vertical.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     svg.appendChild(vertical);
 
     return svg;
@@ -1502,7 +1363,10 @@ function updateCanvasBitsForBitId(bitId) {
             bit.group.insertBefore(newShape, bit.group.firstChild); // insert before anchor point if exists
 
             // Update stroke width
-            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+            const thickness = Math.max(
+                0.1,
+                0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+            );
             newShape.setAttribute("stroke-width", thickness);
         }
     });
@@ -1747,7 +1611,10 @@ function selectBit(index) {
             const newFill = currentFill.replace(/0\.\d+\)/, "0.6)"); // Change transparency
             shape.setAttribute("fill", newFill);
             shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+            const thickness = Math.max(
+                0.1,
+                0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+            );
             shape.setAttribute("stroke-width", thickness);
         }
     }
@@ -1770,7 +1637,10 @@ function resetBitHighlight(index) {
                 shape.dataset.originalStroke || "black"
             );
             // Set to scaled thickness instead of default "1"
-            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+            const thickness = Math.max(
+                0.1,
+                0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+            );
             shape.setAttribute("stroke-width", thickness);
             delete shape.dataset.originalFill;
             delete shape.dataset.originalStroke;
@@ -1909,7 +1779,10 @@ function redrawBitsOnCanvas() {
 
         // Draw a small cross
         const crossSize = 3;
-        const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+        const thickness = Math.max(
+            0.1,
+            0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+        );
         const horizontal = document.createElementNS(svgNS, "line");
         horizontal.setAttribute("x1", anchorX - crossSize);
         horizontal.setAttribute("y1", anchorY);
@@ -1941,94 +1814,25 @@ function redrawBitsOnCanvas() {
 
 // ===== ZOOM AND PAN FUNCTIONS =====
 
-// Draw millimeter grid
-function drawGrid() {
-    if (!gridEnabled) return;
-
-    gridLayer.innerHTML = ""; // Clear existing grid
-
-    // Calculate line thickness based on zoom level
-    // Thicker lines when zoomed out (zoomLevel < 1), thinner when zoomed in (zoomLevel > 1)
-    const baseThickness = 0.1;
-    const thickness = Math.max(0.01, baseThickness / Math.sqrt(zoomLevel));
-
-    // Align grid to material's anchor point
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
-    let anchorX = materialX;
-    let anchorY =
-        materialAnchor === "top-left"
-            ? materialY
-            : materialY + materialThickness;
-    const xOffset = anchorX % gridSize;
-    const yOffset = anchorY % gridSize;
-
-    // Draw vertical lines
-    for (let x = xOffset; x <= canvasParameters.width; x += gridSize) {
-        const line = document.createElementNS(svgNS, "line");
-        line.setAttribute("x1", x);
-        line.setAttribute("y1", 0);
-        line.setAttribute("x2", x);
-        line.setAttribute("y2", canvasParameters.height);
-        line.setAttribute("stroke", "#e0e0e0");
-        line.setAttribute("stroke-width", thickness);
-        gridLayer.appendChild(line);
-    }
-
-    // Draw horizontal lines
-    for (let y = yOffset; y <= canvasParameters.height; y += gridSize) {
-        const line = document.createElementNS(svgNS, "line");
-        line.setAttribute("x1", 0);
-        line.setAttribute("y1", y);
-        line.setAttribute("x2", canvasParameters.width);
-        line.setAttribute("y2", y);
-        line.setAttribute("stroke", "#e0e0e0");
-        line.setAttribute("stroke-width", thickness);
-        gridLayer.appendChild(line);
-    }
+// Get adaptive stroke width based on zoom level
+function getAdaptiveStrokeWidth(zoomLevel = mainCanvasManager?.zoomLevel) {
+    if (!zoomLevel) return 1; // Default fallback
+    return Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
 }
 
 // Update stroke widths based on zoom level
-function updateStrokeWidths() {
-    const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
-    materialRect.setAttribute("stroke-width", thickness);
+function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
+    if (!zoomLevel) return;
+    const thickness = getAdaptiveStrokeWidth(zoomLevel);
+    if (materialRect) {
+        materialRect.setAttribute("stroke-width", thickness);
+    }
     bitsOnCanvas.forEach((bit) => {
-        const shape = bit.group.querySelector(".bit-shape");
+        const shape = bit.group?.querySelector(".bit-shape");
         if (shape) {
             shape.setAttribute("stroke-width", thickness);
         }
     });
-}
-
-// Update viewBox based on current zoom and pan
-function updateViewBox() {
-    const viewBoxWidth = canvasParameters.width / zoomLevel;
-    const viewBoxHeight = canvasParameters.height / zoomLevel;
-    const viewBoxX = panX - viewBoxWidth / 2;
-    const viewBoxY = panY - viewBoxHeight / 2;
-
-    canvas.setAttribute(
-        "viewBox",
-        `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`
-    );
-
-    // Redraw grid with new thickness based on zoom level
-    if (gridEnabled) {
-        drawGrid();
-    }
-    // Update stroke widths
-    updateStrokeWidths();
-}
-
-// Zoom functions
-function zoomIn() {
-    zoomLevel *= 1.2;
-    updateViewBox();
-}
-
-function zoomOut() {
-    zoomLevel /= 1.2;
-    updateViewBox();
 }
 
 function fitToScale() {
@@ -2076,19 +1880,14 @@ function fitToScale() {
     const contentWidth = maxX - minX + 2 * padding;
     const contentHeight = maxY - minY + 2 * padding;
 
-    // Calculate zoom level to fit content
-    const zoomX = canvasParameters.width / contentWidth;
-    const zoomY = canvasParameters.height / contentHeight;
-    zoomLevel = Math.min(zoomX, zoomY); // Allow zoom in for small content
-
-    // Center on content center
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    panX = centerX;
-    panY = centerY;
-
-    updateViewBox();
+    // Use CanvasManager's fitToScale method
+    mainCanvasManager.fitToScale({
+        minX,
+        maxX,
+        minY,
+        maxY,
+        padding,
+    });
 }
 
 function zoomToSelected() {
@@ -2114,23 +1913,20 @@ function zoomToSelected() {
     const availableHeight = canvasParameters.height - 100; // 20px padding
     const zoomX = availableWidth / bitWidth;
     const zoomY = availableHeight / bitHeight;
-    zoomLevel = Math.min(zoomX, zoomY); // Allow zoom in for small bits
+    const zoomLevel = Math.min(zoomX, zoomY); // Allow zoom in for small bits
 
     // Center on the selected bit
-    panX = bitAbsX;
-    panY = bitAbsY - bitData.length / 2; // Center vertically on the bit
+    const panX = bitAbsX;
+    const panY = bitAbsY - bitData.length / 2; // Center vertically on the bit
 
-    updateViewBox();
+    // Set zoom and pan using CanvasManager
+    mainCanvasManager.zoomLevel = zoomLevel;
+    mainCanvasManager.panX = panX;
+    mainCanvasManager.panY = panY;
+    mainCanvasManager.updateViewBox();
 }
 
-function toggleGrid() {
-    gridEnabled = !gridEnabled;
-    if (gridEnabled) {
-        drawGrid();
-    } else {
-        gridLayer.innerHTML = "";
-    }
-}
+// toggleGrid is handled by CanvasManager
 
 // Helper function to snap value to grid
 function snapToGrid(value) {
@@ -2160,54 +1956,11 @@ function getAnchorOffset(bit) {
     }
 }
 
-// Mouse event handlers for zoom and pan
-function handleZoom(e) {
-    e.preventDefault();
-
-    const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-
-    const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
-    const oldZoom = zoomLevel;
-    zoomLevel *= zoomFactor;
-
-    const oldViewBoxWidth = canvasParameters.width / oldZoom;
-    const oldViewBoxHeight = canvasParameters.height / oldZoom;
-    const oldViewBoxX = panX - oldViewBoxWidth / 2;
-    const oldViewBoxY = panY - oldViewBoxHeight / 2;
-
-    const svgX = oldViewBoxX + (mouseX / rect.width) * oldViewBoxWidth;
-    const svgY = oldViewBoxY + (mouseY / rect.height) * oldViewBoxHeight;
-
-    const newViewBoxWidth = canvasParameters.width / zoomLevel;
-    const newViewBoxHeight = canvasParameters.height / zoomLevel;
-
-    const newViewBoxX = svgX - (mouseX / rect.width) * newViewBoxWidth;
-    const newViewBoxY = svgY - (mouseY / rect.height) * newViewBoxHeight;
-
-    panX = newViewBoxX + newViewBoxWidth / 2;
-    panY = newViewBoxY + newViewBoxHeight / 2;
-
-    updateViewBox();
-}
-
+// Mouse event handlers for bit dragging and panning
 function handleMouseDown(e) {
     if (e.button === 0) {
         // Left mouse button
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        // Convert mouse position to SVG coordinates
-        const svgX =
-            panX -
-            canvasParameters.width / zoomLevel / 2 +
-            (mouseX / rect.width) * (canvasParameters.width / zoomLevel);
-        const svgY =
-            panY -
-            canvasParameters.height / zoomLevel / 2 +
-            (mouseY / rect.height) * (canvasParameters.height / zoomLevel);
+        const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
 
         // Check if clicking on a selected bit
         if (selectedBitIndex !== null && bitsOnCanvas[selectedBitIndex]) {
@@ -2219,41 +1972,31 @@ function handleMouseDown(e) {
 
             // Check if click is near the bit (within 20px)
             const distance = Math.sqrt(
-                (svgX - bitAbsX) ** 2 + (svgY - bitAbsY) ** 2
+                (svgCoords.x - bitAbsX) ** 2 + (svgCoords.y - bitAbsY) ** 2
             );
             if (distance <= 20) {
                 isDraggingBit = true;
                 draggedBitIndex = selectedBitIndex;
-                dragStartX = svgX;
-                dragStartY = svgY;
+                dragStartX = svgCoords.x;
+                dragStartY = svgCoords.y;
                 canvas.style.cursor = "grabbing";
                 return;
             }
         }
 
         // Otherwise, start panning
-        isDragging = true;
-        lastMouseX = e.clientX;
-        lastMouseY = e.clientY;
+        isPanning = true;
+        panStartX = e.clientX;
+        panStartY = e.clientY;
+        panStartPanX = mainCanvasManager.panX;
+        panStartPanY = mainCanvasManager.panY;
         canvas.style.cursor = "grabbing";
     }
 }
 
 function handleMouseMove(e) {
     if (isDraggingBit && draggedBitIndex !== null) {
-        const rect = canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        // Convert mouse position to SVG coordinates
-        const svgX =
-            panX -
-            canvasParameters.width / zoomLevel / 2 +
-            (mouseX / rect.width) * (canvasParameters.width / zoomLevel);
-        const svgY =
-            panY -
-            canvasParameters.height / zoomLevel / 2 +
-            (mouseY / rect.height) * (canvasParameters.height / zoomLevel);
+        const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
 
         const bit = bitsOnCanvas[draggedBitIndex];
         const anchorOffset = getAnchorOffset(bit);
@@ -2268,12 +2011,12 @@ function handleMouseMove(e) {
             materialAnchorOffset.y;
 
         // Calculate desired anchor position
-        let anchorX = svgX - materialAnchorX;
-        let anchorY = svgY - materialAnchorY;
+        let anchorX = svgCoords.x - materialAnchorX;
+        let anchorY = svgCoords.y - materialAnchorY;
 
         // Snap anchor to grid
-        anchorX = snapToGrid(anchorX);
-        anchorY = snapToGrid(anchorY);
+        anchorX = mainCanvasManager.snapToGrid(anchorX);
+        anchorY = mainCanvasManager.snapToGrid(anchorY);
 
         // Then center position = anchorX - anchorOffset.x
         let newX = anchorX - anchorOffset.x;
@@ -2284,21 +2027,18 @@ function handleMouseMove(e) {
 
         // Update table inputs
         updateTableCoordinates(draggedBitIndex, newX, newY);
-    } else if (isDragging) {
-        const deltaX = e.clientX - lastMouseX;
-        const deltaY = e.clientY - lastMouseY;
+    } else if (isPanning) {
+        // Handle panning
+        const deltaX = e.clientX - panStartX;
+        const deltaY = e.clientY - panStartY;
 
         // Convert screen delta to SVG delta based on zoom level
-        const svgDeltaX = deltaX / zoomLevel;
-        const svgDeltaY = deltaY / zoomLevel;
+        const svgDeltaX = deltaX / mainCanvasManager.zoomLevel;
+        const svgDeltaY = deltaY / mainCanvasManager.zoomLevel;
 
-        panX -= svgDeltaX;
-        panY -= svgDeltaY;
-
-        lastMouseX = e.clientX;
-        lastMouseY = e.clientY;
-
-        updateViewBox();
+        mainCanvasManager.panX = panStartPanX - svgDeltaX;
+        mainCanvasManager.panY = panStartPanY - svgDeltaY;
+        mainCanvasManager.updateViewBox();
     }
 }
 
@@ -2307,8 +2047,8 @@ function handleMouseUp(e) {
         isDraggingBit = false;
         draggedBitIndex = null;
         canvas.style.cursor = "grab";
-    } else if (isDragging) {
-        isDragging = false;
+    } else if (isPanning) {
+        isPanning = false;
         canvas.style.cursor = "grab";
     }
 }
