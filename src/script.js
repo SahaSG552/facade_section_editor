@@ -438,24 +438,37 @@ function openBitModal(groupName, bit = null) {
     modal.innerHTML = `
     <div class="modal-content">
       <h2>${isEdit ? "Edit Bit" : "New Bit Parameters"}</h2>
-      <form id="bit-form">
-        <label for="bit-name">Name:</label>
-        <input type="text" id="bit-name" required value="${defaultName}">
-        ${getGroupSpecificInputs(groupName, {
-            diameter: defaultDiameter,
-            length: defaultLength,
-            angle: defaultAngle,
-            height: defaultHeight,
-            cornerRadius: defaultCornerRadius,
-            flat: defaultFlat,
-        })}
-        <label for="bit-toolnumber">Tool Number:</label>
-        <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
-        <div class="button-group">
-          <button type="button" id="cancel-btn">Cancel</button>
-          <button type="submit">OK</button>
+      <div class="modal-body">
+        <form id="bit-form" class="bit-form">
+          <label for="bit-name">Name:</label>
+          <input type="text" id="bit-name" required value="${defaultName}">
+          ${getGroupSpecificInputs(groupName, {
+              diameter: defaultDiameter,
+              length: defaultLength,
+              angle: defaultAngle,
+              height: defaultHeight,
+              cornerRadius: defaultCornerRadius,
+              flat: defaultFlat,
+          })}
+          <label for="bit-toolnumber">Tool Number:</label>
+          <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
+
+        </form>
+        <div id="bit-preview" class="bit-preview">
+          <svg id="bit-preview-canvas" width="200" height="200"></svg>
+          <div id="preview-toolbar">
+            <button id="preview-zoom-in" title="Zoom In">+</button>
+            <button id="preview-zoom-out" title="Zoom Out">-</button>
+            <button id="preview-fit" title="Fit to Scale">Fit</button>
+            <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
+          </div>
         </div>
-      </form>
+
+        </div>
+    <div class="button-group">
+        <button type="button" id="cancel-btn">Cancel</button>
+        <button type="submit" form="bit-form">OK</button>
+    </div>
     </div>
   `;
 
@@ -463,13 +476,427 @@ function openBitModal(groupName, bit = null) {
 
     const form = modal.querySelector("#bit-form");
 
+    // Function to check if all required parameters are filled
+    function checkBitParametersFilled() {
+        const name = form.querySelector("#bit-name").value.trim();
+        if (!name) return false;
+
+        const diameter = form.querySelector("#bit-diameter")?.value;
+        if (!diameter) return false;
+
+        const length = form.querySelector("#bit-length")?.value;
+        if (!length) return false;
+
+        const toolNumber = form.querySelector("#bit-toolnumber")?.value;
+        if (!toolNumber) return false;
+
+        if (groupName === "conical") {
+            const angle = form.querySelector("#bit-angle")?.value;
+            if (!angle) return false;
+        }
+
+        if (groupName === "ball") {
+            const height = form.querySelector("#bit-height")?.value;
+            if (!height) return false;
+        }
+
+        if (groupName === "fillet" || groupName === "bull") {
+            const height = form.querySelector("#bit-height")?.value;
+            const cornerRadius = form.querySelector("#bit-cornerRadius")?.value;
+            const flat = form.querySelector("#bit-flat")?.value;
+            if (!height || !cornerRadius || !flat) return false;
+        }
+
+        return true;
+    }
+
+    // Preview variables using canvas functions
+    const previewCanvas = modal.querySelector("#bit-preview-canvas");
+    let previewZoomLevel = 1;
+    let previewPanX = 100;
+    let previewPanY = 100;
+    let previewGridEnabled = true;
+    let previewGridLayer;
+    const previewGridSize = 10; // 1mm = 10px in preview
+    const previewCanvasParameters = {
+        width: 200,
+        height: 200,
+    };
+
+    // Preview drag variables
+    let previewIsDragging = false;
+    let previewLastMouseX = 0;
+    let previewLastMouseY = 0;
+    let previewZoomInitialized = false; // Track if initial zoom has been set
+
+    // Initialize preview canvas layers
+    function initializePreviewCanvas() {
+        previewCanvas.setAttribute(
+            "viewBox",
+            `0 0 ${previewCanvasParameters.width} ${previewCanvasParameters.height}`
+        );
+
+        // Create layers for preview
+        previewGridLayer = document.createElementNS(svgNS, "g");
+        previewGridLayer.id = "preview-grid-layer";
+        previewCanvas.appendChild(previewGridLayer);
+
+        const previewBitsLayer = document.createElementNS(svgNS, "g");
+        previewBitsLayer.id = "preview-bits-layer";
+        previewCanvas.appendChild(previewBitsLayer);
+    }
+
+    // Preview-specific drawGrid function
+    function drawPreviewGrid() {
+        if (!previewGridEnabled) return;
+
+        previewGridLayer.innerHTML = ""; // Clear existing grid
+
+        const thickness = Math.max(0.01, 0.1 / Math.sqrt(previewZoomLevel));
+
+        // Align grid to center
+        const xOffset = (previewPanX % previewGridSize) - previewGridSize / 2;
+        const yOffset = (previewPanY % previewGridSize) - previewGridSize / 2;
+
+        // Draw vertical lines
+        for (
+            let x = xOffset;
+            x <= previewCanvasParameters.width;
+            x += previewGridSize
+        ) {
+            if (x < 0 || x > previewCanvasParameters.width) continue;
+            const line = document.createElementNS(svgNS, "line");
+            line.setAttribute("x1", x);
+            line.setAttribute("y1", 0);
+            line.setAttribute("x2", x);
+            line.setAttribute("y2", previewCanvasParameters.height);
+            line.setAttribute("stroke", "#e0e0e0");
+            line.setAttribute("stroke-width", thickness);
+            previewGridLayer.appendChild(line);
+        }
+
+        // Draw horizontal lines
+        for (
+            let y = yOffset;
+            y <= previewCanvasParameters.height;
+            y += previewGridSize
+        ) {
+            if (y < 0 || y > previewCanvasParameters.height) continue;
+            const line = document.createElementNS(svgNS, "line");
+            line.setAttribute("x1", 0);
+            line.setAttribute("y1", y);
+            line.setAttribute("x2", previewCanvasParameters.width);
+            line.setAttribute("y2", y);
+            line.setAttribute("stroke", "#e0e0e0");
+            line.setAttribute("stroke-width", thickness);
+            previewGridLayer.appendChild(line);
+        }
+    }
+
+    // Preview viewBox update
+    function updatePreviewViewBox() {
+        const viewBoxWidth = previewCanvasParameters.width / previewZoomLevel;
+        const viewBoxHeight = previewCanvasParameters.height / previewZoomLevel;
+        const viewBoxX = previewPanX - viewBoxWidth / 2;
+        const viewBoxY = previewPanY - viewBoxHeight / 2;
+
+        previewCanvas.setAttribute(
+            "viewBox",
+            `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`
+        );
+
+        if (previewGridEnabled) {
+            drawPreviewGrid();
+        }
+    }
+
+    // Preview zoom functions
+    function previewZoomIn() {
+        previewZoomLevel *= 1.2;
+        updatePreviewViewBox();
+        updatePreviewStrokeWidths();
+    }
+
+    function previewZoomOut() {
+        previewZoomLevel /= 1.2;
+        updatePreviewViewBox();
+        updatePreviewStrokeWidths();
+    }
+
+    function previewFitToScale() {
+        if (checkBitParametersFilled()) {
+            const diameter = parseFloat(
+                evaluateMathExpression(
+                    form.querySelector("#bit-diameter").value
+                )
+            );
+            const length = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-length").value)
+            );
+            const availableWidth = previewCanvasParameters.width - 40; // 20px padding on each side
+            const availableHeight = previewCanvasParameters.height - 40; // 20px padding on each side
+
+            // Calculate zoom level to fit bit (maximize zoom to fill the canvas)
+            const zoomX = availableWidth / diameter;
+            const zoomY = availableHeight / length;
+            previewZoomLevel = Math.min(zoomX, zoomY); // Maximize zoom level
+        } else {
+            previewZoomLevel = 1;
+        }
+
+        // Center on the bit (100, 100 is the center where bit is drawn)
+        previewPanX = 100;
+        previewPanY = 100;
+
+        updatePreviewViewBox();
+        updatePreviewStrokeWidths();
+        updateBitPreview();
+    }
+
+    function togglePreviewGrid() {
+        previewGridEnabled = !previewGridEnabled;
+        if (previewGridEnabled) {
+            drawPreviewGrid();
+        } else {
+            previewGridLayer.innerHTML = "";
+        }
+    }
+
+    // Initialize preview canvas
+    initializePreviewCanvas();
+
+    // Preview mouse event handlers
+    function handlePreviewZoom(e) {
+        e.preventDefault();
+
+        const rect = previewCanvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+        const oldZoom = previewZoomLevel;
+        previewZoomLevel *= zoomFactor;
+
+        const oldViewBoxWidth = previewCanvasParameters.width / oldZoom;
+        const oldViewBoxHeight = previewCanvasParameters.height / oldZoom;
+        const oldViewBoxX = previewPanX - oldViewBoxWidth / 2;
+        const oldViewBoxY = previewPanY - oldViewBoxHeight / 2;
+
+        const svgX = oldViewBoxX + (mouseX / rect.width) * oldViewBoxWidth;
+        const svgY = oldViewBoxY + (mouseY / rect.height) * oldViewBoxHeight;
+
+        const newViewBoxWidth =
+            previewCanvasParameters.width / previewZoomLevel;
+        const newViewBoxHeight =
+            previewCanvasParameters.height / previewZoomLevel;
+
+        const newViewBoxX = svgX - (mouseX / rect.width) * newViewBoxWidth;
+        const newViewBoxY = svgY - (mouseY / rect.height) * newViewBoxHeight;
+
+        previewPanX = newViewBoxX + newViewBoxWidth / 2;
+        previewPanY = newViewBoxY + newViewBoxHeight / 2;
+
+        updatePreviewViewBox();
+        updatePreviewStrokeWidths();
+        updateBitPreview();
+    }
+
+    function handlePreviewMouseDown(e) {
+        if (e.button === 0) {
+            previewIsDragging = true;
+            previewLastMouseX = e.clientX;
+            previewLastMouseY = e.clientY;
+            previewCanvas.style.cursor = "grabbing";
+        }
+    }
+
+    function handlePreviewMouseMove(e) {
+        if (previewIsDragging) {
+            const deltaX = e.clientX - previewLastMouseX;
+            const deltaY = e.clientY - previewLastMouseY;
+
+            const svgDeltaX = deltaX / previewZoomLevel;
+            const svgDeltaY = deltaY / previewZoomLevel;
+
+            previewPanX -= svgDeltaX;
+            previewPanY -= svgDeltaY;
+
+            previewLastMouseX = e.clientX;
+            previewLastMouseY = e.clientY;
+
+            updatePreviewViewBox();
+        }
+    }
+
+    function handlePreviewMouseUp(e) {
+        if (previewIsDragging) {
+            previewIsDragging = false;
+            previewCanvas.style.cursor = "grab";
+        }
+    }
+
+    // Add preview event listeners
+    previewCanvas.addEventListener("wheel", handlePreviewZoom);
+    previewCanvas.addEventListener("mousedown", handlePreviewMouseDown);
+    previewCanvas.addEventListener("mousemove", handlePreviewMouseMove);
+    previewCanvas.addEventListener("mouseup", handlePreviewMouseUp);
+    previewCanvas.addEventListener("mouseleave", handlePreviewMouseUp);
+
+    // Function to update stroke widths in preview based on zoom level
+    function updatePreviewStrokeWidths() {
+        const thickness = Math.max(0.1, 0.5 / Math.sqrt(previewZoomLevel));
+
+        // Update stroke width for the bit shape
+        const previewBitsLayer = previewCanvas.querySelector(
+            "#preview-bits-layer"
+        );
+        const shape = previewBitsLayer.querySelector(".bit-shape");
+        if (shape) {
+            shape.setAttribute("stroke-width", thickness);
+        }
+    }
+
+    // Function to update bit preview using canvas functions
+    function updateBitPreview() {
+        // Clear bits layer
+        const previewBitsLayer = previewCanvas.querySelector(
+            "#preview-bits-layer"
+        );
+        previewBitsLayer.innerHTML = "";
+
+        if (!checkBitParametersFilled()) {
+            // Show placeholder text if parameters are not complete
+            const text = document.createElementNS(svgNS, "text");
+            text.setAttribute("x", previewPanX);
+            text.setAttribute("y", previewPanY + 10);
+            text.setAttribute("text-anchor", "middle");
+            text.setAttribute("font-size", "14");
+            text.setAttribute("fill", "#999");
+            text.textContent = "Заполните все параметры";
+            previewBitsLayer.appendChild(text);
+            return;
+        }
+
+        // Collect parameters
+        const name = form.querySelector("#bit-name").value.trim();
+        const diameter = parseFloat(
+            evaluateMathExpression(form.querySelector("#bit-diameter").value)
+        );
+        const length = parseFloat(
+            evaluateMathExpression(form.querySelector("#bit-length").value)
+        );
+        const toolNumber = parseInt(
+            evaluateMathExpression(form.querySelector("#bit-toolnumber").value),
+            10
+        );
+
+        let bitParams = {
+            name,
+            diameter,
+            length,
+            toolNumber,
+        };
+
+        if (groupName === "conical") {
+            bitParams.angle = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-angle").value)
+            );
+        }
+
+        if (groupName === "ball") {
+            bitParams.height = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-height").value)
+            );
+        }
+
+        if (groupName === "fillet" || groupName === "bull") {
+            bitParams.height = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-height").value)
+            );
+            bitParams.cornerRadius = parseFloat(
+                evaluateMathExpression(
+                    form.querySelector("#bit-cornerRadius").value
+                )
+            );
+            bitParams.flat = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-flat").value)
+            );
+        }
+
+        // Calculate initial zoom level to fit bit within preview area (only once)
+        if (!previewZoomInitialized) {
+            const bitDiameter = bitParams.diameter;
+            const bitLength = bitParams.length;
+            const availableWidth = previewCanvasParameters.width - 40; // 20px padding on each side
+            const availableHeight = previewCanvasParameters.height - 40; // 20px padding on each side
+
+            // Calculate zoom level to fit bit (maximize zoom to fill the canvas)
+            const zoomX = availableWidth / bitDiameter;
+            const zoomY = availableHeight / bitLength;
+            previewZoomLevel = Math.min(zoomX, zoomY);
+
+            // Set initial zoom for preview (pan stays at center)
+            previewZoomInitialized = true;
+
+            // Update viewBox after setting initial zoom
+            updatePreviewViewBox();
+        }
+
+        // Create bit shape always at center (100, 100)
+        const shape = createBitShapeElement(
+            bitParams,
+            groupName,
+            100,
+            100 + bitParams.length / 2
+        );
+
+        previewBitsLayer.appendChild(shape);
+
+        // Update stroke width after adding to DOM
+        updatePreviewStrokeWidths();
+    }
+
+    // Preview zoom event handlers
+    modal.querySelector("#preview-zoom-in").addEventListener("click", () => {
+        previewZoomIn();
+        updateBitPreview();
+    });
+
+    modal.querySelector("#preview-zoom-out").addEventListener("click", () => {
+        previewZoomOut();
+        updateBitPreview();
+    });
+
+    modal.querySelector("#preview-fit").addEventListener("click", () => {
+        previewFitToScale();
+        updateBitPreview();
+    });
+
+    modal
+        .querySelector("#preview-toggle-grid")
+        .addEventListener("click", () => {
+            togglePreviewGrid();
+            updateBitPreview();
+        });
+
     // Add math evaluation on blur for all text inputs
     const inputs = form.querySelectorAll('input[type="text"]');
     inputs.forEach((input) => {
         input.addEventListener("blur", () => {
             input.value = evaluateMathExpression(input.value);
         });
+        // Update preview on input change
+        input.addEventListener("input", updateBitPreview);
     });
+
+    // Update preview on number input change
+    const numberInputs = form.querySelectorAll('input[type="number"]');
+    numberInputs.forEach((input) => {
+        input.addEventListener("input", updateBitPreview);
+    });
+
+    // Initial preview update
+    updateBitPreview();
     form.addEventListener("submit", (e) => {
         e.preventDefault();
         const name = form.querySelector("#bit-name").value.trim();
@@ -693,6 +1120,9 @@ function initializeSVG() {
     // Initial draw of material shape and grid
     updateMaterialShape();
     drawGrid();
+
+    // Initial fit to scale
+    fitToScale();
 
     // Add zoom and pan event listeners
     canvas.addEventListener("wheel", handleZoom);
@@ -1602,9 +2032,62 @@ function zoomOut() {
 }
 
 function fitToScale() {
-    zoomLevel = 1;
-    panX = canvasParameters.width / 2;
-    panY = canvasParameters.height / 2;
+    // Calculate bounding box including material and all bits
+    let minX = (canvasParameters.width - materialWidth) / 2;
+    let maxX = minX + materialWidth;
+    let minY = (canvasParameters.height - materialThickness) / 2;
+    let maxY = minY + materialThickness;
+
+    if (bitsOnCanvas.length > 0) {
+        bitsOnCanvas.forEach((bit) => {
+            // Get the actual bounding box of the bit shape
+            const shape = bit.group.querySelector(".bit-shape");
+            if (shape) {
+                const bbox = shape.getBBox();
+                const transform = bit.group.getAttribute("transform");
+                let offsetX = 0;
+                let offsetY = 0;
+
+                if (transform) {
+                    const match = transform.match(
+                        /translate\(([^,]+),\s*([^)]+)\)/
+                    );
+                    if (match) {
+                        offsetX = parseFloat(match[1]);
+                        offsetY = parseFloat(match[2]);
+                    }
+                }
+
+                const shapeMinX = bbox.x + offsetX;
+                const shapeMaxX = bbox.x + bbox.width + offsetX;
+                const shapeMinY = bbox.y + offsetY;
+                const shapeMaxY = bbox.y + bbox.height + offsetY;
+
+                minX = Math.min(minX, shapeMinX);
+                maxX = Math.max(maxX, shapeMaxX);
+                minY = Math.min(minY, shapeMinY);
+                maxY = Math.max(maxY, shapeMaxY);
+            }
+        });
+    }
+
+    // Add padding
+    const padding = 20;
+    const contentWidth = maxX - minX + 2 * padding;
+    const contentHeight = maxY - minY + 2 * padding;
+
+    // Calculate zoom level to fit content
+    const zoomX = canvasParameters.width / contentWidth;
+    const zoomY = canvasParameters.height / contentHeight;
+    zoomLevel = Math.min(zoomX, zoomY); // Allow zoom in for small content
+
+    // Center on content center
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    panX = centerX;
+    panY = centerY;
+
     updateViewBox();
 }
 
@@ -1622,10 +2105,20 @@ function zoomToSelected() {
     const bitAbsX = anchorX + bit.x;
     const bitAbsY = anchorY + bit.y;
 
-    // Zoom to fit the bit with some padding
-    zoomLevel = 8; // Fixed zoom level for selected bit
+    const bitData = bit.bitData;
+    const bitWidth = bitData.diameter || 0;
+    const bitHeight = bitData.length || 0;
+
+    // Calculate zoom level to fit the selected bit
+    const availableWidth = canvasParameters.width - 100; // 20px padding
+    const availableHeight = canvasParameters.height - 100; // 20px padding
+    const zoomX = availableWidth / bitWidth;
+    const zoomY = availableHeight / bitHeight;
+    zoomLevel = Math.min(zoomX, zoomY); // Allow zoom in for small bits
+
+    // Center on the selected bit
     panX = bitAbsX;
-    panY = bitAbsY;
+    panY = bitAbsY - bitData.length / 2; // Center vertically on the bit
 
     updateViewBox();
 }

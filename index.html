@@ -13,6 +13,7 @@
                 <div id="bit-groups"></div>
             </div>
             <div id="canvas-container">
+                <svg id="canvas" width="800" height="600"></svg>
                 <div id="zoom-toolbar">
                     <button id="zoom-in-btn" title="Zoom In">+</button>
                     <button id="zoom-out-btn" title="Zoom Out">-</button>
@@ -23,7 +24,7 @@
                     <button id="part-btn" title="Show Part">Part</button>
                     <label
                         for="grid-scale"
-                        style="font-size: 12px; margin: 0 5px"
+                        style="font-size: 12px; margin: auto"
                         >Grid:</label
                     >
                     <input
@@ -33,13 +34,12 @@
                         min="0.1"
                         max="100"
                         step="0.1"
-                        style="width: 50px; font-size: 12px"
+                        style="width: 30px; font-size: 12px"
                     />
                     <button id="toggle-grid-btn" title="Toggle Grid">
                         Grid
                     </button>
                 </div>
-                <svg id="canvas" width="800" height="600"></svg>
             </div>
             <div id="right-menu">
                 <div id="material-params">
