@@ -16,9 +16,8 @@ html {
 /* ===== ЛЕВАЯ ПАНЕЛЬ (Tools + Title) ===== */
 #left-panel {
   flex-shrink: 0;
-  width: 120px;
-  background-color: #f0f0f0;
-  border-right: 1px solid #ccc;
+  width: 90px;
+  background-color: transparent;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -125,8 +124,8 @@ html {
 
 /* ===== BITS DATABASE (Left panel) ===== */
 #bit-groups {
-  flex: 0 0 auto;  /* Не растягиваться, только занимать нужное место */
-  padding: 10px 8px;
+  flex: 0 auto auto;  /* Не растягиваться, только занимать нужное место */
+  padding: 10px 0px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -134,7 +133,7 @@ html {
   overflow-y: auto;
   overflow-x: visible;
   width: auto;
-  min-width: 120px;
+  min-width: 80px;
   position: relative;
   max-height: calc(100vh - 60px);  /* Оставить место для заголовка */
 }
@@ -148,12 +147,13 @@ html {
   align-items: center;
   justify-content: center;
   padding: 5px;
-  border-radius: 4px;
-  width: 70px;  /* Фиксированная ширина для консистентности */
+  border-radius: 40px;
+  width: 60px;  /* Фиксированная ширина для консистентности */
 }
 
 .bit-group:hover {
   background-color: #e0e0e0;
+  border-radius: 40px;
 }
 
 .bit-group svg {
