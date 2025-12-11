@@ -23,7 +23,7 @@ const materialThicknessInput = document.getElementById("material-thickness");
 // Global variables for material shape
 let materialRect;
 let materialWidth = 400;
-let materialThickness = 18;
+let materialThickness = 19;
 let materialAnchor = "top-left"; // "top-left" or "bottom-left"
 
 const CLIPPER_SCALE = 1000;
@@ -934,6 +934,13 @@ function initializeSVG() {
     // Create material rectangle first (before CanvasManager to avoid callback issues)
     materialRect = document.createElementNS(svgNS, "rect");
 
+    // Calculate material anchor position for grid alignment
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+    const anchorOffset = getMaterialAnchorOffset();
+    const gridAnchorX = materialX + anchorOffset.x + gridSize / 2;
+    const gridAnchorY = materialY + anchorOffset.y + gridSize / 2;
+
     // Create main canvas manager instance
     mainCanvasManager = new CanvasManager({
         canvas: canvas,
@@ -944,6 +951,8 @@ function initializeSVG() {
         enableGrid: true,
         enableMouseEvents: true,
         gridSize: gridSize,
+        gridAnchorX: gridAnchorX,
+        gridAnchorY: gridAnchorY,
         initialZoom: 1,
         initialPanX: canvasParameters.width / 2,
         initialPanY: canvasParameters.height / 2,
@@ -1005,6 +1014,8 @@ function initializeSVG() {
         gridSize = parseFloat(val) || 1;
         // Update grid size in canvas manager
         mainCanvasManager.config.gridSize = gridSize;
+        // Update grid anchor position with new grid size
+        updateGridAnchor();
         if (mainCanvasManager.gridEnabled) {
             mainCanvasManager.drawGrid();
         }
@@ -1039,7 +1050,8 @@ function cycleMaterialAnchor() {
     // Recalculate bit positions relative to new anchor
     updateBitsForNewAnchor();
 
-    // Update grid alignment - handled by CanvasManager
+    // Update grid anchor position
+    updateGridAnchor();
 
     // Update indicator
     updateMaterialAnchorIndicator();
@@ -1146,6 +1158,23 @@ function updateMaterialAnchorIndicator() {
     indicator.appendChild(vertical);
 }
 
+// Update grid anchor position
+function updateGridAnchor() {
+    const materialX = (canvasParameters.width - materialWidth) / 2;
+    const materialY = (canvasParameters.height - materialThickness) / 2;
+    const anchorOffset = getMaterialAnchorOffset();
+    const gridAnchorX = materialX + anchorOffset.x + gridSize / 2;
+    const gridAnchorY = materialY + anchorOffset.y + gridSize / 2;
+
+    if (mainCanvasManager) {
+        mainCanvasManager.config.gridAnchorX = gridAnchorX;
+        mainCanvasManager.config.gridAnchorY = gridAnchorY;
+        if (mainCanvasManager.gridEnabled) {
+            mainCanvasManager.drawGrid();
+        }
+    }
+}
+
 // Update material parameters
 function updateMaterialParams() {
     // Update material dimensions
@@ -1155,6 +1184,7 @@ function updateMaterialParams() {
 
     updateMaterialShape();
     updateBitsPositions();
+    updateGridAnchor(); // Update grid anchor when material changes
     if (showPart) updatePartShape();
 }
 
@@ -1692,6 +1722,7 @@ function updateBitPosition(index, newX, newY) {
     // DO NOT call updateBitsSheet() here - it recreates inputs and breaks focus
     // redraw layer order if needed
     redrawBitsOnCanvas();
+    // Note: updatePartShape() is now called only after movement is complete (in handleMouseUp)
 }
 
 function handleDragStart(e) {
@@ -2047,6 +2078,8 @@ function handleMouseUp(e) {
         isDraggingBit = false;
         draggedBitIndex = null;
         canvas.style.cursor = "grab";
+        // Update part shape after dragging is complete
+        updatePartShape();
     } else if (isPanning) {
         isPanning = false;
         canvas.style.cursor = "grab";

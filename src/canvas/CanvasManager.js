@@ -12,6 +12,8 @@ class CanvasManager {
             enableSelection: false,
             enableDrag: false,
             gridSize: 1,
+            gridAnchorX: null, // Anchor point for grid alignment (if null, uses center)
+            gridAnchorY: null, // Anchor point for grid alignment (if null, uses center)
             initialZoom: 1,
             initialPanX: 400,
             initialPanY: 300,
@@ -116,17 +118,63 @@ class CanvasManager {
 
         const thickness = Math.max(0.01, 0.1 / Math.sqrt(this.zoomLevel));
 
-        // Выравнивание сетки по центру (или другим правилам в зависимости от конфига)
-        const xOffset =
-            (this.panX % this.config.gridSize) - this.config.gridSize / 2;
-        const yOffset =
-            (this.panY % this.config.gridSize) - this.config.gridSize / 2;
+        // Calculate current viewBox bounds for optimization
+        const viewBoxWidth = this.canvasParameters.width / this.zoomLevel;
+        const viewBoxHeight = this.canvasParameters.height / this.zoomLevel;
+        const viewBoxX = this.panX - viewBoxWidth / 2;
+        const viewBoxY = this.panY - viewBoxHeight / 2;
 
-        // Вертикальные линии
+        // Calculate visible area bounds with some padding
+        const padding = viewBoxWidth * 0.1; // 10% padding
+        const minVisibleX = viewBoxX - padding;
+        const maxVisibleX = viewBoxX + viewBoxWidth + padding;
+        const minVisibleY = viewBoxY - padding;
+        const maxVisibleY = viewBoxY + viewBoxHeight + padding;
+
+        // Calculate grid line spacing (increase spacing for very small grid sizes to improve performance)
+        let effectiveGridSize = this.config.gridSize;
+        const minGridSpacing = 5; // Minimum 5 pixels between grid lines for performance
+        if (effectiveGridSize * this.zoomLevel < minGridSpacing) {
+            effectiveGridSize = minGridSpacing / this.zoomLevel;
+        }
+
+        // Align grid to anchor point or center (depending on config)
+        let xOffset, yOffset;
+        if (
+            this.config.gridAnchorX !== null &&
+            this.config.gridAnchorY !== null
+        ) {
+            // Align grid to the specified anchor point
+            xOffset =
+                (this.config.gridAnchorX % effectiveGridSize) -
+                effectiveGridSize / 2;
+            yOffset =
+                (this.config.gridAnchorY % effectiveGridSize) -
+                effectiveGridSize / 2;
+        } else {
+            // Default: align to center
+            xOffset = (this.panX % effectiveGridSize) - effectiveGridSize / 2;
+            yOffset = (this.panY % effectiveGridSize) - effectiveGridSize / 2;
+        }
+
+        // Vertical lines - only draw lines that are visible
+        const firstVerticalX = Math.max(
+            0,
+            Math.floor((minVisibleX - xOffset) / effectiveGridSize) *
+                effectiveGridSize +
+                xOffset
+        );
+        const lastVerticalX = Math.min(
+            this.canvasParameters.width,
+            Math.ceil((maxVisibleX - xOffset) / effectiveGridSize) *
+                effectiveGridSize +
+                xOffset
+        );
+
         for (
-            let x = xOffset;
-            x <= this.canvasParameters.width;
-            x += this.config.gridSize
+            let x = firstVerticalX;
+            x <= lastVerticalX;
+            x += effectiveGridSize
         ) {
             if (x < 0 || x > this.canvasParameters.width) continue;
             const line = document.createElementNS(this.svgNS, "line");
@@ -139,11 +187,24 @@ class CanvasManager {
             this.gridLayer.appendChild(line);
         }
 
-        // Горизонтальные линии
+        // Horizontal lines - only draw lines that are visible
+        const firstHorizontalY = Math.max(
+            0,
+            Math.floor((minVisibleY - yOffset) / effectiveGridSize) *
+                effectiveGridSize +
+                yOffset
+        );
+        const lastHorizontalY = Math.min(
+            this.canvasParameters.height,
+            Math.ceil((maxVisibleY - yOffset) / effectiveGridSize) *
+                effectiveGridSize +
+                yOffset
+        );
+
         for (
-            let y = yOffset;
-            y <= this.canvasParameters.height;
-            y += this.config.gridSize
+            let y = firstHorizontalY;
+            y <= lastHorizontalY;
+            y += effectiveGridSize
         ) {
             if (y < 0 || y > this.canvasParameters.height) continue;
             const line = document.createElementNS(this.svgNS, "line");
