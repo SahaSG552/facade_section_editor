@@ -2078,8 +2078,8 @@ function handleMouseUp(e) {
         isDraggingBit = false;
         draggedBitIndex = null;
         canvas.style.cursor = "grab";
-        // Update part shape after dragging is complete
-        updatePartShape();
+        // Update part shape after dragging is complete only if Part view is enabled
+        if (showPart) updatePartShape();
     } else if (isPanning) {
         isPanning = false;
         canvas.style.cursor = "grab";
@@ -2205,6 +2205,12 @@ function updatePartShape() {
         console.error("ClipperLib not loaded");
         return;
     }
+
+    // Don't perform calculations if Part view is not enabled
+    if (!showPart) {
+        return;
+    }
+
     const ClipperLib = window.ClipperLib;
     const clipper = new ClipperLib.Clipper();
     const subj = new ClipperLib.Paths();
