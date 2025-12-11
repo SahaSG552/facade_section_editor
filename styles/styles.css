@@ -102,25 +102,25 @@ html {
   z-index: 2;
 }
 
-#material-params {
+#part-params {
   margin-bottom: 20px;
   flex-shrink: 0;
 }
 
-#material-params h3,
-#bits-sheet h3 {
+#part-params h3,
+#operations h3 {
   margin-top: 0;
   font-size: 14px;
 }
 
-#material-params label,
-#material-params input {
+#part-params label,
+#part-params input {
   display: block;
   margin-bottom: 10px;
   font-size: 12px;
 }
 
-#material-params input {
+#part-params input {
   width: 100%;
   box-sizing: border-box;
 }
@@ -275,8 +275,8 @@ html {
   transform: scale(1.2);
 }
 
-/* ===== BITS SHEET (Table) ===== */
-#bits-sheet {
+/* ===== OPERATIONS (Table) ===== */
+#operations {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
@@ -284,7 +284,7 @@ html {
   max-height: 400px;
 }
 
-#bits-sheet table {
+#operations table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
@@ -292,8 +292,8 @@ html {
   table-layout: fixed;  /* Фиксированная ширина колонок */
 }
 
-#bits-sheet th,
-#bits-sheet td {
+#operations th,
+#operations td {
   border: 1px solid #ddd;
   padding: 6px;
   text-align: center;
@@ -302,7 +302,7 @@ html {
   word-wrap: break-word;
 }
 
-#bits-sheet th {
+#operations th {
   background-color: #e0e0e0;
   font-weight: bold;
   position: sticky;
@@ -311,34 +311,34 @@ html {
 }
 
 /* Колонки = и № - 20px каждая */
-#bits-sheet th:nth-child(6),
-#bits-sheet td:nth-child(6),
-#bits-sheet th:nth-child(7),
-#bits-sheet td:nth-child(7) {
+#operations th:nth-child(6),
+#operations td:nth-child(6),
+#operations th:nth-child(7),
+#operations td:nth-child(7) {
   width: 30px;
 }
 
 /* Колонки = и № - 20px каждая */
-#bits-sheet th:nth-child(1),
-#bits-sheet td:nth-child(1),
-#bits-sheet th:nth-child(2),
-#bits-sheet td:nth-child(2){
+#operations th:nth-child(1),
+#operations td:nth-child(1),
+#operations th:nth-child(2),
+#operations td:nth-child(2){
   width: 20px;
 }
 
 /* Колонка Name - шире на 150px и выравнена по левому краю */
-#bits-sheet th:nth-child(3),
-#bits-sheet td:nth-child(3) {
+#operations th:nth-child(3),
+#operations td:nth-child(3) {
   width: 150px;
   text-align: left;
   padding-left: 8px;
 }
 
 /* Остальные колонки - авто ширина */
-#bits-sheet th:nth-child(4),
-#bits-sheet td:nth-child(4),
-#bits-sheet th:nth-child(5),
-#bits-sheet td:nth-child(5) {
+#operations th:nth-child(4),
+#operations td:nth-child(4),
+#operations th:nth-child(5),
+#operations td:nth-child(5) {
   width: 50px;
 }
 
@@ -347,7 +347,7 @@ html {
   background-color: #cce7ff;
 }
 
-#bits-sheet td input {
+#operations td input {
   width: 100%;  /* Инпут занимает всю ширину колонки */
   box-sizing: border-box;
   font-size: 11px;

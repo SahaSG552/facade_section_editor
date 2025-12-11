@@ -1,21 +1,15 @@
-import { angleToRad, distancePtToPt } from "./utils/utils.js";
+import {
+    angleToRad,
+    distancePtToPt,
+    evaluateMathExpression,
+} from "./utils/utils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
+import BitsManager from "./panel/BitsManager.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
-// Function to evaluate math expressions
-function evaluateMathExpression(value) {
-    if (!value || typeof value !== "string") return value;
-    try {
-        return math.evaluate(value);
-    } catch (e) {
-        return value; // if not a valid expression, return as is
-    }
-}
-
 // Get DOM elements
-const bitGroups = document.getElementById("bit-groups");
 const canvas = document.getElementById("canvas");
 const materialWidthInput = document.getElementById("material-width");
 const materialThicknessInput = document.getElementById("material-thickness");
@@ -37,6 +31,7 @@ const canvasParameters = {
 
 // Canvas manager instance
 let mainCanvasManager;
+let bitsManager; // Bits manager instance
 let gridSize = 1; // Default grid size in pixels (1mm = 10px)
 
 // Pan variables for manual pan handling
@@ -51,883 +46,14 @@ let panStartY = 0;
 let panStartPanX = 0;
 let panStartPanY = 0;
 
-// Drag variables for selected bit
+// Drag variables for selected bits (now supports multi-selection)
 let isDraggingBit = false;
-let draggedBitIndex = null;
+let draggedBitIndex = null; // Index of the bit being dragged (for multi-selection)
+let selectedBitIndices = []; // Array of selected bit indices
 let dragStartX = 0;
 let dragStartY = 0;
 
-// ===== SVG and Icon Creation Functions =====
-
-// Create bit shape element based on parameters
-function createBitShapeElement(bit, groupName, x = 0, y = 0) {
-    let shape;
-    // Радиус дуги (формула через хорду и стрелу подъёма)
-    let A = { x: x + bit.diameter / 2, y: y - bit.height };
-    let B = { x: x - bit.diameter / 2, y: y - bit.height };
-    let arcRad =
-        bit.height / 2 +
-        (distancePtToPt(A, B) * distancePtToPt(A, B)) / (8 * bit.height);
-
-    switch (groupName) {
-        case "cylindrical":
-            shape = document.createElementNS(svgNS, "rect");
-            shape.setAttribute("x", x - bit.diameter / 2);
-            shape.setAttribute("y", y - bit.length);
-            shape.setAttribute("width", bit.diameter);
-            shape.setAttribute("height", bit.length);
-            shape.setAttribute("fill", "rgba(0, 140, 255, 0.30)");
-            break;
-        case "conical":
-            const oppositeAngle = bit.angle;
-            const hypotenuse = bit.diameter;
-            const height =
-                (hypotenuse / 2) *
-                (1 / Math.tan(angleToRad(oppositeAngle) / 2));
-            const points = [
-                `${x},${y}`,
-                `${x - hypotenuse / 2},${y - height}`,
-                `${x - hypotenuse / 2},${y - bit.length}`,
-                `${x + hypotenuse / 2},${y - bit.length}`,
-                `${x + hypotenuse / 2},${y - height}`,
-            ].join(" ");
-            shape = document.createElementNS(svgNS, "polygon");
-            shape.setAttribute("points", points);
-            shape.setAttribute("fill", "rgba(26, 255, 0, 0.30)");
-            break;
-        case "ball":
-            shape = document.createElementNS(svgNS, "path");
-            shape.setAttribute(
-                "d",
-                `M ${x + bit.diameter / 2} ${
-                    y - bit.height
-                } A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${
-                    y - bit.height
-                } 
-        L ${x - bit.diameter / 2} ${y - bit.length}
-        L ${x + bit.diameter / 2} ${y - bit.length} Z`
-            );
-            shape.setAttribute("fill", "rgba(255, 0, 0, 0.30)");
-            break;
-        case "fillet":
-            // Fillet cutter: cylindrical part + fillet profile
-            arcRad = bit.cornerRadius;
-            shape = document.createElementNS(svgNS, "path");
-            shape.setAttribute(
-                "d",
-                `M ${x + bit.diameter / 2} ${
-                    y - bit.height
-                } A ${arcRad} ${arcRad} 0 0 0 ${x + bit.flat / 2} ${y} 
-        L ${x - bit.flat / 2} ${y}
-        A ${arcRad} ${arcRad} 0 0 0 ${x - bit.diameter / 2} ${y - bit.height} 
-        L ${x - bit.diameter / 2} ${y - bit.length}
-        L ${x + bit.diameter / 2} ${y - bit.length} Z`
-            );
-            shape.setAttribute("fill", "rgba(128, 0, 128, 0.30)"); // Purple color
-            break;
-        case "bull":
-            // Bull-nose cutter: cylindrical part + bullnose profile
-            arcRad = bit.cornerRadius;
-            shape = document.createElementNS(svgNS, "path");
-            shape.setAttribute(
-                "d",
-                `M ${x + bit.diameter / 2} ${
-                    y - bit.height
-                } A ${arcRad} ${arcRad} 0 0 1 ${x + bit.flat / 2} ${y} 
-        L ${x - bit.flat / 2} ${y}
-        A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${y - bit.height} 
-        L ${x - bit.diameter / 2} ${y - bit.length}
-        L ${x + bit.diameter / 2} ${y - bit.length} Z`
-            );
-            shape.setAttribute("fill", "rgba(128, 128, 0, 0.3)"); // Olive color
-            break;
-    }
-
-    if (shape) {
-        shape.setAttribute("stroke", "black");
-        shape.classList.add("bit-shape");
-    }
-
-    return shape;
-}
-
-// Create SVG icon
-function createSVGIcon(shape, params, size = 50) {
-    const svg = document.createElementNS(svgNS, "svg");
-    svg.setAttribute("width", size);
-    svg.setAttribute("height", size);
-    svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
-
-    const circle = document.createElementNS(svgNS, "circle");
-    circle.setAttribute("cx", size / 2);
-    circle.setAttribute("cy", size / 2);
-    circle.setAttribute("r", size / 2 - 1);
-    circle.setAttribute("fill", "white");
-    circle.setAttribute("stroke", "black");
-    circle.setAttribute("stroke-width", "2");
-    svg.appendChild(circle);
-
-    const innerGroup = document.createElementNS(svgNS, "g");
-    innerGroup.setAttribute("transform", `translate(${size / 2}, ${size / 2})`);
-
-    let innerShape;
-
-    if (shape !== "newBit" && params && params.diameter !== undefined) {
-        // Use actual bit shape if parameters are provided
-        innerShape = createBitShapeElement(params, shape, 0, params.length / 2);
-        // Adjust transform for proper scaling in icon
-        innerShape.setAttribute("transform", `scale(${size / 80})`);
-    } else {
-        // Use placeholder shapes for new bit button
-        const s = size / 4;
-        switch (shape) {
-            case "cylindrical":
-                innerShape = document.createElementNS(svgNS, "rect");
-                innerShape.setAttribute("x", -size / 4);
-                innerShape.setAttribute("y", -size / 4);
-                innerShape.setAttribute("width", size / 2);
-                innerShape.setAttribute("height", size / 2);
-                break;
-            case "conical":
-                innerShape = document.createElementNS(svgNS, "path");
-                innerShape.setAttribute(
-                    "d",
-                    `M ${-s} 0 
-                    L ${-s} ${-s} 
-                    L ${s} ${-s} 
-                    L ${s} 0
-                    L 0 ${s} 
-                    Z`
-                );
-                break;
-            case "ball":
-                innerShape = document.createElementNS(svgNS, "path");
-                innerShape.setAttribute(
-                    "d",
-                    `M ${-s} 0 
-                    L ${-s} ${-s} 
-                    L ${s} ${-s} 
-                    L ${s} 0
-                    A ${s} ${s} 0 0 1 0 ${s} 
-                    A ${s} ${s} 0 0 1 ${-s} 0
-                    Z`
-                );
-                break;
-            case "fillet":
-                innerShape = document.createElementNS(svgNS, "path");
-                innerShape.setAttribute(
-                    "d",
-                    `M ${-s} ${s / 4} 
-                    L ${-s} ${-s} 
-                    L ${s} ${-s} 
-                    L ${s} ${s / 4}
-                    A ${s} ${s} 0 0 0 ${s / 4} ${s} 
-                    L ${-s / 4} ${s}
-                    A ${s} ${s} 0 0 0 ${-s} ${s / 4}
-                    Z`
-                );
-                break;
-            case "bull":
-                innerShape = document.createElementNS(svgNS, "path");
-                innerShape.setAttribute(
-                    "d",
-                    `M ${-s} ${s / 2} 
-                    L ${-s} ${-s} 
-                    L ${s} ${-s} 
-                    L ${s} ${s / 2}
-                    A ${s / 2} ${s / 2} 0 0 1 ${s / 2} ${s} 
-                    L ${-s / 2} ${s}
-                    A ${s / 2} ${s / 2} 0 0 1 ${-s} ${s / 2}
-                    Z`
-                );
-                break;
-            case "newBit":
-                innerShape = document.createElementNS(svgNS, "path");
-                innerShape.setAttribute(
-                    "d",
-                    `M0 ${-size / 6}V${size / 6}M${-size / 6} 0H${size / 6}`
-                );
-                break;
-        }
-        if (innerShape) {
-            innerShape.setAttribute("fill", "white");
-            innerShape.setAttribute("stroke", "black");
-            innerShape.setAttribute("stroke-width", "2");
-        }
-    }
-
-    if (innerShape) {
-        innerGroup.appendChild(innerShape);
-    }
-    svg.appendChild(innerGroup);
-    return svg;
-}
-
-// Create action icon
-function createActionIcon(action) {
-    const svg = document.createElementNS(svgNS, "svg");
-    svg.setAttribute("width", "15");
-    svg.setAttribute("height", "15");
-    svg.setAttribute("viewBox", "0 0 24 24");
-
-    const circle = document.createElementNS(svgNS, "circle");
-    circle.setAttribute("cx", "12");
-    circle.setAttribute("cy", "12");
-    circle.setAttribute("r", "11");
-    circle.setAttribute("fill", "white");
-    circle.setAttribute("stroke-width", "2");
-
-    const path = document.createElementNS(svgNS, "path");
-    path.setAttribute("fill", "black");
-
-    switch (action) {
-        case "edit":
-            circle.setAttribute("stroke", "green");
-            path.setAttribute(
-                "d",
-                "M16.293 2.293l3.414 3.414-13 13-3.414-3.414 13-13zM18 10v8h-8v-8h8z"
-            );
-            break;
-        case "copy":
-            circle.setAttribute("stroke", "orange");
-            path.setAttribute(
-                "d",
-                "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
-            );
-            break;
-        case "remove":
-            circle.setAttribute("stroke", "red");
-            path.setAttribute(
-                "d",
-                "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
-            );
-            break;
-    }
-
-    svg.appendChild(circle);
-    svg.appendChild(path);
-    return svg;
-}
-
-// Create bit groups
-function createBitGroups() {
-    const allBits = getBits();
-    const groupOrder = Object.keys(allBits);
-
-    groupOrder.forEach((groupName) => {
-        // sort by diameter asc, then length asc (work on a shallow copy to avoid mutating storage)
-        const bits = (allBits[groupName] || []).slice().sort((a, b) => {
-            const d = (a.diameter || 0) - (b.diameter || 0);
-            if (d !== 0) return d;
-            return (a.length || 0) - (b.length || 0);
-        });
-        const groupDiv = document.createElement("div");
-        groupDiv.className = "bit-group";
-
-        const groupIcon = createSVGIcon(groupName);
-        groupDiv.appendChild(groupIcon);
-
-        const bitList = document.createElement("div");
-        bitList.className = "bit-list";
-
-        bits.forEach((bit, index) => {
-            const bitDiv = document.createElement("div");
-            bitDiv.className = "bit";
-
-            const bitName = document.createElement("span");
-            bitName.textContent = bit.name;
-            bitDiv.appendChild(bitName);
-
-            const bitIcon = createSVGIcon(groupName, bit, 40);
-            bitDiv.appendChild(bitIcon);
-
-            const actionIcons = document.createElement("div");
-            actionIcons.className = "action-icons";
-            ["edit", "copy", "remove"].forEach((action) => {
-                const actionIcon = createActionIcon(action);
-                actionIcon.addEventListener("click", (e) => {
-                    e.stopPropagation();
-
-                    switch (action) {
-                        case "edit":
-                            // open edit modal for this bit
-                            openBitModal(groupName, bit);
-                            break;
-                        case "copy":
-                            handleCopyClick(e, bit);
-                            break;
-                        case "remove":
-                            handleDeleteClick(e, bit);
-                            break;
-                    }
-                    refreshBitGroups();
-                });
-                actionIcons.appendChild(actionIcon);
-            });
-            bitDiv.appendChild(actionIcons);
-
-            bitDiv.addEventListener("click", () =>
-                drawBitShape(bit, groupName)
-            );
-            bitList.appendChild(bitDiv);
-        });
-
-        // Add '+' button
-        const addButton = document.createElement("div");
-        addButton.className = "bit add-bit";
-
-        const addBitName = document.createElement("span");
-        addBitName.textContent = "New";
-        addButton.appendChild(addBitName);
-        const addBitIcon = createSVGIcon("newBit", "newBit", 40);
-        addButton.appendChild(addBitIcon);
-
-        addButton.addEventListener("click", () => openNewBitMenu(groupName));
-
-        bitList.appendChild(addButton);
-
-        groupDiv.appendChild(bitList);
-
-        groupDiv.addEventListener("mouseenter", (e) => {
-            const rect = groupDiv.getBoundingClientRect();
-            bitList.style.display = "flex";
-            bitList.style.left = rect.right + 5 + "px";
-            bitList.style.top = rect.top + rect.height / 2 + "px";
-            bitList.style.transform = "translateY(-50%)";
-
-            // Позиционировать невидимую зону для hover bridge
-            const afterElement = groupDiv.getAttribute("data-after-element");
-            // Установить ::after динамически через JS (для невидимой зоны)
-        });
-
-        groupDiv.addEventListener("mouseleave", (e) => {
-            // Не скрывать меню сразу - дать пользователю время дотянуться до него
-            setTimeout(() => {
-                if (!bitList.matches(":hover")) {
-                    bitList.style.display = "none";
-                }
-            }, 100);
-        });
-
-        bitList.addEventListener("mouseenter", () => {
-            bitList.style.display = "flex";
-        });
-
-        bitList.addEventListener("mouseleave", () => {
-            bitList.style.display = "none";
-        });
-
-        bitGroups.appendChild(groupDiv);
-    });
-}
-
-function openNewBitMenu(groupName) {
-    // reuse unified modal for create/edit - open as "new"
-    openBitModal(groupName, null);
-}
-
-// Unified create/edit modal
-function openBitModal(groupName, bit = null) {
-    const isEdit = !!bit;
-    const defaultToolNumber =
-        bit && bit.toolNumber !== undefined ? bit.toolNumber : 1;
-    const defaultDiameter = bit ? bit.diameter : "";
-    const defaultLength = bit ? bit.length : "";
-    const defaultAngle = bit ? bit.angle : "";
-    const defaultHeight = bit ? bit.height : "";
-    const defaultCornerRadius = bit ? bit.cornerRadius : "";
-    const defaultFlat = bit ? bit.flat : "";
-    const defaultName = bit ? bit.name : "";
-
-    const modal = document.createElement("div");
-    modal.className = "modal";
-    modal.innerHTML = `
-    <div class="modal-content">
-      <h2>${isEdit ? "Edit Bit" : "New Bit Parameters"}</h2>
-      <div class="modal-body">
-        <form id="bit-form" class="bit-form">
-          <label for="bit-name">Name:</label>
-          <input type="text" id="bit-name" required value="${defaultName}">
-          ${getGroupSpecificInputs(groupName, {
-              diameter: defaultDiameter,
-              length: defaultLength,
-              angle: defaultAngle,
-              height: defaultHeight,
-              cornerRadius: defaultCornerRadius,
-              flat: defaultFlat,
-          })}
-          <label for="bit-toolnumber">Tool Number:</label>
-          <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
-
-        </form>
-        <div id="bit-preview" class="bit-preview">
-          <svg id="bit-preview-canvas" width="200" height="200"></svg>
-          <div id="preview-toolbar">
-            <button id="preview-zoom-in" title="Zoom In">+</button>
-            <button id="preview-zoom-out" title="Zoom Out">-</button>
-            <button id="preview-fit" title="Fit to Scale">Fit</button>
-            <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
-          </div>
-        </div>
-
-        </div>
-    <div class="button-group">
-        <button type="button" id="cancel-btn">Cancel</button>
-        <button type="submit" form="bit-form">OK</button>
-    </div>
-    </div>
-  `;
-
-    document.body.appendChild(modal);
-
-    const form = modal.querySelector("#bit-form");
-
-    // Function to check if all required parameters are filled
-    function checkBitParametersFilled() {
-        const name = form.querySelector("#bit-name").value.trim();
-        if (!name) return false;
-
-        const diameter = form.querySelector("#bit-diameter")?.value;
-        if (!diameter) return false;
-
-        const length = form.querySelector("#bit-length")?.value;
-        if (!length) return false;
-
-        const toolNumber = form.querySelector("#bit-toolnumber")?.value;
-        if (!toolNumber) return false;
-
-        if (groupName === "conical") {
-            const angle = form.querySelector("#bit-angle")?.value;
-            if (!angle) return false;
-        }
-
-        if (groupName === "ball") {
-            const height = form.querySelector("#bit-height")?.value;
-            if (!height) return false;
-        }
-
-        if (groupName === "fillet" || groupName === "bull") {
-            const height = form.querySelector("#bit-height")?.value;
-            const cornerRadius = form.querySelector("#bit-cornerRadius")?.value;
-            const flat = form.querySelector("#bit-flat")?.value;
-            if (!height || !cornerRadius || !flat) return false;
-        }
-
-        return true;
-    }
-
-    // Preview canvas manager
-    let previewCanvasManager;
-    let previewZoomInitialized = false; // Track if initial zoom has been set
-
-    // Initialize preview canvas with CanvasManager
-    function initializePreviewCanvas() {
-        previewCanvasManager = new CanvasManager({
-            canvas: modal.querySelector("#bit-preview-canvas"),
-            width: 200,
-            height: 200,
-            enableZoom: true,
-            enablePan: true,
-            enableGrid: true,
-            enableMouseEvents: true,
-            gridSize: 10, // 1mm = 10px in preview
-            initialZoom: 1,
-            initialPanX: 100,
-            initialPanY: 100,
-            layers: ["grid", "bits"],
-            onZoom: (zoomLevel) => {
-                updatePreviewStrokeWidths(zoomLevel);
-            },
-        });
-    }
-
-    // Preview zoom functions
-    function previewZoomIn() {
-        previewCanvasManager.zoomIn();
-        updatePreviewStrokeWidths();
-    }
-
-    function previewZoomOut() {
-        previewCanvasManager.zoomOut();
-        updatePreviewStrokeWidths();
-    }
-
-    function previewFitToScale() {
-        if (checkBitParametersFilled()) {
-            const diameter = parseFloat(
-                evaluateMathExpression(
-                    form.querySelector("#bit-diameter").value
-                )
-            );
-            const length = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-length").value)
-            );
-            const availableWidth = 200 - 40; // 20px padding on each side
-            const availableHeight = 200 - 40; // 20px padding on each side
-
-            // Calculate zoom level to fit bit (maximize zoom to fill the canvas)
-            const zoomX = availableWidth / diameter;
-            const zoomY = availableHeight / length;
-            const zoomLevel = Math.min(zoomX, zoomY); // Maximize zoom level
-
-            // Set zoom and center on the bit (100, 100 is the center where bit is drawn)
-            previewCanvasManager.zoomLevel = zoomLevel;
-            previewCanvasManager.panX = 100;
-            previewCanvasManager.panY = 100;
-            previewCanvasManager.updateViewBox();
-        } else {
-            // Reset to default
-            previewCanvasManager.zoomLevel = 1;
-            previewCanvasManager.panX = 100;
-            previewCanvasManager.panY = 100;
-            previewCanvasManager.updateViewBox();
-        }
-
-        updatePreviewStrokeWidths();
-        // Don't call updateBitPreview() since bit position doesn't change
-    }
-
-    function togglePreviewGrid() {
-        previewCanvasManager.toggleGrid();
-    }
-
-    // Initialize preview canvas
-    initializePreviewCanvas();
-
-    // Event listeners are handled by CanvasManager
-
-    // Function to update stroke widths in preview based on zoom level
-    function updatePreviewStrokeWidths(
-        zoomLevel = previewCanvasManager?.zoomLevel
-    ) {
-        if (!zoomLevel || !previewCanvasManager) return;
-        const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
-
-        // Update stroke width for the bit shape
-        const previewBitsLayer = previewCanvasManager.getLayer("bits");
-        const shape = previewBitsLayer?.querySelector(".bit-shape");
-        if (shape) {
-            shape.setAttribute("stroke-width", thickness);
-        }
-    }
-
-    // Function to update bit preview using canvas functions
-    function updateBitPreview() {
-        // Clear bits layer
-        const previewBitsLayer = previewCanvasManager.getLayer("bits");
-        previewBitsLayer.innerHTML = "";
-
-        if (!checkBitParametersFilled()) {
-            // Show placeholder text if parameters are not complete
-            const text = document.createElementNS(svgNS, "text");
-            text.setAttribute("x", previewCanvasManager.panX);
-            text.setAttribute("y", previewCanvasManager.panY + 10);
-            text.setAttribute("text-anchor", "middle");
-            text.setAttribute("font-size", "14");
-            text.setAttribute("fill", "#999");
-            text.textContent = "Заполните все параметры";
-            previewBitsLayer.appendChild(text);
-            return;
-        }
-
-        // Collect parameters
-        const name = form.querySelector("#bit-name").value.trim();
-        const diameter = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-diameter").value)
-        );
-        const length = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-length").value)
-        );
-        const toolNumber = parseInt(
-            evaluateMathExpression(form.querySelector("#bit-toolnumber").value),
-            10
-        );
-
-        let bitParams = {
-            name,
-            diameter,
-            length,
-            toolNumber,
-        };
-
-        if (groupName === "conical") {
-            bitParams.angle = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-angle").value)
-            );
-        }
-
-        if (groupName === "ball") {
-            bitParams.height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value)
-            );
-        }
-
-        if (groupName === "fillet" || groupName === "bull") {
-            bitParams.height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value)
-            );
-            bitParams.cornerRadius = parseFloat(
-                evaluateMathExpression(
-                    form.querySelector("#bit-cornerRadius").value
-                )
-            );
-            bitParams.flat = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-flat").value)
-            );
-        }
-
-        // Calculate initial zoom level to fit bit within preview area (only once)
-        if (!previewZoomInitialized) {
-            const bitDiameter = bitParams.diameter;
-            const bitLength = bitParams.length;
-            const availableWidth = 200 - 40; // 20px padding on each side
-            const availableHeight = 200 - 40; // 20px padding on each side
-
-            // Calculate zoom level to fit bit (maximize zoom to fill the canvas)
-            const zoomX = availableWidth / bitDiameter;
-            const zoomY = availableHeight / bitLength;
-            const zoomLevel = Math.min(zoomX, zoomY);
-
-            // Set initial zoom for preview (pan stays at center)
-            previewCanvasManager.zoomLevel = zoomLevel;
-            previewCanvasManager.updateViewBox();
-            previewZoomInitialized = true;
-        }
-
-        // Create bit shape always at center of bit
-        const shape = createBitShapeElement(
-            bitParams,
-            groupName,
-            100,
-            100 + bitParams.length / 2
-        );
-
-        previewBitsLayer.appendChild(shape);
-
-        // Update stroke width after adding to DOM
-        updatePreviewStrokeWidths();
-    }
-
-    // Preview zoom event handlers
-    modal.querySelector("#preview-zoom-in").addEventListener("click", () => {
-        previewZoomIn();
-        updateBitPreview();
-    });
-
-    modal.querySelector("#preview-zoom-out").addEventListener("click", () => {
-        previewZoomOut();
-        updateBitPreview();
-    });
-
-    modal.querySelector("#preview-fit").addEventListener("click", () => {
-        previewFitToScale();
-        updateBitPreview();
-    });
-
-    modal
-        .querySelector("#preview-toggle-grid")
-        .addEventListener("click", () => {
-            togglePreviewGrid();
-            updateBitPreview();
-        });
-
-    // Add math evaluation on blur for all text inputs
-    const inputs = form.querySelectorAll('input[type="text"]');
-    inputs.forEach((input) => {
-        input.addEventListener("blur", () => {
-            input.value = evaluateMathExpression(input.value);
-        });
-        // Update preview on input change
-        input.addEventListener("input", updateBitPreview);
-    });
-
-    // Update preview on number input change
-    const numberInputs = form.querySelectorAll('input[type="number"]');
-    numberInputs.forEach((input) => {
-        input.addEventListener("input", updateBitPreview);
-    });
-
-    // Initial preview update
-    updateBitPreview();
-    form.addEventListener("submit", (e) => {
-        e.preventDefault();
-        const name = form.querySelector("#bit-name").value.trim();
-
-        if (isBitNameDuplicate(name, isEdit ? bit.id : null)) {
-            alert(
-                "A bit with this name already exists. Please choose a different name."
-            );
-            return;
-        }
-
-        const diameterStr = evaluateMathExpression(
-            form.querySelector("#bit-diameter").value
-        );
-        const diameter = parseFloat(diameterStr);
-        const lengthStr = evaluateMathExpression(
-            form.querySelector("#bit-length").value
-        );
-        const length = parseFloat(lengthStr);
-        const toolNumberStr = evaluateMathExpression(
-            form.querySelector("#bit-toolnumber").value
-        );
-        const toolNumber = parseInt(toolNumberStr, 10) || 1;
-
-        const payload = {
-            name,
-            diameter,
-            length,
-            toolNumber,
-        };
-
-        if (groupName === "conical") {
-            const angleStr = evaluateMathExpression(
-                form.querySelector("#bit-angle").value
-            );
-            payload.angle = parseFloat(angleStr);
-        }
-
-        if (groupName === "ball") {
-            const heightStr = evaluateMathExpression(
-                form.querySelector("#bit-height").value
-            );
-            payload.height = parseFloat(heightStr);
-        }
-
-        if (groupName === "fillet") {
-            const heightStr = evaluateMathExpression(
-                form.querySelector("#bit-height").value
-            );
-            payload.height = parseFloat(heightStr);
-            const cornerRadiusStr = evaluateMathExpression(
-                form.querySelector("#bit-cornerRadius").value
-            );
-            payload.cornerRadius = parseFloat(cornerRadiusStr);
-            const flatStr = evaluateMathExpression(
-                form.querySelector("#bit-flat").value
-            );
-            payload.flat = parseFloat(flatStr);
-        }
-
-        let updatedBit;
-        if (isEdit) {
-            updatedBit = updateBit(groupName, bit.id, payload);
-        } else {
-            updatedBit = addBit(groupName, payload);
-        }
-
-        if (isEdit) {
-            updateCanvasBitsForBitId(updatedBit.id);
-        }
-
-        document.body.removeChild(modal);
-        refreshBitGroups();
-    });
-
-    const cancelBtn = modal.querySelector("#cancel-btn");
-    cancelBtn.addEventListener("click", () => {
-        document.body.removeChild(modal);
-    });
-}
-
-function getGroupSpecificInputs(groupName, defaults = {}) {
-    const d = defaults.diameter !== undefined ? defaults.diameter : "";
-    const l = defaults.length !== undefined ? defaults.length : "";
-    const a = defaults.angle !== undefined ? defaults.angle : "";
-    const h = defaults.height !== undefined ? defaults.height : "";
-    const cr = defaults.cornerRadius !== undefined ? defaults.cornerRadius : "";
-    const f = defaults.flat !== undefined ? defaults.flat : "";
-
-    let inputs = `
-        <label for="bit-diameter">Diameter:</label>
-        <input type="text" id="bit-diameter" required value="${d}">
-        <label for="bit-length">Length:</label>
-        <input type="text" id="bit-length" required value="${l}">
-    `;
-    if (groupName === "conical") {
-        inputs += `
-        <label for="bit-angle">Angle:</label>
-        <input type="text" id="bit-angle" required value="${a}">
-        `;
-    }
-    if (groupName === "ball") {
-        inputs += `
-        <label for="bit-height">Height:</label>
-        <input type="text" id="bit-height" required value="${h}">
-        `;
-    }
-    if (groupName === "fillet" || groupName === "bull") {
-        inputs += `
-        <label for="bit-height">Height:</label>
-        <input type="text" id="bit-height" required value="${h}">
-        <label for="bit-cornerRadius">Corner Radius:</label>
-        <input type="text" id="bit-cornerRadius" required value="${cr}">
-        <label for="bit-flat">Flat:</label>
-        <input type="text" id="bit-flat" required value="${f}">
-        `;
-    }
-    return inputs;
-}
-
-function isBitNameDuplicate(name, excludeId = null) {
-    const all = getBits();
-    return Object.values(all || {})
-        .flat()
-        .some((bit) => bit.name === name && bit.id !== excludeId);
-}
-
-function handleCopyClick(e, bit) {
-    const baseName = bit.name;
-    const all = getBits();
-    // count existing copies with same baseName
-    const existingCopies = Object.values(all)
-        .flat()
-        .filter((b) => b.name.startsWith(`${baseName} (`));
-    const maxCopyNumber = existingCopies.reduce((max, b) => {
-        const m = b.name.match(/\((\d+)\)$/);
-        return m ? Math.max(max, parseInt(m[1], 10)) : max;
-    }, 0);
-    const name = `${baseName} (${maxCopyNumber + 1})`;
-    const newBit = { ...bit, name };
-    delete newBit.id; // ensure new id created
-
-    // Find the group name for this bit
-    const allBits = getBits();
-    let groupName = null;
-    for (const group in allBits) {
-        if (allBits[group].some((b) => b.id === bit.id)) {
-            groupName = group;
-            break;
-        }
-    }
-
-    if (groupName) {
-        addBit(groupName, newBit);
-    }
-}
-
-function handleDeleteClick(e, bit) {
-    if (confirm(`Are you sure you want to delete ${bit.name}?`)) {
-        // Find the group name for this bit
-        const allBits = getBits();
-        let groupName = null;
-        for (const group in allBits) {
-            if (allBits[group].some((b) => b.id === bit.id)) {
-                groupName = group;
-                break;
-            }
-        }
-
-        if (groupName) {
-            deleteBit(groupName, bit.id);
-        }
-    }
-}
-
-function refreshBitGroups() {
-    bitGroups.innerHTML = "";
-    createBitGroups();
-}
+// BitsManager will be created in initializeSVG after CanvasManager is set up
 
 // Initialize SVG elements using CanvasManager
 function initializeSVG() {
@@ -1035,6 +161,18 @@ function initializeSVG() {
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseup", handleMouseUp);
+
+    // Create BitsManager instance now that CanvasManager is available
+    bitsManager = new BitsManager(mainCanvasManager);
+
+    // Set up callbacks for BitsManager to communicate with main canvas
+    bitsManager.onDrawBitShape = (bit, groupName) =>
+        drawBitShape(
+            bit,
+            groupName,
+            bitsManager.createBitShapeElement.bind(bitsManager)
+        );
+    bitsManager.onUpdateCanvasBits = (bitId) => updateCanvasBitsForBitId(bitId);
 }
 
 // Cycle material anchor
@@ -1220,7 +358,6 @@ function updateBitsPositions() {
 let bitsOnCanvas = [];
 let bitCounter = 0;
 let dragSrcRow = null;
-let selectedBitIndex = null;
 let bitsLayer;
 
 // Alignment states: 'center', 'left', 'right'
@@ -1384,7 +521,7 @@ function updateCanvasBitsForBitId(bitId) {
             if (oldShape) {
                 bit.group.removeChild(oldShape);
             }
-            const newShape = createBitShapeElement(
+            const newShape = bitsManager.createBitShapeElement(
                 updatedBitData,
                 bit.groupName,
                 bit.baseAbsX,
@@ -1407,7 +544,7 @@ function updateCanvasBitsForBitId(bitId) {
 }
 
 // Draw bit shape
-function drawBitShape(bit, groupName) {
+function drawBitShape(bit, groupName, createBitShapeElementFn) {
     const bitsLayer = document.getElementById("bits-layer");
 
     updateMaterialParams();
@@ -1417,7 +554,7 @@ function drawBitShape(bit, groupName) {
     const centerY = materialY;
 
     // create shape at absolute coords, wrap in group so we can translate later
-    const shape = createBitShapeElement(bit, groupName, centerX, centerY);
+    const shape = createBitShapeElementFn(bit, groupName, centerX, centerY);
     const g = document.createElementNS(svgNS, "g");
     g.appendChild(shape);
     // store transform relative to creation point
@@ -1554,13 +691,37 @@ function updateBitsSheet() {
         row.addEventListener("dragover", handleDragOver);
         row.addEventListener("drop", handleDrop);
 
-        // Apply selection style if this is the selected bit
-        if (index === selectedBitIndex) {
+        // Apply selection style if this bit is selected
+        if (selectedBitIndices.includes(index)) {
             row.classList.add("selected-bit-row");
         }
 
         sheetBody.appendChild(row);
     });
+
+    // Add click handler to clear selection when clicking on empty area in right-menu
+    const rightMenu = document.getElementById("right-menu");
+    if (rightMenu) {
+        rightMenu.addEventListener("click", (e) => {
+            // Only clear selection if clicking on the right-menu itself or its padding,
+            // not on interactive elements within it
+            const isInteractiveElement = e.target.closest(
+                "input, button, svg, tr, td, th"
+            );
+            if (!isInteractiveElement) {
+                // Clear all selections
+                selectedBitIndices.forEach((index) => {
+                    resetBitHighlight(index);
+                });
+                selectedBitIndices = [];
+
+                // Update table row highlighting
+                updateBitsSheet();
+                // Update anchor point visibility
+                redrawBitsOnCanvas();
+            }
+        });
+    }
 }
 
 // Delete bit from canvas
@@ -1577,12 +738,12 @@ function deleteBitFromCanvas(index) {
     // Remove from array
     bitsOnCanvas.splice(index, 1);
 
-    // Reset selection if needed
-    if (selectedBitIndex === index) {
-        selectedBitIndex = null;
-    } else if (selectedBitIndex !== null && selectedBitIndex > index) {
-        selectedBitIndex--;
-    }
+    // Update selection indices - remove deleted bit and adjust indices
+    selectedBitIndices = selectedBitIndices
+        .filter((selectedIndex) => selectedIndex !== index) // Remove the deleted bit
+        .map((selectedIndex) =>
+            selectedIndex > index ? selectedIndex - 1 : selectedIndex
+        ); // Adjust indices
 
     // Update table
     updateBitsSheet();
@@ -1615,37 +776,43 @@ function cycleAlignment(index) {
 
     // Update the table to show new alignment button
     updateBitsSheet();
+
+    // Recalculate part shape if part view is enabled
+    if (showPart) updatePartShape();
 }
 
-// Select a bit and highlight it on canvas
+// Select a bit and highlight it on canvas (multi-selection support)
 function selectBit(index) {
-    // Deselect previous bit
-    if (selectedBitIndex !== null && bitsOnCanvas[selectedBitIndex]) {
-        resetBitHighlight(selectedBitIndex);
-    }
+    const indexInSelection = selectedBitIndices.indexOf(index);
 
-    // Select new bit
-    selectedBitIndex = index;
-    const bit = bitsOnCanvas[index];
+    if (indexInSelection !== -1) {
+        // Bit is already selected, deselect it
+        selectedBitIndices.splice(indexInSelection, 1);
+        resetBitHighlight(index);
+    } else {
+        // Bit is not selected, add it to selection
+        selectedBitIndices.push(index);
+        const bit = bitsOnCanvas[index];
 
-    if (bit && bit.group) {
-        // Find the shape element in the group
-        const shape = bit.group.querySelector(".bit-shape");
-        if (shape) {
-            // Store original attributes
-            shape.dataset.originalFill = shape.getAttribute("fill");
-            shape.dataset.originalStroke = shape.getAttribute("stroke");
+        if (bit && bit.group) {
+            // Find the shape element in the group
+            const shape = bit.group.querySelector(".bit-shape");
+            if (shape) {
+                // Store original attributes
+                shape.dataset.originalFill = shape.getAttribute("fill");
+                shape.dataset.originalStroke = shape.getAttribute("stroke");
 
-            // Apply highlight
-            const currentFill = shape.getAttribute("fill");
-            const newFill = currentFill.replace(/0\.\d+\)/, "0.6)"); // Change transparency
-            shape.setAttribute("fill", newFill);
-            shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-            const thickness = Math.max(
-                0.1,
-                0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
-            );
-            shape.setAttribute("stroke-width", thickness);
+                // Apply highlight
+                const currentFill = shape.getAttribute("fill");
+                const newFill = currentFill.replace(/0\.\d+\)/, "0.6)"); // Change transparency
+                shape.setAttribute("fill", newFill);
+                shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                const thickness = Math.max(
+                    0.1,
+                    0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+                );
+                shape.setAttribute("stroke-width", thickness);
+            }
         }
     }
 
@@ -1678,21 +845,6 @@ function resetBitHighlight(index) {
     }
 }
 
-// Clear selection when clicking outside
-document.addEventListener("click", (e) => {
-    // Check if click is inside the table
-    const bitsSheet = document.getElementById("bits-sheet");
-    if (bitsSheet && !bitsSheet.contains(e.target)) {
-        // Clicked outside table
-        if (selectedBitIndex !== null) {
-            resetBitHighlight(selectedBitIndex);
-            selectedBitIndex = null;
-            updateBitsSheet();
-            redrawBitsOnCanvas();
-        }
-    }
-});
-
 function updateBitPosition(index, newX, newY) {
     // update material params to get correct material origin
     updateMaterialParams();
@@ -1702,6 +854,47 @@ function updateBitPosition(index, newX, newY) {
     const materialAnchorY =
         (canvasParameters.height - materialThickness) / 2 +
         materialAnchorOffset.y;
+
+    // If this bit is selected and there are multiple selections, move all selected bits by the same delta
+    if (selectedBitIndices.includes(index) && selectedBitIndices.length > 1) {
+        const bit = bitsOnCanvas[index];
+        const oldX = bit.x;
+        const oldY = bit.y;
+        const deltaX = newX - oldX;
+        const deltaY = newY - oldY;
+
+        // Move all selected bits by the same delta
+        selectedBitIndices.forEach((selectedIndex) => {
+            if (selectedIndex !== index) {
+                // Skip the current bit as it's handled below
+                const selectedBit = bitsOnCanvas[selectedIndex];
+                const selectedNewX = selectedBit.x + deltaX;
+                const selectedNewY = selectedBit.y + deltaY;
+
+                // Update selected bit position
+                const selectedNewAbsX = materialAnchorX + selectedNewX;
+                const selectedNewAbsY = materialAnchorY + selectedNewY;
+                const selectedDx = selectedNewAbsX - selectedBit.baseAbsX;
+                const selectedDy = selectedNewAbsY - selectedBit.baseAbsY;
+
+                selectedBit.group.setAttribute(
+                    "transform",
+                    `translate(${selectedDx}, ${selectedDy})`
+                );
+                selectedBit.x = selectedNewX;
+                selectedBit.y = selectedNewY;
+            }
+        });
+
+        // Update table coordinates for all moved bits
+        selectedBitIndices.forEach((selectedIndex) => {
+            updateTableCoordinates(
+                selectedIndex,
+                bitsOnCanvas[selectedIndex].x,
+                bitsOnCanvas[selectedIndex].y
+            );
+        });
+    }
 
     const bit = bitsOnCanvas[index];
     // compute absolute positions the user expects (relative to material anchor)
@@ -1722,7 +915,8 @@ function updateBitPosition(index, newX, newY) {
     // DO NOT call updateBitsSheet() here - it recreates inputs and breaks focus
     // redraw layer order if needed
     redrawBitsOnCanvas();
-    // Note: updatePartShape() is now called only after movement is complete (in handleMouseUp)
+    // Update part shape if part view is enabled and bits were moved via table coordinates
+    if (showPart) updatePartShape();
 }
 
 function handleDragStart(e) {
@@ -1751,25 +945,17 @@ function handleDrop(e) {
         const [removed] = bitsOnCanvas.splice(srcIndex, 1);
         bitsOnCanvas.splice(destIndex, 0, removed);
 
-        // Update selectedBitIndex if the selected bit was moved
-        if (selectedBitIndex === srcIndex) {
-            selectedBitIndex = destIndex;
-        } else if (selectedBitIndex !== null) {
-            // Adjust selectedBitIndex if another bit moved past it
-            if (
-                srcIndex < destIndex &&
-                selectedBitIndex > srcIndex &&
-                selectedBitIndex <= destIndex
-            ) {
-                selectedBitIndex--;
-            } else if (
-                srcIndex > destIndex &&
-                selectedBitIndex >= destIndex &&
-                selectedBitIndex < srcIndex
-            ) {
-                selectedBitIndex++;
+        // Update selectedBitIndices if selected bits were moved
+        selectedBitIndices = selectedBitIndices.map((selectedIndex) => {
+            if (selectedIndex === srcIndex) {
+                return destIndex; // The moved bit stays selected at new position
+            } else if (selectedIndex > srcIndex && selectedIndex <= destIndex) {
+                return selectedIndex - 1; // Adjust indices when bit moves down
+            } else if (selectedIndex >= destIndex && selectedIndex < srcIndex) {
+                return selectedIndex + 1; // Adjust indices when bit moves up
             }
-        }
+            return selectedIndex;
+        });
 
         // update sheet and canvas
         updateBitsSheet();
@@ -1832,8 +1018,8 @@ function redrawBitsOnCanvas() {
         vertical.setAttribute("stroke-width", thickness);
         anchorPoint.appendChild(vertical);
 
-        // Only show anchor point for selected bit
-        if (index === selectedBitIndex) {
+        // Only show anchor point for selected bits
+        if (selectedBitIndices.includes(index)) {
             anchorPoint.setAttribute("visibility", "visible");
         } else {
             anchorPoint.setAttribute("visibility", "hidden");
@@ -1922,38 +1108,58 @@ function fitToScale() {
 }
 
 function zoomToSelected() {
-    if (selectedBitIndex === null || !bitsOnCanvas[selectedBitIndex]) return;
+    if (selectedBitIndices.length === 0) return;
 
-    const bit = bitsOnCanvas[selectedBitIndex];
     const materialX = (canvasParameters.width - materialWidth) / 2;
     const materialY = (canvasParameters.height - materialThickness) / 2;
     const anchorOffset = getMaterialAnchorOffset();
     const anchorX = materialX + anchorOffset.x;
     const anchorY = materialY + anchorOffset.y;
 
-    // Calculate the absolute position of the selected bit
-    const bitAbsX = anchorX + bit.x;
-    const bitAbsY = anchorY + bit.y;
+    // Calculate bounding box for all selected bits
+    let minX = Infinity,
+        maxX = -Infinity;
+    let minY = Infinity,
+        maxY = -Infinity;
 
-    const bitData = bit.bitData;
-    const bitWidth = bitData.diameter || 0;
-    const bitHeight = bitData.length || 0;
+    selectedBitIndices.forEach((index) => {
+        const bit = bitsOnCanvas[index];
+        if (bit) {
+            const bitData = bit.bitData;
+            const bitAbsX = anchorX + bit.x;
+            const bitAbsY = anchorY + bit.y;
+            const bitWidth = bitData.diameter || 0;
+            const bitHeight = bitData.length || 0;
 
-    // Calculate zoom level to fit the selected bit
-    const availableWidth = canvasParameters.width - 100; // 20px padding
-    const availableHeight = canvasParameters.height - 100; // 20px padding
-    const zoomX = availableWidth / bitWidth;
-    const zoomY = availableHeight / bitHeight;
-    const zoomLevel = Math.min(zoomX, zoomY); // Allow zoom in for small bits
+            minX = Math.min(minX, bitAbsX - bitWidth / 2);
+            maxX = Math.max(maxX, bitAbsX + bitWidth / 2);
+            minY = Math.min(minY, bitAbsY - bitHeight);
+            maxY = Math.max(maxY, bitAbsY);
+        }
+    });
 
-    // Center on the selected bit
-    const panX = bitAbsX;
-    const panY = bitAbsY - bitData.length / 2; // Center vertically on the bit
+    if (minX === Infinity) return; // No valid bits found
+
+    // Add padding
+    const padding = 20;
+    const contentWidth = maxX - minX + 2 * padding;
+    const contentHeight = maxY - minY + 2 * padding;
+
+    // Calculate zoom level to fit all selected bits
+    const availableWidth = canvasParameters.width - 100;
+    const availableHeight = canvasParameters.height - 100;
+    const zoomX = availableWidth / contentWidth;
+    const zoomY = availableHeight / contentHeight;
+    const zoomLevel = Math.min(zoomX, zoomY);
+
+    // Center on the center of all selected bits
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
 
     // Set zoom and pan using CanvasManager
     mainCanvasManager.zoomLevel = zoomLevel;
-    mainCanvasManager.panX = panX;
-    mainCanvasManager.panY = panY;
+    mainCanvasManager.panX = centerX;
+    mainCanvasManager.panY = centerY;
     mainCanvasManager.updateViewBox();
 }
 
@@ -1993,25 +1199,28 @@ function handleMouseDown(e) {
         // Left mouse button
         const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
 
-        // Check if clicking on a selected bit
-        if (selectedBitIndex !== null && bitsOnCanvas[selectedBitIndex]) {
-            const bit = bitsOnCanvas[selectedBitIndex];
-            const materialX = (canvasParameters.width - materialWidth) / 2;
-            const materialY = (canvasParameters.height - materialThickness) / 2;
-            const bitAbsX = materialX + bit.x;
-            const bitAbsY = materialY + bit.y;
+        // Check if clicking on any selected bit
+        for (const selectedIndex of selectedBitIndices) {
+            const bit = bitsOnCanvas[selectedIndex];
+            if (bit) {
+                const materialX = (canvasParameters.width - materialWidth) / 2;
+                const materialY =
+                    (canvasParameters.height - materialThickness) / 2;
+                const bitAbsX = materialX + bit.x;
+                const bitAbsY = materialY + bit.y;
 
-            // Check if click is near the bit (within 20px)
-            const distance = Math.sqrt(
-                (svgCoords.x - bitAbsX) ** 2 + (svgCoords.y - bitAbsY) ** 2
-            );
-            if (distance <= 20) {
-                isDraggingBit = true;
-                draggedBitIndex = selectedBitIndex;
-                dragStartX = svgCoords.x;
-                dragStartY = svgCoords.y;
-                canvas.style.cursor = "grabbing";
-                return;
+                // Check if click is near the bit (within 20px)
+                const distance = Math.sqrt(
+                    (svgCoords.x - bitAbsX) ** 2 + (svgCoords.y - bitAbsY) ** 2
+                );
+                if (distance <= 20) {
+                    isDraggingBit = true;
+                    draggedBitIndex = selectedIndex; // Use the clicked bit as the reference for dragging
+                    dragStartX = svgCoords.x;
+                    dragStartY = svgCoords.y;
+                    canvas.style.cursor = "grabbing";
+                    return;
+                }
             }
         }
 
@@ -2277,8 +1486,10 @@ function togglePartView() {
 
 // Initialize
 function initialize() {
-    createBitGroups();
     initializeSVG();
+
+    // Now that bitsManager is created, initialize the bit groups
+    bitsManager.createBitGroups();
 
     // Add event listeners for material parameter inputs
     materialWidthInput.addEventListener("input", updateMaterialParams);

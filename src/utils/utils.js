@@ -13,3 +13,18 @@ export function distancePtToPt(p1, p2) {
     const dy = p2.y - p1.y;
     return Math.sqrt(dx * dx + dy * dy);
 }
+
+/**
+ * Evaluates mathematical expressions in strings.
+ *
+ * @param {string|number} value - The value to evaluate. If it's a string, evaluates it as a math expression. If not a string, returns as-is.
+ * @returns {string|number} The evaluated result or original value if evaluation fails.
+ */
+export function evaluateMathExpression(value) {
+    if (!value || typeof value !== "string") return value;
+    try {
+        return math.evaluate(value);
+    } catch (e) {
+        return value; // if not a valid expression, return as is
+    }
+}
