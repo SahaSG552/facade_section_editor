@@ -1675,10 +1675,10 @@ function exportToDXF() {
     }
 
     // Get result polygon from Clipper
-    const resultPolygon = calculateResultPolygon();
+    const clipperResult = calculateResultPolygon();
 
     // Export to DXF
-    const dxfContent = dxfExporter.exportToDXF(bitsOnCanvas, resultPolygon);
+    const dxfContent = dxfExporter.exportToDXF(bitsOnCanvas, clipperResult);
 
     // Download the file
     dxfExporter.downloadDXF(dxfContent);

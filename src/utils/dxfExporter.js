@@ -12,10 +12,10 @@ class DXFExporter {
     /**
      * Export bits on canvas to DXF format
      * @param {Array} bitsOnCanvas - Array of bit objects from the canvas
-     * @param {Array} resultPolygon - Result polygon after boolean operations
+     * @param {Array} clipperResult - Result polygon from Clipper operations
      * @returns {string} DXF content as string
      */
-    exportToDXF(bitsOnCanvas, resultPolygon) {
+    exportToDXF(bitsOnCanvas, clipperResult) {
         this.dxfContent = [];
         this.layerCounter = 0;
 
@@ -29,7 +29,7 @@ class DXFExporter {
         this.writeBlocks();
 
         // DXF Entities (the actual geometry)
-        this.writeEntities(bitsOnCanvas, resultPolygon);
+        this.writeEntities(bitsOnCanvas, clipperResult);
 
         // DXF Objects
         this.writeObjects();
@@ -79,13 +79,13 @@ class DXFExporter {
         this.dxfContent.push("2");
         this.dxfContent.push("LAYER");
         this.dxfContent.push("70");
-        this.dxfContent.push((bitsOnCanvas.length + 2).toString()); // +2 for Result and 0 layers
+        this.dxfContent.push((bitsOnCanvas.length + 1).toString()); // +1 for Result layer
 
         // Layer 0 (default)
         this.writeLayer("0", 7, 0, 0, 0); // White color
 
-        // Result layer (final shape after boolean operations)
-        this.writeLayer("Result", 3, 0, 0, 0); // Green color
+        // Result layer for Clipper
+        this.writeLayer("Clipper_Result", 3, 0, 0, 0); // Green color for Clipper
 
         // Bit layers
         bitsOnCanvas.forEach((bit, index) => {
@@ -137,14 +137,14 @@ class DXFExporter {
     /**
      * Write DXF entities section
      */
-    writeEntities(bitsOnCanvas, resultPolygon) {
+    writeEntities(bitsOnCanvas, clipperResult) {
         this.dxfContent.push("0");
         this.dxfContent.push("SECTION");
         this.dxfContent.push("2");
         this.dxfContent.push("ENTITIES");
 
-        // Write result polygon after boolean operations
-        this.writeResultPolygon(resultPolygon);
+        // Write result polygon from Clipper
+        this.writeResultPolygon(clipperResult, "Clipper_Result");
 
         // Write bit shapes
         bitsOnCanvas.forEach((bit, index) => {
@@ -404,8 +404,9 @@ class DXFExporter {
     /**
      * Write result polygon as DXF LWPOLYLINE
      * @param {Array} resultPolygon - Array of paths from Clipper result
+     * @param {string} layerName - Layer name for the result
      */
-    writeResultPolygon(resultPolygon) {
+    writeResultPolygon(resultPolygon, layerName = "Result") {
         if (!resultPolygon || resultPolygon.length === 0) return;
 
         const scale = 1 / 1000; // Clipper scale factor
@@ -425,7 +426,7 @@ class DXFExporter {
             this.dxfContent.push("0");
             this.dxfContent.push("LWPOLYLINE");
             this.dxfContent.push("8"); // Layer
-            this.dxfContent.push("Result");
+            this.dxfContent.push(layerName);
             this.dxfContent.push("90"); // Number of vertices
             this.dxfContent.push(orderedPoints.length.toString());
             this.dxfContent.push("70"); // Flags (1 = closed)
