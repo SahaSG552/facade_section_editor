@@ -7,6 +7,7 @@ class DXFExporter {
     constructor() {
         this.dxfContent = [];
         this.layerCounter = 0;
+        this.handleCounter = 0x100; // Start handles from 256
     }
 
     /**
@@ -21,6 +22,9 @@ class DXFExporter {
 
         // DXF Header
         this.writeHeader();
+
+        // DXF Classes (required for AutoCAD compatibility)
+        this.writeClasses();
 
         // DXF Tables (Layers)
         this.writeTables(bitsOnCanvas);
@@ -53,6 +57,10 @@ class DXFExporter {
         this.dxfContent.push("1");
         this.dxfContent.push("AC1021"); // AutoCAD 2018
         this.dxfContent.push("9");
+        this.dxfContent.push("$DWGCODEPAGE");
+        this.dxfContent.push("3");
+        this.dxfContent.push("ANSI_1251");
+        this.dxfContent.push("9");
         this.dxfContent.push("$INSBASE");
         this.dxfContent.push("10");
         this.dxfContent.push("0.0");
@@ -60,6 +68,46 @@ class DXFExporter {
         this.dxfContent.push("0.0");
         this.dxfContent.push("30");
         this.dxfContent.push("0.0");
+        this.dxfContent.push("9");
+        this.dxfContent.push("$EXTMIN");
+        this.dxfContent.push("10");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("20");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("30");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("9");
+        this.dxfContent.push("$EXTMAX");
+        this.dxfContent.push("10");
+        this.dxfContent.push("1000.0");
+        this.dxfContent.push("20");
+        this.dxfContent.push("1000.0");
+        this.dxfContent.push("30");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("9");
+        this.dxfContent.push("$LIMMIN");
+        this.dxfContent.push("10");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("20");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("9");
+        this.dxfContent.push("$LIMMAX");
+        this.dxfContent.push("10");
+        this.dxfContent.push("420.0");
+        this.dxfContent.push("20");
+        this.dxfContent.push("297.0");
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDSEC");
+    }
+
+    /**
+     * Write DXF classes section (required for AutoCAD compatibility)
+     */
+    writeClasses() {
+        this.dxfContent.push("0");
+        this.dxfContent.push("SECTION");
+        this.dxfContent.push("2");
+        this.dxfContent.push("CLASSES");
         this.dxfContent.push("0");
         this.dxfContent.push("ENDSEC");
     }
@@ -79,7 +127,7 @@ class DXFExporter {
         this.dxfContent.push("2");
         this.dxfContent.push("LAYER");
         this.dxfContent.push("70");
-        this.dxfContent.push((bitsOnCanvas.length + 1).toString()); // +1 for Result layer
+        this.dxfContent.push((bitsOnCanvas.length + 2).toString()); // +1 for layer 0, +1 for Result layer
 
         // Layer 0 (default)
         this.writeLayer("0", 7, 0, 0, 0); // White color
@@ -98,6 +146,17 @@ class DXFExporter {
 
         this.dxfContent.push("0");
         this.dxfContent.push("ENDTAB");
+
+        // Add other required tables with minimal entries
+        this.addBLOCKRECORDTable();
+        this.addLTYPETable();
+        this.addSTYLETable();
+        this.addVPORTTable();
+        this.addEmptyTable("VIEW");
+        this.addEmptyTable("UCS");
+        this.addAPPIDTable();
+        this.addDIMSTYLETable();
+
         this.dxfContent.push("0");
         this.dxfContent.push("ENDSEC");
     }
@@ -106,8 +165,16 @@ class DXFExporter {
      * Write a single layer definition
      */
     writeLayer(name, colorIndex, lineType = 0, lineWeight = 0, plotFlag = 0) {
+        const handle = this.getNextHandle();
+
         this.dxfContent.push("0");
         this.dxfContent.push("LAYER");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbSymbolTableRecord");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbLayerTableRecord");
         this.dxfContent.push("2");
         this.dxfContent.push(name);
         this.dxfContent.push("70");
@@ -115,11 +182,335 @@ class DXFExporter {
         this.dxfContent.push("62");
         this.dxfContent.push(colorIndex.toString());
         this.dxfContent.push("6");
-        this.dxfContent.push("Continuous");
+        this.dxfContent.push("CONTINUOUS");
         this.dxfContent.push("290");
         this.dxfContent.push("1"); // Layer is on
-        this.dxfContent.push("370");
-        this.dxfContent.push(lineWeight.toString());
+        this.dxfContent.push("390");
+        this.dxfContent.push("0"); // Plot style handle
+    }
+
+    /**
+     * Add LTYPE table with CONTINUOUS linetype
+     */
+    addLTYPETable() {
+        this.dxfContent.push("0");
+        this.dxfContent.push("TABLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push("LTYPE");
+        this.dxfContent.push("70");
+        this.dxfContent.push("1"); // Number of linetypes
+
+        // CONTINUOUS linetype
+        const ltypeHandle = this.getNextHandle();
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("LTYPE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(ltypeHandle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbSymbolTableRecord");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbLinetypeTableRecord");
+        this.dxfContent.push("2");
+        this.dxfContent.push("CONTINUOUS");
+        this.dxfContent.push("70");
+        this.dxfContent.push("0");
+        this.dxfContent.push("3");
+        this.dxfContent.push("");
+        this.dxfContent.push("72");
+        this.dxfContent.push("65");
+        this.dxfContent.push("73");
+        this.dxfContent.push("0");
+        this.dxfContent.push("40");
+        this.dxfContent.push("0.0");
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDTAB");
+    }
+
+    /**
+     * Add STYLE table with STANDARD text style
+     */
+    addSTYLETable() {
+        this.dxfContent.push("0");
+        this.dxfContent.push("TABLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push("STYLE");
+        this.dxfContent.push("70");
+        this.dxfContent.push("1"); // Number of styles
+
+        // STANDARD style
+        const styleHandle = this.getNextHandle();
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("STYLE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(styleHandle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbSymbolTableRecord");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbTextStyleTableRecord");
+        this.dxfContent.push("2");
+        this.dxfContent.push("STANDARD");
+        this.dxfContent.push("70");
+        this.dxfContent.push("0");
+        this.dxfContent.push("40");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("41");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("50");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("71");
+        this.dxfContent.push("0");
+        this.dxfContent.push("42");
+        this.dxfContent.push("2.5");
+        this.dxfContent.push("3");
+        this.dxfContent.push("txt");
+        this.dxfContent.push("4");
+        this.dxfContent.push("");
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDTAB");
+    }
+
+    /**
+     * Add APPID table with ACAD application
+     */
+    addAPPIDTable() {
+        this.dxfContent.push("0");
+        this.dxfContent.push("TABLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push("APPID");
+        this.dxfContent.push("70");
+        this.dxfContent.push("1"); // Number of app IDs
+
+        // ACAD application
+        const appidHandle = this.getNextHandle();
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("APPID");
+        this.dxfContent.push("5");
+        this.dxfContent.push(appidHandle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbSymbolTableRecord");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbRegAppTableRecord");
+        this.dxfContent.push("2");
+        this.dxfContent.push("ACAD");
+        this.dxfContent.push("70");
+        this.dxfContent.push("0");
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDTAB");
+    }
+
+    /**
+     * Add BLOCK_RECORD table with model/paper space
+     */
+    addBLOCKRECORDTable() {
+        this.dxfContent.push("0");
+        this.dxfContent.push("TABLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push("BLOCK_RECORD");
+        this.dxfContent.push("70");
+        this.dxfContent.push("2"); // Number of block records
+
+        // *MODEL_SPACE block record
+        this.dxfContent.push("0");
+        this.dxfContent.push("BLOCK_RECORD");
+        this.dxfContent.push("2");
+        this.dxfContent.push("*MODEL_SPACE");
+
+        // *PAPER_SPACE block record
+        this.dxfContent.push("0");
+        this.dxfContent.push("BLOCK_RECORD");
+        this.dxfContent.push("2");
+        this.dxfContent.push("*PAPER_SPACE");
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDTAB");
+    }
+
+    /**
+     * Add VPORT table with active viewport
+     */
+    addVPORTTable() {
+        this.dxfContent.push("0");
+        this.dxfContent.push("TABLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push("VPORT");
+        this.dxfContent.push("70");
+        this.dxfContent.push("1"); // Number of viewports
+
+        // *ACTIVE viewport
+        this.dxfContent.push("0");
+        this.dxfContent.push("VPORT");
+        this.dxfContent.push("2");
+        this.dxfContent.push("*ACTIVE");
+        this.dxfContent.push("70");
+        this.dxfContent.push("0");
+        this.dxfContent.push("10");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("20");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("11");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("21");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("12");
+        this.dxfContent.push("400.0");
+        this.dxfContent.push("22");
+        this.dxfContent.push("-295.0");
+        this.dxfContent.push("32");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("13");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("23");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("14");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("24");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("15");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("25");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("16");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("26");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("36");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("17");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("27");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("37");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("40");
+        this.dxfContent.push("200.0");
+        this.dxfContent.push("41");
+        this.dxfContent.push("2.0");
+        this.dxfContent.push("42");
+        this.dxfContent.push("50.0");
+        this.dxfContent.push("43");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("44");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("50");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("51");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("71");
+        this.dxfContent.push("0");
+        this.dxfContent.push("72");
+        this.dxfContent.push("100");
+        this.dxfContent.push("73");
+        this.dxfContent.push("1");
+        this.dxfContent.push("74");
+        this.dxfContent.push("1");
+        this.dxfContent.push("75");
+        this.dxfContent.push("0");
+        this.dxfContent.push("76");
+        this.dxfContent.push("0");
+        this.dxfContent.push("77");
+        this.dxfContent.push("0");
+        this.dxfContent.push("78");
+        this.dxfContent.push("0");
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDTAB");
+    }
+
+    /**
+     * Add DIMSTYLE table with STANDARD dimension style
+     */
+    addDIMSTYLETable() {
+        this.dxfContent.push("0");
+        this.dxfContent.push("TABLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push("DIMSTYLE");
+        this.dxfContent.push("70");
+        this.dxfContent.push("1"); // Number of dimension styles
+
+        // STANDARD dimension style
+        this.dxfContent.push("0");
+        this.dxfContent.push("DIMSTYLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push("STANDARD");
+        this.dxfContent.push("70");
+        this.dxfContent.push("0");
+        this.dxfContent.push("3");
+        this.dxfContent.push("");
+        this.dxfContent.push("40");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("41");
+        this.dxfContent.push("0.18");
+        this.dxfContent.push("42");
+        this.dxfContent.push("0.0625");
+        this.dxfContent.push("44");
+        this.dxfContent.push("0.18");
+        this.dxfContent.push("47");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("48");
+        this.dxfContent.push("0.0");
+        this.dxfContent.push("73");
+        this.dxfContent.push("1");
+        this.dxfContent.push("74");
+        this.dxfContent.push("1");
+        this.dxfContent.push("75");
+        this.dxfContent.push("0");
+        this.dxfContent.push("76");
+        this.dxfContent.push("0");
+        this.dxfContent.push("77");
+        this.dxfContent.push("0");
+        this.dxfContent.push("140");
+        this.dxfContent.push("0.18");
+        this.dxfContent.push("141");
+        this.dxfContent.push("0.09");
+        this.dxfContent.push("144");
+        this.dxfContent.push("1.0");
+        this.dxfContent.push("147");
+        this.dxfContent.push("0.0625");
+        this.dxfContent.push("173");
+        this.dxfContent.push("0");
+        this.dxfContent.push("174");
+        this.dxfContent.push("0");
+        this.dxfContent.push("176");
+        this.dxfContent.push("0");
+        this.dxfContent.push("177");
+        this.dxfContent.push("0");
+        this.dxfContent.push("178");
+        this.dxfContent.push("0");
+        this.dxfContent.push("277");
+        this.dxfContent.push("2");
+        this.dxfContent.push("278");
+        this.dxfContent.push("46");
+        this.dxfContent.push("281");
+        this.dxfContent.push("0");
+        this.dxfContent.push("282");
+        this.dxfContent.push("0");
+        this.dxfContent.push("271");
+        this.dxfContent.push("4");
+        this.dxfContent.push("276");
+        this.dxfContent.push("0");
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDTAB");
+    }
+
+    /**
+     * Add an empty table (required for DXF structure)
+     */
+    addEmptyTable(tableType) {
+        this.dxfContent.push("0");
+        this.dxfContent.push("TABLE");
+        this.dxfContent.push("2");
+        this.dxfContent.push(tableType);
+        this.dxfContent.push("70");
+        this.dxfContent.push("0"); // No entries in this table
+        this.dxfContent.push("0");
+        this.dxfContent.push("ENDTAB");
     }
 
     /**
@@ -248,10 +639,24 @@ class DXFExporter {
         const x2 = x + width;
         const y2 = convertY(y + height);
 
+        const handle = this.getNextHandle();
+
         this.dxfContent.push("0");
         this.dxfContent.push("LWPOLYLINE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
         this.dxfContent.push("8");
         this.dxfContent.push(layerName);
+        this.dxfContent.push("6");
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("62");
+        this.dxfContent.push("256");
+        this.dxfContent.push("370");
+        this.dxfContent.push("-1");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbPolyline");
         this.dxfContent.push("90");
         this.dxfContent.push("4");
         this.dxfContent.push("70");
@@ -297,10 +702,24 @@ class DXFExporter {
         // Ensure counter-clockwise order for DXF (right-hand rule)
         const orderedPoints = this.ensureCounterClockwise(points);
 
+        const handle = this.getNextHandle();
+
         this.dxfContent.push("0");
         this.dxfContent.push("LWPOLYLINE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
         this.dxfContent.push("8");
         this.dxfContent.push(layerName);
+        this.dxfContent.push("6");
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("62");
+        this.dxfContent.push("256");
+        this.dxfContent.push("370");
+        this.dxfContent.push("-1");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbPolyline");
         this.dxfContent.push("90");
         this.dxfContent.push(orderedPoints.length.toString());
         this.dxfContent.push("70");
@@ -361,10 +780,24 @@ class DXFExporter {
         }
 
         // Write as LWPOLYLINE
+        const handle = this.getNextHandle();
+
         this.dxfContent.push("0");
         this.dxfContent.push("LWPOLYLINE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
         this.dxfContent.push("8");
         this.dxfContent.push(layerName);
+        this.dxfContent.push("6");
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("62");
+        this.dxfContent.push("256");
+        this.dxfContent.push("370");
+        this.dxfContent.push("-1");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbPolyline");
         this.dxfContent.push("90");
         this.dxfContent.push(points.length.toString());
         this.dxfContent.push("70");
@@ -387,10 +820,24 @@ class DXFExporter {
         const cy = parseFloat(svgElement.getAttribute("cy") || 0) + offsetY;
         const r = parseFloat(svgElement.getAttribute("r") || 0);
 
+        const handle = this.getNextHandle();
+
         this.dxfContent.push("0");
         this.dxfContent.push("CIRCLE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
         this.dxfContent.push("8");
         this.dxfContent.push(layerName);
+        this.dxfContent.push("6");
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("62");
+        this.dxfContent.push("256");
+        this.dxfContent.push("370");
+        this.dxfContent.push("-1");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbCircle");
         this.dxfContent.push("10");
         this.dxfContent.push(cx.toString());
         this.dxfContent.push("20");
@@ -423,10 +870,24 @@ class DXFExporter {
             // Ensure counter-clockwise order for DXF
             const orderedPoints = this.ensureCounterClockwise(points);
 
+            const handle = this.getNextHandle();
+
             this.dxfContent.push("0");
             this.dxfContent.push("LWPOLYLINE");
+            this.dxfContent.push("5");
+            this.dxfContent.push(handle);
+            this.dxfContent.push("100");
+            this.dxfContent.push("AcDbEntity");
             this.dxfContent.push("8"); // Layer
             this.dxfContent.push(layerName);
+            this.dxfContent.push("6");
+            this.dxfContent.push("BYLAYER");
+            this.dxfContent.push("62");
+            this.dxfContent.push("256");
+            this.dxfContent.push("370");
+            this.dxfContent.push("-1");
+            this.dxfContent.push("100");
+            this.dxfContent.push("AcDbPolyline");
             this.dxfContent.push("90"); // Number of vertices
             this.dxfContent.push(orderedPoints.length.toString());
             this.dxfContent.push("70"); // Flags (1 = closed)
@@ -637,10 +1098,24 @@ class DXFExporter {
      * @param {string} layerName - Layer name
      */
     writeDXFLine(start, end, layerName) {
+        const handle = this.getNextHandle();
+
         this.dxfContent.push("0");
         this.dxfContent.push("LINE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
         this.dxfContent.push("8");
         this.dxfContent.push(layerName);
+        this.dxfContent.push("6");
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("62");
+        this.dxfContent.push("256");
+        this.dxfContent.push("370");
+        this.dxfContent.push("-1");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbLine");
         this.dxfContent.push("10"); // Start X
         this.dxfContent.push(start.x.toString());
         this.dxfContent.push("20"); // Start Y
@@ -761,10 +1236,24 @@ class DXFExporter {
      * @param {string} layerName - Layer name
      */
     writeDXFArc(arc, layerName) {
+        const handle = this.getNextHandle();
+
         this.dxfContent.push("0");
         this.dxfContent.push("ARC");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
         this.dxfContent.push("8");
         this.dxfContent.push(layerName);
+        this.dxfContent.push("6");
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("62");
+        this.dxfContent.push("256");
+        this.dxfContent.push("370");
+        this.dxfContent.push("-1");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbCircle");
         this.dxfContent.push("10"); // Center X
         this.dxfContent.push(arc.centerX.toString());
         this.dxfContent.push("20"); // Center Y
@@ -773,6 +1262,8 @@ class DXFExporter {
         this.dxfContent.push("0.0");
         this.dxfContent.push("40"); // Radius
         this.dxfContent.push(arc.radius.toString());
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbArc");
         this.dxfContent.push("50"); // Start angle
         this.dxfContent.push(arc.startAngle.toString());
         this.dxfContent.push("51"); // End angle
@@ -800,6 +1291,16 @@ class DXFExporter {
         }
 
         return points;
+    }
+
+    /**
+     * Get next unique handle for entities
+     * @returns {string} Hexadecimal handle
+     */
+    getNextHandle() {
+        const handle = this.handleCounter.toString(16).toUpperCase();
+        this.handleCounter++;
+        return handle;
     }
 
     /**
