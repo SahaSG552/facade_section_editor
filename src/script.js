@@ -6,6 +6,7 @@ import {
 import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
+import dxfExporter from "./utils/dxfExporter.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -163,6 +164,11 @@ function initializeSVG() {
     const bitsBtn = document.getElementById("bits-btn");
     bitsBtn.addEventListener("click", toggleBitsVisibility);
     bitsBtn.classList.add("bits-visible"); // Initial state - bits are visible
+
+    // Setup DXF export button
+    document
+        .getElementById("export-dxf-btn")
+        .addEventListener("click", exportToDXF);
 
     // Add mouse event listeners for bit dragging
     canvas.addEventListener("mousedown", handleMouseDown);
@@ -1621,6 +1627,32 @@ function initialize() {
         );
         updateMaterialParams();
     });
+}
+
+// Export to DXF function
+function exportToDXF() {
+    if (bitsOnCanvas.length === 0) {
+        alert("No bits on canvas to export. Please add some bits first.");
+        return;
+    }
+
+    // Prepare material parameters
+    const materialParams = {
+        width: materialWidth,
+        height: materialThickness,
+    };
+
+    // Export to DXF
+    const dxfContent = dxfExporter.exportToDXF(
+        bitsOnCanvas,
+        materialParams,
+        materialAnchor
+    );
+
+    // Download the file
+    dxfExporter.downloadDXF(dxfContent);
+
+    console.log("DXF export completed. File downloaded.");
 }
 
 // Call initialize function when the page loads
