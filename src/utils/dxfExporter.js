@@ -6,7 +6,6 @@
 class DXFExporter {
     constructor() {
         this.dxfContent = [];
-        this.layerCounter = 0;
         this.handleCounter = 0x100; // Start handles from 256
     }
 
@@ -18,7 +17,6 @@ class DXFExporter {
      */
     exportToDXF(bitsOnCanvas, clipperResult) {
         this.dxfContent = [];
-        this.layerCounter = 0;
 
         // DXF Header
         this.writeHeader();
@@ -29,7 +27,7 @@ class DXFExporter {
         // DXF Tables (Layers)
         this.writeTables(bitsOnCanvas);
 
-        // DXF Blocks (empty for now)
+        // DXF Blocks (empty)
         this.writeBlocks();
 
         // DXF Entities (the actual geometry)
@@ -735,7 +733,7 @@ class DXFExporter {
     }
 
     /**
-     * Write SVG path as DXF entities
+     * Write SVG path as DXF POLYLINE with bulge values for arcs
      */
     writeSVGPath(svgElement, offsetX, offsetY, layerName, convertY) {
         const d = svgElement.getAttribute("d") || "";
@@ -749,67 +747,9 @@ class DXFExporter {
         );
 
         if (segments.length > 0) {
-            // Write each segment as appropriate DXF entity
-            segments.forEach((segment) => {
-                if (segment.type === "line") {
-                    this.writeDXFLine(segment.start, segment.end, layerName);
-                } else if (segment.type === "arc") {
-                    this.writeDXFArc(segment.arc, layerName);
-                }
-            });
-            return;
+            // Write as single POLYLINE with bulge values for arcs
+            this.writePathAsPolyline(segments, layerName);
         }
-
-        // Fallback: sample the path at multiple points
-        const pathElement = svgElement;
-        const pathLength = pathElement.getTotalLength();
-
-        if (pathLength === 0) return;
-
-        // Sample the path at regular intervals
-        const numPoints = Math.max(10, Math.floor(pathLength / 5)); // Sample every 5 units
-        const points = [];
-
-        for (let i = 0; i <= numPoints; i++) {
-            const length = (i / numPoints) * pathLength;
-            const point = pathElement.getPointAtLength(length);
-            points.push({
-                x: point.x + offsetX,
-                y: convertY(point.y + offsetY),
-            });
-        }
-
-        // Write as LWPOLYLINE
-        const handle = this.getNextHandle();
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("LWPOLYLINE");
-        this.dxfContent.push("5");
-        this.dxfContent.push(handle);
-        this.dxfContent.push("100");
-        this.dxfContent.push("AcDbEntity");
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("6");
-        this.dxfContent.push("BYLAYER");
-        this.dxfContent.push("62");
-        this.dxfContent.push("256");
-        this.dxfContent.push("370");
-        this.dxfContent.push("-1");
-        this.dxfContent.push("100");
-        this.dxfContent.push("AcDbPolyline");
-        this.dxfContent.push("90");
-        this.dxfContent.push(points.length.toString());
-        this.dxfContent.push("70");
-        this.dxfContent.push("0"); // Not closed
-
-        // Vertices
-        points.forEach((point) => {
-            this.dxfContent.push("10");
-            this.dxfContent.push(point.x.toString());
-            this.dxfContent.push("20");
-            this.dxfContent.push(point.y.toString());
-        });
     }
 
     /**
@@ -1092,56 +1032,17 @@ class DXFExporter {
     }
 
     /**
-     * Write DXF LINE entity
-     * @param {Object} start - Start point {x, y}
-     * @param {Object} end - End point {x, y}
-     * @param {string} layerName - Layer name
-     */
-    writeDXFLine(start, end, layerName) {
-        const handle = this.getNextHandle();
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("LINE");
-        this.dxfContent.push("5");
-        this.dxfContent.push(handle);
-        this.dxfContent.push("100");
-        this.dxfContent.push("AcDbEntity");
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("6");
-        this.dxfContent.push("BYLAYER");
-        this.dxfContent.push("62");
-        this.dxfContent.push("256");
-        this.dxfContent.push("370");
-        this.dxfContent.push("-1");
-        this.dxfContent.push("100");
-        this.dxfContent.push("AcDbLine");
-        this.dxfContent.push("10"); // Start X
-        this.dxfContent.push(start.x.toString());
-        this.dxfContent.push("20"); // Start Y
-        this.dxfContent.push(start.y.toString());
-        this.dxfContent.push("30"); // Start Z
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("11"); // End X
-        this.dxfContent.push(end.x.toString());
-        this.dxfContent.push("21"); // End Y
-        this.dxfContent.push(end.y.toString());
-        this.dxfContent.push("31"); // End Z
-        this.dxfContent.push("0.0");
-    }
-
-    /**
-     * Convert SVG arc parameters to DXF arc parameters
-     * @param {number} x1 - Start point X
-     * @param {number} y1 - Start point Y
-     * @param {number} x2 - End point X
-     * @param {number} y2 - End point Y
-     * @param {number} rx - Arc radius X
-     * @param {number} ry - Arc radius Y
-     * @param {number} xAxisRotation - Rotation angle
+     * Convert SVG arc to DXF polyline arc parameters
+     * @param {number} x1 - Start X
+     * @param {number} y1 - Start Y
+     * @param {number} x2 - End X
+     * @param {number} y2 - End Y
+     * @param {number} rx - Radius X
+     * @param {number} ry - Radius Y
+     * @param {number} xAxisRotation - Rotation
      * @param {number} largeArcFlag - Large arc flag
-     * @param {number} sweepFlag - Sweep flag
-     * @returns {Object|null} DXF arc parameters or null if conversion fails
+     * @param {number} sweepFlag - Direction flag
+     * @returns {Object|null} Arc parameters or null
      */
     svgArcToDXFArc(
         x1,
@@ -1154,92 +1055,123 @@ class DXFExporter {
         largeArcFlag,
         sweepFlag
     ) {
-        // For simplicity, assume circular arcs (rx === ry)
-        // and no rotation (xAxisRotation === 0)
+        // Only support circular arcs without rotation
         if (Math.abs(rx - ry) > 0.001 || Math.abs(xAxisRotation) > 0.001) {
-            return null; // Fallback to polyline for complex cases
+            return null;
         }
 
         const radius = rx;
-
-        // Calculate arc center
         const dx = x2 - x1;
         const dy = y2 - y1;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
         if (distance === 0 || radius === 0) return null;
 
-        // Calculate the distance from midpoint to center
         const halfDistance = distance / 2;
         const height = Math.sqrt(radius * radius - halfDistance * halfDistance);
 
-        // Determine center position based on sweep flag
         const midX = (x1 + x2) / 2;
         const midY = (y1 + y2) / 2;
 
-        // Perpendicular vector
         const perpX = -dy / distance;
         const perpY = dx / distance;
 
-        // Center offset - SVG sweepFlag=1 means clockwise, sweepFlag=0 means counter-clockwise
-        // For DXF we need to ensure proper arc direction
         const centerOffset = height * (sweepFlag ? -1 : 1);
         const centerX = midX + perpX * centerOffset;
         const centerY = midY + perpY * centerOffset;
 
-        // Calculate start and end angles
         let startAngle =
             Math.atan2(y1 - centerY, x1 - centerX) * (180 / Math.PI);
         let endAngle = Math.atan2(y2 - centerY, x2 - centerX) * (180 / Math.PI);
 
-        // Normalize angles to 0-360 range
-        const normalizeAngle = (angle) => {
-            while (angle < 0) angle += 360;
-            while (angle >= 360) angle -= 360;
-            return angle;
-        };
-
+        // Normalize angles to 0-360
+        const normalizeAngle = (angle) => ((angle % 360) + 360) % 360;
         startAngle = normalizeAngle(startAngle);
         endAngle = normalizeAngle(endAngle);
 
-        // DXF ARC always draws counter-clockwise
-        // If SVG sweepFlag = 1 (clockwise), we need to swap start and end angles
-        let finalStartAngle, finalEndAngle;
-        if (sweepFlag) {
-            // SVG clockwise - swap angles for DXF counter-clockwise equivalent
-            finalStartAngle = endAngle;
-            finalEndAngle = startAngle;
-            if (finalEndAngle <= finalStartAngle) {
-                finalEndAngle += 360;
-            }
-        } else {
-            // SVG counter-clockwise - use as is
-            finalStartAngle = startAngle;
-            finalEndAngle = endAngle;
-            if (finalEndAngle <= finalStartAngle) {
-                finalEndAngle += 360;
-            }
-        }
-
-        return {
-            centerX,
-            centerY,
-            radius,
-            startAngle: finalStartAngle,
-            endAngle: finalEndAngle,
-        };
+        return { centerX, centerY, radius, startAngle, endAngle, sweepFlag };
     }
 
     /**
-     * Write DXF ARC entity
-     * @param {Object} arc - Arc parameters
+     * Write path segments as single POLYLINE with bulge values for arcs
+     * @param {Array} segments - Array of path segments (lines and arcs)
      * @param {string} layerName - Layer name
      */
-    writeDXFArc(arc, layerName) {
+    writePathAsPolyline(segments, layerName) {
+        if (segments.length === 0) return;
+
+        // Collect all vertices and calculate bulge values
+        const vertices = [];
+        const bulges = [];
+
+        // Start with the first segment's start point
+        let currentPoint;
+        if (segments[0].type === "arc") {
+            const arc = segments[0].arc;
+            currentPoint = {
+                x:
+                    arc.centerX +
+                    arc.radius * Math.cos((arc.startAngle * Math.PI) / 180),
+                y:
+                    arc.centerY +
+                    arc.radius * Math.sin((arc.startAngle * Math.PI) / 180),
+            };
+        } else {
+            currentPoint = segments[0].start;
+        }
+
+        vertices.push(currentPoint);
+        bulges.push(0); // First vertex has no bulge
+
+        for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+
+            if (segment.type === "line") {
+                // Add endpoint of line segment
+                vertices.push(segment.end);
+                bulges.push(0); // Straight line, no bulge
+                currentPoint = segment.end;
+            } else if (segment.type === "arc") {
+                // Calculate bulge for the arc
+                const arc = segment.arc;
+                const bulge = this.calculateBulge(arc);
+                bulges[bulges.length - 1] = bulge; // Set bulge for the previous vertex
+
+                // Add endpoint of arc segment
+                const endPoint = {
+                    x:
+                        arc.centerX +
+                        arc.radius * Math.cos((arc.endAngle * Math.PI) / 180),
+                    y:
+                        arc.centerY +
+                        arc.radius * Math.sin((arc.endAngle * Math.PI) / 180),
+                };
+                vertices.push(endPoint);
+                bulges.push(0); // Next vertex bulge will be set by next segment
+                currentPoint = endPoint;
+            }
+        }
+
+        // Check if path should be closed (if last point connects to first point within tolerance)
+        const tolerance = 0.01; // Allow for small floating point differences
+        const isClosed =
+            vertices.length > 2 &&
+            Math.abs(vertices[vertices.length - 1].x - vertices[0].x) <
+                tolerance &&
+            Math.abs(vertices[vertices.length - 1].y - vertices[0].y) <
+                tolerance;
+
+        // For closed paths, remove the duplicate closing vertex since DXF handles closure via flag
+        if (isClosed) {
+            vertices.pop();
+            bulges.pop();
+        }
+
+        // Write LWPOLYLINE entity
         const handle = this.getNextHandle();
 
         this.dxfContent.push("0");
-        this.dxfContent.push("ARC");
+        this.dxfContent.push("LWPOLYLINE");
         this.dxfContent.push("5");
         this.dxfContent.push(handle);
         this.dxfContent.push("100");
@@ -1253,21 +1185,45 @@ class DXFExporter {
         this.dxfContent.push("370");
         this.dxfContent.push("-1");
         this.dxfContent.push("100");
-        this.dxfContent.push("AcDbCircle");
-        this.dxfContent.push("10"); // Center X
-        this.dxfContent.push(arc.centerX.toString());
-        this.dxfContent.push("20"); // Center Y
-        this.dxfContent.push(arc.centerY.toString());
-        this.dxfContent.push("30"); // Center Z
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("40"); // Radius
-        this.dxfContent.push(arc.radius.toString());
-        this.dxfContent.push("100");
-        this.dxfContent.push("AcDbArc");
-        this.dxfContent.push("50"); // Start angle
-        this.dxfContent.push(arc.startAngle.toString());
-        this.dxfContent.push("51"); // End angle
-        this.dxfContent.push(arc.endAngle.toString());
+        this.dxfContent.push("AcDbPolyline");
+        this.dxfContent.push("90");
+        this.dxfContent.push(vertices.length.toString());
+        this.dxfContent.push("70");
+        this.dxfContent.push(isClosed ? "1" : "0"); // Closed flag
+
+        // Vertices with bulges
+        for (let i = 0; i < vertices.length; i++) {
+            this.dxfContent.push("10"); // X
+            this.dxfContent.push(vertices[i].x.toString());
+            this.dxfContent.push("20"); // Y
+            this.dxfContent.push(vertices[i].y.toString());
+            if (bulges[i] !== 0) {
+                this.dxfContent.push("42"); // Bulge
+                this.dxfContent.push(bulges[i].toString());
+            }
+        }
+    }
+
+    /**
+     * Calculate bulge value for an arc
+     * Bulge = tan(angle/4) where angle is the included angle in radians
+     * Positive bulge = counter-clockwise arc, negative = clockwise
+     * @param {Object} arc - Arc parameters
+     * @returns {number} Bulge value
+     */
+    calculateBulge(arc) {
+        // Calculate the smaller included angle
+        let angle = Math.abs(arc.endAngle - arc.startAngle);
+        if (angle > 180) angle = 360 - angle;
+
+        // Convert to radians
+        const angleRad = (angle * Math.PI) / 180;
+
+        // Bulge = tan(angle/4), always positive for the magnitude
+        const absBulge = Math.tan(angleRad / 4);
+
+        // Apply sign based on sweepFlag: positive for counter-clockwise, negative for clockwise
+        return arc.sweepFlag ? -absBulge : absBulge;
     }
 
     /**
