@@ -10,6 +10,20 @@
         <div id="app">
             <div id="left-panel">
                 <h3 id="bits-title">Bits Database</h3>
+                <div id="bits-actions">
+                    <button
+                        id="export-bits-btn"
+                        title="Export bits to JSON file"
+                    >
+                        Exp
+                    </button>
+                    <button
+                        id="import-bits-btn"
+                        title="Import bits from JSON file"
+                    >
+                        Imp
+                    </button>
+                </div>
                 <div id="bit-groups"></div>
             </div>
             <div id="canvas-container">
@@ -22,6 +36,9 @@
                         Sel
                     </button>
                     <button id="part-btn" title="Show Part">Part</button>
+                    <button id="bits-btn" title="Toggle Bits Visibility">
+                        Bits
+                    </button>
                     <label
                         for="grid-scale"
                         style="font-size: 12px; margin: auto"

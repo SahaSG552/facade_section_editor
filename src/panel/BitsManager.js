@@ -1,4 +1,11 @@
-import { getBits, addBit, deleteBit, updateBit } from "../storage/bitsStore.js";
+import {
+    getBits,
+    addBit,
+    deleteBit,
+    updateBit,
+    exportToJSON,
+    importFromJSON,
+} from "../data/bitsStore.js";
 import CanvasManager from "../canvas/CanvasManager.js";
 import { evaluateMathExpression } from "../utils/utils.js";
 
@@ -280,8 +287,8 @@ export default class BitsManager {
     }
 
     // Create bit groups
-    createBitGroups() {
-        const allBits = getBits();
+    async createBitGroups() {
+        const allBits = await getBits();
         const groupOrder = Object.keys(allBits);
 
         groupOrder.forEach((groupName) => {
@@ -394,14 +401,14 @@ export default class BitsManager {
         });
     }
 
-    refreshBitGroups() {
+    async refreshBitGroups() {
         this.bitGroups.innerHTML = "";
-        this.createBitGroups();
+        await this.createBitGroups();
     }
 
-    handleCopyClick(e, bit) {
+    async handleCopyClick(e, bit) {
         const baseName = bit.name;
-        const all = getBits();
+        const all = await getBits();
         // count existing copies with same baseName
         const existingCopies = Object.values(all)
             .flat()
@@ -415,7 +422,7 @@ export default class BitsManager {
         delete newBit.id; // ensure new id created
 
         // Find the group name for this bit
-        const allBits = getBits();
+        const allBits = await getBits();
         let groupName = null;
         for (const group in allBits) {
             if (allBits[group].some((b) => b.id === bit.id)) {
@@ -429,10 +436,10 @@ export default class BitsManager {
         }
     }
 
-    handleDeleteClick(e, bit) {
+    async handleDeleteClick(e, bit) {
         if (confirm(`Are you sure you want to delete ${bit.name}?`)) {
             // Find the group name for this bit
-            const allBits = getBits();
+            const allBits = await getBits();
             let groupName = null;
             for (const group in allBits) {
                 if (allBits[group].some((b) => b.id === bit.id)) {
@@ -447,8 +454,8 @@ export default class BitsManager {
         }
     }
 
-    isBitNameDuplicate(name, excludeId = null) {
-        const all = getBits();
+    async isBitNameDuplicate(name, excludeId = null) {
+        const all = await getBits();
         return Object.values(all || {})
             .flat()
             .some((bit) => bit.name === name && bit.id !== excludeId);
@@ -786,7 +793,7 @@ export default class BitsManager {
         const inputs = form.querySelectorAll('input[type="text"]');
         inputs.forEach((input) => {
             input.addEventListener("blur", () => {
-                input.value = this.evaluateMathExpression(input.value);
+                input.value = evaluateMathExpression(input.value);
             });
             // Update preview on input change
             input.addEventListener("input", updateBitPreview);
@@ -800,26 +807,26 @@ export default class BitsManager {
 
         // Initial preview update
         updateBitPreview();
-        form.addEventListener("submit", (e) => {
+        form.addEventListener("submit", async (e) => {
             e.preventDefault();
             const name = form.querySelector("#bit-name").value.trim();
 
-            if (this.isBitNameDuplicate(name, isEdit ? bit?.id : null)) {
+            if (await this.isBitNameDuplicate(name, isEdit ? bit?.id : null)) {
                 alert(
                     "A bit with this name already exists. Please choose a different name."
                 );
                 return;
             }
 
-            const diameterStr = this.evaluateMathExpression(
+            const diameterStr = evaluateMathExpression(
                 form.querySelector("#bit-diameter").value
             );
             const diameter = parseFloat(diameterStr);
-            const lengthStr = this.evaluateMathExpression(
+            const lengthStr = evaluateMathExpression(
                 form.querySelector("#bit-length").value
             );
             const length = parseFloat(lengthStr);
-            const toolNumberStr = this.evaluateMathExpression(
+            const toolNumberStr = evaluateMathExpression(
                 form.querySelector("#bit-toolnumber").value
             );
             const toolNumber = parseInt(toolNumberStr, 10) || 1;
@@ -832,29 +839,29 @@ export default class BitsManager {
             };
 
             if (groupName === "conical") {
-                const angleStr = this.evaluateMathExpression(
+                const angleStr = evaluateMathExpression(
                     form.querySelector("#bit-angle").value
                 );
                 payload.angle = parseFloat(angleStr);
             }
 
             if (groupName === "ball") {
-                const heightStr = this.evaluateMathExpression(
+                const heightStr = evaluateMathExpression(
                     form.querySelector("#bit-height").value
                 );
                 payload.height = parseFloat(heightStr);
             }
 
             if (groupName === "fillet" || groupName === "bull") {
-                const heightStr = this.evaluateMathExpression(
+                const heightStr = evaluateMathExpression(
                     form.querySelector("#bit-height").value
                 );
                 payload.height = parseFloat(heightStr);
-                const cornerRadiusStr = this.evaluateMathExpression(
+                const cornerRadiusStr = evaluateMathExpression(
                     form.querySelector("#bit-cornerRadius").value
                 );
                 payload.cornerRadius = parseFloat(cornerRadiusStr);
-                const flatStr = this.evaluateMathExpression(
+                const flatStr = evaluateMathExpression(
                     form.querySelector("#bit-flat").value
                 );
                 payload.flat = parseFloat(flatStr);

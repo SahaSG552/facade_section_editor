@@ -33,6 +33,32 @@ html {
   border-bottom: 1px solid #ccc;
 }
 
+#bits-actions {
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  justify-content: center;
+  border-bottom: 1px solid #ccc;
+}
+
+#bits-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid #ccc;
+  background-color: white;
+  cursor: pointer;
+  border-radius: 3px;
+  flex: 1;
+}
+
+#bits-actions button:hover {
+  background-color: #e0e0e0;
+}
+
+#bits-actions button:active {
+  background-color: #d0d0d0;
+}
+
 /* ===== ЦЕНТРАЛЬНАЯ КОЛОНКА (Canvas) ===== */
 #canvas-container {
   flex: 1;

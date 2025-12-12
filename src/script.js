@@ -3,7 +3,7 @@ import {
     distancePtToPt,
     evaluateMathExpression,
 } from "./utils/utils.js";
-import { getBits, addBit, deleteBit, updateBit } from "./storage/bitsStore.js";
+import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
 // SVG namespace
@@ -23,6 +23,7 @@ let materialAnchor = "top-left"; // "top-left" or "bottom-left"
 const CLIPPER_SCALE = 1000;
 let showPart = false;
 let partPath;
+let bitsVisible = true; // Track bits visibility state
 
 const canvasParameters = {
     width: canvas.getAttribute("width"),
@@ -52,6 +53,7 @@ let draggedBitIndex = null; // Index of the bit being dragged (for multi-selecti
 let selectedBitIndices = []; // Array of selected bit indices
 let dragStartX = 0;
 let dragStartY = 0;
+let dragStarted = false; // Flag to track if drag actually started (mouse moved)
 
 // BitsManager will be created in initializeSVG after CanvasManager is set up
 
@@ -157,6 +159,11 @@ function initializeSVG() {
         .getElementById("part-btn")
         .addEventListener("click", togglePartView);
 
+    // Setup bits visibility button
+    const bitsBtn = document.getElementById("bits-btn");
+    bitsBtn.addEventListener("click", toggleBitsVisibility);
+    bitsBtn.classList.add("bits-visible"); // Initial state - bits are visible
+
     // Add mouse event listeners for bit dragging
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
@@ -173,6 +180,45 @@ function initializeSVG() {
             bitsManager.createBitShapeElement.bind(bitsManager)
         );
     bitsManager.onUpdateCanvasBits = (bitId) => updateCanvasBitsForBitId(bitId);
+
+    // Setup export/import buttons
+    document.getElementById("export-bits-btn").addEventListener("click", () => {
+        import("./data/bitsStore.js").then((module) => {
+            module.exportToJSON();
+        });
+    });
+
+    document.getElementById("import-bits-btn").addEventListener("click", () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json";
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const jsonData = event.target.result;
+                    import("./data/bitsStore.js").then((module) => {
+                        const success = module.importFromJSON(jsonData);
+                        if (success) {
+                            // Refresh the bits manager and canvas
+                            bitsManager.refreshBitGroups();
+                            // Clear canvas and reload bits
+                            bitsOnCanvas = [];
+                            updateBitsSheet();
+                            redrawBitsOnCanvas();
+                        } else {
+                            alert(
+                                "Failed to import bits data. Please check the JSON format."
+                            );
+                        }
+                    });
+                };
+                reader.readAsText(file);
+            }
+        };
+        input.click();
+    });
 }
 
 // Cycle material anchor
@@ -1199,29 +1245,56 @@ function handleMouseDown(e) {
         // Left mouse button
         const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
 
-        // Check if clicking on any selected bit
-        for (const selectedIndex of selectedBitIndices) {
-            const bit = bitsOnCanvas[selectedIndex];
-            if (bit) {
-                const materialX = (canvasParameters.width - materialWidth) / 2;
-                const materialY =
-                    (canvasParameters.height - materialThickness) / 2;
-                const bitAbsX = materialX + bit.x;
-                const bitAbsY = materialY + bit.y;
+        // Check if clicking on any bit (selected or not) - but only if bits are visible
+        let clickedOnBit = false;
+        if (bitsVisible) {
+            for (let i = 0; i < bitsOnCanvas.length; i++) {
+                const bit = bitsOnCanvas[i];
+                if (bit) {
+                    const materialX =
+                        (canvasParameters.width - materialWidth) / 2;
+                    const materialY =
+                        (canvasParameters.height - materialThickness) / 2;
+                    const bitAbsX = materialX + bit.x;
+                    const bitAbsY = materialY + bit.y;
 
-                // Check if click is near the bit (within 20px)
-                const distance = Math.sqrt(
-                    (svgCoords.x - bitAbsX) ** 2 + (svgCoords.y - bitAbsY) ** 2
-                );
-                if (distance <= 20) {
-                    isDraggingBit = true;
-                    draggedBitIndex = selectedIndex; // Use the clicked bit as the reference for dragging
-                    dragStartX = svgCoords.x;
-                    dragStartY = svgCoords.y;
-                    canvas.style.cursor = "grabbing";
-                    return;
+                    // Check if click is near the bit (within 20px)
+                    const distance = Math.sqrt(
+                        (svgCoords.x - bitAbsX) ** 2 +
+                            (svgCoords.y - bitAbsY) ** 2
+                    );
+                    if (distance <= 20) {
+                        clickedOnBit = true;
+
+                        // If clicking on a selected bit, prepare for potential deselection or dragging
+                        if (selectedBitIndices.includes(i)) {
+                            // Start dragging the selected bit
+                            isDraggingBit = true;
+                            draggedBitIndex = i;
+                            dragStartX = svgCoords.x;
+                            dragStartY = svgCoords.y;
+                            dragStarted = false; // Reset flag
+                            canvas.style.cursor = "grabbing";
+                            return;
+                        }
+                        // If clicking on an unselected bit, select it (but don't start dragging)
+                        else {
+                            selectBit(i);
+                            return;
+                        }
+                    }
                 }
             }
+        }
+
+        // If clicked on empty canvas area, clear all selections
+        if (!clickedOnBit && selectedBitIndices.length > 0) {
+            selectedBitIndices.forEach((index) => {
+                resetBitHighlight(index);
+            });
+            selectedBitIndices = [];
+            updateBitsSheet();
+            redrawBitsOnCanvas();
         }
 
         // Otherwise, start panning
@@ -1236,6 +1309,9 @@ function handleMouseDown(e) {
 
 function handleMouseMove(e) {
     if (isDraggingBit && draggedBitIndex !== null) {
+        // Set flag that drag has started
+        dragStarted = true;
+
         const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
 
         const bit = bitsOnCanvas[draggedBitIndex];
@@ -1285,8 +1361,16 @@ function handleMouseMove(e) {
 function handleMouseUp(e) {
     if (isDraggingBit) {
         isDraggingBit = false;
+
+        // If drag didn't actually start (just a click), deselect the bit
+        if (!dragStarted && draggedBitIndex !== null) {
+            selectBit(draggedBitIndex);
+        }
+
         draggedBitIndex = null;
+        dragStarted = false; // Reset flag
         canvas.style.cursor = "grab";
+
         // Update part shape after dragging is complete only if Part view is enabled
         if (showPart) updatePartShape();
     } else if (isPanning) {
@@ -1466,21 +1550,50 @@ function pathsToSvgD(paths, scale) {
     return d;
 }
 
+// Toggle bits visibility
+function toggleBitsVisibility() {
+    bitsVisible = !bitsVisible;
+    const bitsBtn = document.getElementById("bits-btn");
+
+    if (bitsVisible) {
+        // Show bits
+        bitsLayer.style.display = "block";
+        bitsBtn.classList.remove("bits-hidden");
+        bitsBtn.classList.add("bits-visible");
+        bitsBtn.title = "Hide Bits";
+    } else {
+        // Hide bits
+        bitsLayer.style.display = "none";
+        bitsBtn.classList.remove("bits-visible");
+        bitsBtn.classList.add("bits-hidden");
+        bitsBtn.title = "Show Bits";
+    }
+}
+
 function togglePartView() {
     if (!bitsLayer || !materialRect || !partPath) {
         console.error("SVG elements not initialized");
         return;
     }
+
     showPart = !showPart;
+    const partBtn = document.getElementById("part-btn");
+
     if (showPart) {
         updatePartShape();
         materialRect.style.display = "none";
         partPath.style.display = "block";
         bitsLayer.style.display = "block";
+        partBtn.classList.remove("part-hidden");
+        partBtn.classList.add("part-visible");
+        partBtn.title = "Show Material";
     } else {
         materialRect.style.display = "block";
         partPath.style.display = "none";
         bitsLayer.style.display = "block";
+        partBtn.classList.remove("part-visible");
+        partBtn.classList.add("part-hidden");
+        partBtn.title = "Show Part";
     }
 }
 

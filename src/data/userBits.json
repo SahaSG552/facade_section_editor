@@ -1,0 +1,237 @@
+{
+  "cylindrical": [
+    {
+      "id": "cyl-1",
+      "name": "D10H20",
+      "diameter": 10,
+      "length": 20
+    },
+    {
+      "id": "cyl-2",
+      "name": "D12H25",
+      "diameter": 12,
+      "length": 25
+    },
+    {
+      "id": "cyl-3",
+      "name": "D4H13",
+      "diameter": 4,
+      "length": 13,
+      "toolNumber": 4
+    },
+    {
+      "id": "cyl-4",
+      "name": "D4H20",
+      "diameter": 4,
+      "length": 20,
+      "toolNumber": 4
+    }
+  ],
+  "conical": [
+    {
+      "id": "con-1",
+      "name": "V90D25",
+      "diameter": 25.4,
+      "length": 19,
+      "angle": 90,
+      "toolNumber": 1
+    },
+    {
+      "id": "con-2",
+      "name": "V120D32",
+      "diameter": 32,
+      "length": 13.2,
+      "angle": 120
+    },
+    {
+      "id": "con-3",
+      "name": "V120D50",
+      "diameter": 50,
+      "length": 20.6,
+      "angle": 120,
+      "toolNumber": 1
+    },
+    {
+      "id": "con-4",
+      "name": "V60D14",
+      "diameter": 14,
+      "length": 16,
+      "toolNumber": 1,
+      "angle": 60
+    }
+  ],
+  "ball": [
+    {
+      "id": "bn-1",
+      "name": "U10",
+      "diameter": 10,
+      "length": 20,
+      "height": 5
+    },
+    {
+      "id": "bn-2",
+      "name": "U19",
+      "diameter": 19,
+      "length": 25,
+      "height": 9.5,
+      "toolNumber": 1
+    },
+    {
+      "id": "bn-3",
+      "name": "U38",
+      "diameter": 38.1,
+      "length": 22,
+      "height": 19.05,
+      "toolNumber": 1
+    },
+    {
+      "id": "b_mizv5vo3ko6kzl",
+      "name": "U51H6",
+      "diameter": 50.8,
+      "length": 10,
+      "toolNumber": 1,
+      "height": 6
+    },
+    {
+      "id": "b_mizv9oo9jqz57s",
+      "name": "U6",
+      "diameter": 6,
+      "length": 10,
+      "toolNumber": 1,
+      "height": 3
+    },
+    {
+      "id": "b_mj1f0h4maqz8po",
+      "name": "U25",
+      "diameter": 25,
+      "length": 15,
+      "toolNumber": 1,
+      "height": 12.5
+    },
+    {
+      "id": "b_mj1f1li0c7ypi9",
+      "name": "U30",
+      "diameter": 30,
+      "length": 20,
+      "toolNumber": 1,
+      "height": 15
+    },
+    {
+      "id": "b_mj1f24g9htfv39",
+      "name": "U40",
+      "diameter": 40,
+      "length": 25,
+      "toolNumber": 1,
+      "height": 20
+    },
+    {
+      "id": "b_mj1f2ly3yecp3v",
+      "name": "U50",
+      "diameter": 50,
+      "length": 30,
+      "toolNumber": 1,
+      "height": 25
+    },
+    {
+      "id": "b_mj1f3sizre7tfs",
+      "name": "U76",
+      "diameter": 76.2,
+      "length": 45,
+      "toolNumber": 1,
+      "height": 38.1
+    }
+  ],
+  "fillet": [
+    {
+      "id": "fil-1",
+      "name": "R5",
+      "diameter": 10,
+      "length": 10,
+      "height": 5,
+      "cornerRadius": 5,
+      "flat": 0,
+      "toolNumber": 1
+    },
+    {
+      "id": "b_mix5psqam2e0g2",
+      "name": "R8D16H6",
+      "diameter": 16,
+      "length": 16,
+      "toolNumber": 1,
+      "height": 6,
+      "cornerRadius": 8,
+      "flat": 0
+    },
+    {
+      "id": "b_mix5qkzt54ivih",
+      "name": "R8",
+      "diameter": 16,
+      "length": 16,
+      "toolNumber": 1,
+      "height": 8,
+      "cornerRadius": 8,
+      "flat": 0
+    },
+    {
+      "id": "b_mix5t7abnv2kcb",
+      "name": "R6H5",
+      "diameter": 12,
+      "length": 12,
+      "toolNumber": 1,
+      "height": 5,
+      "cornerRadius": 6,
+      "flat": 0
+    },
+    {
+      "id": "b_mix63v6pb3mtb3",
+      "name": "R4D9F2",
+      "diameter": 9.5,
+      "length": 10,
+      "toolNumber": 1,
+      "height": 4,
+      "cornerRadius": 4,
+      "flat": 2
+    },
+    {
+      "id": "b_mix69sugwv7gje",
+      "name": "R6",
+      "diameter": 12,
+      "length": 12,
+      "toolNumber": 1,
+      "height": 6,
+      "cornerRadius": 6,
+      "flat": 0
+    },
+    {
+      "id": "b_mizv2fyptfizfm",
+      "name": "R3",
+      "diameter": 6.35,
+      "length": 10,
+      "toolNumber": 1,
+      "height": 3.175,
+      "cornerRadius": 3.175,
+      "flat": 0
+    }
+  ],
+  "bull": [
+    {
+      "id": "bul-1",
+      "name": "B3D10",
+      "diameter": 10,
+      "length": 10,
+      "height": 3,
+      "cornerRadius": 3,
+      "flat": 4
+    },
+    {
+      "id": "bul-2",
+      "name": "B2D12",
+      "diameter": 12,
+      "length": 12,
+      "height": 2,
+      "cornerRadius": 2,
+      "flat": 8,
+      "toolNumber": 1
+    }
+  ]
+}
