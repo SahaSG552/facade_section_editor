@@ -12,11 +12,10 @@ class DXFExporter {
     /**
      * Export bits on canvas to DXF format
      * @param {Array} bitsOnCanvas - Array of bit objects from the canvas
-     * @param {Object} materialParams - Material parameters (width, height)
-     * @param {string} materialAnchor - Material anchor position
+     * @param {Array} resultPolygon - Result polygon after boolean operations
      * @returns {string} DXF content as string
      */
-    exportToDXF(bitsOnCanvas, materialParams, materialAnchor = "top-left") {
+    exportToDXF(bitsOnCanvas, resultPolygon) {
         this.dxfContent = [];
         this.layerCounter = 0;
 
@@ -30,7 +29,7 @@ class DXFExporter {
         this.writeBlocks();
 
         // DXF Entities (the actual geometry)
-        this.writeEntities(bitsOnCanvas, materialParams, materialAnchor);
+        this.writeEntities(bitsOnCanvas, resultPolygon);
 
         // DXF Objects
         this.writeObjects();
@@ -80,13 +79,13 @@ class DXFExporter {
         this.dxfContent.push("2");
         this.dxfContent.push("LAYER");
         this.dxfContent.push("70");
-        this.dxfContent.push((bitsOnCanvas.length + 2).toString()); // +2 for Material and 0 layers
+        this.dxfContent.push((bitsOnCanvas.length + 2).toString()); // +2 for Result and 0 layers
 
         // Layer 0 (default)
         this.writeLayer("0", 7, 0, 0, 0); // White color
 
-        // Material layer
-        this.writeLayer("Material", 1, 0, 0, 0); // Red color
+        // Result layer (final shape after boolean operations)
+        this.writeLayer("Result", 3, 0, 0, 0); // Green color
 
         // Bit layers
         bitsOnCanvas.forEach((bit, index) => {
@@ -138,14 +137,14 @@ class DXFExporter {
     /**
      * Write DXF entities section
      */
-    writeEntities(bitsOnCanvas, materialParams, materialAnchor) {
+    writeEntities(bitsOnCanvas, resultPolygon) {
         this.dxfContent.push("0");
         this.dxfContent.push("SECTION");
         this.dxfContent.push("2");
         this.dxfContent.push("ENTITIES");
 
-        // Write material rectangle
-        this.writeMaterialRectangle(materialParams, materialAnchor);
+        // Write result polygon after boolean operations
+        this.writeResultPolygon(resultPolygon);
 
         // Write bit shapes
         bitsOnCanvas.forEach((bit, index) => {
@@ -154,63 +153,6 @@ class DXFExporter {
 
         this.dxfContent.push("0");
         this.dxfContent.push("ENDSEC");
-    }
-
-    /**
-     * Write material rectangle as DXF LWPOLYLINE
-     */
-    writeMaterialRectangle(materialParams, materialAnchor) {
-        const { width: materialWidth, height: materialThickness } =
-            materialParams;
-
-        // Calculate rectangle coordinates based on anchor
-        let x1, y1, x2, y2;
-        if (materialAnchor === "top-left") {
-            x1 = 0;
-            y1 = 0;
-            x2 = materialWidth;
-            y2 = -materialThickness; // Negative Y for CAD coordinate system
-        } else {
-            // bottom-left
-            x1 = 0;
-            y1 = materialThickness;
-            x2 = materialWidth;
-            y2 = 0;
-        }
-
-        // Write as LWPOLYLINE
-        this.dxfContent.push("0");
-        this.dxfContent.push("LWPOLYLINE");
-        this.dxfContent.push("8"); // Layer
-        this.dxfContent.push("Material");
-        this.dxfContent.push("90"); // Number of vertices
-        this.dxfContent.push("4");
-        this.dxfContent.push("70"); // Flags (1 = closed)
-        this.dxfContent.push("1");
-
-        // Vertex 1
-        this.dxfContent.push("10"); // X
-        this.dxfContent.push(x1.toString());
-        this.dxfContent.push("20"); // Y
-        this.dxfContent.push(y1.toString());
-
-        // Vertex 2
-        this.dxfContent.push("10");
-        this.dxfContent.push(x2.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y1.toString());
-
-        // Vertex 3
-        this.dxfContent.push("10");
-        this.dxfContent.push(x2.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y2.toString());
-
-        // Vertex 4
-        this.dxfContent.push("10");
-        this.dxfContent.push(x1.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y2.toString());
     }
 
     /**
@@ -241,202 +183,6 @@ class DXFExporter {
 
         // Export based on actual SVG element type, not bit type
         this.writeSVGShape(shape, offsetX, offsetY, layerName, convertY);
-    }
-
-    /**
-     * Write cylindrical bit (circle)
-     */
-    writeCylinder(bitData, offsetX, offsetY, layerName, convertY) {
-        const radius = bitData.diameter / 2;
-        const centerX = offsetX;
-        const centerY = convertY(offsetY);
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("CIRCLE");
-        this.dxfContent.push("8"); // Layer
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("10"); // Center X
-        this.dxfContent.push(centerX.toString());
-        this.dxfContent.push("20"); // Center Y
-        this.dxfContent.push(centerY.toString());
-        this.dxfContent.push("30"); // Center Z
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("40"); // Radius
-        this.dxfContent.push(radius.toString());
-    }
-
-    /**
-     * Write conical bit (circle with annotation)
-     */
-    writeCone(bitData, offsetX, offsetY, layerName, convertY) {
-        // For cone, draw the base circle
-        const radius = bitData.diameter / 2;
-        const centerX = offsetX;
-        const centerY = convertY(offsetY);
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("CIRCLE");
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("10");
-        this.dxfContent.push(centerX.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(centerY.toString());
-        this.dxfContent.push("30");
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("40");
-        this.dxfContent.push(radius.toString());
-
-        // Add angle annotation as text
-        this.addTextAnnotation(
-            `${bitData.angle}°`,
-            centerX + radius + 5,
-            centerY,
-            layerName
-        );
-    }
-
-    /**
-     * Write ball end mill (circle)
-     */
-    writeBall(bitData, offsetX, offsetY, layerName, convertY) {
-        const radius = bitData.diameter / 2;
-        const centerX = offsetX;
-        const centerY = convertY(offsetY);
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("CIRCLE");
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("10");
-        this.dxfContent.push(centerX.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(centerY.toString());
-        this.dxfContent.push("30");
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("40");
-        this.dxfContent.push(radius.toString());
-    }
-
-    /**
-     * Write fillet bit (complex shape)
-     */
-    writeFillet(bitData, offsetX, offsetY, layerName, convertY) {
-        const centerX = offsetX;
-        const centerY = convertY(offsetY);
-
-        // Draw as a rectangle with rounded corners approximation
-        const width = bitData.diameter;
-        const height = bitData.length;
-        const radius = bitData.cornerRadius;
-
-        // For simplicity, draw as a rectangle first
-        const x1 = centerX - width / 2;
-        const y1 = centerY - height / 2;
-        const x2 = centerX + width / 2;
-        const y2 = centerY + height / 2;
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("LWPOLYLINE");
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("90");
-        this.dxfContent.push("4");
-        this.dxfContent.push("70");
-        this.dxfContent.push("1"); // Closed
-
-        // Vertices
-        this.dxfContent.push("10");
-        this.dxfContent.push(x1.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y1.toString());
-
-        this.dxfContent.push("10");
-        this.dxfContent.push(x2.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y1.toString());
-
-        this.dxfContent.push("10");
-        this.dxfContent.push(x2.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y2.toString());
-
-        this.dxfContent.push("10");
-        this.dxfContent.push(x1.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y2.toString());
-    }
-
-    /**
-     * Write bull nose bit
-     */
-    writeBull(bitData, offsetX, offsetY, layerName, convertY) {
-        const centerX = offsetX;
-        const centerY = convertY(offsetY);
-
-        // Similar to fillet, draw as rectangle approximation
-        const width = bitData.diameter;
-        const height = bitData.length;
-        const radius = bitData.cornerRadius;
-
-        const x1 = centerX - width / 2;
-        const y1 = centerY - height / 2;
-        const x2 = centerX + width / 2;
-        const y2 = centerY + height / 2;
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("LWPOLYLINE");
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("90");
-        this.dxfContent.push("4");
-        this.dxfContent.push("70");
-        this.dxfContent.push("1"); // Closed
-
-        // Vertices
-        this.dxfContent.push("10");
-        this.dxfContent.push(x1.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y1.toString());
-
-        this.dxfContent.push("10");
-        this.dxfContent.push(x2.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y1.toString());
-
-        this.dxfContent.push("10");
-        this.dxfContent.push(x2.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y2.toString());
-
-        this.dxfContent.push("10");
-        this.dxfContent.push(x1.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y2.toString());
-    }
-
-    /**
-     * Add text annotation
-     */
-    addTextAnnotation(text, x, y, layerName) {
-        this.dxfContent.push("0");
-        this.dxfContent.push("TEXT");
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("10");
-        this.dxfContent.push(x.toString());
-        this.dxfContent.push("20");
-        this.dxfContent.push(y.toString());
-        this.dxfContent.push("30");
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("40");
-        this.dxfContent.push("3.0"); // Text height
-        this.dxfContent.push("1");
-        this.dxfContent.push(text);
-        this.dxfContent.push("72");
-        this.dxfContent.push("0"); // Horizontal justification
-        this.dxfContent.push("73");
-        this.dxfContent.push("1"); // Vertical justification
     }
 
     /**
@@ -656,6 +402,46 @@ class DXFExporter {
     }
 
     /**
+     * Write result polygon as DXF LWPOLYLINE
+     * @param {Array} resultPolygon - Array of paths from Clipper result
+     */
+    writeResultPolygon(resultPolygon) {
+        if (!resultPolygon || resultPolygon.length === 0) return;
+
+        const scale = 1 / 1000; // Clipper scale factor
+
+        resultPolygon.forEach((path, pathIndex) => {
+            if (path.length < 3) return; // Skip degenerate paths
+
+            // Convert Clipper coordinates back to original scale
+            const points = path.map((point) => ({
+                x: point.X * scale,
+                y: -point.Y * scale, // Flip Y for CAD coordinate system
+            }));
+
+            // Ensure counter-clockwise order for DXF
+            const orderedPoints = this.ensureCounterClockwise(points);
+
+            this.dxfContent.push("0");
+            this.dxfContent.push("LWPOLYLINE");
+            this.dxfContent.push("8"); // Layer
+            this.dxfContent.push("Result");
+            this.dxfContent.push("90"); // Number of vertices
+            this.dxfContent.push(orderedPoints.length.toString());
+            this.dxfContent.push("70"); // Flags (1 = closed)
+            this.dxfContent.push("1");
+
+            // Vertices
+            orderedPoints.forEach((point) => {
+                this.dxfContent.push("10"); // X
+                this.dxfContent.push(point.x.toString());
+                this.dxfContent.push("20"); // Y
+                this.dxfContent.push(point.y.toString());
+            });
+        });
+    }
+
+    /**
      * Write DXF objects section
      */
     writeObjects() {
@@ -673,56 +459,6 @@ class DXFExporter {
     writeEOF() {
         this.dxfContent.push("0");
         this.dxfContent.push("EOF");
-    }
-
-    /**
-     * Parse SVG path data and extract arc parameters
-     * @param {string} d - SVG path data
-     * @param {number} offsetX - X offset
-     * @param {number} offsetY - Y offset
-     * @param {function} convertY - Y coordinate converter
-     * @returns {Array} Array of arc objects with DXF parameters
-     */
-    parseSVGPathForArcs(d, offsetX, offsetY, convertY) {
-        const arcs = [];
-        const commands = this.parseSVGPathCommands(d);
-
-        let currentX = 0;
-        let currentY = 0;
-
-        for (const command of commands) {
-            if (command.type === "M" || command.type === "L") {
-                currentX = command.x + offsetX;
-                currentY = convertY(command.y + offsetY);
-            } else if (command.type === "A") {
-                const startX = currentX;
-                const startY = currentY;
-                const endX = command.x + offsetX;
-                const endY = convertY(command.y + offsetY);
-
-                // Calculate arc center and angles
-                const arc = this.svgArcToDXFArc(
-                    startX,
-                    startY,
-                    endX,
-                    endY,
-                    command.rx,
-                    command.ry,
-                    command.xAxisRotation,
-                    command.largeArcFlag,
-                    command.sweepFlag
-                );
-
-                if (arc) {
-                    arcs.push(arc);
-                }
-
-                currentX = endX;
-                currentY = endY;
-            }
-        }
-
-        return arcs;
     }
 
     /**

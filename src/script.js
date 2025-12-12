@@ -1629,6 +1629,44 @@ function initialize() {
     });
 }
 
+// Calculate result polygon using Clipper (same logic as updatePartShape but returns result)
+function calculateResultPolygon() {
+    if (!window.ClipperLib) {
+        console.error("ClipperLib not loaded");
+        return [];
+    }
+
+    const ClipperLib = window.ClipperLib;
+    const clipper = new ClipperLib.Clipper();
+    const subj = new ClipperLib.Paths();
+    subj.push(getMaterialPolygon());
+    const clip = new ClipperLib.Paths();
+    bitsOnCanvas.forEach((bit) => {
+        const poly = getBitPolygon(bit);
+        if (poly.length > 0) clip.push(poly);
+    });
+    const unionBits = new ClipperLib.Paths();
+    clipper.AddPaths(clip, ClipperLib.PolyType.ptSubject, true);
+    clipper.Execute(
+        ClipperLib.ClipType.ctUnion,
+        unionBits,
+        ClipperLib.PolyFillType.pftNonZero,
+        ClipperLib.PolyFillType.pftNonZero
+    );
+    const result = new ClipperLib.Paths();
+    clipper.Clear();
+    clipper.AddPaths(subj, ClipperLib.PolyType.ptSubject, true);
+    clipper.AddPaths(unionBits, ClipperLib.PolyType.ptClip, true);
+    clipper.Execute(
+        ClipperLib.ClipType.ctDifference,
+        result,
+        ClipperLib.PolyFillType.pftNonZero,
+        ClipperLib.PolyFillType.pftNonZero
+    );
+
+    return result;
+}
+
 // Export to DXF function
 function exportToDXF() {
     if (bitsOnCanvas.length === 0) {
@@ -1636,18 +1674,11 @@ function exportToDXF() {
         return;
     }
 
-    // Prepare material parameters
-    const materialParams = {
-        width: materialWidth,
-        height: materialThickness,
-    };
+    // Get result polygon from Clipper
+    const resultPolygon = calculateResultPolygon();
 
     // Export to DXF
-    const dxfContent = dxfExporter.exportToDXF(
-        bitsOnCanvas,
-        materialParams,
-        materialAnchor
-    );
+    const dxfContent = dxfExporter.exportToDXF(bitsOnCanvas, resultPolygon);
 
     // Download the file
     dxfExporter.downloadDXF(dxfContent);
