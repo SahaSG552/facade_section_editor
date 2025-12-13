@@ -125,7 +125,11 @@ export default class BitsManager {
                     break;
             }
             if (innerShape) {
-                innerShape.setAttribute("fill", "white");
+                // Use the bit's color if available, otherwise white
+                const fillColor = params?.fillColor
+                    ? this.getBitFillColor(params, false)
+                    : "white";
+                innerShape.setAttribute("fill", fillColor);
                 innerShape.setAttribute("stroke", "black");
                 innerShape.setAttribute("stroke-width", "2");
             }
@@ -185,7 +189,7 @@ export default class BitsManager {
     }
 
     // Create bit shape element based on parameters
-    createBitShapeElement(bit, groupName, x = 0, y = 0) {
+    createBitShapeElement(bit, groupName, x = 0, y = 0, isSelected = false) {
         let shape;
         // Радиус дуги (формула через хорду и стрелу подъёма)
         let A = { x: x + bit.diameter / 2, y: y - bit.height };
@@ -195,6 +199,9 @@ export default class BitsManager {
             (this.distancePtToPt(A, B) * this.distancePtToPt(A, B)) /
                 (8 * bit.height);
 
+        // Get the fill color with proper opacity
+        const fillColor = this.getBitFillColor(bit, isSelected);
+
         switch (groupName) {
             case "cylindrical":
                 shape = document.createElementNS(svgNS, "rect");
@@ -202,7 +209,7 @@ export default class BitsManager {
                 shape.setAttribute("y", y - bit.length);
                 shape.setAttribute("width", bit.diameter);
                 shape.setAttribute("height", bit.length);
-                shape.setAttribute("fill", "rgba(0, 140, 255, 0.30)");
+                shape.setAttribute("fill", fillColor);
                 break;
             case "conical":
                 const oppositeAngle = bit.angle;
@@ -219,7 +226,7 @@ export default class BitsManager {
                 ].join(" ");
                 shape = document.createElementNS(svgNS, "polygon");
                 shape.setAttribute("points", points);
-                shape.setAttribute("fill", "rgba(26, 255, 0, 0.30)");
+                shape.setAttribute("fill", fillColor);
                 break;
             case "ball":
                 shape = document.createElementNS(svgNS, "path");
@@ -233,7 +240,7 @@ export default class BitsManager {
         L ${x - bit.diameter / 2} ${y - bit.length}
         L ${x + bit.diameter / 2} ${y - bit.length} Z`
                 );
-                shape.setAttribute("fill", "rgba(255, 0, 0, 0.30)");
+                shape.setAttribute("fill", fillColor);
                 break;
             case "fillet":
                 // Fillet cutter: cylindrical part + fillet profile
@@ -249,7 +256,7 @@ export default class BitsManager {
         L ${x - bit.diameter / 2} ${y - bit.length}
         L ${x + bit.diameter / 2} ${y - bit.length} Z`
                 );
-                shape.setAttribute("fill", "rgba(128, 0, 128, 0.30)"); // Purple color
+                shape.setAttribute("fill", fillColor);
                 break;
             case "bull":
                 // Bull-nose cutter: cylindrical part + bullnose profile
@@ -265,7 +272,7 @@ export default class BitsManager {
         L ${x - bit.diameter / 2} ${y - bit.length}
         L ${x + bit.diameter / 2} ${y - bit.length} Z`
                 );
-                shape.setAttribute("fill", "rgba(128, 128, 0, 0.3)"); // Olive color
+                shape.setAttribute("fill", fillColor);
                 break;
         }
 
@@ -275,6 +282,44 @@ export default class BitsManager {
         }
 
         return shape;
+    }
+
+    // Get the fill color for a bit with proper opacity
+    getBitFillColor(bit, isSelected = false) {
+        const baseColor = bit.fillColor;
+        if (!baseColor) return "rgba(204, 204, 204, 0.3)"; // Default gray
+
+        // Parse the base color to extract RGB values
+        let r, g, b;
+        if (baseColor.startsWith("rgba")) {
+            // Extract RGB from rgba(r, g, b, a)
+            const match = baseColor.match(
+                /rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d.]+\)/
+            );
+            if (match) {
+                r = parseInt(match[1]);
+                g = parseInt(match[2]);
+                b = parseInt(match[3]);
+            }
+        } else if (baseColor.startsWith("rgb")) {
+            // Extract RGB from rgb(r, g, b)
+            const match = baseColor.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (match) {
+                r = parseInt(match[1]);
+                g = parseInt(match[2]);
+                b = parseInt(match[3]);
+            }
+        } else if (baseColor.startsWith("#")) {
+            // Convert hex to RGB
+            const hex = baseColor.slice(1);
+            r = parseInt(hex.slice(0, 2), 16);
+            g = parseInt(hex.slice(2, 4), 16);
+            b = parseInt(hex.slice(4, 6), 16);
+        }
+
+        // Apply opacity: 0.6 for selected/modal, 0.3 for normal
+        const opacity = isSelected ? 0.6 : 0.3;
+        return `rgba(${r}, ${g}, ${b}, ${opacity})`;
     }
 
     // Helper functions needed for bit shapes
@@ -477,6 +522,7 @@ export default class BitsManager {
         const defaultHeight = bit ? bit.height : "";
         const defaultCornerRadius = bit ? bit.cornerRadius : "";
         const defaultFlat = bit ? bit.flat : "";
+        const defaultColor = bit ? bit.fillColor : "#cccccc";
         const defaultName = bit ? bit.name : "";
 
         const modal = document.createElement("div");
@@ -496,6 +542,10 @@ export default class BitsManager {
               cornerRadius: defaultCornerRadius,
               flat: defaultFlat,
           })}
+          <label for="bit-color">Color:</label>
+          <input type="color" id="bit-color" value="${
+              defaultColor || "#cccccc"
+          }">
           <label for="bit-toolnumber">Tool Number:</label>
           <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
 
@@ -690,11 +740,13 @@ export default class BitsManager {
                 10
             );
 
+            const color = form.querySelector("#bit-color").value;
             let bitParams = {
                 name,
                 diameter,
                 length,
                 toolNumber,
+                fillColor: color,
             };
 
             if (groupName === "conical") {
@@ -749,12 +801,13 @@ export default class BitsManager {
                 previewZoomInitialized = true;
             }
 
-            // Create bit shape always at center of bit
+            // Create bit shape always at center of bit (preview should show selected state with 0.6 opacity)
             const shape = this.createBitShapeElement(
                 bitParams,
                 groupName,
                 100,
-                100 + bitParams.length / 2
+                100 + bitParams.length / 2,
+                true // isSelected = true for modal preview
             );
 
             previewBitsLayer.appendChild(shape);
@@ -805,6 +858,10 @@ export default class BitsManager {
             input.addEventListener("input", updateBitPreview);
         });
 
+        // Update preview on color input change
+        const colorInput = form.querySelector("#bit-color");
+        colorInput.addEventListener("input", updateBitPreview);
+
         // Initial preview update
         updateBitPreview();
         form.addEventListener("submit", async (e) => {
@@ -831,11 +888,13 @@ export default class BitsManager {
             );
             const toolNumber = parseInt(toolNumberStr, 10) || 1;
 
+            const color = form.querySelector("#bit-color").value;
             const payload = {
                 name,
                 diameter,
                 length,
                 toolNumber,
+                fillColor: color,
             };
 
             if (groupName === "conical") {

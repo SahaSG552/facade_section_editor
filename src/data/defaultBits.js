@@ -1,16 +1,36 @@
 export default {
     cylindrical: [
-        { id: "cyl-1", name: "D10H20", diameter: 10, length: 20 },
-        { id: "cyl-2", name: "D12H25", diameter: 12, length: 25 },
+        {
+            id: "cyl-1",
+            name: "D10H20",
+            diameter: 10,
+            length: 20,
+            fillColor: "rgba(0, 140, 255, 0.3)",
+        },
+        {
+            id: "cyl-2",
+            name: "D12H25",
+            diameter: 12,
+            length: 25,
+            fillColor: "rgba(0, 140, 255, 0.3)",
+        },
     ],
     conical: [
-        { id: "con-1", name: "V90D25", diameter: 25.4, length: 19, angle: 90 },
+        {
+            id: "con-1",
+            name: "V90D25",
+            diameter: 25.4,
+            length: 19,
+            angle: 90,
+            fillColor: "rgba(26, 255, 0, 0.3)",
+        },
         {
             id: "con-2",
             name: "V120D32",
             diameter: 32,
             length: 13.2,
             angle: 120,
+            fillColor: "rgba(26, 255, 0, 0.3)",
         },
         {
             id: "con-3",
@@ -18,12 +38,34 @@ export default {
             diameter: 50,
             length: 20.6,
             angle: 120,
+            fillColor: "rgba(26, 255, 0, 0.3)",
         },
     ],
     ball: [
-        { id: "bn-1", name: "U10", diameter: 10, length: 20, height: 5 },
-        { id: "bn-2", name: "U19", diameter: 19, length: 25, height: 9.5 },
-        { id: "bn-3", name: "U38", diameter: 38.1, length: 22, height: 19.05 },
+        {
+            id: "bn-1",
+            name: "U10",
+            diameter: 10,
+            length: 20,
+            height: 5,
+            fillColor: "rgba(255, 0, 0, 0.3)",
+        },
+        {
+            id: "bn-2",
+            name: "U19",
+            diameter: 19,
+            length: 25,
+            height: 9.5,
+            fillColor: "rgba(255, 0, 0, 0.3)",
+        },
+        {
+            id: "bn-3",
+            name: "U38",
+            diameter: 38.1,
+            length: 22,
+            height: 19.05,
+            fillColor: "rgba(255, 0, 0, 0.3)",
+        },
     ],
     fillet: [
         {
@@ -34,6 +76,7 @@ export default {
             height: 3.175,
             cornerRadius: 3.175,
             flat: 0,
+            fillColor: "rgba(128, 0, 128, 0.3)",
         },
         {
             id: "fil-2",
@@ -43,6 +86,7 @@ export default {
             height: 4,
             cornerRadius: 4,
             flat: 2,
+            fillColor: "rgba(128, 0, 128, 0.3)",
         },
     ],
     bull: [
@@ -54,6 +98,7 @@ export default {
             height: 3,
             cornerRadius: 3,
             flat: 4,
+            fillColor: "rgba(128, 128, 0, 0.3)",
         },
         {
             id: "bul-2",
@@ -63,6 +108,7 @@ export default {
             height: 2,
             cornerRadius: 2,
             flat: 8,
+            fillColor: "rgba(128, 128, 0, 0.3)",
         },
     ],
 };

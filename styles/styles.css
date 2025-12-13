@@ -394,11 +394,27 @@ html {
   z-index: 5;
 }
 
-/* Колонки = и № - 20px каждая */
+/* Колонка Al - 30px */
 #operations th:nth-child(6),
-#operations td:nth-child(6),
+#operations td:nth-child(6) {
+  width: 30px;
+}
+
+/* Колонка OP - 30px */
 #operations th:nth-child(7),
 #operations td:nth-child(7) {
+  width: 30px;
+}
+
+/* Колонка Col - 30px */
+#operations th:nth-child(8),
+#operations td:nth-child(8) {
+  width: 30px;
+}
+
+/* Колонка Del - 30px */
+#operations th:nth-child(9),
+#operations td:nth-child(9) {
   width: 30px;
 }
 
@@ -418,7 +434,7 @@ html {
   padding-left: 8px;
 }
 
-/* Остальные колонки - авто ширина */
+/* Колонки X, Y - 50px каждая */
 #operations th:nth-child(4),
 #operations td:nth-child(4),
 #operations th:nth-child(5),

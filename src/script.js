@@ -491,7 +491,7 @@ function updateOffsetContours() {
             const offsetContour = document.createElementNS(svgNS, "path");
             offsetContour.setAttribute("d", pathData);
             offsetContour.setAttribute("fill", "none");
-            offsetContour.setAttribute("stroke", "blue");
+            offsetContour.setAttribute("stroke", bit.color || "#cccccc");
             offsetContour.setAttribute(
                 "stroke-width",
                 getAdaptiveStrokeWidth()
@@ -661,32 +661,38 @@ function updateCanvasBitsForBitId(bitId) {
     }
     if (!updatedBitData) return;
 
-    bitsOnCanvas.forEach((bit) => {
+    bitsOnCanvas.forEach((bit, index) => {
         if (bit.bitData.id === bitId) {
             // Update reference to the new bit data
             bit.bitData = updatedBitData;
             // Update name
             bit.name = updatedBitData.name;
 
-            // Redraw shape
+            // Redraw shape with correct selection state
             const oldShape = bit.group.querySelector(".bit-shape");
             if (oldShape) {
                 bit.group.removeChild(oldShape);
             }
+            const isSelected = selectedBitIndices.includes(index);
             const newShape = bitsManager.createBitShapeElement(
                 updatedBitData,
                 bit.groupName,
                 bit.baseAbsX,
-                bit.baseAbsY
+                bit.baseAbsY,
+                isSelected
             );
-            bit.group.insertBefore(newShape, bit.group.firstChild); // insert before anchor point if exists
 
-            // Update stroke width
-            const thickness = Math.max(
-                0.1,
-                0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
-            );
-            newShape.setAttribute("stroke-width", thickness);
+            // Apply highlight stroke if selected
+            if (isSelected) {
+                newShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                const thickness = Math.max(
+                    0.1,
+                    0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+                );
+                newShape.setAttribute("stroke-width", thickness);
+            }
+
+            bit.group.insertBefore(newShape, bit.group.firstChild); // insert before anchor point if exists
         }
     });
 
@@ -724,6 +730,8 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
         x: x,
         y: y,
         alignment: "center", // default alignment
+        operation: "AL", // default operation
+        color: bit.fillColor || "#cccccc", // default color from bit data
         group: g, // group that contains the shape
         baseAbsX: centerX, // absolute coords where shape was created
         baseAbsY: centerY,
@@ -746,13 +754,15 @@ function updateBitsSheet() {
         const row = document.createElement("tr");
         row.setAttribute("data-index", index);
 
-        // Add click handler for row selection (but NOT on inputs or buttons)
+        // Add click handler for row selection (but NOT on inputs, buttons, selects or interactive elements)
         row.addEventListener("click", (e) => {
-            // Don't select if clicking on input or button
+            // Don't select if clicking on input, button, select, svg or other interactive elements
             if (
                 e.target.tagName === "INPUT" ||
+                e.target.tagName === "SELECT" ||
                 e.target.closest("button") ||
-                e.target.closest("svg")
+                e.target.closest("svg") ||
+                e.target.closest("option")
             ) {
                 return;
             }
@@ -825,6 +835,82 @@ function updateBitsSheet() {
         });
         alignCell.appendChild(alignBtn);
         row.appendChild(alignCell);
+
+        // Operations dropdown
+        const opCell = document.createElement("td");
+        const opSelect = document.createElement("select");
+        opSelect.style.width = "100%";
+        opSelect.style.padding = "2px";
+        opSelect.style.border = "1px solid #ccc";
+        opSelect.style.borderRadius = "3px";
+
+        const operations = [
+            { value: "AL", label: "Profile Along" },
+            { value: "OU", label: "Profile Outside" },
+            { value: "IN", label: "Profile Inside" },
+            { value: "PO", label: "Pocketing" },
+            { value: "VC", label: "V-Carve" },
+            { value: "RE", label: "Re-Machining" },
+            { value: "TS", label: "T-Slotting" },
+            { value: "DR", label: "Drill" },
+        ];
+
+        operations.forEach((op) => {
+            const option = document.createElement("option");
+            option.value = op.value;
+            option.textContent = op.label;
+            if (bit.operation === op.value) {
+                option.selected = true;
+            }
+            opSelect.appendChild(option);
+        });
+
+        opSelect.addEventListener("change", () => {
+            bit.operation = opSelect.value;
+        });
+
+        opCell.appendChild(opSelect);
+        row.appendChild(opCell);
+
+        // Color picker
+        const colorCell = document.createElement("td");
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = bit.color || "#cccccc";
+        colorInput.style.width = "40px";
+        colorInput.style.height = "25px";
+        colorInput.style.border = "1px solid #ccc";
+        colorInput.style.borderRadius = "3px";
+        colorInput.style.cursor = "pointer";
+
+        colorInput.addEventListener("input", () => {
+            bit.color = colorInput.value;
+            // Note: bit.bitData.fillColor remains unchanged (database default color)
+
+            // Redraw bit shape with new display color
+            const oldShape = bit.group?.querySelector(".bit-shape");
+            if (oldShape) {
+                // Create shape with display color instead of default color
+                const bitDataWithDisplayColor = {
+                    ...bit.bitData,
+                    fillColor: bit.color,
+                };
+                const newShape = bitsManager.createBitShapeElement(
+                    bitDataWithDisplayColor,
+                    bit.groupName,
+                    bit.baseAbsX,
+                    bit.baseAbsY,
+                    selectedBitIndices.includes(index) // Keep selected state
+                );
+                bit.group.replaceChild(newShape, oldShape);
+            }
+
+            // Update offset contour color
+            updateOffsetContours();
+        });
+
+        colorCell.appendChild(colorInput);
+        row.appendChild(colorCell);
 
         // Delete button
         const delCell = document.createElement("td");
@@ -956,16 +1042,30 @@ function selectBit(index) {
                 shape.dataset.originalFill = shape.getAttribute("fill");
                 shape.dataset.originalStroke = shape.getAttribute("stroke");
 
-                // Apply highlight
-                const currentFill = shape.getAttribute("fill");
-                const newFill = currentFill.replace(/0\.\d+\)/, "0.6)"); // Change transparency
-                shape.setAttribute("fill", newFill);
-                shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                // Redraw shape with selected state (0.6 opacity) using display color
+                const oldShape = shape;
+                const bitDataWithDisplayColor = {
+                    ...bit.bitData,
+                    fillColor: bit.color,
+                };
+                const newShape = bitsManager.createBitShapeElement(
+                    bitDataWithDisplayColor,
+                    bit.groupName,
+                    bit.baseAbsX,
+                    bit.baseAbsY,
+                    true // isSelected = true for highlighting
+                );
+
+                // Replace old shape with new one
+                bit.group.replaceChild(newShape, oldShape);
+
+                // Apply highlight stroke
+                newShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
                 const thickness = Math.max(
                     0.1,
                     0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
                 );
-                shape.setAttribute("stroke-width", thickness);
+                newShape.setAttribute("stroke-width", thickness);
             }
         }
     }
@@ -981,20 +1081,30 @@ function resetBitHighlight(index) {
     const bit = bitsOnCanvas[index];
     if (bit && bit.group) {
         const shape = bit.group.querySelector(".bit-shape");
-        if (shape && shape.dataset.originalFill) {
-            shape.setAttribute("fill", shape.dataset.originalFill);
-            shape.setAttribute(
-                "stroke",
-                shape.dataset.originalStroke || "black"
+        if (shape) {
+            // Redraw shape with normal state (0.3 opacity) using display color
+            const oldShape = shape;
+            const bitDataWithDisplayColor = {
+                ...bit.bitData,
+                fillColor: bit.color,
+            };
+            const newShape = bitsManager.createBitShapeElement(
+                bitDataWithDisplayColor,
+                bit.groupName,
+                bit.baseAbsX,
+                bit.baseAbsY,
+                false // isSelected = false for normal state
             );
-            // Set to scaled thickness instead of default "1"
+
+            // Replace old shape with new one
+            bit.group.replaceChild(newShape, oldShape);
+
+            // Set to scaled thickness
             const thickness = Math.max(
                 0.1,
                 0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
             );
-            shape.setAttribute("stroke-width", thickness);
-            delete shape.dataset.originalFill;
-            delete shape.dataset.originalStroke;
+            newShape.setAttribute("stroke-width", thickness);
         }
     }
 }
@@ -1733,6 +1843,9 @@ function initialize() {
     // Now that bitsManager is created, initialize the bit groups
     bitsManager.createBitGroups();
 
+    // Initial update of offset contours (even if no bits are loaded yet)
+    updateOffsetContours();
+
     // Add event listeners for panel parameter inputs
     panelWidthInput.addEventListener("input", updatepanelParams);
     panelHeightInput.addEventListener("input", updatepanelParams);
@@ -1772,6 +1885,7 @@ function initialize() {
                         logOperation(
                             `Auto-loaded ${restoredCount} saved bit positions`
                         );
+                        updateOffsetContours(); // Update offset contours after loading saved positions
                     }
                 } catch (error) {
                     console.warn("Failed to load saved positions:", error);
@@ -1861,6 +1975,8 @@ function saveBitPositions() {
         x: bit.x,
         y: bit.y,
         alignment: bit.alignment,
+        operation: bit.operation,
+        color: bit.color,
     }));
 
     localStorage.setItem("bits_positions", JSON.stringify(savedPositions));
@@ -1874,6 +1990,8 @@ function saveBitPositionsAs() {
         x: bit.x,
         y: bit.y,
         alignment: bit.alignment,
+        operation: bit.operation,
+        color: bit.color,
     }));
 
     const dataStr = JSON.stringify(savedPositions, null, 2);
@@ -1909,6 +2027,7 @@ async function loadBitPositions() {
                     logOperation(
                         `Loaded ${restoredCount} bit positions from JSON file`
                     );
+                    updateOffsetContours(); // Update offset contours after loading positions
                 } catch (error) {
                     alert(
                         "Failed to parse JSON file. Please check the format."
@@ -1992,6 +2111,8 @@ async function restoreBitPositions(positionsData) {
                     x: pos.x,
                     y: pos.y,
                     alignment: pos.alignment || "center",
+                    operation: pos.operation || "AL",
+                    color: pos.color || bitData.fillColor || "#cccccc",
                     group: g,
                     baseAbsX: centerX,
                     baseAbsY: centerY,
@@ -2059,6 +2180,7 @@ function clearAllBits() {
 
     // Update table and canvas
     updateBitsSheet();
+    updateOffsetContours();
     if (showPart) updatePartShape();
 
     logOperation(`Cleared ${bitCount} bits from canvas`);
