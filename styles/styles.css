@@ -301,6 +301,64 @@ html {
   transform: scale(1.2);
 }
 
+/* ===== OPERATIONS HEADER ===== */
+#operations-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0px;
+}
+
+#operations-header h3 {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+/* ===== OPERATIONS TOOLBAR ===== */
+#operations-toolbar {
+  display: inline-flex;
+  gap: 5px;
+  background-color: #f0f0f0;
+  padding: 5px;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  width: 280px;
+}
+
+#operations-toolbar button {
+  padding: 5px 10px;
+  font-size: 12px;
+  border: 1px solid #ccc;
+  background-color: white;
+  cursor: pointer;
+  border-radius: 3px;
+  flex: 1;
+  width: auto;
+}
+
+#operations-toolbar button:hover {
+  background-color: #e0e0e0;
+}
+
+#operations-toolbar button:active {
+  background-color: #d0d0d0;
+}
+
+/* ===== OPERATIONS LOG ===== */
+#operations-log {
+  font-size: 11px;
+  color: #666;
+  margin: 5px 0;
+  min-height: 18px;
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+  overflow: hidden;
+}
+
+#operations-log.fade-out {
+  opacity: 0;
+}
+
 /* ===== OPERATIONS (Table) ===== */
 #operations {
   flex: 0 0 auto;

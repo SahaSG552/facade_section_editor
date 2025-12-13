@@ -7,19 +7,23 @@ import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
 import dxfExporter from "./utils/dxfExporter.js";
+import { OffsetCalculator } from "./utils/offsetCalculator.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
 // Get DOM elements
 const canvas = document.getElementById("canvas");
-const materialWidthInput = document.getElementById("material-width");
-const materialThicknessInput = document.getElementById("material-thickness");
+const panelWidthInput = document.getElementById("panel-width");
+const panelHeightInput = document.getElementById("panel-height");
+const panelThicknessInput = document.getElementById("panel-thickness");
 
-// Global variables for material shape
-let materialRect;
-let materialWidth = 400;
-let materialThickness = 19;
-let materialAnchor = "top-left"; // "top-left" or "bottom-left"
+// Global variables for panel shape
+let partSection;
+let partFront;
+let panelWidth = 400;
+let panelHeight = 600;
+let panelThickness = 19;
+let panelAnchor = "top-left"; // "top-left" or "bottom-left"
 
 const CLIPPER_SCALE = 1000;
 let showPart = false;
@@ -60,15 +64,18 @@ let dragStarted = false; // Flag to track if drag actually started (mouse moved)
 
 // Initialize SVG elements using CanvasManager
 function initializeSVG() {
-    // Create material rectangle first (before CanvasManager to avoid callback issues)
-    materialRect = document.createElementNS(svgNS, "rect");
+    // Create panel rectangle first (before CanvasManager to avoid callback issues)
+    partSection = document.createElementNS(svgNS, "rect");
 
-    // Calculate material anchor position for grid alignment
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
-    const anchorOffset = getMaterialAnchorOffset();
-    const gridAnchorX = materialX + anchorOffset.x + gridSize / 2;
-    const gridAnchorY = materialY + anchorOffset.y + gridSize / 2;
+    // Create part front rectangle
+    partFront = document.createElementNS(svgNS, "rect");
+
+    // Calculate panel anchor position for grid alignment
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const anchorOffset = getpanelAnchorOffset();
+    const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
+    const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
 
     // Create main canvas manager instance
     mainCanvasManager = new CanvasManager({
@@ -85,7 +92,7 @@ function initializeSVG() {
         initialZoom: 1,
         initialPanX: canvasParameters.width / 2,
         initialPanY: canvasParameters.height / 2,
-        layers: ["grid", "material", "bits", "overlay"],
+        layers: ["grid", "panel", "offsets", "bits", "overlay"],
         onZoom: (zoomLevel, panX, panY) => {
             // Update stroke widths when zoom changes
             updateStrokeWidths(zoomLevel);
@@ -93,11 +100,14 @@ function initializeSVG() {
     });
 
     // Get layer references
-    const materialLayer = mainCanvasManager.getLayer("material");
+    const panelLayer = mainCanvasManager.getLayer("panel");
     bitsLayer = mainCanvasManager.getLayer("bits");
 
-    // Add material rectangle to layer
-    materialLayer.appendChild(materialRect);
+    // Add panel rectangle to layer
+    panelLayer.appendChild(partSection);
+
+    // Add part front rectangle to layer
+    panelLayer.appendChild(partFront);
 
     // Create part path
     partPath = document.createElementNS(svgNS, "path");
@@ -106,18 +116,15 @@ function initializeSVG() {
     partPath.setAttribute("stroke", "black");
     partPath.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     partPath.style.display = "none";
-    materialLayer.appendChild(partPath);
+    panelLayer.appendChild(partPath);
 
-    // Create material anchor indicator (always visible)
-    const materialAnchorIndicator = document.createElementNS(svgNS, "g");
-    materialAnchorIndicator.id = "material-anchor-indicator";
-    materialLayer.appendChild(materialAnchorIndicator);
+    // Create panel anchor indicator (always visible)
+    const panelAnchorIndicator = document.createElementNS(svgNS, "g");
+    panelAnchorIndicator.id = "panel-anchor-indicator";
+    panelLayer.appendChild(panelAnchorIndicator);
 
-    // Initial draw of material shape
-    updateMaterialShape();
-
-    // Initial fit to scale
-    fitToScale();
+    // Initial draw of panel shape
+    updatepanelShape();
 
     // Add zoom button event listeners
     document
@@ -150,10 +157,10 @@ function initializeSVG() {
         }
     });
 
-    // Setup material anchor button
-    const materialAnchorBtn = document.getElementById("material-anchor-btn");
-    materialAnchorBtn.appendChild(createMaterialAnchorButton(materialAnchor));
-    materialAnchorBtn.addEventListener("click", cycleMaterialAnchor);
+    // Setup panel anchor button
+    const panelAnchorBtn = document.getElementById("panel-anchor-btn");
+    panelAnchorBtn.appendChild(createpanelAnchorButton(panelAnchor));
+    panelAnchorBtn.addEventListener("click", cyclepanelAnchor);
 
     // Setup part button
     document
@@ -169,6 +176,20 @@ function initializeSVG() {
     document
         .getElementById("export-dxf-btn")
         .addEventListener("click", exportToDXF);
+
+    // Setup operations toolbar buttons
+    document
+        .getElementById("save-btn")
+        .addEventListener("click", saveBitPositions);
+    document
+        .getElementById("save-as-btn")
+        .addEventListener("click", saveBitPositionsAs);
+    document
+        .getElementById("load-btn")
+        .addEventListener("click", loadBitPositions);
+    document
+        .getElementById("clear-btn")
+        .addEventListener("click", clearAllBits);
 
     // Add mouse event listeners for bit dragging
     canvas.addEventListener("mousedown", handleMouseDown);
@@ -227,15 +248,15 @@ function initializeSVG() {
     });
 }
 
-// Cycle material anchor
-function cycleMaterialAnchor() {
+// Cycle panel anchor
+function cyclepanelAnchor() {
     // Cycle between "top-left" and "bottom-left"
-    materialAnchor = materialAnchor === "top-left" ? "bottom-left" : "top-left";
+    panelAnchor = panelAnchor === "top-left" ? "bottom-left" : "top-left";
 
     // Update button icon
-    const materialAnchorBtn = document.getElementById("material-anchor-btn");
-    materialAnchorBtn.innerHTML = "";
-    materialAnchorBtn.appendChild(createMaterialAnchorButton(materialAnchor));
+    const panelAnchorBtn = document.getElementById("panel-anchor-btn");
+    panelAnchorBtn.innerHTML = "";
+    panelAnchorBtn.appendChild(createpanelAnchorButton(panelAnchor));
 
     // Recalculate bit positions relative to new anchor
     updateBitsForNewAnchor();
@@ -244,23 +265,20 @@ function cycleMaterialAnchor() {
     updateGridAnchor();
 
     // Update indicator
-    updateMaterialAnchorIndicator();
+    updatepanelAnchorIndicator();
 }
 
-// Update bit positions when material anchor changes
+// Update bit positions when panel anchor changes
 function updateBitsForNewAnchor() {
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
-    const oldAnchor =
-        materialAnchor === "top-left" ? "bottom-left" : "top-left";
-    const currentAnchorX = materialX;
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const oldAnchor = panelAnchor === "top-left" ? "bottom-left" : "top-left";
+    const currentAnchorX = panelX;
     const currentAnchorY =
-        oldAnchor === "top-left" ? materialY : materialY + materialThickness;
-    const newAnchorX = materialX;
+        oldAnchor === "top-left" ? panelY : panelY + panelThickness;
+    const newAnchorX = panelX;
     const newAnchorY =
-        materialAnchor === "top-left"
-            ? materialY
-            : materialY + materialThickness;
+        panelAnchor === "top-left" ? panelY : panelY + panelThickness;
 
     bitsOnCanvas.forEach((bit) => {
         // Current physical position
@@ -285,42 +303,61 @@ function updateBitsForNewAnchor() {
         const dy = newAbsY - bit.baseAbsY;
         bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
     });
+    updateOffsetContours();
     if (showPart) updatePartShape();
 }
 
-// Update material shape
-function updateMaterialShape() {
-    materialRect.setAttribute(
-        "x",
-        (canvasParameters.width - materialWidth) / 2
-    );
-    materialRect.setAttribute(
-        "y",
-        (canvasParameters.height - materialThickness) / 2
-    );
-    materialRect.setAttribute("width", materialWidth);
-    materialRect.setAttribute("height", materialThickness);
-    materialRect.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
-    materialRect.setAttribute("stroke", "black");
+// Update part front view
+function updatepartFront() {
+    // Position part front with 100mm gap from the panel rectangle using same anchor system
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const anchorOffset = getpanelAnchorOffset();
 
-    updateMaterialAnchorIndicator();
+    // Position part front relative to panel anchor
+    const anchorX = panelX + anchorOffset.x;
+    const anchorY = panelY;
+
+    partFront.setAttribute("x", anchorX);
+    partFront.setAttribute("y", anchorY - panelHeight - 100); // 100mm gap above panel anchor
+    partFront.setAttribute("width", panelWidth);
+    partFront.setAttribute("height", panelHeight);
+    partFront.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
+    partFront.setAttribute("stroke", "black");
+    partFront.setAttribute("stroke-width", getAdaptiveStrokeWidth());
 }
 
-// Update material anchor indicator (always visible)
-function updateMaterialAnchorIndicator() {
-    const indicator = document.getElementById("material-anchor-indicator");
+// Update panel shape
+function updatepanelShape() {
+    partSection.setAttribute("x", (canvasParameters.width - panelWidth) / 2);
+    partSection.setAttribute(
+        "y",
+        (canvasParameters.height - panelThickness) / 2
+    );
+    partSection.setAttribute("width", panelWidth);
+    partSection.setAttribute("height", panelThickness);
+    partSection.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
+    partSection.setAttribute("stroke", "black");
+
+    updatepartFront();
+    updatepanelAnchorIndicator();
+}
+
+// Update panel anchor indicator (always visible)
+function updatepanelAnchorIndicator() {
+    const indicator = document.getElementById("panel-anchor-indicator");
     indicator.innerHTML = ""; // Clear
 
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
 
     let anchorX, anchorY;
-    if (materialAnchor === "top-left") {
-        anchorX = materialX;
-        anchorY = materialY;
-    } else if (materialAnchor === "bottom-left") {
-        anchorX = materialX;
-        anchorY = materialY + materialThickness;
+    if (panelAnchor === "top-left") {
+        anchorX = panelX;
+        anchorY = panelY;
+    } else if (panelAnchor === "bottom-left") {
+        anchorX = panelX;
+        anchorY = panelY + panelThickness;
     }
 
     // Draw a small cross
@@ -350,11 +387,11 @@ function updateMaterialAnchorIndicator() {
 
 // Update grid anchor position
 function updateGridAnchor() {
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
-    const anchorOffset = getMaterialAnchorOffset();
-    const gridAnchorX = materialX + anchorOffset.x + gridSize / 2;
-    const gridAnchorY = materialY + anchorOffset.y + gridSize / 2;
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const anchorOffset = getpanelAnchorOffset();
+    const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
+    const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
 
     if (mainCanvasManager) {
         mainCanvasManager.config.gridAnchorX = gridAnchorX;
@@ -365,26 +402,27 @@ function updateGridAnchor() {
     }
 }
 
-// Update material parameters
-function updateMaterialParams() {
-    // Update material dimensions
-    materialWidth = parseInt(materialWidthInput.value) || materialWidth;
-    materialThickness =
-        parseInt(materialThicknessInput.value) || materialThickness;
+// Update panel parameters
+function updatepanelParams() {
+    // Update panel dimensions
+    panelWidth = parseInt(panelWidthInput.value) || panelWidth;
+    panelHeight = parseInt(panelHeightInput.value) || panelHeight;
+    panelThickness = parseInt(panelThicknessInput.value) || panelThickness;
 
-    updateMaterialShape();
+    updatepanelShape();
     updateBitsPositions();
-    updateGridAnchor(); // Update grid anchor when material changes
+    updateGridAnchor(); // Update grid anchor when panel changes
+    updateOffsetContours();
     if (showPart) updatePartShape();
 }
 
-// New: reposition all bits according to current material anchor and their stored logical coords
+// New: reposition all bits according to current panel anchor and their stored logical coords
 function updateBitsPositions() {
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
-    const anchorOffset = getMaterialAnchorOffset();
-    const anchorX = materialX + anchorOffset.x;
-    const anchorY = materialY + anchorOffset.y;
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const anchorOffset = getpanelAnchorOffset();
+    const anchorX = panelX + anchorOffset.x;
+    const anchorY = panelY + anchorOffset.y;
 
     bitsOnCanvas.forEach((bit) => {
         // desired absolute position = anchor + logical coords
@@ -411,6 +449,68 @@ let bitsOnCanvas = [];
 let bitCounter = 0;
 let dragSrcRow = null;
 let bitsLayer;
+
+// Offset contours for each bit
+let offsetContours = [];
+
+// Update offset contours for all bits
+function updateOffsetContours() {
+    const offsetsLayer = mainCanvasManager.getLayer("offsets");
+    offsetsLayer.innerHTML = ""; // Clear all offset contours
+
+    // Clear the offset contours array
+    offsetContours = [];
+
+    // Create offset calculator instance
+    const offsetCalculator = new OffsetCalculator();
+
+    // Get the original partFront rectangle points
+    const partFrontPoints = offsetCalculator.rectToPoints(partFront);
+
+    bitsOnCanvas.forEach((bit, index) => {
+        // Use the bit's X position as the offset distance
+        const offsetDistance = bit.x;
+
+        // Calculate offset curve
+        const offsetPoints = offsetCalculator.calculateOffset(
+            partFrontPoints,
+            offsetDistance
+        );
+
+        if (offsetPoints && offsetPoints.length > 0) {
+            // Create SVG path for the offset contour
+            const pathData =
+                offsetPoints
+                    .map((point, i) =>
+                        i === 0
+                            ? `M ${point.x} ${point.y}`
+                            : `L ${point.x} ${point.y}`
+                    )
+                    .join(" ") + " Z";
+
+            const offsetContour = document.createElementNS(svgNS, "path");
+            offsetContour.setAttribute("d", pathData);
+            offsetContour.setAttribute("fill", "none");
+            offsetContour.setAttribute("stroke", "blue");
+            offsetContour.setAttribute(
+                "stroke-width",
+                getAdaptiveStrokeWidth()
+            );
+            offsetContour.setAttribute("stroke-dasharray", "5,5");
+            offsetContour.classList.add("offset-contour");
+
+            // Add to offsets layer
+            offsetsLayer.appendChild(offsetContour);
+
+            // Store reference
+            offsetContours.push({
+                element: offsetContour,
+                bitIndex: index,
+                offsetDistance: offsetDistance,
+            });
+        }
+    });
+}
 
 // Alignment states: 'center', 'left', 'right'
 const alignmentStates = ["center", "left", "right"];
@@ -498,15 +598,15 @@ function createAlignmentButton(alignment) {
     return svg;
 }
 
-// Create material anchor button SVG
-function createMaterialAnchorButton(anchor) {
+// Create panel anchor button SVG
+function createpanelAnchorButton(anchor) {
     const svg = document.createElementNS(svgNS, "svg");
     svg.setAttribute("width", "20");
     svg.setAttribute("height", "20");
     svg.setAttribute("viewBox", "0 0 20 20");
     svg.style.cursor = "pointer";
 
-    // Background rectangle (material)
+    // Background rectangle (panel)
     const bg = document.createElementNS(svgNS, "rect");
     bg.setAttribute("width", "20");
     bg.setAttribute("height", "20");
@@ -599,11 +699,11 @@ function updateCanvasBitsForBitId(bitId) {
 function drawBitShape(bit, groupName, createBitShapeElementFn) {
     const bitsLayer = document.getElementById("bits-layer");
 
-    updateMaterialParams();
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
-    const centerX = materialX + materialWidth / 2;
-    const centerY = materialY;
+    updatepanelParams();
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const centerX = panelX + panelWidth / 2;
+    const centerY = panelY;
 
     // create shape at absolute coords, wrap in group so we can translate later
     const shape = createBitShapeElementFn(bit, groupName, centerX, centerY);
@@ -615,8 +715,8 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
 
     bitCounter++;
 
-    const x = centerX - materialX;
-    const y = centerY - materialY;
+    const x = centerX - panelX;
+    const y = centerY - panelY;
 
     const newBit = {
         number: bitCounter,
@@ -633,6 +733,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
     bitsOnCanvas.push(newBit);
     updateBitsSheet();
     updateStrokeWidths();
+    updateOffsetContours();
     if (showPart) updatePartShape();
 }
 
@@ -800,6 +901,7 @@ function deleteBitFromCanvas(index) {
     // Update table
     updateBitsSheet();
     redrawBitsOnCanvas();
+    updateOffsetContours();
     if (showPart) updatePartShape();
 }
 
@@ -898,14 +1000,13 @@ function resetBitHighlight(index) {
 }
 
 function updateBitPosition(index, newX, newY) {
-    // update material params to get correct material origin
-    updateMaterialParams();
-    const materialAnchorOffset = getMaterialAnchorOffset();
-    const materialAnchorX =
-        (canvasParameters.width - materialWidth) / 2 + materialAnchorOffset.x;
-    const materialAnchorY =
-        (canvasParameters.height - materialThickness) / 2 +
-        materialAnchorOffset.y;
+    // update panel params to get correct panel origin
+    updatepanelParams();
+    const panelAnchorOffset = getpanelAnchorOffset();
+    const panelAnchorX =
+        (canvasParameters.width - panelWidth) / 2 + panelAnchorOffset.x;
+    const panelAnchorY =
+        (canvasParameters.height - panelThickness) / 2 + panelAnchorOffset.y;
 
     // If this bit is selected and there are multiple selections, move all selected bits by the same delta
     if (selectedBitIndices.includes(index) && selectedBitIndices.length > 1) {
@@ -924,8 +1025,8 @@ function updateBitPosition(index, newX, newY) {
                 const selectedNewY = selectedBit.y + deltaY;
 
                 // Update selected bit position
-                const selectedNewAbsX = materialAnchorX + selectedNewX;
-                const selectedNewAbsY = materialAnchorY + selectedNewY;
+                const selectedNewAbsX = panelAnchorX + selectedNewX;
+                const selectedNewAbsY = panelAnchorY + selectedNewY;
                 const selectedDx = selectedNewAbsX - selectedBit.baseAbsX;
                 const selectedDy = selectedNewAbsY - selectedBit.baseAbsY;
 
@@ -949,9 +1050,9 @@ function updateBitPosition(index, newX, newY) {
     }
 
     const bit = bitsOnCanvas[index];
-    // compute absolute positions the user expects (relative to material anchor)
-    const newAbsX = materialAnchorX + newX;
-    const newAbsY = materialAnchorY + newY;
+    // compute absolute positions the user expects (relative to panel anchor)
+    const newAbsX = panelAnchorX + newX;
+    const newAbsY = panelAnchorY + newY;
 
     // compute translation relative to base creation coordinates
     const dx = newAbsX - bit.baseAbsX;
@@ -967,6 +1068,7 @@ function updateBitPosition(index, newX, newY) {
     // DO NOT call updateBitsSheet() here - it recreates inputs and breaks focus
     // redraw layer order if needed
     redrawBitsOnCanvas();
+    updateOffsetContours();
     // Update part shape if part view is enabled and bits were moved via table coordinates
     if (showPart) updatePartShape();
 }
@@ -1093,8 +1195,11 @@ function getAdaptiveStrokeWidth(zoomLevel = mainCanvasManager?.zoomLevel) {
 function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
     if (!zoomLevel) return;
     const thickness = getAdaptiveStrokeWidth(zoomLevel);
-    if (materialRect) {
-        materialRect.setAttribute("stroke-width", thickness);
+    if (partSection) {
+        partSection.setAttribute("stroke-width", thickness);
+    }
+    if (partFront) {
+        partFront.setAttribute("stroke-width", thickness);
     }
     bitsOnCanvas.forEach((bit) => {
         const shape = bit.group?.querySelector(".bit-shape");
@@ -1102,71 +1207,89 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
             shape.setAttribute("stroke-width", thickness);
         }
     });
+    // Update offset contour stroke widths
+    offsetContours.forEach((contour) => {
+        if (contour.element) {
+            contour.element.setAttribute("stroke-width", thickness);
+        }
+    });
 }
 
 function fitToScale() {
-    // Calculate bounding box including material and all bits
-    let minX = (canvasParameters.width - materialWidth) / 2;
-    let maxX = minX + materialWidth;
-    let minY = (canvasParameters.height - materialThickness) / 2;
-    let maxY = minY + materialThickness;
+    // Initialize bounding box with panel rectangle
+    let minX = (canvasParameters.width - panelWidth) / 2;
+    let maxX = minX + panelWidth;
+    let minY = (canvasParameters.height - panelThickness) / 2;
+    let maxY = minY + panelThickness;
 
+    // Include part front rectangle in bounds if it exists
+    if (partFront) {
+        const partFrontX = parseFloat(partFront.getAttribute("x"));
+        const partFrontY = parseFloat(partFront.getAttribute("y"));
+        const partFrontWidth = parseFloat(partFront.getAttribute("width"));
+        const partFrontHeight = parseFloat(partFront.getAttribute("height"));
+
+        minX = Math.min(minX, partFrontX);
+        maxX = Math.max(maxX, partFrontX + partFrontWidth);
+        minY = Math.min(minY, partFrontY);
+        maxY = Math.max(maxY, partFrontY + partFrontHeight);
+    }
+
+    // Include all bits on canvas
     if (bitsOnCanvas.length > 0) {
         bitsOnCanvas.forEach((bit) => {
-            // Get the actual bounding box of the bit shape
-            const shape = bit.group.querySelector(".bit-shape");
-            if (shape) {
-                const bbox = shape.getBBox();
-                const transform = bit.group.getAttribute("transform");
-                let offsetX = 0;
-                let offsetY = 0;
+            if (bit.group) {
+                // Get the actual bounding box of the bit group
+                const bbox = bit.group.getBBox();
 
-                if (transform) {
-                    const match = transform.match(
-                        /translate\(([^,]+),\s*([^)]+)\)/
-                    );
-                    if (match) {
-                        offsetX = parseFloat(match[1]);
-                        offsetY = parseFloat(match[2]);
-                    }
-                }
-
-                const shapeMinX = bbox.x + offsetX;
-                const shapeMaxX = bbox.x + bbox.width + offsetX;
-                const shapeMinY = bbox.y + offsetY;
-                const shapeMaxY = bbox.y + bbox.height + offsetY;
-
-                minX = Math.min(minX, shapeMinX);
-                maxX = Math.max(maxX, shapeMaxX);
-                minY = Math.min(minY, shapeMinY);
-                maxY = Math.max(maxY, shapeMaxY);
+                minX = Math.min(minX, bbox.x);
+                maxX = Math.max(maxX, bbox.x + bbox.width);
+                minY = Math.min(minY, bbox.y);
+                maxY = Math.max(maxY, bbox.y + bbox.height);
             }
         });
     }
 
-    // Add padding
-    const padding = 20;
-    const contentWidth = maxX - minX + 2 * padding;
-    const contentHeight = maxY - minY + 2 * padding;
+    // Include panel anchor indicator
+    if (document.getElementById("panel-anchor-indicator")) {
+        const anchorIndicator = document.getElementById(
+            "panel-anchor-indicator"
+        );
+        const anchorBbox = anchorIndicator.getBBox();
+        minX = Math.min(minX, anchorBbox.x);
+        maxX = Math.max(maxX, anchorBbox.x + anchorBbox.width);
+        minY = Math.min(minY, anchorBbox.y);
+        maxY = Math.max(maxY, anchorBbox.y + anchorBbox.height);
+    }
 
-    // Use CanvasManager's fitToScale method
+    // Add padding - extra 50mm for top/bottom menus
+    const sidePadding = 20;
+    const topBottomPadding = 100; // 50mm for top/bottom menus
+
+    // Adjust min/max coordinates with different padding for top/bottom vs sides
+    const adjustedMinX = minX - sidePadding;
+    const adjustedMaxX = maxX + sidePadding;
+    const adjustedMinY = minY - topBottomPadding;
+    const adjustedMaxY = maxY + topBottomPadding;
+
+    // Use CanvasManager's fitToScale method with adjusted bounds
     mainCanvasManager.fitToScale({
-        minX,
-        maxX,
-        minY,
-        maxY,
-        padding,
+        minX: adjustedMinX,
+        maxX: adjustedMaxX,
+        minY: adjustedMinY,
+        maxY: adjustedMaxY,
+        padding: 0, // CanvasManager will handle padding internally if needed
     });
 }
 
 function zoomToSelected() {
     if (selectedBitIndices.length === 0) return;
 
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
-    const anchorOffset = getMaterialAnchorOffset();
-    const anchorX = materialX + anchorOffset.x;
-    const anchorY = materialY + anchorOffset.y;
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const anchorOffset = getpanelAnchorOffset();
+    const anchorX = panelX + anchorOffset.x;
+    const anchorY = panelY + anchorOffset.y;
 
     // Calculate bounding box for all selected bits
     let minX = Infinity,
@@ -1222,11 +1345,11 @@ function snapToGrid(value) {
     return Math.round(value / gridSize) * gridSize;
 }
 
-// Helper function to get material anchor offset
-function getMaterialAnchorOffset() {
-    return materialAnchor === "top-left"
+// Helper function to get panel anchor offset
+function getpanelAnchorOffset() {
+    return panelAnchor === "top-left"
         ? { x: 0, y: 0 }
-        : { x: 0, y: materialThickness };
+        : { x: 0, y: panelThickness };
 }
 
 // Helper function to get anchor offset based on alignment
@@ -1257,12 +1380,11 @@ function handleMouseDown(e) {
             for (let i = 0; i < bitsOnCanvas.length; i++) {
                 const bit = bitsOnCanvas[i];
                 if (bit) {
-                    const materialX =
-                        (canvasParameters.width - materialWidth) / 2;
-                    const materialY =
-                        (canvasParameters.height - materialThickness) / 2;
-                    const bitAbsX = materialX + bit.x;
-                    const bitAbsY = materialY + bit.y;
+                    const panelX = (canvasParameters.width - panelWidth) / 2;
+                    const panelY =
+                        (canvasParameters.height - panelThickness) / 2;
+                    const bitAbsX = panelX + bit.x;
+                    const bitAbsY = panelY + bit.y;
 
                     // Check if click is near the bit (within 20px)
                     const distance = Math.sqrt(
@@ -1323,18 +1445,17 @@ function handleMouseMove(e) {
         const bit = bitsOnCanvas[draggedBitIndex];
         const anchorOffset = getAnchorOffset(bit);
 
-        // Calculate new position relative to material anchor
-        const materialAnchorOffset = getMaterialAnchorOffset();
-        const materialAnchorX =
-            (canvasParameters.width - materialWidth) / 2 +
-            materialAnchorOffset.x;
-        const materialAnchorY =
-            (canvasParameters.height - materialThickness) / 2 +
-            materialAnchorOffset.y;
+        // Calculate new position relative to panel anchor
+        const panelAnchorOffset = getpanelAnchorOffset();
+        const panelAnchorX =
+            (canvasParameters.width - panelWidth) / 2 + panelAnchorOffset.x;
+        const panelAnchorY =
+            (canvasParameters.height - panelThickness) / 2 +
+            panelAnchorOffset.y;
 
         // Calculate desired anchor position
-        let anchorX = svgCoords.x - materialAnchorX;
-        let anchorY = svgCoords.y - materialAnchorY;
+        let anchorX = svgCoords.x - panelAnchorX;
+        let anchorY = svgCoords.y - panelAnchorY;
 
         // Snap anchor to grid
         anchorX = mainCanvasManager.snapToGrid(anchorX);
@@ -1407,25 +1528,25 @@ function updateTableCoordinates(bitIndex, newX, newY) {
 }
 
 // Clipper functions for part subtraction
-function getMaterialPolygon() {
-    const materialX = (canvasParameters.width - materialWidth) / 2;
-    const materialY = (canvasParameters.height - materialThickness) / 2;
+function getpanelPolygon() {
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
     return [
         {
-            X: Math.round(materialX * CLIPPER_SCALE),
-            Y: Math.round(materialY * CLIPPER_SCALE),
+            X: Math.round(panelX * CLIPPER_SCALE),
+            Y: Math.round(panelY * CLIPPER_SCALE),
         },
         {
-            X: Math.round((materialX + materialWidth) * CLIPPER_SCALE),
-            Y: Math.round(materialY * CLIPPER_SCALE),
+            X: Math.round((panelX + panelWidth) * CLIPPER_SCALE),
+            Y: Math.round(panelY * CLIPPER_SCALE),
         },
         {
-            X: Math.round((materialX + materialWidth) * CLIPPER_SCALE),
-            Y: Math.round((materialY + materialThickness) * CLIPPER_SCALE),
+            X: Math.round((panelX + panelWidth) * CLIPPER_SCALE),
+            Y: Math.round((panelY + panelThickness) * CLIPPER_SCALE),
         },
         {
-            X: Math.round(materialX * CLIPPER_SCALE),
-            Y: Math.round((materialY + materialThickness) * CLIPPER_SCALE),
+            X: Math.round(panelX * CLIPPER_SCALE),
+            Y: Math.round((panelY + panelThickness) * CLIPPER_SCALE),
         },
     ];
 }
@@ -1513,7 +1634,7 @@ function updatePartShape() {
     const ClipperLib = window.ClipperLib;
     const clipper = new ClipperLib.Clipper();
     const subj = new ClipperLib.Paths();
-    subj.push(getMaterialPolygon());
+    subj.push(getpanelPolygon());
     const clip = new ClipperLib.Paths();
     bitsOnCanvas.forEach((bit) => {
         const poly = getBitPolygon(bit);
@@ -1577,7 +1698,7 @@ function toggleBitsVisibility() {
 }
 
 function togglePartView() {
-    if (!bitsLayer || !materialRect || !partPath) {
+    if (!bitsLayer || !partSection || !partPath) {
         console.error("SVG elements not initialized");
         return;
     }
@@ -1587,16 +1708,18 @@ function togglePartView() {
 
     if (showPart) {
         updatePartShape();
-        materialRect.style.display = "none";
+        partSection.style.display = "none";
         partPath.style.display = "block";
-        bitsLayer.style.display = "block";
+        // Respect the bits visibility state
+        bitsLayer.style.display = bitsVisible ? "block" : "none";
         partBtn.classList.remove("part-hidden");
         partBtn.classList.add("part-visible");
         partBtn.title = "Show Material";
     } else {
-        materialRect.style.display = "block";
+        partSection.style.display = "block";
         partPath.style.display = "none";
-        bitsLayer.style.display = "block";
+        // Respect the bits visibility state
+        bitsLayer.style.display = bitsVisible ? "block" : "none";
         partBtn.classList.remove("part-visible");
         partBtn.classList.add("part-hidden");
         partBtn.title = "Show Part";
@@ -1610,22 +1733,52 @@ function initialize() {
     // Now that bitsManager is created, initialize the bit groups
     bitsManager.createBitGroups();
 
-    // Add event listeners for material parameter inputs
-    materialWidthInput.addEventListener("input", updateMaterialParams);
-    materialThicknessInput.addEventListener("input", updateMaterialParams);
+    // Add event listeners for panel parameter inputs
+    panelWidthInput.addEventListener("input", updatepanelParams);
+    panelHeightInput.addEventListener("input", updatepanelParams);
+    panelThicknessInput.addEventListener("input", updatepanelParams);
 
     // Add math evaluation on blur
-    materialWidthInput.addEventListener("blur", () => {
-        materialWidthInput.value = evaluateMathExpression(
-            materialWidthInput.value
-        );
-        updateMaterialParams();
+    panelWidthInput.addEventListener("blur", () => {
+        panelWidthInput.value = evaluateMathExpression(panelWidthInput.value);
+        updatepanelParams();
     });
-    materialThicknessInput.addEventListener("blur", () => {
-        materialThicknessInput.value = evaluateMathExpression(
-            materialThicknessInput.value
+    panelHeightInput.addEventListener("blur", () => {
+        panelHeightInput.value = evaluateMathExpression(panelHeightInput.value);
+        updatepanelParams();
+    });
+    panelThicknessInput.addEventListener("blur", () => {
+        panelThicknessInput.value = evaluateMathExpression(
+            panelThicknessInput.value
         );
-        updateMaterialParams();
+        updatepanelParams();
+    });
+
+    // Initial fit to scale after all initialization is complete
+    requestAnimationFrame(() => {
+        fitToScale();
+
+        // Auto-load saved bit positions after everything is initialized
+        setTimeout(async () => {
+            const savedPositions = localStorage.getItem("bits_positions");
+            if (savedPositions) {
+                try {
+                    const positionsData = JSON.parse(savedPositions);
+                    if (positionsData.length > 0) {
+                        console.log("Auto-loading positions:", positionsData);
+                        const restoredCount = await restoreBitPositions(
+                            positionsData
+                        );
+                        logOperation(
+                            `Auto-loaded ${restoredCount} saved bit positions`
+                        );
+                    }
+                } catch (error) {
+                    console.warn("Failed to load saved positions:", error);
+                    logOperation("Failed to auto-load saved positions");
+                }
+            }
+        }, 100); // Small delay to ensure everything is ready
     });
 }
 
@@ -1639,7 +1792,7 @@ function calculateResultPolygon() {
     const ClipperLib = window.ClipperLib;
     const clipper = new ClipperLib.Clipper();
     const subj = new ClipperLib.Paths();
-    subj.push(getMaterialPolygon());
+    subj.push(getpanelPolygon());
     const clip = new ClipperLib.Paths();
     bitsOnCanvas.forEach((bit) => {
         const poly = getBitPolygon(bit);
@@ -1684,6 +1837,231 @@ function exportToDXF() {
     dxfExporter.downloadDXF(dxfContent);
 
     console.log("DXF export completed. File downloaded.");
+}
+
+// Logging function for operations
+function logOperation(message) {
+    const logElement = document.getElementById("operations-log");
+    const timestamp = new Date().toLocaleTimeString();
+    logElement.textContent = `[${timestamp}] ${message}`;
+
+    // Remove fade-out class if it exists
+    logElement.classList.remove("fade-out");
+
+    // Add fade-out class after 5 seconds
+    setTimeout(() => {
+        logElement.classList.add("fade-out");
+    }, 5000);
+}
+
+// Save current bit positions to localStorage
+function saveBitPositions() {
+    const savedPositions = bitsOnCanvas.map((bit) => ({
+        id: bit.bitData.id,
+        x: bit.x,
+        y: bit.y,
+        alignment: bit.alignment,
+    }));
+
+    localStorage.setItem("bits_positions", JSON.stringify(savedPositions));
+    logOperation(`Saved ${savedPositions.length} bit positions`);
+}
+
+// Save bit positions to JSON file
+function saveBitPositionsAs() {
+    const savedPositions = bitsOnCanvas.map((bit) => ({
+        id: bit.bitData.id,
+        x: bit.x,
+        y: bit.y,
+        alignment: bit.alignment,
+    }));
+
+    const dataStr = JSON.stringify(savedPositions, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(dataBlob);
+    link.download = "bits_positions.json";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    logOperation(
+        `Exported ${savedPositions.length} bit positions to JSON file`
+    );
+}
+
+// Load bit positions from JSON file
+async function loadBitPositions() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const positionsData = JSON.parse(event.target.result);
+                    const restoredCount = await restoreBitPositions(
+                        positionsData
+                    );
+                    logOperation(
+                        `Loaded ${restoredCount} bit positions from JSON file`
+                    );
+                } catch (error) {
+                    alert(
+                        "Failed to parse JSON file. Please check the format."
+                    );
+                    logOperation(
+                        "Failed to load positions: invalid JSON format"
+                    );
+                }
+            };
+            reader.readAsText(file);
+        }
+    };
+    input.click();
+}
+
+// Restore bit positions from data
+async function restoreBitPositions(positionsData) {
+    console.log("Starting restoreBitPositions with data:", positionsData);
+
+    // Clear current canvas
+    bitsOnCanvas.forEach((bit) => {
+        if (bit.group && bit.group.parentNode) {
+            bit.group.parentNode.removeChild(bit.group);
+        }
+    });
+    bitsOnCanvas = [];
+
+    // Get all available bits
+    const allBits = await getBits();
+    console.log("Available bits:", allBits);
+
+    let restoredCount = 0;
+
+    // Restore positions
+    positionsData.forEach((pos, index) => {
+        console.log(`Processing position ${index}:`, pos);
+
+        // Find the bit data by ID
+        let bitData = null;
+        let groupName = null;
+
+        for (const [group, bits] of Object.entries(allBits)) {
+            const found = bits.find((b) => b.id === pos.id);
+            if (found) {
+                bitData = found;
+                groupName = group;
+                break;
+            }
+        }
+
+        console.log(`Bit data found for ${pos.id}:`, bitData);
+
+        if (bitData) {
+            try {
+                // Create bit on canvas at the saved position
+                const panelX = (canvasParameters.width - panelWidth) / 2;
+                const panelY = (canvasParameters.height - panelThickness) / 2;
+                const centerX = panelX + panelWidth / 2;
+                const centerY = panelY + panelThickness / 2;
+
+                console.log("Creating shape element...");
+                const shape = bitsManager.createBitShapeElement(
+                    bitData,
+                    groupName,
+                    centerX,
+                    centerY
+                );
+
+                console.log("Creating SVG group...");
+                const g = document.createElementNS(svgNS, "g");
+                g.appendChild(shape);
+
+                console.log("Adding to bits layer:", bitsLayer);
+                bitsLayer.appendChild(g);
+
+                bitCounter++;
+
+                const newBit = {
+                    number: bitCounter,
+                    name: bitData.name,
+                    x: pos.x,
+                    y: pos.y,
+                    alignment: pos.alignment || "center",
+                    group: g,
+                    baseAbsX: centerX,
+                    baseAbsY: centerY,
+                    bitData: bitData,
+                    groupName: groupName,
+                };
+
+                bitsOnCanvas.push(newBit);
+                restoredCount++;
+
+                // Apply the saved position
+                const panelAnchorOffset = getpanelAnchorOffset();
+                const panelAnchorX =
+                    (canvasParameters.width - panelWidth) / 2 +
+                    panelAnchorOffset.x;
+                const panelAnchorY =
+                    (canvasParameters.height - panelThickness) / 2 +
+                    panelAnchorOffset.y;
+
+                const absX = panelAnchorX + pos.x;
+                const absY = panelAnchorY + pos.y;
+                const dx = absX - centerX;
+                const dy = absY - centerY;
+                g.setAttribute("transform", `translate(${dx}, ${dy})`);
+
+                console.log(
+                    `Successfully restored bit ${bitData.name} at position (${pos.x}, ${pos.y})`
+                );
+            } catch (error) {
+                console.error(`Error restoring bit ${pos.id}:`, error);
+            }
+        } else {
+            console.warn(`Bit with ID ${pos.id} not found in available bits`);
+        }
+    });
+
+    console.log(
+        `Restored ${restoredCount} out of ${positionsData.length} bits`
+    );
+
+    // Update table and canvas
+    console.log("Updating table and canvas...");
+    updateBitsSheet();
+    updateStrokeWidths();
+    if (showPart) updatePartShape();
+
+    return restoredCount;
+}
+
+// Clear all bits from canvas
+function clearAllBits() {
+    const bitCount = bitsOnCanvas.length;
+
+    bitsOnCanvas.forEach((bit) => {
+        if (bit.group && bit.group.parentNode) {
+            bit.group.parentNode.removeChild(bit.group);
+        }
+    });
+
+    bitsOnCanvas = [];
+    bitCounter = 0;
+
+    // Clear localStorage
+    localStorage.removeItem("bits_positions");
+
+    // Update table and canvas
+    updateBitsSheet();
+    if (showPart) updatePartShape();
+
+    logOperation(`Cleared ${bitCount} bits from canvas`);
 }
 
 // Call initialize function when the page loads
