@@ -124,7 +124,11 @@ export function updateBit(groupName, id, patch) {
     if (!VALID_GROUPS.has(groupName)) return null;
     const idx = bits[groupName].findIndex((b) => b.id === id);
     if (idx === -1) return null;
-    bits[groupName][idx] = { ...bits[groupName][idx], ...patch };
+
+    // Create completely new structure to avoid read-only property issues
+    const updatedBits = JSON.parse(JSON.stringify(bits));
+    updatedBits[groupName][idx] = { ...updatedBits[groupName][idx], ...patch };
+    bits = updatedBits;
     save();
     return bits[groupName][idx];
 }
