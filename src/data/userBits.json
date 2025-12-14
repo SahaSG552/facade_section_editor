@@ -13,18 +13,20 @@
       "length": 25
     },
     {
-      "id": "cyl-3",
+      "id": "b_mir8nn6i7x9s75",
       "name": "D4H13",
       "diameter": 4,
       "length": 13,
-      "toolNumber": 4
+      "toolNumber": 4,
+      "fillColor": "#d37373"
     },
     {
-      "id": "cyl-4",
+      "id": "b_mir9yp5kdp8up1",
       "name": "D4H20",
       "diameter": 4,
       "length": 20,
-      "toolNumber": 4
+      "toolNumber": 4,
+      "fillColor": "#289a98"
     }
   ],
   "conical": [
@@ -49,10 +51,11 @@
       "diameter": 50,
       "length": 20.6,
       "angle": 120,
-      "toolNumber": 1
+      "toolNumber": 1,
+      "fillColor": "#213bc0"
     },
     {
-      "id": "con-4",
+      "id": "b_mj15eccqigibza",
       "name": "V60D14",
       "diameter": 14,
       "length": 16,
@@ -74,7 +77,8 @@
       "diameter": 19,
       "length": 25,
       "height": 9.5,
-      "toolNumber": 1
+      "toolNumber": 1,
+      "fillColor": "#a4ae24"
     },
     {
       "id": "bn-3",
@@ -82,7 +86,8 @@
       "diameter": 38.1,
       "length": 22,
       "height": 19.05,
-      "toolNumber": 1
+      "toolNumber": 1,
+      "fillColor": "#c332b7"
     },
     {
       "id": "b_mizv5vo3ko6kzl",
@@ -106,7 +111,8 @@
       "diameter": 25,
       "length": 15,
       "toolNumber": 1,
-      "height": 12.5
+      "height": 12.5,
+      "fillColor": "#2f2a74"
     },
     {
       "id": "b_mj1f1li0c7ypi9",
@@ -190,7 +196,8 @@
       "toolNumber": 1,
       "height": 4,
       "cornerRadius": 4,
-      "flat": 2
+      "flat": 2,
+      "fillColor": "#8c941e"
     },
     {
       "id": "b_mix69sugwv7gje",
@@ -231,7 +238,8 @@
       "height": 2,
       "cornerRadius": 2,
       "flat": 8,
-      "toolNumber": 1
+      "toolNumber": 1,
+      "fillColor": "#d0ca25"
     }
   ]
 }

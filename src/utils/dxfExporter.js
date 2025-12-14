@@ -13,9 +13,18 @@ class DXFExporter {
      * Export bits on canvas to DXF format
      * @param {Array} bitsOnCanvas - Array of bit objects from the canvas
      * @param {Array} clipperResult - Result polygon from Clipper operations
+     * @param {SVGElement} partFront - The part front SVG rectangle element
+     * @param {Array} offsetContours - Array of offset contour objects
+     * @param {number} panelThickness - Panel thickness for layer naming
      * @returns {string} DXF content as string
      */
-    exportToDXF(bitsOnCanvas, clipperResult) {
+    exportToDXF(
+        bitsOnCanvas,
+        clipperResult,
+        partFront,
+        offsetContours,
+        panelThickness
+    ) {
         this.dxfContent = [];
 
         // DXF Header
@@ -25,13 +34,24 @@ class DXFExporter {
         this.writeClasses();
 
         // DXF Tables (Layers)
-        this.writeTables(bitsOnCanvas);
+        this.writeTables(
+            bitsOnCanvas,
+            partFront,
+            offsetContours,
+            panelThickness
+        );
 
         // DXF Blocks (empty)
         this.writeBlocks();
 
         // DXF Entities (the actual geometry)
-        this.writeEntities(bitsOnCanvas, clipperResult);
+        this.writeEntities(
+            bitsOnCanvas,
+            clipperResult,
+            partFront,
+            offsetContours,
+            panelThickness
+        );
 
         // DXF Objects
         this.writeObjects();
@@ -113,11 +133,20 @@ class DXFExporter {
     /**
      * Write DXF tables section with layers
      */
-    writeTables(bitsOnCanvas) {
+    writeTables(bitsOnCanvas, partFront, offsetContours, panelThickness) {
         this.dxfContent.push("0");
         this.dxfContent.push("SECTION");
         this.dxfContent.push("2");
         this.dxfContent.push("TABLES");
+
+        // Calculate total number of layers
+        let totalLayers = bitsOnCanvas.length + 2; // +1 for layer 0, +1 for Result layer
+
+        // Add layer for partFront if provided
+        if (partFront) totalLayers++;
+
+        // Add layers for offset contours if provided
+        if (offsetContours) totalLayers += offsetContours.length;
 
         // Layer table
         this.dxfContent.push("0");
@@ -125,20 +154,46 @@ class DXFExporter {
         this.dxfContent.push("2");
         this.dxfContent.push("LAYER");
         this.dxfContent.push("70");
-        this.dxfContent.push((bitsOnCanvas.length + 2).toString()); // +1 for layer 0, +1 for Result layer
+        this.dxfContent.push(totalLayers.toString());
 
         // Layer 0 (default)
-        this.writeLayer("0", 7, 0, 0, 0); // White color
+        // this.writeLayer("0", 7, 0, 0, 0); // White color
 
         // Result layer for Clipper
-        this.writeLayer("Clipper_Result", 3, 0, 0, 0); // Green color for Clipper
+        this.writeLayer("Default", 0, 0, 0, 0); // Green color for Clipper
+
+        // Part front layer
+        if (partFront) {
+            const partFrontLayerName = `CUT_${panelThickness}MM_OU`;
+            this.writeLayer(partFrontLayerName, 0, 0, 0, 0); // Black color for part front
+        }
+
+        // Offset contour layers
+        if (offsetContours) {
+            offsetContours.forEach((offset, index) => {
+                const bit = bitsOnCanvas[offset.bitIndex];
+                if (bit) {
+                    // Format bit.y value: if fractional, add extra _ before value, replace decimal with _
+                    let yValue = bit.y.toString();
+                    if (bit.y % 1 !== 0) {
+                        // It's fractional, add extra _
+                        yValue = `_${yValue.replace(".", "_")}`;
+                    } else {
+                        yValue = `${bit.y}`;
+                    }
+
+                    const layerName = `${bit.name}_${yValue}MM_${bit.operation}`;
+                    // Use the bit's color from the canvas
+                    const colorIndex = this.colorToDXFIndex(bit.color);
+                    this.writeLayer(layerName, colorIndex, 0, 0, 0);
+                }
+            });
+        }
 
         // Bit layers
         bitsOnCanvas.forEach((bit, index) => {
-            const layerName = `Bit_${bit.name.replace(/[^a-zA-Z0-9_]/g, "_")}_${
-                index + 1
-            }`;
-            const colorIndex = (index % 7) + 1; // Cycle through colors 1-7
+            const layerName = `Default`;
+            const colorIndex = this.colorToDXFIndex(bit.color);
             this.writeLayer(layerName, colorIndex, 0, 0, 0);
         });
 
@@ -177,8 +232,23 @@ class DXFExporter {
         this.dxfContent.push(name);
         this.dxfContent.push("70");
         this.dxfContent.push(plotFlag.toString());
-        this.dxfContent.push("62");
-        this.dxfContent.push(colorIndex.toString());
+
+        // Use RGB color (group code 420) instead of ACI color index (62)
+        if (
+            colorIndex &&
+            typeof colorIndex === "object" &&
+            colorIndex.r !== undefined
+        ) {
+            const rgbValue =
+                colorIndex.r * 256 * 256 + colorIndex.g * 256 + colorIndex.b;
+            this.dxfContent.push("420");
+            this.dxfContent.push(rgbValue.toString());
+        } else {
+            // Fallback to ACI color index
+            this.dxfContent.push("62");
+            this.dxfContent.push((colorIndex || 7).toString());
+        }
+
         this.dxfContent.push("6");
         this.dxfContent.push("CONTINUOUS");
         this.dxfContent.push("290");
@@ -272,7 +342,7 @@ class DXFExporter {
     }
 
     /**
-     * Add APPID table with ACAD application
+     * Add APPID table with ACAD and Rhino applications
      */
     addAPPIDTable() {
         this.dxfContent.push("0");
@@ -280,21 +350,37 @@ class DXFExporter {
         this.dxfContent.push("2");
         this.dxfContent.push("APPID");
         this.dxfContent.push("70");
-        this.dxfContent.push("1"); // Number of app IDs
+        this.dxfContent.push("2"); // Number of app IDs
 
         // ACAD application
-        const appidHandle = this.getNextHandle();
+        const acadHandle = this.getNextHandle();
 
         this.dxfContent.push("0");
         this.dxfContent.push("APPID");
         this.dxfContent.push("5");
-        this.dxfContent.push(appidHandle);
+        this.dxfContent.push(acadHandle);
         this.dxfContent.push("100");
         this.dxfContent.push("AcDbSymbolTableRecord");
         this.dxfContent.push("100");
         this.dxfContent.push("AcDbRegAppTableRecord");
         this.dxfContent.push("2");
         this.dxfContent.push("ACAD");
+        this.dxfContent.push("70");
+        this.dxfContent.push("0");
+
+        // Rhino application (for XDATA)
+        const rhinoHandle = this.getNextHandle();
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("APPID");
+        this.dxfContent.push("5");
+        this.dxfContent.push(rhinoHandle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbSymbolTableRecord");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbRegAppTableRecord");
+        this.dxfContent.push("2");
+        this.dxfContent.push("Rhino");
         this.dxfContent.push("70");
         this.dxfContent.push("0");
 
@@ -526,14 +612,32 @@ class DXFExporter {
     /**
      * Write DXF entities section
      */
-    writeEntities(bitsOnCanvas, clipperResult) {
+    writeEntities(
+        bitsOnCanvas,
+        clipperResult,
+        partFront,
+        offsetContours,
+        panelThickness
+    ) {
         this.dxfContent.push("0");
         this.dxfContent.push("SECTION");
         this.dxfContent.push("2");
         this.dxfContent.push("ENTITIES");
 
+        // Write part front contour
+        if (partFront) {
+            this.writePartFront(partFront, panelThickness);
+        }
+
+        // Write offset contours
+        if (offsetContours) {
+            offsetContours.forEach((offset, index) => {
+                this.writeOffsetContour(offset, bitsOnCanvas);
+            });
+        }
+
         // Write result polygon from Clipper
-        this.writeResultPolygon(clipperResult, "Clipper_Result");
+        this.writeResultPolygon(clipperResult, "Default");
 
         // Write bit shapes
         bitsOnCanvas.forEach((bit, index) => {
@@ -548,9 +652,7 @@ class DXFExporter {
      * Write bit shape to DXF
      */
     writeBitShape(bit, index) {
-        const layerName = `Bit_${bit.name.replace(/[^a-zA-Z0-9_]/g, "_")}_${
-            index + 1
-        }`;
+        const layerName = `Default`;
 
         // Get bit position and transformation
         const transform = bit.group.getAttribute("transform");
@@ -572,6 +674,70 @@ class DXFExporter {
 
         // Export based on actual SVG element type, not bit type
         this.writeSVGShape(shape, offsetX, offsetY, layerName, convertY);
+
+        // Add XDATA for bit information
+        this.addBitXDATA(bit);
+    }
+
+    /**
+     * Add XDATA for bit information
+     * @param {Object} bit - Bit object with name and other properties
+     */
+    addBitXDATA(bit) {
+        // XDATA format for Rhino application
+        this.dxfContent.push("1001"); // Application name
+        this.dxfContent.push("Rhino");
+        this.dxfContent.push("1002"); // Control string start
+        this.dxfContent.push("{");
+        this.dxfContent.push("1000"); // String data
+        this.dxfContent.push("Name");
+        this.dxfContent.push("1000"); // String data
+        this.dxfContent.push(bit.name);
+        this.dxfContent.push("1002"); // Control string end
+        this.dxfContent.push("}");
+    }
+
+    /**
+     * Write part front contour to DXF
+     * @param {SVGElement} partFront - The part front SVG rectangle element
+     * @param {number} panelThickness - Panel thickness for layer naming
+     */
+    writePartFront(partFront, panelThickness) {
+        const layerName = `CUT_${panelThickness}MM_OU`;
+
+        // Convert SVG coordinates to DXF coordinates (flip Y axis)
+        const convertY = (y) => -y;
+
+        // Write as SVG rectangle (should be a rect element)
+        this.writeSVGRect(partFront, 0, 0, layerName, convertY);
+    }
+
+    /**
+     * Write offset contour to DXF
+     * @param {Object} offset - Offset contour object with element and bitIndex
+     * @param {Array} bitsOnCanvas - Array of bits on canvas
+     */
+    writeOffsetContour(offset, bitsOnCanvas) {
+        const bit = bitsOnCanvas[offset.bitIndex];
+        if (!bit) return;
+
+        // Format bit.y value: if fractional, add extra _ before value, replace decimal with _
+        let yValue = bit.y.toString();
+        if (bit.y % 1 !== 0) {
+            // It's fractional, add extra _
+            yValue = `_${yValue.replace(".", "_")}`;
+        } else {
+            yValue = `${bit.y}`;
+        }
+
+        const layerName = `${bit.name}_${yValue}MM_${bit.operation}`;
+
+        // The offset.element should be an SVG path element with the offset contour
+        // Convert SVG coordinates to DXF coordinates (flip Y axis)
+        const convertY = (y) => -y;
+
+        // Write as SVG path
+        this.writeSVGPath(offset.element, 0, 0, layerName, convertY);
     }
 
     /**
@@ -1247,6 +1413,45 @@ class DXFExporter {
         }
 
         return points;
+    }
+
+    /**
+     * Convert color string to RGB object for DXF RGB colors (group code 420)
+     * @param {string} color - Color string (hex or rgba)
+     * @returns {Object} RGB object with r, g, b properties or number for ACI fallback
+     */
+    colorToDXFIndex(color) {
+        if (!color) return { r: 255, g: 255, b: 255 }; // Default to white
+
+        // If it's already a number, return it (ACI color index fallback)
+        if (typeof color === "number") return color;
+
+        // Parse color string
+        let r, g, b;
+
+        if (color.startsWith("#")) {
+            // Convert hex to RGB
+            const hex = color.slice(1);
+            r = parseInt(hex.slice(0, 2), 16);
+            g = parseInt(hex.slice(2, 4), 16);
+            b = parseInt(hex.slice(4, 6), 16);
+        } else if (color.startsWith("rgba") || color.startsWith("rgb")) {
+            // Extract RGB from rgba/rgb
+            const match = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+            if (match) {
+                r = parseInt(match[1]);
+                g = parseInt(match[2]);
+                b = parseInt(match[3]);
+            }
+        }
+
+        if (r !== undefined && g !== undefined && b !== undefined) {
+            // Return RGB object for true color support
+            return { r, g, b };
+        }
+
+        // Fallback to white
+        return { r: 255, g: 255, b: 255 };
     }
 
     /**

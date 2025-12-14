@@ -40,10 +40,7 @@ let mainCanvasManager;
 let bitsManager; // Bits manager instance
 let gridSize = 1; // Default grid size in pixels (1mm = 10px)
 
-// Pan variables for manual pan handling
-let isDraggingCanvas = false;
-let lastMouseX = 0;
-let lastMouseY = 0;
+// Pan variables for canvas panning
 
 // Pan variables for canvas panning
 let isPanning = false;
@@ -1878,7 +1875,6 @@ function initialize() {
                 try {
                     const positionsData = JSON.parse(savedPositions);
                     if (positionsData.length > 0) {
-                        console.log("Auto-loading positions:", positionsData);
                         const restoredCount = await restoreBitPositions(
                             positionsData
                         );
@@ -1944,8 +1940,14 @@ function exportToDXF() {
     // Get result polygon from Clipper
     const clipperResult = calculateResultPolygon();
 
-    // Export to DXF
-    const dxfContent = dxfExporter.exportToDXF(bitsOnCanvas, clipperResult);
+    // Export to DXF with partFront, offset contours, and panel thickness
+    const dxfContent = dxfExporter.exportToDXF(
+        bitsOnCanvas,
+        clipperResult,
+        partFront,
+        offsetContours,
+        panelThickness
+    );
 
     // Download the file
     dxfExporter.downloadDXF(dxfContent);
@@ -2045,8 +2047,6 @@ async function loadBitPositions() {
 
 // Restore bit positions from data
 async function restoreBitPositions(positionsData) {
-    console.log("Starting restoreBitPositions with data:", positionsData);
-
     // Clear current canvas
     bitsOnCanvas.forEach((bit) => {
         if (bit.group && bit.group.parentNode) {
@@ -2057,14 +2057,11 @@ async function restoreBitPositions(positionsData) {
 
     // Get all available bits
     const allBits = await getBits();
-    console.log("Available bits:", allBits);
 
     let restoredCount = 0;
 
     // Restore positions
     positionsData.forEach((pos, index) => {
-        console.log(`Processing position ${index}:`, pos);
-
         // Find the bit data by ID
         let bitData = null;
         let groupName = null;
@@ -2078,8 +2075,6 @@ async function restoreBitPositions(positionsData) {
             }
         }
 
-        console.log(`Bit data found for ${pos.id}:`, bitData);
-
         if (bitData) {
             try {
                 // Create bit on canvas at the saved position
@@ -2088,7 +2083,6 @@ async function restoreBitPositions(positionsData) {
                 const centerX = panelX + panelWidth / 2;
                 const centerY = panelY + panelThickness / 2;
 
-                console.log("Creating shape element...");
                 const shape = bitsManager.createBitShapeElement(
                     bitData,
                     groupName,
@@ -2096,11 +2090,9 @@ async function restoreBitPositions(positionsData) {
                     centerY
                 );
 
-                console.log("Creating SVG group...");
                 const g = document.createElementNS(svgNS, "g");
                 g.appendChild(shape);
 
-                console.log("Adding to bits layer:", bitsLayer);
                 bitsLayer.appendChild(g);
 
                 bitCounter++;
@@ -2137,10 +2129,6 @@ async function restoreBitPositions(positionsData) {
                 const dx = absX - centerX;
                 const dy = absY - centerY;
                 g.setAttribute("transform", `translate(${dx}, ${dy})`);
-
-                console.log(
-                    `Successfully restored bit ${bitData.name} at position (${pos.x}, ${pos.y})`
-                );
             } catch (error) {
                 console.error(`Error restoring bit ${pos.id}:`, error);
             }
@@ -2149,12 +2137,7 @@ async function restoreBitPositions(positionsData) {
         }
     });
 
-    console.log(
-        `Restored ${restoredCount} out of ${positionsData.length} bits`
-    );
-
     // Update table and canvas
-    console.log("Updating table and canvas...");
     updateBitsSheet();
     updateStrokeWidths();
     if (showPart) updatePartShape();
