@@ -71,6 +71,8 @@ class GridRenderer {
 }
 
 // CanvasManager - унифицированный класс для работы с SVG канвасами
+import { getSVGBounds } from "../utils/utils.js";
+
 class CanvasManager {
     constructor(config) {
         this.config = {
@@ -302,6 +304,17 @@ class CanvasManager {
         }
 
         this.updateViewBox();
+    }
+
+    fitToSVGElement(svgElement, padding = 20) {
+        const bounds = getSVGBounds(svgElement);
+        this.fitToScale({
+            minX: bounds.centerX - bounds.width / 2,
+            maxX: bounds.centerX + bounds.width / 2,
+            minY: bounds.centerY - bounds.height / 2,
+            maxY: bounds.centerY + bounds.height / 2,
+            padding: padding,
+        });
     }
 
     updateViewBox() {

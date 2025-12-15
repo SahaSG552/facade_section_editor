@@ -28,3 +28,36 @@ export function evaluateMathExpression(value) {
         return value; // if not a valid expression, return as is
     }
 }
+
+/**
+ * Gets the bounding box dimensions and center point of an SVG element or group.
+ *
+ * @param {SVGElement} svgElement - The SVG element to measure.
+ * @returns {Object} An object with width, height, centerX, and centerY properties.
+ */
+export function getSVGBounds(svgElement) {
+    // Create a temporary SVG container to attach the element for getBBox to work
+    const tempSvg = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "svg"
+    );
+    tempSvg.style.position = "absolute";
+    tempSvg.style.left = "-9999px";
+    tempSvg.style.top = "-9999px";
+    tempSvg.style.width = "1px";
+    tempSvg.style.height = "1px";
+    tempSvg.appendChild(svgElement);
+    document.body.appendChild(tempSvg);
+
+    const bbox = svgElement.getBBox();
+
+    // Clean up
+    document.body.removeChild(tempSvg);
+
+    return {
+        width: bbox.width,
+        height: bbox.height,
+        centerX: bbox.x + bbox.width / 2,
+        centerY: bbox.y + bbox.height / 2,
+    };
+}

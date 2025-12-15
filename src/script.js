@@ -30,6 +30,7 @@ const CLIPPER_SCALE = 1000;
 let showPart = false;
 let partPath;
 let bitsVisible = true; // Track bits visibility state
+let shankVisible = true; // Track shank visibility state
 
 const canvasParameters = {
     width: canvas.getAttribute("width"),
@@ -170,6 +171,11 @@ function initializeSVG() {
     const bitsBtn = document.getElementById("bits-btn");
     bitsBtn.addEventListener("click", toggleBitsVisibility);
     bitsBtn.classList.add("bits-visible"); // Initial state - bits are visible
+
+    // Setup shank visibility button
+    const shankBtn = document.getElementById("shank-btn");
+    shankBtn.addEventListener("click", toggleShankVisibility);
+    shankBtn.classList.add("shank-visible"); // Initial state - shank is visible
 
     // Setup DXF export button
     document
@@ -871,31 +877,45 @@ function updateCanvasBitsForBitId(bitId) {
             // Update name
             bit.name = updatedBitData.name;
 
-            // Redraw shape with correct selection state
-            const oldShape = bit.group.querySelector(".bit-shape");
-            if (oldShape) {
-                bit.group.removeChild(oldShape);
-            }
-            const isSelected = selectedBitIndices.includes(index);
-            const newShape = bitsManager.createBitShapeElement(
-                updatedBitData,
-                bit.groupName,
-                bit.baseAbsX,
-                bit.baseAbsY,
-                isSelected
-            );
-
-            // Apply highlight stroke if selected
-            if (isSelected) {
-                newShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-                const thickness = Math.max(
-                    0.1,
-                    0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+            // Redraw shape group with correct selection state
+            const oldShapeGroup = bit.group.querySelector("g");
+            if (oldShapeGroup) {
+                const isSelected = selectedBitIndices.includes(index);
+                const newShapeGroup = bitsManager.createBitShapeElement(
+                    updatedBitData,
+                    bit.groupName,
+                    bit.baseAbsX,
+                    bit.baseAbsY,
+                    isSelected
                 );
-                newShape.setAttribute("stroke-width", thickness);
-            }
 
-            bit.group.insertBefore(newShape, bit.group.firstChild); // insert before anchor point if exists
+                // Apply highlight stroke if selected
+                if (isSelected) {
+                    const newBitShape =
+                        newShapeGroup.querySelector(".bit-shape");
+                    const newShankShape =
+                        newShapeGroup.querySelector(".shank-shape");
+                    const thickness = Math.max(
+                        0.1,
+                        0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+                    );
+
+                    if (newBitShape) {
+                        newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                        newBitShape.setAttribute("stroke-width", thickness);
+                    }
+                    if (newShankShape) {
+                        newShankShape.setAttribute("stroke", "#00BFFF");
+                        newShankShape.setAttribute("stroke-width", thickness);
+
+                        newShankShape.style.display = shankVisible
+                            ? "block"
+                            : "none";
+                    }
+                }
+
+                bit.group.replaceChild(newShapeGroup, oldShapeGroup);
+            }
         }
     });
 
@@ -1093,22 +1113,22 @@ function updateBitsSheet() {
             bit.color = colorInput.value;
             // Note: bit.bitData.fillColor remains unchanged (database default color)
 
-            // Redraw bit shape with new display color
-            const oldShape = bit.group?.querySelector(".bit-shape");
-            if (oldShape) {
-                // Create shape with display color instead of default color
+            // Redraw bit shape group with new display color
+            const oldShapeGroup = bit.group?.querySelector("g");
+            if (oldShapeGroup) {
+                // Create shape group with display color instead of default color
                 const bitDataWithDisplayColor = {
                     ...bit.bitData,
                     fillColor: bit.color,
                 };
-                const newShape = bitsManager.createBitShapeElement(
+                const newShapeGroup = bitsManager.createBitShapeElement(
                     bitDataWithDisplayColor,
                     bit.groupName,
                     bit.baseAbsX,
                     bit.baseAbsY,
                     selectedBitIndices.includes(index) // Keep selected state
                 );
-                bit.group.replaceChild(newShape, oldShape);
+                bit.group.replaceChild(newShapeGroup, oldShapeGroup);
             }
 
             // Update offset contour color
@@ -1243,20 +1263,26 @@ function selectBit(index) {
         const bit = bitsOnCanvas[index];
 
         if (bit && bit.group) {
-            // Find the shape element in the group
-            const shape = bit.group.querySelector(".bit-shape");
-            if (shape) {
-                // Store original attributes
-                shape.dataset.originalFill = shape.getAttribute("fill");
-                shape.dataset.originalStroke = shape.getAttribute("stroke");
+            // Find the shape group (contains bit and shank shapes)
+            const shapeGroup = bit.group.querySelector("g");
+            if (shapeGroup) {
+                // Store original attributes for bit shape
+                const bitShape = shapeGroup.querySelector(".bit-shape");
+                const shankShape = shapeGroup.querySelector(".shank-shape");
 
-                // Redraw shape with selected state (0.6 opacity) using display color
-                const oldShape = shape;
+                if (bitShape) {
+                    bitShape.dataset.originalFill =
+                        bitShape.getAttribute("fill");
+                    bitShape.dataset.originalStroke =
+                        bitShape.getAttribute("stroke");
+                }
+
+                // Redraw entire shape group with selected state
                 const bitDataWithDisplayColor = {
                     ...bit.bitData,
                     fillColor: bit.color,
                 };
-                const newShape = bitsManager.createBitShapeElement(
+                const newShapeGroup = bitsManager.createBitShapeElement(
                     bitDataWithDisplayColor,
                     bit.groupName,
                     bit.baseAbsX,
@@ -1264,16 +1290,26 @@ function selectBit(index) {
                     true // isSelected = true for highlighting
                 );
 
-                // Replace old shape with new one
-                bit.group.replaceChild(newShape, oldShape);
+                // Replace old shape group with new one
+                bit.group.replaceChild(newShapeGroup, shapeGroup);
 
-                // Apply highlight stroke
-                newShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                // Apply highlight stroke to both bit and shank shapes
+                const newBitShape = newShapeGroup.querySelector(".bit-shape");
+                const newShankShape =
+                    newShapeGroup.querySelector(".shank-shape");
                 const thickness = Math.max(
                     0.1,
                     0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
                 );
-                newShape.setAttribute("stroke-width", thickness);
+
+                if (newBitShape) {
+                    newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                    newBitShape.setAttribute("stroke-width", thickness);
+                }
+                if (newShankShape) {
+                    newShankShape.setAttribute("stroke", "#00BFFF");
+                    newShankShape.setAttribute("stroke-width", thickness);
+                }
             }
         }
     }
@@ -1288,15 +1324,14 @@ function selectBit(index) {
 function resetBitHighlight(index) {
     const bit = bitsOnCanvas[index];
     if (bit && bit.group) {
-        const shape = bit.group.querySelector(".bit-shape");
-        if (shape) {
-            // Redraw shape with normal state (0.3 opacity) using display color
-            const oldShape = shape;
+        const shapeGroup = bit.group.querySelector("g");
+        if (shapeGroup) {
+            // Redraw entire shape group with normal state
             const bitDataWithDisplayColor = {
                 ...bit.bitData,
                 fillColor: bit.color,
             };
-            const newShape = bitsManager.createBitShapeElement(
+            const newShapeGroup = bitsManager.createBitShapeElement(
                 bitDataWithDisplayColor,
                 bit.groupName,
                 bit.baseAbsX,
@@ -1304,15 +1339,26 @@ function resetBitHighlight(index) {
                 false // isSelected = false for normal state
             );
 
-            // Replace old shape with new one
-            bit.group.replaceChild(newShape, oldShape);
+            // Replace old shape group with new one
+            bit.group.replaceChild(newShapeGroup, shapeGroup);
 
-            // Set to scaled thickness
+            // Set stroke widths to scaled thickness
             const thickness = Math.max(
                 0.1,
                 0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
             );
-            newShape.setAttribute("stroke-width", thickness);
+            const newBitShape = newShapeGroup.querySelector(".bit-shape");
+            const newShankShape = newShapeGroup.querySelector(".shank-shape");
+
+            if (newBitShape) {
+                newBitShape.setAttribute("stroke-width", thickness);
+            }
+            if (newShankShape) {
+                newShankShape.setAttribute("stroke", "black");
+                newShankShape.setAttribute("stroke-width", thickness);
+                // Respect global shank visibility setting
+                newShankShape.style.display = shankVisible ? "block" : "none";
+            }
         }
     }
 }
@@ -1520,8 +1566,12 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
     }
     bitsOnCanvas.forEach((bit) => {
         const shape = bit.group?.querySelector(".bit-shape");
+        const shankShape = bit.group?.querySelector(".shank-shape");
         if (shape) {
             shape.setAttribute("stroke-width", thickness);
+        }
+        if (shankShape) {
+            shankShape.setAttribute("stroke-width", thickness);
         }
     });
     // Update offset contour stroke widths
@@ -1602,53 +1652,35 @@ function fitToScale() {
 function zoomToSelected() {
     if (selectedBitIndices.length === 0) return;
 
-    const anchorCoords = getPanelAnchorCoords();
-
-    // Calculate bounding box for all selected bits
-    let minX = Infinity,
-        maxX = -Infinity;
-    let minY = Infinity,
-        maxY = -Infinity;
+    // Collect all selected bit elements to fit
+    const elementsToFit = [];
 
     selectedBitIndices.forEach((index) => {
         const bit = bitsOnCanvas[index];
-        if (bit) {
-            const bitData = bit.bitData;
-            const bitAbsX = anchorCoords.x + bit.x;
-            const bitAbsY = anchorCoords.y + bit.y;
-            const bitWidth = bitData.diameter || 0;
-            const bitHeight = bitData.length || 0;
-
-            minX = Math.min(minX, bitAbsX - bitWidth / 2);
-            maxX = Math.max(maxX, bitAbsX + bitWidth / 2);
-            minY = Math.min(minY, bitAbsY - bitHeight);
-            maxY = Math.max(maxY, bitAbsY);
+        if (bit && bit.group) {
+            if (shankVisible) {
+                // If shank is visible, fit the entire bit group (includes shank)
+                elementsToFit.push(bit.group);
+            } else {
+                // If shank is hidden, fit only the bit shape
+                const bitShape = bit.group.querySelector(".bit-shape");
+                if (bitShape) {
+                    elementsToFit.push(bitShape);
+                }
+            }
         }
     });
 
-    if (minX === Infinity) return; // No valid bits found
+    if (elementsToFit.length === 0) return;
 
-    // Add padding
-    const padding = 20;
-    const contentWidth = maxX - minX + 2 * padding;
-    const contentHeight = maxY - minY + 2 * padding;
+    // Create a temporary group containing all selected elements
+    const tempGroup = document.createElementNS(svgNS, "g");
+    elementsToFit.forEach((element) => {
+        tempGroup.appendChild(element.cloneNode(true));
+    });
 
-    // Calculate zoom level to fit all selected bits
-    const availableWidth = canvasParameters.width - 100;
-    const availableHeight = canvasParameters.height - 100;
-    const zoomX = availableWidth / contentWidth;
-    const zoomY = availableHeight / contentHeight;
-    const zoomLevel = Math.min(zoomX, zoomY);
-
-    // Center on the center of all selected bits
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    // Set zoom and pan using CanvasManager
-    mainCanvasManager.zoomLevel = zoomLevel;
-    mainCanvasManager.panX = centerX;
-    mainCanvasManager.panY = centerY;
-    mainCanvasManager.updateViewBox();
+    // Fit to the combined bounds of all selected elements
+    mainCanvasManager.fitToSVGElement(tempGroup, 50);
 }
 
 // Helper function to snap value to grid
@@ -2017,6 +2049,16 @@ function toggleBitsVisibility() {
         bitsBtn.classList.remove("bits-hidden");
         bitsBtn.classList.add("bits-visible");
         bitsBtn.title = "Hide Bits";
+
+        // Also respect shank visibility
+        if (!shankVisible) {
+            bitsOnCanvas.forEach((bit) => {
+                const shankShape = bit.group?.querySelector(".shank-shape");
+                if (shankShape) {
+                    shankShape.style.display = "none";
+                }
+            });
+        }
     } else {
         // Hide bits and phantom bits
         bitsLayer.style.display = "none";
@@ -2024,6 +2066,29 @@ function toggleBitsVisibility() {
         bitsBtn.classList.remove("bits-visible");
         bitsBtn.classList.add("bits-hidden");
         bitsBtn.title = "Show Bits";
+    }
+}
+
+// Toggle shank visibility
+function toggleShankVisibility() {
+    shankVisible = !shankVisible;
+    const shankBtn = document.getElementById("shank-btn");
+
+    bitsOnCanvas.forEach((bit) => {
+        const shankShape = bit.group?.querySelector(".shank-shape");
+        if (shankShape) {
+            shankShape.style.display = shankVisible ? "block" : "none";
+        }
+    });
+
+    if (shankVisible) {
+        shankBtn.classList.remove("shank-hidden");
+        shankBtn.classList.add("shank-visible");
+        shankBtn.title = "Hide Shanks";
+    } else {
+        shankBtn.classList.remove("shank-visible");
+        shankBtn.classList.add("shank-hidden");
+        shankBtn.title = "Show Shanks";
     }
 }
 

@@ -7,6 +7,8 @@ export default {
                 name: "D10H20",
                 diameter: 10,
                 length: 20,
+                shankDiameter: 6,
+                totalLength: 50,
                 fillColor: "rgba(0, 140, 255, 0.3)",
             },
             {
@@ -14,6 +16,8 @@ export default {
                 name: "D12H25",
                 diameter: 12,
                 length: 25,
+                shankDiameter: 8,
+                totalLength: 60,
                 fillColor: "rgba(0, 140, 255, 0.3)",
             },
         ],
