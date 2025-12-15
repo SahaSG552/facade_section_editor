@@ -8,6 +8,7 @@ import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
 import dxfExporter from "./utils/dxfExporter.js";
 import { OffsetCalculator } from "./utils/offsetCalculator.js";
+import { getOperationsForGroup } from "./data/bitsStore.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -89,7 +90,7 @@ function initializeSVG() {
         initialZoom: 1,
         initialPanX: canvasParameters.width / 2,
         initialPanY: canvasParameters.height / 2,
-        layers: ["grid", "panel", "offsets", "bits", "overlay"],
+        layers: ["grid", "panel", "offsets", "bits", "phantoms", "overlay"],
         onZoom: (zoomLevel, panX, panY) => {
             // Update stroke widths when zoom changes
             updateStrokeWidths(zoomLevel);
@@ -99,6 +100,7 @@ function initializeSVG() {
     // Get layer references
     const panelLayer = mainCanvasManager.getLayer("panel");
     bitsLayer = mainCanvasManager.getLayer("bits");
+    const phantomsLayer = mainCanvasManager.getLayer("phantoms");
 
     // Add panel rectangle to layer
     panelLayer.appendChild(partSection);
@@ -301,6 +303,7 @@ function updateBitsForNewAnchor() {
         bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
     });
     updateOffsetContours();
+    updatePhantomBits();
     if (showPart) updatePartShape();
 }
 
@@ -410,6 +413,7 @@ function updatepanelParams() {
     updateBitsPositions();
     updateGridAnchor(); // Update grid anchor when panel changes
     updateOffsetContours();
+    updatePhantomBits();
     if (showPart) updatePartShape();
 }
 
@@ -450,6 +454,86 @@ let bitsLayer;
 // Offset contours for each bit
 let offsetContours = [];
 
+// Update phantom bits for all bits
+function updatePhantomBits() {
+    const phantomsLayer = mainCanvasManager.getLayer("phantoms");
+    phantomsLayer.innerHTML = ""; // Clear all phantom bits
+
+    // Calculate panel anchor position for positioning phantom bits
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const anchorOffset = getpanelAnchorOffset();
+    const anchorX = panelX + anchorOffset.x;
+    const anchorY = panelY + anchorOffset.y;
+
+    bitsOnCanvas.forEach((bit, index) => {
+        if (bit.operation === "VC") {
+            // V-Carve operation: multiple passes
+            const angle = bit.bitData.angle || 90;
+            const bitY = bit.y;
+            // Calculate conical bit height: height = (diameter / 2) / tan(angle / 2)
+            const hypotenuse = bit.bitData.diameter || 10;
+            const bitHeight =
+                (hypotenuse / 2) * (1 / Math.tan(angleToRad(angle) / 2));
+
+            // Calculate number of passes
+            const passes = bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
+
+            // Calculate partial results (depth values)
+            const partialResults = [];
+            for (let i = 0; i < passes; i++) {
+                partialResults.push((bitY * (i + 1)) / passes);
+            }
+
+            // Draw phantom bits if passes > 1
+            if (passes > 1) {
+                // Calculate offsets for each pass (same logic as in updateOffsetContours)
+                const offsets = partialResults.map((value) => {
+                    const offsetValue = value * Math.tan(angleToRad(angle / 2));
+                    return bit.x - offsetValue; // Offset from center
+                });
+                offsets.reverse(); // Reverse to start from outermost pass
+
+                offsets.forEach((offsetDistance, passIndex) => {
+                    if (passIndex === passes - 1) return; // skip the last one (real bit)
+
+                    // Create phantom bit at offset position with depth from partial results
+                    const phantomBitData = {
+                        ...bit.bitData,
+                        fillColor: "rgba(128, 128, 128, 0.1)", // Gray with 0.1 opacity
+                    };
+
+                    // Position phantom bit at offset x, depth y relative to panel anchor
+                    const phantomAbsX = anchorX + offsets[passIndex + 1];
+                    const phantomAbsY = anchorY + partialResults[passIndex];
+
+                    const phantomShape = bitsManager.createBitShapeElement(
+                        phantomBitData,
+                        bit.groupName,
+                        phantomAbsX,
+                        phantomAbsY,
+                        false // not selected
+                    );
+
+                    // Set gray stroke for phantom
+                    phantomShape.setAttribute("stroke", "gray");
+                    phantomShape.setAttribute(
+                        "stroke-width",
+                        getAdaptiveStrokeWidth()
+                    );
+                    phantomShape.setAttribute(
+                        "fill",
+                        "rgba(128, 128, 128, 0.1)"
+                    );
+                    phantomShape.classList.add("phantom-bit");
+
+                    phantomsLayer.appendChild(phantomShape);
+                });
+            }
+        }
+    });
+}
+
 // Update offset contours for all bits
 function updateOffsetContours() {
     const offsetsLayer = mainCanvasManager.getLayer("offsets");
@@ -458,6 +542,13 @@ function updateOffsetContours() {
     // Clear the offset contours array
     offsetContours = [];
 
+    // Calculate panel anchor position for positioning phantom bits
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const anchorOffset = getpanelAnchorOffset();
+    const anchorX = panelX + anchorOffset.x;
+    const anchorY = panelY + anchorOffset.y;
+
     // Create offset calculator instance
     const offsetCalculator = new OffsetCalculator();
 
@@ -465,46 +556,148 @@ function updateOffsetContours() {
     const partFrontPoints = offsetCalculator.rectToPoints(partFront);
 
     bitsOnCanvas.forEach((bit, index) => {
-        // Use the bit's X position as the offset distance
-        const offsetDistance = bit.x;
+        if (bit.operation === "VC") {
+            // V-Carve operation: multiple passes
+            const angle = bit.bitData.angle || 90;
+            const bitY = bit.y;
+            // Calculate conical bit height: height = (diameter / 2) / tan(angle / 2)
+            const hypotenuse = bit.bitData.diameter || 10;
+            const bitHeight =
+                (hypotenuse / 2) * (1 / Math.tan(angleToRad(angle) / 2));
 
-        // Calculate offset curve
-        const offsetPoints = offsetCalculator.calculateOffset(
-            partFrontPoints,
-            offsetDistance
-        );
+            // Calculate number of passes
+            const passes = bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
 
-        if (offsetPoints && offsetPoints.length > 0) {
-            // Create SVG path for the offset contour
-            const pathData =
-                offsetPoints
-                    .map((point, i) =>
-                        i === 0
-                            ? `M ${point.x} ${point.y}`
-                            : `L ${point.x} ${point.y}`
-                    )
-                    .join(" ") + " Z";
-
-            const offsetContour = document.createElementNS(svgNS, "path");
-            offsetContour.setAttribute("d", pathData);
-            offsetContour.setAttribute("fill", "none");
-            offsetContour.setAttribute("stroke", bit.color || "#cccccc");
-            offsetContour.setAttribute(
-                "stroke-width",
-                getAdaptiveStrokeWidth()
-            );
-            offsetContour.setAttribute("stroke-dasharray", "5,5");
-            offsetContour.classList.add("offset-contour");
-
-            // Add to offsets layer
-            offsetsLayer.appendChild(offsetContour);
-
-            // Store reference
-            offsetContours.push({
-                element: offsetContour,
-                bitIndex: index,
-                offsetDistance: offsetDistance,
+            // Calculate partial results (depth values)
+            const partialResults = [];
+            for (let i = 0; i < passes; i++) {
+                partialResults.push((bitY * (i + 1)) / passes);
+            }
+            // Calculate offsets for each pass
+            const offsets = partialResults.map((value) => {
+                const offsetValue = value * Math.tan(angleToRad(angle / 2));
+                return bit.x - offsetValue; // Offset from center
             });
+            offsets.reverse(); // Reverse to start from outermost pass
+
+            // Add base offset at bit.x (black, default layer)
+            if (partFrontPoints && partFrontPoints.length > 0) {
+                const baseOffsetPoints = offsetCalculator.calculateOffset(
+                    partFrontPoints,
+                    bit.x
+                );
+                if (baseOffsetPoints && baseOffsetPoints.length > 0) {
+                    const pathData =
+                        baseOffsetPoints
+                            .map((point, i) =>
+                                i === 0
+                                    ? `M ${point.x} ${point.y}`
+                                    : `L ${point.x} ${point.y}`
+                            )
+                            .join(" ") + " Z";
+
+                    const baseContour = document.createElementNS(svgNS, "path");
+                    baseContour.setAttribute("d", pathData);
+                    baseContour.setAttribute("fill", "none");
+                    baseContour.setAttribute("stroke", "black"); // Black for base
+                    baseContour.setAttribute(
+                        "stroke-width",
+                        getAdaptiveStrokeWidth()
+                    );
+                    baseContour.setAttribute("stroke-dasharray", "5,5");
+                    baseContour.classList.add("offset-contour");
+                    offsetsLayer.appendChild(baseContour);
+
+                    offsetContours.push({
+                        element: baseContour,
+                        bitIndex: index,
+                        offsetDistance: bit.x,
+                        operation: "VC",
+                        pass: 0,
+                    });
+                }
+            }
+
+            // V-Carve offset
+            const offsetPoints = offsetCalculator.calculateOffset(
+                partFrontPoints,
+                offsets[0]
+            );
+
+            if (offsetPoints && offsetPoints.length > 0) {
+                const pathData =
+                    offsetPoints
+                        .map((point, i) =>
+                            i === 0
+                                ? `M ${point.x} ${point.y}`
+                                : `L ${point.x} ${point.y}`
+                        )
+                        .join(" ") + " Z";
+
+                const offsetContour = document.createElementNS(svgNS, "path");
+                offsetContour.setAttribute("d", pathData);
+                offsetContour.setAttribute("fill", "none");
+                offsetContour.setAttribute("stroke", bit.color || "#cccccc");
+                offsetContour.setAttribute(
+                    "stroke-width",
+                    getAdaptiveStrokeWidth()
+                );
+                offsetContour.setAttribute("stroke-dasharray", "5,5");
+                offsetContour.classList.add("offset-contour");
+                offsetsLayer.appendChild(offsetContour);
+
+                offsetContours.push({
+                    element: offsetContour,
+                    bitIndex: index,
+                    offsetDistance: offsets[0],
+                    operation: "VC",
+                    pass: 1,
+                    depth: bit.y, // Save depth for DXF export
+                });
+            }
+        } else {
+            // Standard operations: AL, OU, IN
+            let offsetDistance = bit.x;
+            if (bit.operation === "OU") {
+                offsetDistance = bit.x + (bit.bitData.diameter || 0) / 2;
+            } else if (bit.operation === "IN") {
+                offsetDistance = bit.x - (bit.bitData.diameter || 0) / 2;
+            }
+            // AL uses bit.x as is
+
+            const offsetPoints = offsetCalculator.calculateOffset(
+                partFrontPoints,
+                offsetDistance
+            );
+
+            if (offsetPoints && offsetPoints.length > 0) {
+                const pathData =
+                    offsetPoints
+                        .map((point, i) =>
+                            i === 0
+                                ? `M ${point.x} ${point.y}`
+                                : `L ${point.x} ${point.y}`
+                        )
+                        .join(" ") + " Z";
+
+                const offsetContour = document.createElementNS(svgNS, "path");
+                offsetContour.setAttribute("d", pathData);
+                offsetContour.setAttribute("fill", "none");
+                offsetContour.setAttribute("stroke", bit.color || "#cccccc");
+                offsetContour.setAttribute(
+                    "stroke-width",
+                    getAdaptiveStrokeWidth()
+                );
+                offsetContour.setAttribute("stroke-dasharray", "5,5");
+                offsetContour.classList.add("offset-contour");
+                offsetsLayer.appendChild(offsetContour);
+
+                offsetContours.push({
+                    element: offsetContour,
+                    bitIndex: index,
+                    offsetDistance: offsetDistance,
+                });
+            }
         }
     });
 }
@@ -841,22 +1034,24 @@ function updateBitsSheet() {
         opSelect.style.border = "1px solid #ccc";
         opSelect.style.borderRadius = "3px";
 
-        const operations = [
-            { value: "AL", label: "Profile Along" },
-            { value: "OU", label: "Profile Outside" },
-            { value: "IN", label: "Profile Inside" },
-            { value: "PO", label: "Pocketing" },
-            { value: "VC", label: "V-Carve" },
-            { value: "RE", label: "Re-Machining" },
-            { value: "TS", label: "T-Slotting" },
-            { value: "DR", label: "Drill" },
-        ];
+        // Get operations for this bit's group
+        const groupOperations = getOperationsForGroup(bit.groupName);
+        const operationLabels = {
+            AL: "Profile Along",
+            OU: "Profile Outside",
+            IN: "Profile Inside",
+            VC: "V-Carve",
+            PO: "Pocketing",
+            RE: "Re-Machining",
+            TS: "T-Slotting",
+            DR: "Drill",
+        };
 
-        operations.forEach((op) => {
+        groupOperations.forEach((opValue) => {
             const option = document.createElement("option");
-            option.value = op.value;
-            option.textContent = op.label;
-            if (bit.operation === op.value) {
+            option.value = opValue;
+            option.textContent = operationLabels[opValue] || opValue;
+            if (bit.operation === opValue) {
                 option.selected = true;
             }
             opSelect.appendChild(option);
@@ -864,6 +1059,8 @@ function updateBitsSheet() {
 
         opSelect.addEventListener("change", () => {
             bit.operation = opSelect.value;
+            updateOffsetContours(); // Update offsets when operation changes
+            updatePhantomBits(); // Update phantom bits when operation changes
         });
 
         opCell.appendChild(opSelect);
@@ -904,6 +1101,7 @@ function updateBitsSheet() {
 
             // Update offset contour color
             updateOffsetContours();
+            updatePhantomBits();
         });
 
         colorCell.appendChild(colorInput);
@@ -985,6 +1183,7 @@ function deleteBitFromCanvas(index) {
     updateBitsSheet();
     redrawBitsOnCanvas();
     updateOffsetContours();
+    updatePhantomBits();
     if (showPart) updatePartShape();
 }
 
@@ -1176,6 +1375,7 @@ function updateBitPosition(index, newX, newY) {
     // redraw layer order if needed
     redrawBitsOnCanvas();
     updateOffsetContours();
+    updatePhantomBits();
     // Update part shape if part view is enabled and bits were moved via table coordinates
     if (showPart) updatePartShape();
 }
@@ -1788,16 +1988,19 @@ function pathsToSvgD(paths, scale) {
 function toggleBitsVisibility() {
     bitsVisible = !bitsVisible;
     const bitsBtn = document.getElementById("bits-btn");
+    const phantomsLayer = mainCanvasManager.getLayer("phantoms");
 
     if (bitsVisible) {
-        // Show bits
+        // Show bits and phantom bits
         bitsLayer.style.display = "block";
+        phantomsLayer.style.display = "block";
         bitsBtn.classList.remove("bits-hidden");
         bitsBtn.classList.add("bits-visible");
         bitsBtn.title = "Hide Bits";
     } else {
-        // Hide bits
+        // Hide bits and phantom bits
         bitsLayer.style.display = "none";
+        phantomsLayer.style.display = "none";
         bitsBtn.classList.remove("bits-visible");
         bitsBtn.classList.add("bits-hidden");
         bitsBtn.title = "Show Bits";
@@ -1840,8 +2043,9 @@ function initialize() {
     // Now that bitsManager is created, initialize the bit groups
     bitsManager.createBitGroups();
 
-    // Initial update of offset contours (even if no bits are loaded yet)
+    // Initial update of offset contours and phantom bits (even if no bits are loaded yet)
     updateOffsetContours();
+    updatePhantomBits();
 
     // Add event listeners for panel parameter inputs
     panelWidthInput.addEventListener("input", updatepanelParams);
@@ -1882,6 +2086,7 @@ function initialize() {
                             `Auto-loaded ${restoredCount} saved bit positions`
                         );
                         updateOffsetContours(); // Update offset contours after loading saved positions
+                        updatePhantomBits(); // Update phantom bits after loading saved positions
                     }
                 } catch (error) {
                     console.warn("Failed to load saved positions:", error);
@@ -2097,13 +2302,20 @@ async function restoreBitPositions(positionsData) {
 
                 bitCounter++;
 
+                // Ensure operation is valid for the group
+                const validOperations = getOperationsForGroup(groupName);
+                let operation = pos.operation || "AL";
+                if (!validOperations.includes(operation)) {
+                    operation = "AL"; // Fallback to default
+                }
+
                 const newBit = {
                     number: bitCounter,
                     name: bitData.name,
                     x: pos.x,
                     y: pos.y,
                     alignment: pos.alignment || "center",
-                    operation: pos.operation || "AL",
+                    operation: operation,
                     color: pos.color || bitData.fillColor || "#cccccc",
                     group: g,
                     baseAbsX: centerX,
@@ -2140,6 +2352,8 @@ async function restoreBitPositions(positionsData) {
     // Update table and canvas
     updateBitsSheet();
     updateStrokeWidths();
+    updateOffsetContours();
+    updatePhantomBits();
     if (showPart) updatePartShape();
 
     return restoredCount;
@@ -2164,6 +2378,7 @@ function clearAllBits() {
     // Update table and canvas
     updateBitsSheet();
     updateOffsetContours();
+    updatePhantomBits();
     if (showPart) updatePartShape();
 
     logOperation(`Cleared ${bitCount} bits from canvas`);

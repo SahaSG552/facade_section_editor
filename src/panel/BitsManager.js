@@ -216,7 +216,7 @@ export default class BitsManager {
                 const hypotenuse = bit.diameter;
                 const height =
                     (hypotenuse / 2) *
-                    (1 / Math.tan(this.angleToRad(oppositeAngle) / 2));
+                    (1 / Math.tan(this.angleToRad(oppositeAngle / 2)));
                 const points = [
                     `${x},${y}`,
                     `${x - hypotenuse / 2},${y - height}`,

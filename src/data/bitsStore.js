@@ -4,6 +4,16 @@ const STORAGE_KEY = "facade_bits_v1";
 let bits = null;
 const VALID_GROUPS = new Set(Object.keys(defaultBits));
 
+// Helper to get group data from defaultBits
+function getGroupData(groupName) {
+    const group = defaultBits[groupName];
+    if (group && typeof group === "object" && group.bits) {
+        return { operations: group.operations || [], bits: group.bits };
+    }
+    // Backward compatibility for old structure
+    return { operations: ["AL"], bits: group || [] };
+}
+
 function genId() {
     return (
         "b_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
@@ -22,7 +32,7 @@ async function load() {
                 if (stored[groupName]) {
                     bits[groupName] = stored[groupName];
                 } else {
-                    bits[groupName] = defaultBits[groupName].map((b) => ({
+                    bits[groupName] = getGroupData(groupName).bits.map((b) => ({
                         id: b.id || genId(),
                         ...b,
                     }));
@@ -52,7 +62,7 @@ async function load() {
                         ...b,
                     }));
                 } else {
-                    bits[groupName] = defaultBits[groupName].map((b) => ({
+                    bits[groupName] = getGroupData(groupName).bits.map((b) => ({
                         id: b.id || genId(),
                         ...b,
                     }));
@@ -66,9 +76,12 @@ async function load() {
     }
 
     // Deep clone defaults and ensure ids
-    bits = JSON.parse(JSON.stringify(defaultBits));
-    Object.keys(bits).forEach((group) => {
-        bits[group] = bits[group].map((b) => ({ id: b.id || genId(), ...b }));
+    bits = {};
+    Object.keys(defaultBits).forEach((groupName) => {
+        bits[groupName] = getGroupData(groupName).bits.map((b) => ({
+            id: b.id || genId(),
+            ...b,
+        }));
     });
     save();
 }
@@ -101,12 +114,18 @@ export function setBits(newBits) {
     Object.keys(defaultBits).forEach((groupName) => {
         bits[groupName] =
             newBits[groupName] ||
-            defaultBits[groupName].map((b) => ({
+            getGroupData(groupName).bits.map((b) => ({
                 id: b.id || genId(),
                 ...b,
             }));
     });
     save();
+}
+
+// Get operations for a group
+export function getOperationsForGroup(groupName) {
+    if (!VALID_GROUPS.has(groupName)) return [];
+    return getGroupData(groupName).operations;
 }
 
 export function addBit(groupName, bitData) {

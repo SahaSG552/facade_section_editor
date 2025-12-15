@@ -173,13 +173,17 @@ class DXFExporter {
             offsetContours.forEach((offset, index) => {
                 const bit = bitsOnCanvas[offset.bitIndex];
                 if (bit) {
-                    // Format bit.y value: if fractional, add extra _ before value, replace decimal with _
-                    let yValue = bit.y.toString();
-                    if (bit.y % 1 !== 0) {
+                    // Use depth from offset if available (for VC multi-pass), otherwise use bit.y
+                    let depthValue =
+                        offset.depth !== undefined ? offset.depth : bit.y;
+
+                    // Format depth value: if fractional, add extra _ before value, replace decimal with _
+                    let yValue = depthValue.toString();
+                    if (depthValue % 1 !== 0) {
                         // It's fractional, add extra _
                         yValue = `_${yValue.replace(".", "_")}`;
                     } else {
-                        yValue = `${bit.y}`;
+                        yValue = `${depthValue}`;
                     }
 
                     const layerName = `${bit.name}_${yValue}MM_${bit.operation}`;
@@ -721,16 +725,22 @@ class DXFExporter {
         const bit = bitsOnCanvas[offset.bitIndex];
         if (!bit) return;
 
-        // Format bit.y value: if fractional, add extra _ before value, replace decimal with _
-        let yValue = bit.y.toString();
-        if (bit.y % 1 !== 0) {
+        // Use depth from offset if available (for VC multi-pass), otherwise use bit.y
+        let depthValue = offset.depth !== undefined ? offset.depth : bit.y;
+
+        // Format depth value: if fractional, add extra _ before value, replace decimal with _
+        let yValue = depthValue.toString();
+        if (depthValue % 1 !== 0) {
             // It's fractional, add extra _
             yValue = `_${yValue.replace(".", "_")}`;
         } else {
-            yValue = `${bit.y}`;
+            yValue = `${depthValue}`;
         }
 
-        const layerName = `${bit.name}_${yValue}MM_${bit.operation}`;
+        let layerName = `${bit.name}_${yValue}MM_${bit.operation}`;
+        if (offset.pass === 0) {
+            layerName = `Default`;
+        }
 
         // The offset.element should be an SVG path element with the offset contour
         // Convert SVG coordinates to DXF coordinates (flip Y axis)
