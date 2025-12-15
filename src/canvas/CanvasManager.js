@@ -1,3 +1,75 @@
+// GridRenderer - класс для создания SVG сетки с использованием паттернов
+class GridRenderer {
+    constructor(svgNS, defs, gridLayer, config) {
+        this.svgNS = svgNS;
+        this.defs = defs;
+        this.gridLayer = gridLayer;
+        this.config = config; // { id, size, color, thickness, anchorX, anchorY, panX, panY, width, height }
+    }
+
+    render() {
+        // Remove existing pattern
+        const existingPattern = this.defs.querySelector(
+            `#${this.config.id}-pattern`
+        );
+        if (existingPattern) {
+            this.defs.removeChild(existingPattern);
+        }
+
+        // Calculate offset - grid start point aligned to anchor or pan
+        let startX =
+            this.config.anchorX !== null
+                ? this.config.anchorX
+                : this.config.panX;
+        let startY =
+            this.config.anchorY !== null
+                ? this.config.anchorY
+                : this.config.panY;
+        let xOffset = startX - 0.5;
+        let yOffset = startY - 0.5;
+
+        // Create pattern
+        const pattern = document.createElementNS(this.svgNS, "pattern");
+        pattern.id = `${this.config.id}-pattern`;
+        pattern.setAttribute("patternUnits", "userSpaceOnUse");
+        pattern.setAttribute("x", xOffset);
+        pattern.setAttribute("y", yOffset);
+        pattern.setAttribute("width", this.config.size);
+        pattern.setAttribute("height", this.config.size);
+
+        // Horizontal line
+        const hLine = document.createElementNS(this.svgNS, "line");
+        hLine.setAttribute("x1", 0);
+        hLine.setAttribute("y1", 0);
+        hLine.setAttribute("x2", this.config.size);
+        hLine.setAttribute("y2", 0);
+        hLine.setAttribute("stroke", this.config.color);
+        hLine.setAttribute("stroke-width", this.config.thickness);
+        pattern.appendChild(hLine);
+
+        // Vertical line
+        const vLine = document.createElementNS(this.svgNS, "line");
+        vLine.setAttribute("x1", 0);
+        vLine.setAttribute("y1", 0);
+        vLine.setAttribute("x2", 0);
+        vLine.setAttribute("y2", this.config.size);
+        vLine.setAttribute("stroke", this.config.color);
+        vLine.setAttribute("stroke-width", this.config.thickness);
+        pattern.appendChild(vLine);
+
+        this.defs.appendChild(pattern);
+
+        // Create rectangle to cover the entire viewBox area
+        const rect = document.createElementNS(this.svgNS, "rect");
+        rect.setAttribute("x", this.config.x);
+        rect.setAttribute("y", this.config.y);
+        rect.setAttribute("width", this.config.width);
+        rect.setAttribute("height", this.config.height);
+        rect.setAttribute("fill", `url(#${this.config.id}-pattern)`);
+        this.gridLayer.appendChild(rect);
+    }
+}
+
 // CanvasManager - унифицированный класс для работы с SVG канвасами
 class CanvasManager {
     constructor(config) {
@@ -114,108 +186,77 @@ class CanvasManager {
     drawGrid() {
         if (!this.gridEnabled || !this.gridLayer) return;
 
-        this.gridLayer.innerHTML = ""; // Очистка существующей сетки
+        this.gridLayer.innerHTML = ""; // Clear existing grid
 
-        const thickness = Math.max(0.01, 0.1 / Math.sqrt(this.zoomLevel));
+        // Ensure defs element exists
+        let defs = this.canvas.querySelector("defs");
+        if (!defs) {
+            defs = document.createElementNS(this.svgNS, "defs");
+            this.canvas.insertBefore(defs, this.canvas.firstChild);
+        }
 
-        // Calculate current viewBox bounds for optimization
+        // Calculate current viewBox bounds
         const viewBoxWidth = this.canvasParameters.width / this.zoomLevel;
         const viewBoxHeight = this.canvasParameters.height / this.zoomLevel;
         const viewBoxX = this.panX - viewBoxWidth / 2;
         const viewBoxY = this.panY - viewBoxHeight / 2;
 
-        // Calculate visible area bounds with some padding
-        const padding = viewBoxWidth * 0.1; // 10% padding
-        const minVisibleX = viewBoxX - padding;
-        const maxVisibleX = viewBoxX + viewBoxWidth + padding;
-        const minVisibleY = viewBoxY - padding;
-        const maxVisibleY = viewBoxY + viewBoxHeight + padding;
-
         // Calculate grid line spacing (increase spacing for very small grid sizes to improve performance)
         let effectiveGridSize = this.config.gridSize;
-        const minGridSpacing = 5; // Minimum 5 pixels between grid lines for performance
+        const minGridSpacing = 1; // Minimum 5 pixels between grid lines for performance
         if (effectiveGridSize * this.zoomLevel < minGridSpacing) {
             effectiveGridSize = minGridSpacing / this.zoomLevel;
         }
 
-        // Align grid to anchor point or center (depending on config)
-        let xOffset, yOffset;
-        if (
-            this.config.gridAnchorX !== null &&
-            this.config.gridAnchorY !== null
-        ) {
-            // Align grid to the specified anchor point
-            xOffset =
-                (this.config.gridAnchorX % effectiveGridSize) -
-                effectiveGridSize / 2;
-            yOffset =
-                (this.config.gridAnchorY % effectiveGridSize) -
-                effectiveGridSize / 2;
-        } else {
-            // Default: align to center
-            xOffset = (this.panX % effectiveGridSize) - effectiveGridSize / 2;
-            yOffset = (this.panY % effectiveGridSize) - effectiveGridSize / 2;
-        }
+        // Calculate stroke width that scales with zoom level
+        const thickness = Math.max(0.01, 0.1 / Math.sqrt(this.zoomLevel));
 
-        // Vertical lines - only draw lines that are visible
-        const firstVerticalX = Math.max(
-            0,
-            Math.floor((minVisibleX - xOffset) / effectiveGridSize) *
-                effectiveGridSize +
-                xOffset
+        // Main grid renderer
+        const mainGridConfig = {
+            id: "grid",
+            size: effectiveGridSize,
+            color: "#e0e0e0",
+            thickness: thickness,
+            anchorX: this.config.gridAnchorX,
+            anchorY: this.config.gridAnchorY,
+            panX: this.panX,
+            panY: this.panY,
+            x: viewBoxX,
+            y: viewBoxY,
+            width: viewBoxWidth,
+            height: viewBoxHeight,
+        };
+        const mainGrid = new GridRenderer(
+            this.svgNS,
+            defs,
+            this.gridLayer,
+            mainGridConfig
         );
-        const lastVerticalX = Math.min(
-            this.canvasParameters.width,
-            Math.ceil((maxVisibleX - xOffset) / effectiveGridSize) *
-                effectiveGridSize +
-                xOffset
-        );
+        mainGrid.render();
 
-        for (
-            let x = firstVerticalX;
-            x <= lastVerticalX;
-            x += effectiveGridSize
-        ) {
-            if (x < 0 || x > this.canvasParameters.width) continue;
-            const line = document.createElementNS(this.svgNS, "line");
-            line.setAttribute("x1", x);
-            line.setAttribute("y1", 0);
-            line.setAttribute("x2", x);
-            line.setAttribute("y2", this.canvasParameters.height);
-            line.setAttribute("stroke", "#e0e0e0");
-            line.setAttribute("stroke-width", thickness);
-            this.gridLayer.appendChild(line);
-        }
-
-        // Horizontal lines - only draw lines that are visible
-        const firstHorizontalY = Math.max(
-            0,
-            Math.floor((minVisibleY - yOffset) / effectiveGridSize) *
-                effectiveGridSize +
-                yOffset
+        // Auxiliary grid renderer (10x spacing, thicker and darker lines)
+        const auxGridSize = effectiveGridSize * 10;
+        const auxGridConfig = {
+            id: "aux-grid",
+            size: auxGridSize,
+            color: "#5f5959ff",
+            thickness: thickness * 2,
+            anchorX: this.config.gridAnchorX,
+            anchorY: this.config.gridAnchorY,
+            panX: this.panX,
+            panY: this.panY,
+            x: viewBoxX,
+            y: viewBoxY,
+            width: viewBoxWidth,
+            height: viewBoxHeight,
+        };
+        const auxGrid = new GridRenderer(
+            this.svgNS,
+            defs,
+            this.gridLayer,
+            auxGridConfig
         );
-        const lastHorizontalY = Math.min(
-            this.canvasParameters.height,
-            Math.ceil((maxVisibleY - yOffset) / effectiveGridSize) *
-                effectiveGridSize +
-                yOffset
-        );
-
-        for (
-            let y = firstHorizontalY;
-            y <= lastHorizontalY;
-            y += effectiveGridSize
-        ) {
-            if (y < 0 || y > this.canvasParameters.height) continue;
-            const line = document.createElementNS(this.svgNS, "line");
-            line.setAttribute("x1", 0);
-            line.setAttribute("y1", y);
-            line.setAttribute("x2", this.canvasParameters.width);
-            line.setAttribute("y2", y);
-            line.setAttribute("stroke", "#e0e0e0");
-            line.setAttribute("stroke-width", thickness);
-            this.gridLayer.appendChild(line);
-        }
+        auxGrid.render();
     }
 
     toggleGrid() {

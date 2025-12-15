@@ -309,10 +309,10 @@ function updateBitsForNewAnchor() {
 
 // Update part front view
 function updatepartFront() {
-    // Position part front with 100mm gap from the panel rectangle using same anchor system
+    // Always position part front relative to top anchor for consistent calculations
     const panelX = (canvasParameters.width - panelWidth) / 2;
     const panelY = (canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = getpanelAnchorOffset();
+    const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
 
     // Position part front relative to panel anchor
     const anchorX = panelX + anchorOffset.x;
@@ -454,23 +454,34 @@ let bitsLayer;
 // Offset contours for each bit
 let offsetContours = [];
 
+// Helper function to convert bit coordinates to top anchor coordinates
+function convertToTopAnchorCoordinates(bit) {
+    const currentAnchorOffset = getpanelAnchorOffset();
+    // Convert from current anchor to top anchor coordinates
+    return {
+        x: bit.x + currentAnchorOffset.x,
+        y: bit.y + currentAnchorOffset.y,
+    };
+}
+
 // Update phantom bits for all bits
 function updatePhantomBits() {
     const phantomsLayer = mainCanvasManager.getLayer("phantoms");
     phantomsLayer.innerHTML = ""; // Clear all phantom bits
 
-    // Calculate panel anchor position for positioning phantom bits
+    // Always calculate relative to top anchor for consistent offset calculations
     const panelX = (canvasParameters.width - panelWidth) / 2;
     const panelY = (canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = getpanelAnchorOffset();
+    const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
     const anchorX = panelX + anchorOffset.x;
     const anchorY = panelY + anchorOffset.y;
 
     bitsOnCanvas.forEach((bit, index) => {
         if (bit.operation === "VC") {
-            // V-Carve operation: multiple passes
+            // Convert bit coordinates to top anchor coordinates for calculations
+            const topAnchorCoords = convertToTopAnchorCoordinates(bit);
             const angle = bit.bitData.angle || 90;
-            const bitY = bit.y;
+            const bitY = topAnchorCoords.y; // Use top anchor Y coordinate
             // Calculate conical bit height: height = (diameter / 2) / tan(angle / 2)
             const hypotenuse = bit.bitData.diameter || 10;
             const bitHeight =
@@ -490,7 +501,7 @@ function updatePhantomBits() {
                 // Calculate offsets for each pass (same logic as in updateOffsetContours)
                 const offsets = partialResults.map((value) => {
                     const offsetValue = value * Math.tan(angleToRad(angle / 2));
-                    return bit.x - offsetValue; // Offset from center
+                    return topAnchorCoords.x - offsetValue; // Use top anchor X coordinate
                 });
                 offsets.reverse(); // Reverse to start from outermost pass
 
@@ -542,10 +553,10 @@ function updateOffsetContours() {
     // Clear the offset contours array
     offsetContours = [];
 
-    // Calculate panel anchor position for positioning phantom bits
+    // Always calculate relative to top anchor for consistent offset calculations
     const panelX = (canvasParameters.width - panelWidth) / 2;
     const panelY = (canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = getpanelAnchorOffset();
+    const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
     const anchorX = panelX + anchorOffset.x;
     const anchorY = panelY + anchorOffset.y;
 
@@ -557,9 +568,11 @@ function updateOffsetContours() {
 
     bitsOnCanvas.forEach((bit, index) => {
         if (bit.operation === "VC") {
+            // Convert bit coordinates to top anchor coordinates for calculations
+            const topAnchorCoords = convertToTopAnchorCoordinates(bit);
             // V-Carve operation: multiple passes
             const angle = bit.bitData.angle || 90;
-            const bitY = bit.y;
+            const bitY = topAnchorCoords.y; // Use top anchor Y coordinate
             // Calculate conical bit height: height = (diameter / 2) / tan(angle / 2)
             const hypotenuse = bit.bitData.diameter || 10;
             const bitHeight =
@@ -576,15 +589,15 @@ function updateOffsetContours() {
             // Calculate offsets for each pass
             const offsets = partialResults.map((value) => {
                 const offsetValue = value * Math.tan(angleToRad(angle / 2));
-                return bit.x - offsetValue; // Offset from center
+                return topAnchorCoords.x - offsetValue; // Use top anchor X coordinate
             });
             offsets.reverse(); // Reverse to start from outermost pass
 
-            // Add base offset at bit.x (black, default layer)
+            // Add base offset at topAnchorCoords.x (black, default layer)
             if (partFrontPoints && partFrontPoints.length > 0) {
                 const baseOffsetPoints = offsetCalculator.calculateOffset(
                     partFrontPoints,
-                    bit.x
+                    topAnchorCoords.x
                 );
                 if (baseOffsetPoints && baseOffsetPoints.length > 0) {
                     const pathData =
@@ -611,7 +624,7 @@ function updateOffsetContours() {
                     offsetContours.push({
                         element: baseContour,
                         bitIndex: index,
-                        offsetDistance: bit.x,
+                        offsetDistance: topAnchorCoords.x,
                         operation: "VC",
                         pass: 0,
                     });
@@ -652,7 +665,7 @@ function updateOffsetContours() {
                     offsetDistance: offsets[0],
                     operation: "VC",
                     pass: 1,
-                    depth: bit.y, // Save depth for DXF export
+                    depth: topAnchorCoords.y, // Save depth for DXF export (use top anchor coordinates)
                 });
             }
         } else {
@@ -999,12 +1012,11 @@ function updateBitsSheet() {
         const yCell = document.createElement("td");
         const yInput = document.createElement("input");
         yInput.type = "text";
-        yInput.value = bit.y + anchorOffset.y;
+        yInput.value = transformYForDisplay(bit.y, anchorOffset);
         yInput.addEventListener("change", () => {
             const val = evaluateMathExpression(yInput.value);
             yInput.value = val;
-            const newAnchorY = parseFloat(val) || 0;
-            const newY = newAnchorY - anchorOffset.y;
+            const newY = transformYFromDisplay(val, anchorOffset);
             updateBitPosition(index, bit.x, newY);
         });
         yCell.appendChild(yInput);
@@ -1308,11 +1320,9 @@ function resetBitHighlight(index) {
 function updateBitPosition(index, newX, newY) {
     // update panel params to get correct panel origin
     updatepanelParams();
-    const panelAnchorOffset = getpanelAnchorOffset();
-    const panelAnchorX =
-        (canvasParameters.width - panelWidth) / 2 + panelAnchorOffset.x;
-    const panelAnchorY =
-        (canvasParameters.height - panelThickness) / 2 + panelAnchorOffset.y;
+    const anchorCoords = getPanelAnchorCoords();
+    const panelAnchorX = anchorCoords.x;
+    const panelAnchorY = anchorCoords.y;
 
     // If this bit is selected and there are multiple selections, move all selected bits by the same delta
     if (selectedBitIndices.includes(index) && selectedBitIndices.length > 1) {
@@ -1592,11 +1602,7 @@ function fitToScale() {
 function zoomToSelected() {
     if (selectedBitIndices.length === 0) return;
 
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = getpanelAnchorOffset();
-    const anchorX = panelX + anchorOffset.x;
-    const anchorY = panelY + anchorOffset.y;
+    const anchorCoords = getPanelAnchorCoords();
 
     // Calculate bounding box for all selected bits
     let minX = Infinity,
@@ -1608,8 +1614,8 @@ function zoomToSelected() {
         const bit = bitsOnCanvas[index];
         if (bit) {
             const bitData = bit.bitData;
-            const bitAbsX = anchorX + bit.x;
-            const bitAbsY = anchorY + bit.y;
+            const bitAbsX = anchorCoords.x + bit.x;
+            const bitAbsY = anchorCoords.y + bit.y;
             const bitWidth = bitData.diameter || 0;
             const bitHeight = bitData.length || 0;
 
@@ -1645,8 +1651,6 @@ function zoomToSelected() {
     mainCanvasManager.updateViewBox();
 }
 
-// toggleGrid is handled by CanvasManager
-
 // Helper function to snap value to grid
 function snapToGrid(value) {
     return Math.round(value / gridSize) * gridSize;
@@ -1657,6 +1661,29 @@ function getpanelAnchorOffset() {
     return panelAnchor === "top-left"
         ? { x: 0, y: 0 }
         : { x: 0, y: panelThickness };
+}
+
+// Helper function to transform Y coordinate for display based on anchor
+function transformYForDisplay(rawY, anchorOffset) {
+    const displayY = rawY + anchorOffset.y;
+    return panelAnchor === "bottom-left" ? -displayY : displayY;
+}
+
+// Helper function to transform Y coordinate from display to internal
+function transformYFromDisplay(displayY, anchorOffset) {
+    const adjustedY = panelAnchor === "bottom-left" ? -displayY : displayY;
+    return adjustedY - anchorOffset.y;
+}
+
+// Helper function to get panel anchor coordinates
+function getPanelAnchorCoords() {
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const offset = getpanelAnchorOffset();
+    return {
+        x: panelX + offset.x,
+        y: panelY + offset.y,
+    };
 }
 
 // Helper function to get anchor offset based on alignment
@@ -1751,18 +1778,11 @@ function handleMouseMove(e) {
 
         const bit = bitsOnCanvas[draggedBitIndex];
         const anchorOffset = getAnchorOffset(bit);
-
-        // Calculate new position relative to panel anchor
-        const panelAnchorOffset = getpanelAnchorOffset();
-        const panelAnchorX =
-            (canvasParameters.width - panelWidth) / 2 + panelAnchorOffset.x;
-        const panelAnchorY =
-            (canvasParameters.height - panelThickness) / 2 +
-            panelAnchorOffset.y;
+        const panelAnchorCoords = getPanelAnchorCoords();
 
         // Calculate desired anchor position
-        let anchorX = svgCoords.x - panelAnchorX;
-        let anchorY = svgCoords.y - panelAnchorY;
+        let anchorX = svgCoords.x - panelAnchorCoords.x;
+        let anchorY = svgCoords.y - panelAnchorCoords.y;
 
         // Snap anchor to grid
         anchorX = mainCanvasManager.snapToGrid(anchorX);
@@ -1829,7 +1849,7 @@ function updateTableCoordinates(bitIndex, newX, newY) {
         if (cells[4]) {
             // Y column
             const yInput = cells[4].querySelector("input");
-            if (yInput) yInput.value = newY + anchorOffset.y;
+            if (yInput) yInput.value = transformYForDisplay(newY, anchorOffset);
         }
     }
 }
@@ -2328,16 +2348,9 @@ async function restoreBitPositions(positionsData) {
                 restoredCount++;
 
                 // Apply the saved position
-                const panelAnchorOffset = getpanelAnchorOffset();
-                const panelAnchorX =
-                    (canvasParameters.width - panelWidth) / 2 +
-                    panelAnchorOffset.x;
-                const panelAnchorY =
-                    (canvasParameters.height - panelThickness) / 2 +
-                    panelAnchorOffset.y;
-
-                const absX = panelAnchorX + pos.x;
-                const absY = panelAnchorY + pos.y;
+                const panelAnchorCoords = getPanelAnchorCoords();
+                const absX = panelAnchorCoords.x + pos.x;
+                const absY = panelAnchorCoords.y + pos.y;
                 const dx = absX - centerX;
                 const dy = absY - centerY;
                 g.setAttribute("transform", `translate(${dx}, ${dy})`);
