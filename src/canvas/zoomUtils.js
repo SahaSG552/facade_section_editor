@@ -20,60 +20,9 @@ export function calculateElementsBBox(elements) {
         };
     }
 
-    // Helper function to get bbox in absolute coordinates
-    function getAbsoluteBBox(element) {
-        const bbox = element.getBBox();
-        const ctm = element.getCTM();
-        const svg = element.ownerSVGElement;
-        const pt = svg.createSVGPoint();
-
-        // Transform the bbox corners
-        const corners = [
-            { x: bbox.x, y: bbox.y },
-            { x: bbox.x + bbox.width, y: bbox.y },
-            { x: bbox.x + bbox.width, y: bbox.y + bbox.height },
-            { x: bbox.x, y: bbox.y + bbox.height },
-        ];
-
-        let minX = Infinity,
-            minY = Infinity,
-            maxX = -Infinity,
-            maxY = -Infinity;
-        corners.forEach((corner) => {
-            pt.x = corner.x;
-            pt.y = corner.y;
-            const transformed = pt.matrixTransform(ctm);
-            minX = Math.min(minX, transformed.x);
-            minY = Math.min(minY, transformed.y);
-            maxX = Math.max(maxX, transformed.x);
-            maxY = Math.max(maxY, transformed.y);
-        });
-
-        return {
-            x: minX,
-            y: minY,
-            width: maxX - minX,
-            height: maxY - minY,
-        };
-    }
-
-    // Calculate combined bbox
-    let minX = Infinity,
-        minY = Infinity,
-        maxX = -Infinity,
-        maxY = -Infinity;
-
-    elements.forEach((element) => {
-        if (element && typeof element.getBBox === "function") {
-            const bbox = getAbsoluteBBox(element);
-            minX = Math.min(minX, bbox.x);
-            minY = Math.min(minY, bbox.y);
-            maxX = Math.max(maxX, bbox.x + bbox.width);
-            maxY = Math.max(maxY, bbox.y + bbox.height);
-        }
-    });
-
-    if (minX === Infinity) {
+    // Find the SVG element
+    const svg = elements[0]?.ownerSVGElement;
+    if (!svg) {
         return {
             minX: 0,
             minY: 0,
@@ -85,11 +34,94 @@ export function calculateElementsBBox(elements) {
         };
     }
 
-    const width = maxX - minX;
-    const height = maxY - minY;
-    const center = { x: minX + width / 2, y: minY + height / 2 };
+    // Save current viewBox
+    const originalViewBox = svg.getAttribute("viewBox");
 
-    return { minX, minY, maxX, maxY, width, height, center };
+    // Temporarily set viewBox to identity to get stable CTM calculations
+    const canvasParams = svg.canvasParameters || { width: 800, height: 600 };
+    svg.setAttribute(
+        "viewBox",
+        `0 0 ${canvasParams.width} ${canvasParams.height}`
+    );
+
+    try {
+        // Helper function to get bbox in absolute coordinates
+        function getAbsoluteBBox(element) {
+            const bbox = element.getBBox();
+            const ctm = element.getCTM();
+            const pt = svg.createSVGPoint();
+
+            // Transform the bbox corners
+            const corners = [
+                { x: bbox.x, y: bbox.y },
+                { x: bbox.x + bbox.width, y: bbox.y },
+                { x: bbox.x + bbox.width, y: bbox.y + bbox.height },
+                { x: bbox.x, y: bbox.y + bbox.height },
+            ];
+
+            let minX = Infinity,
+                minY = Infinity,
+                maxX = -Infinity,
+                maxY = -Infinity;
+            corners.forEach((corner) => {
+                pt.x = corner.x;
+                pt.y = corner.y;
+                const transformed = pt.matrixTransform(ctm);
+                minX = Math.min(minX, transformed.x);
+                minY = Math.min(minY, transformed.y);
+                maxX = Math.max(maxX, transformed.x);
+                maxY = Math.max(maxY, transformed.y);
+            });
+
+            return {
+                x: minX,
+                y: minY,
+                width: maxX - minX,
+                height: maxY - minY,
+            };
+        }
+
+        // Calculate combined bbox
+        let minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
+
+        elements.forEach((element) => {
+            if (element && typeof element.getBBox === "function") {
+                const bbox = getAbsoluteBBox(element);
+                minX = Math.min(minX, bbox.x);
+                minY = Math.min(minY, bbox.y);
+                maxX = Math.max(maxX, bbox.x + bbox.width);
+                maxY = Math.max(maxY, bbox.y + bbox.height);
+            }
+        });
+
+        if (minX === Infinity) {
+            return {
+                minX: 0,
+                minY: 0,
+                maxX: 0,
+                maxY: 0,
+                width: 0,
+                height: 0,
+                center: { x: 0, y: 0 },
+            };
+        }
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const center = { x: minX + width / 2, y: minY + height / 2 };
+
+        return { minX, minY, maxX, maxY, width, height, center };
+    } finally {
+        // Always restore the original viewBox
+        if (originalViewBox) {
+            svg.setAttribute("viewBox", originalViewBox);
+        } else {
+            svg.removeAttribute("viewBox");
+        }
+    }
 }
 
 /**

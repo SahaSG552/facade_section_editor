@@ -3,7 +3,7 @@ import {
     distancePtToPt,
     evaluateMathExpression,
 } from "./utils/utils.js";
-import { zoomToBBox } from "./canvas/zoomUtils.js";
+import { zoomToBBox, calculateElementsBBox } from "./canvas/zoomUtils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
@@ -1584,115 +1584,104 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
 }
 
 function fitToScale() {
-    // Initialize bounding box with panel rectangle
-    let minX = (canvasParameters.width - panelWidth) / 2;
-    let maxX = minX + panelWidth;
-    let minY = (canvasParameters.height - panelThickness) / 2;
-    let maxY = minY + panelThickness;
+    // Collect all visible elements from all layers except "grid"
+    const allElements = [];
 
-    // Include part front rectangle in bounds if it exists
-    if (partFront) {
-        const partFrontX = parseFloat(partFront.getAttribute("x"));
-        const partFrontY = parseFloat(partFront.getAttribute("y"));
-        const partFrontWidth = parseFloat(partFront.getAttribute("width"));
-        const partFrontHeight = parseFloat(partFront.getAttribute("height"));
+    // Get all layers except grid
+    const layerNames = ["panel", "offsets", "bits", "phantoms", "overlay"];
 
-        minX = Math.min(minX, partFrontX);
-        maxX = Math.max(maxX, partFrontX + partFrontWidth);
-        minY = Math.min(minY, partFrontY);
-        maxY = Math.max(maxY, partFrontY + partFrontHeight);
-    }
-
-    // Include all bits on canvas
-    if (bitsOnCanvas.length > 0) {
-        bitsOnCanvas.forEach((bit) => {
-            if (bit.group) {
-                // Get the actual bounding box of the bit group
-                const bbox = bit.group.getBBox();
-
-                minX = Math.min(minX, bbox.x);
-                maxX = Math.max(maxX, bbox.x + bbox.width);
-                minY = Math.min(minY, bbox.y);
-                maxY = Math.max(maxY, bbox.y + bbox.height);
-            }
-        });
-    }
-
-    // Include panel anchor indicator
-    if (document.getElementById("panel-anchor-indicator")) {
-        const anchorIndicator = document.getElementById(
-            "panel-anchor-indicator"
-        );
-        const anchorBbox = anchorIndicator.getBBox();
-        minX = Math.min(minX, anchorBbox.x);
-        maxX = Math.max(maxX, anchorBbox.x + anchorBbox.width);
-        minY = Math.min(minY, anchorBbox.y);
-        maxY = Math.max(maxY, anchorBbox.y + anchorBbox.height);
-    }
-
-    // Add padding - extra 50mm for top/bottom menus
-    const sidePadding = 20;
-    const topBottomPadding = 100; // 50mm for top/bottom menus
-
-    // Adjust min/max coordinates with different padding for top/bottom vs sides
-    const adjustedMinX = minX - sidePadding;
-    const adjustedMaxX = maxX + sidePadding;
-    const adjustedMinY = minY - topBottomPadding;
-    const adjustedMaxY = maxY + topBottomPadding;
-
-    // Use CanvasManager's fitToScale method with adjusted bounds
-    mainCanvasManager.fitToScale({
-        minX: adjustedMinX,
-        maxX: adjustedMaxX,
-        minY: adjustedMinY,
-        maxY: adjustedMaxY,
-        padding: 0, // CanvasManager will handle padding internally if needed
-    });
-}
-
-function zoomToSelected() {
-    if (selectedBitIndices.length === 0) return;
-
-    // Calculate combined bounding box from bit positions
-    const anchorCoords = getPanelAnchorCoords();
-    let minX = Infinity,
-        minY = Infinity,
-        maxX = -Infinity,
-        maxY = -Infinity;
-
-    selectedBitIndices.forEach((index) => {
-        const bit = bitsOnCanvas[index];
-        if (bit) {
-            const centerX = anchorCoords.x + bit.x;
-            const centerY = anchorCoords.y + bit.y;
-            const radius = (bit.bitData.diameter || 10) / 2;
-
-            let extraBelow = 0;
-            if (
-                shankVisible &&
-                bit.bitData.shankDiameter &&
-                bit.bitData.totalLength &&
-                bit.bitData.length
-            ) {
-                extraBelow = bit.bitData.totalLength - bit.bitData.length;
-            }
-
-            minX = Math.min(minX, centerX - radius);
-            minY = Math.min(minY, centerY - radius - extraBelow);
-            maxX = Math.max(maxX, centerX + radius);
-            maxY = Math.max(maxY, centerY + radius);
+    layerNames.forEach((layerName) => {
+        const layer = mainCanvasManager.getLayer(layerName);
+        if (layer) {
+            // Get all child elements, filtering out hidden ones
+            const childElements = Array.from(layer.children).filter(
+                (child) =>
+                    child.style.display !== "none" &&
+                    window.getComputedStyle(child).display !== "none"
+            );
+            allElements.push(...childElements);
         }
     });
 
-    if (minX === Infinity) return; // No valid bits
+    // If no elements found, fall back to default fit
+    if (allElements.length === 0) {
+        mainCanvasManager.fitToScale({
+            minX: 0,
+            maxX: canvasParameters.width,
+            minY: 0,
+            maxY: canvasParameters.height,
+            padding: 20,
+        });
+        return;
+    }
 
-    const width = maxX - minX;
-    const height = maxY - minY;
-    const center = { x: minX + width / 2, y: minY + height / 2 };
-    const combinedBBox = { width, height, center };
+    // Use the unified zoom function to zoom to all canvas elements
+    zoomToElements(allElements, 100); // 100 units padding for fit to scale
+}
+
+/**
+ * Zooms to specified elements or bit indices
+ * @param {Array} targets - Array of SVG elements or bit indices to zoom to (default: selectedBitIndices)
+ * @param {number} padding - Padding around the zoomed area
+ */
+function zoomToElements(targets = selectedBitIndices, padding = 50) {
+    if (!targets || targets.length === 0) return;
+
+    // Check if targets are bit indices (numbers) or SVG elements
+    const areBitIndices = targets.every((target) => typeof target === "number");
+
+    let combinedBBox;
+
+    if (areBitIndices) {
+        // Calculate combined bounding box from bit positions
+        const anchorCoords = getPanelAnchorCoords();
+        let minX = Infinity,
+            minY = Infinity,
+            maxX = -Infinity,
+            maxY = -Infinity;
+
+        targets.forEach((index) => {
+            const bit = bitsOnCanvas[index];
+            if (bit) {
+                const centerX = anchorCoords.x + bit.x;
+                const centerY = anchorCoords.y + bit.y;
+                const radius = (bit.bitData.diameter || 10) / 2;
+
+                let extraBelow = 0;
+                if (
+                    shankVisible &&
+                    bit.bitData.shankDiameter &&
+                    bit.bitData.totalLength &&
+                    bit.bitData.length
+                ) {
+                    extraBelow = bit.bitData.totalLength - bit.bitData.length;
+                }
+
+                minX = Math.min(minX, centerX - radius);
+                minY = Math.min(minY, centerY - radius - extraBelow);
+                maxX = Math.max(maxX, centerX + radius);
+                maxY = Math.max(maxY, centerY + radius);
+            }
+        });
+
+        if (minX === Infinity) return; // No valid bits
+
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const center = { x: minX + width / 2, y: minY + height / 2 };
+        combinedBBox = { width, height, center };
+    } else {
+        // Targets are SVG elements - use the zoom utility
+        const bbox = calculateElementsBBox(targets);
+        combinedBBox = bbox;
+    }
 
     // Zoom to the combined bounding box
-    zoomToBBox(mainCanvasManager, combinedBBox, 50);
+    zoomToBBox(mainCanvasManager, combinedBBox, padding);
+}
+
+function zoomToSelected() {
+    zoomToElements(selectedBitIndices, 50);
 }
 
 // Helper function to snap value to grid
