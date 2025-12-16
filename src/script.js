@@ -1746,42 +1746,62 @@ function handleMouseDown(e) {
         if (bitsVisible) {
             for (let i = 0; i < bitsOnCanvas.length; i++) {
                 const bit = bitsOnCanvas[i];
-                if (bit) {
-                    const panelX = (canvasParameters.width - panelWidth) / 2;
-                    const panelY =
-                        (canvasParameters.height - panelThickness) / 2;
-                    const bitAbsX = panelX + bit.x;
-                    const bitAbsY = panelY + bit.y;
-
-                    // Check if click is near the bit (within 20px)
-                    const distance = Math.sqrt(
-                        (svgCoords.x - bitAbsX) ** 2 +
-                            (svgCoords.y - bitAbsY) ** 2
-                    );
-                    if (distance <= 20) {
-                        clickedOnBit = true;
-
-                        // If clicking on a selected bit, prepare for potential deselection or dragging
-                        if (selectedBitIndices.includes(i)) {
-                            // Start dragging the selected bit
-                            isDraggingBit = true;
-                            draggedBitIndex = i;
-                            dragStartX = svgCoords.x;
-                            dragStartY = svgCoords.y;
-                            dragStarted = false; // Reset flag
-                            canvas.style.cursor = "grabbing";
-                            return;
+                if (bit && bit.group) {
+                    const shape = bit.group.querySelector(".bit-shape");
+                    if (shape) {
+                        // Get the transform from the group
+                        const transform = bit.group.getAttribute("transform");
+                        let dx = 0,
+                            dy = 0;
+                        if (transform) {
+                            const match = transform.match(
+                                /translate\(([^,]+),\s*([^)]+)\)/
+                            );
+                            if (match) {
+                                dx = parseFloat(match[1]) || 0;
+                                dy = parseFloat(match[2]) || 0;
+                            }
                         }
-                        // If clicking on an unselected bit, select it (but don't start dragging)
-                        else {
-                            selectBit(i);
-                            return;
+
+                        // Transform click coordinates to local shape coordinates
+                        const localX = svgCoords.x - dx;
+                        const localY = svgCoords.y - dy;
+
+                        // Check if click is on the fill of the bit shape
+                        if (shape.isPointInFill(new DOMPoint(localX, localY))) {
+                            // Also check adaptive distance tolerance (smaller when zoomed in)
+                            const bitCenterX = bit.baseAbsX + dx;
+                            const bitCenterY = bit.baseAbsY + dy;
+                            const distance = Math.sqrt(
+                                (svgCoords.x - bitCenterX) ** 2 +
+                                    (svgCoords.y - bitCenterY) ** 2
+                            );
+                            const tolerance = 20;
+                            if (distance <= tolerance) {
+                                clickedOnBit = true;
+
+                                // If clicking on a selected bit, prepare for potential deselection or dragging
+                                if (selectedBitIndices.includes(i)) {
+                                    // Start dragging the selected bit
+                                    isDraggingBit = true;
+                                    draggedBitIndex = i;
+                                    dragStartX = svgCoords.x;
+                                    dragStartY = svgCoords.y;
+                                    dragStarted = false; // Reset flag
+                                    canvas.style.cursor = "pointer";
+                                    return;
+                                }
+                                // If clicking on an unselected bit, select it (but don't start dragging)
+                                else {
+                                    selectBit(i);
+                                    return;
+                                }
+                            }
                         }
                     }
                 }
             }
         }
-
         // If clicked on empty canvas area, clear all selections
         if (!clickedOnBit && selectedBitIndices.length > 0) {
             selectedBitIndices.forEach((index) => {

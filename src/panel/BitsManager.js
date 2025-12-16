@@ -820,11 +820,6 @@ export default class BitsManager {
         const updateBitPreview = () => {
             // Clear bits layer
             const previewBitsLayer = previewCanvasManager.getLayer("bits");
-            // Clear existing debug elements
-            const debugElements =
-                previewBitsLayer.querySelectorAll(".debug-bbox");
-            debugElements.forEach((el) => el.remove());
-            previewBitsLayer.innerHTML = "";
 
             if (!checkBitParametersFilled()) {
                 // Show placeholder text if parameters are not complete

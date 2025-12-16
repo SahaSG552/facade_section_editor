@@ -26,8 +26,8 @@ class GridRenderer {
             this.config.anchorY !== null
                 ? this.config.anchorY
                 : this.config.panY;
-        let xOffset = startX - 0.5;
-        let yOffset = startY - 0.5;
+        let xOffset = startX;
+        let yOffset = startY;
 
         // Create pattern
         const pattern = document.createElementNS(this.svgNS, "pattern");
@@ -212,15 +212,16 @@ class CanvasManager {
 
         // Calculate stroke width that scales with zoom level
         const thickness = Math.max(0.01, 0.1 / Math.sqrt(this.zoomLevel));
-
+        // Auxiliary grid renderer (10x spacing, thicker and darker lines)
+        const auxGridSize = 10;
         // Main grid renderer
         const mainGridConfig = {
             id: "grid",
-            size: effectiveGridSize,
+            size: this.config.gridSize,
             color: "#e0e0e0",
             thickness: thickness,
-            anchorX: this.config.gridAnchorX,
-            anchorY: this.config.gridAnchorY,
+            anchorX: this.config.gridAnchorX - this.config.gridSize / 2,
+            anchorY: this.config.gridAnchorY - this.config.gridSize / 2,
             panX: this.panX,
             panY: this.panY,
             x: viewBoxX,
@@ -236,15 +237,13 @@ class CanvasManager {
         );
         mainGrid.render();
 
-        // Auxiliary grid renderer (10x spacing, thicker and darker lines)
-        const auxGridSize = effectiveGridSize * 10;
         const auxGridConfig = {
             id: "aux-grid",
             size: auxGridSize,
             color: "#5f5959ff",
             thickness: thickness * 2,
-            anchorX: this.config.gridAnchorX,
-            anchorY: this.config.gridAnchorY,
+            anchorX: this.config.gridAnchorX - this.config.gridSize / 2,
+            anchorY: this.config.gridAnchorY - this.config.gridSize / 2,
             panX: this.panX,
             panY: this.panY,
             x: viewBoxX,
