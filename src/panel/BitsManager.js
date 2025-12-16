@@ -7,7 +7,8 @@ import {
     importFromJSON,
 } from "../data/bitsStore.js";
 import CanvasManager from "../canvas/CanvasManager.js";
-import { evaluateMathExpression, getSVGBounds } from "../utils/utils.js";
+import { evaluateMathExpression } from "../utils/utils.js";
+import { getSVGBounds } from "../canvas/zoomUtils.js";
 
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -573,13 +574,12 @@ export default class BitsManager {
               cornerRadius: defaultCornerRadius,
               flat: defaultFlat,
           })}
-          <label for="bit-color">Color:</label>
+          
+          <label for="bit-toolnumber">Tool Number:</label>
+          <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
           <input type="color" id="bit-color" value="${
               defaultColor || "#cccccc"
           }">
-          <label for="bit-toolnumber">Tool Number:</label>
-          <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
-
         </form>
         <div id="bit-preview" class="bit-preview">
           <svg id="bit-preview-canvas" width="200" height="200"></svg>
@@ -588,6 +588,7 @@ export default class BitsManager {
             <button id="preview-zoom-out" title="Zoom Out">-</button>
             <button id="preview-fit" title="Fit to Scale">Fit</button>
             <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
+            
           </div>
         </div>
 

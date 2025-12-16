@@ -1,3 +1,4 @@
+import { fitToBounds, zoomToSVGElement } from "./zoomUtils.js";
 // GridRenderer - класс для создания SVG сетки с использованием паттернов
 class GridRenderer {
     constructor(svgNS, defs, gridLayer, config) {
@@ -71,7 +72,6 @@ class GridRenderer {
 }
 
 // CanvasManager - унифицированный класс для работы с SVG канвасами
-import { getSVGBounds } from "../utils/utils.js";
 
 class CanvasManager {
     constructor(config) {
@@ -284,37 +284,11 @@ class CanvasManager {
     }
 
     fitToScale(bounds = null) {
-        if (!bounds) {
-            // По умолчанию вписываем весь канвас
-            this.zoomLevel = 1;
-            this.panX = this.canvasParameters.width / 2;
-            this.panY = this.canvasParameters.height / 2;
-        } else {
-            // Вписываем заданные границы
-            const { minX, maxX, minY, maxY, padding = 20 } = bounds;
-            const contentWidth = maxX - minX + 2 * padding;
-            const contentHeight = maxY - minY + 2 * padding;
-
-            const zoomX = this.canvasParameters.width / contentWidth;
-            const zoomY = this.canvasParameters.height / contentHeight;
-            this.zoomLevel = Math.min(zoomX, zoomY);
-
-            this.panX = (minX + maxX) / 2;
-            this.panY = (minY + maxY) / 2;
-        }
-
-        this.updateViewBox();
+        fitToBounds(this, bounds);
     }
 
     fitToSVGElement(svgElement, padding = 20) {
-        const bounds = getSVGBounds(svgElement);
-        this.fitToScale({
-            minX: bounds.centerX - bounds.width / 2,
-            maxX: bounds.centerX + bounds.width / 2,
-            minY: bounds.centerY - bounds.height / 2,
-            maxY: bounds.centerY + bounds.height / 2,
-            padding: padding,
-        });
+        zoomToSVGElement(this, svgElement, padding);
     }
 
     updateViewBox() {
@@ -446,6 +420,11 @@ class CanvasManager {
         return { x: svgX, y: svgY };
     }
 
+    /**
+     * Snaps a value to the nearest grid line.
+     * @param {Number} value - The value to snap.
+     * @returns {Number} The snapped value.
+     */
     snapToGrid(value) {
         return Math.round(value / this.config.gridSize) * this.config.gridSize;
     }

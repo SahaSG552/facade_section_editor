@@ -3,6 +3,7 @@ import {
     distancePtToPt,
     evaluateMathExpression,
 } from "./utils/utils.js";
+import { zoomToBBox } from "./canvas/zoomUtils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
@@ -1652,35 +1653,46 @@ function fitToScale() {
 function zoomToSelected() {
     if (selectedBitIndices.length === 0) return;
 
-    // Collect all selected bit elements to fit
-    const elementsToFit = [];
+    // Calculate combined bounding box from bit positions
+    const anchorCoords = getPanelAnchorCoords();
+    let minX = Infinity,
+        minY = Infinity,
+        maxX = -Infinity,
+        maxY = -Infinity;
 
     selectedBitIndices.forEach((index) => {
         const bit = bitsOnCanvas[index];
-        if (bit && bit.group) {
-            if (shankVisible) {
-                // If shank is visible, fit the entire bit group (includes shank)
-                elementsToFit.push(bit.group);
-            } else {
-                // If shank is hidden, fit only the bit shape
-                const bitShape = bit.group.querySelector(".bit-shape");
-                if (bitShape) {
-                    elementsToFit.push(bitShape);
-                }
+        if (bit) {
+            const centerX = anchorCoords.x + bit.x;
+            const centerY = anchorCoords.y + bit.y;
+            const radius = (bit.bitData.diameter || 10) / 2;
+
+            let extraBelow = 0;
+            if (
+                shankVisible &&
+                bit.bitData.shankDiameter &&
+                bit.bitData.totalLength &&
+                bit.bitData.length
+            ) {
+                extraBelow = bit.bitData.totalLength - bit.bitData.length;
             }
+
+            minX = Math.min(minX, centerX - radius);
+            minY = Math.min(minY, centerY - radius - extraBelow);
+            maxX = Math.max(maxX, centerX + radius);
+            maxY = Math.max(maxY, centerY + radius);
         }
     });
 
-    if (elementsToFit.length === 0) return;
+    if (minX === Infinity) return; // No valid bits
 
-    // Create a temporary group containing all selected elements
-    const tempGroup = document.createElementNS(svgNS, "g");
-    elementsToFit.forEach((element) => {
-        tempGroup.appendChild(element.cloneNode(true));
-    });
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const center = { x: minX + width / 2, y: minY + height / 2 };
+    const combinedBBox = { width, height, center };
 
-    // Fit to the combined bounds of all selected elements
-    mainCanvasManager.fitToSVGElement(tempGroup, 50);
+    // Zoom to the combined bounding box
+    zoomToBBox(mainCanvasManager, combinedBBox, 50);
 }
 
 // Helper function to snap value to grid
