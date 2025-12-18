@@ -10,9 +10,10 @@ import BitsManager from "./panel/BitsManager.js";
 import dxfExporter from "./utils/dxfExporter.js";
 import { OffsetCalculator } from "./utils/offsetCalculator.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
+import { makerCalculateResultPolygon } from "./utils/makerProcessor.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
-const makerjs = require("makerjs");
+
 // Get DOM elements
 const canvas = document.getElementById("canvas");
 const panelWidthInput = document.getElementById("panel-width");
@@ -27,7 +28,7 @@ let panelHeight = 600;
 let panelThickness = 19;
 let panelAnchor = "top-left"; // "top-left" or "bottom-left"
 
-const CLIPPER_SCALE = 1000;
+const CLIPPER_SCALE = 1000; // Kept for DXF export compatibility
 let showPart = false;
 let partPath;
 let bitsVisible = true; // Track bits visibility state
@@ -2001,44 +2002,19 @@ function ensureCounterClockwise(points) {
 }
 
 function updatePartShape() {
-    if (!window.ClipperLib) {
-        console.error("ClipperLib not loaded");
-        return;
-    }
-
     // Don't perform calculations if Part view is not enabled
     if (!showPart) {
         return;
     }
-
-    const ClipperLib = window.ClipperLib;
-    const clipper = new ClipperLib.Clipper();
-    const subj = new ClipperLib.Paths();
-    subj.push(getpanelPolygon());
-    const clip = new ClipperLib.Paths();
-    bitsOnCanvas.forEach((bit) => {
-        const poly = getBitPolygon(bit);
-        if (poly.length > 0) clip.push(poly);
-    });
-    const unionBits = new ClipperLib.Paths();
-    clipper.AddPaths(clip, ClipperLib.PolyType.ptSubject, true);
-    clipper.Execute(
-        ClipperLib.ClipType.ctUnion,
-        unionBits,
-        ClipperLib.PolyFillType.pftNonZero,
-        ClipperLib.PolyFillType.pftNonZero
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const d = makerCalculateResultPolygon(
+        panelWidth,
+        panelThickness,
+        panelX,
+        panelY,
+        bitsOnCanvas
     );
-    const result = new ClipperLib.Paths();
-    clipper.Clear();
-    clipper.AddPaths(subj, ClipperLib.PolyType.ptSubject, true);
-    clipper.AddPaths(unionBits, ClipperLib.PolyType.ptClip, true);
-    clipper.Execute(
-        ClipperLib.ClipType.ctDifference,
-        result,
-        ClipperLib.PolyFillType.pftNonZero,
-        ClipperLib.PolyFillType.pftNonZero
-    );
-    const d = pathsToSvgD(result, CLIPPER_SCALE);
     partPath.setAttribute("d", d);
 }
 
@@ -2203,44 +2179,6 @@ function initialize() {
     });
 }
 
-// Calculate result polygon using Clipper (same logic as updatePartShape but returns result)
-function calculateResultPolygon() {
-    if (!window.ClipperLib) {
-        console.error("ClipperLib not loaded");
-        return [];
-    }
-
-    const ClipperLib = window.ClipperLib;
-    const clipper = new ClipperLib.Clipper();
-    const subj = new ClipperLib.Paths();
-    subj.push(getpanelPolygon());
-    const clip = new ClipperLib.Paths();
-    bitsOnCanvas.forEach((bit) => {
-        const poly = getBitPolygon(bit);
-        if (poly.length > 0) clip.push(poly);
-    });
-    const unionBits = new ClipperLib.Paths();
-    clipper.AddPaths(clip, ClipperLib.PolyType.ptSubject, true);
-    clipper.Execute(
-        ClipperLib.ClipType.ctUnion,
-        unionBits,
-        ClipperLib.PolyFillType.pftNonZero,
-        ClipperLib.PolyFillType.pftNonZero
-    );
-    const result = new ClipperLib.Paths();
-    clipper.Clear();
-    clipper.AddPaths(subj, ClipperLib.PolyType.ptSubject, true);
-    clipper.AddPaths(unionBits, ClipperLib.PolyType.ptClip, true);
-    clipper.Execute(
-        ClipperLib.ClipType.ctDifference,
-        result,
-        ClipperLib.PolyFillType.pftNonZero,
-        ClipperLib.PolyFillType.pftNonZero
-    );
-
-    return result;
-}
-
 // Export to DXF function
 function exportToDXF() {
     if (bitsOnCanvas.length === 0) {
@@ -2248,8 +2186,19 @@ function exportToDXF() {
         return;
     }
 
+    // Calculate panel position
+    const panelX = (canvasParameters.width - panelWidth) / 2;
+    const panelY = (canvasParameters.height - panelThickness) / 2;
+
     // Get result polygon from Clipper
-    const clipperResult = calculateResultPolygon();
+    const clipperResult = makerCalculateResultPolygon(
+        panelWidth,
+        panelThickness,
+        panelX,
+        panelY,
+        bitsOnCanvas
+    );
+    console.log("Clipper result:", clipperResult);
 
     // Export to DXF with partFront, offset contours, and panel thickness
     const dxfContent = dxfExporter.exportToDXF(

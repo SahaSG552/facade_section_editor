@@ -3,6 +3,8 @@
  * Exports SVG elements to DXF format for CAD systems
  */
 
+const makerjs = require("makerjs");
+
 class DXFExporter {
     constructor() {
         this.dxfContent = [];
@@ -12,7 +14,7 @@ class DXFExporter {
     /**
      * Export bits on canvas to DXF format
      * @param {Array} bitsOnCanvas - Array of bit objects from the canvas
-     * @param {Array} clipperResult - Result polygon from Clipper operations
+     * @param {Object} makerResult - Result model from Maker.js operations
      * @param {SVGElement} partFront - The part front SVG rectangle element
      * @param {Array} offsetContours - Array of offset contour objects
      * @param {number} panelThickness - Panel thickness for layer naming
@@ -20,7 +22,7 @@ class DXFExporter {
      */
     exportToDXF(
         bitsOnCanvas,
-        clipperResult,
+        makerResult,
         partFront,
         offsetContours,
         panelThickness
@@ -47,7 +49,7 @@ class DXFExporter {
         // DXF Entities (the actual geometry)
         this.writeEntities(
             bitsOnCanvas,
-            clipperResult,
+            makerResult,
             partFront,
             offsetContours,
             panelThickness
@@ -618,7 +620,7 @@ class DXFExporter {
      */
     writeEntities(
         bitsOnCanvas,
-        clipperResult,
+        makerResult,
         partFront,
         offsetContours,
         panelThickness
@@ -640,8 +642,8 @@ class DXFExporter {
             });
         }
 
-        // Write result polygon from Clipper
-        this.writeResultPolygon(clipperResult, "Default");
+        // Write result polygon from Maker.js
+        this.writeResultPolygon(makerResult, "Default");
 
         // Write bit shapes
         bitsOnCanvas.forEach((bit, index) => {
@@ -965,58 +967,30 @@ class DXFExporter {
     }
 
     /**
-     * Write result polygon as DXF LWPOLYLINE
-     * @param {Array} resultPolygon - Array of paths from Clipper result
+     * Write result polygon as DXF LWPOLYLINE from SVG path
+     * @param {string} svgPath - SVG path string from Maker.js
      * @param {string} layerName - Layer name for the result
      */
-    writeResultPolygon(resultPolygon, layerName = "Result") {
-        if (!resultPolygon || resultPolygon.length === 0) return;
+    writeResultPolygon(svgPath, layerName = "Result") {
+        if (!svgPath || svgPath.trim().length === 0) return;
 
-        const scale = 1 / 1000; // Clipper scale factor
+        // Create a temporary SVG element to parse the path
+        const tempSvg = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "svg"
+        );
+        const pathElement = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "path"
+        );
+        pathElement.setAttribute("d", svgPath);
+        tempSvg.appendChild(pathElement);
 
-        resultPolygon.forEach((path, pathIndex) => {
-            if (path.length < 3) return; // Skip degenerate paths
+        // Convert SVG coordinates to DXF coordinates (flip Y axis)
+        const convertY = (y) => -y;
 
-            // Convert Clipper coordinates back to original scale
-            const points = path.map((point) => ({
-                x: point.X * scale,
-                y: -point.Y * scale, // Flip Y for CAD coordinate system
-            }));
-
-            // Ensure counter-clockwise order for DXF
-            const orderedPoints = this.ensureCounterClockwise(points);
-
-            const handle = this.getNextHandle();
-
-            this.dxfContent.push("0");
-            this.dxfContent.push("LWPOLYLINE");
-            this.dxfContent.push("5");
-            this.dxfContent.push(handle);
-            this.dxfContent.push("100");
-            this.dxfContent.push("AcDbEntity");
-            this.dxfContent.push("8"); // Layer
-            this.dxfContent.push(layerName);
-            this.dxfContent.push("6");
-            this.dxfContent.push("BYLAYER");
-            this.dxfContent.push("62");
-            this.dxfContent.push("256");
-            this.dxfContent.push("370");
-            this.dxfContent.push("-1");
-            this.dxfContent.push("100");
-            this.dxfContent.push("AcDbPolyline");
-            this.dxfContent.push("90"); // Number of vertices
-            this.dxfContent.push(orderedPoints.length.toString());
-            this.dxfContent.push("70"); // Flags (1 = closed)
-            this.dxfContent.push("1");
-
-            // Vertices
-            orderedPoints.forEach((point) => {
-                this.dxfContent.push("10"); // X
-                this.dxfContent.push(point.x.toString());
-                this.dxfContent.push("20"); // Y
-                this.dxfContent.push(point.y.toString());
-            });
-        });
+        // Write as SVG path
+        this.writeSVGPath(pathElement, 0, 0, layerName, convertY);
     }
 
     /**
