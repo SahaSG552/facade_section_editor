@@ -12,7 +12,7 @@ import { OffsetCalculator } from "./utils/offsetCalculator.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
-
+const makerjs = require("makerjs");
 // Get DOM elements
 const canvas = document.getElementById("canvas");
 const panelWidthInput = document.getElementById("panel-width");

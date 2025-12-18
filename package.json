@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/SahaSG552/facade_section_editor#readme",
   "dependencies": {
-    "clipper-lib": "^6.4.2"
+    "clipper-lib": "^6.4.2",
+    "makerjs": "^0.17.6"
   }
 }
