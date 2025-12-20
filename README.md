@@ -9,19 +9,19 @@ This project aims to create furniture facade cross sections using router bits an
 
 ## To-Do
 
-- [ ] Create SVG icon for each bit type
-- [ ] Create SVG icon for each bit
+- [X] Create SVG icon for each bit type
+- [X] Create SVG icon for each bit
 - [X] Create add new bit button (+) right after last bit icon. It should add new bit after last bit
-- [ ] Create bit preferences menu. Each type of bit has own parameters. Bit names shouldn't have duplicates. Every parameter shold be filled in.
+- [X] Create bit preferences menu. Each type of bit has own parameters. Bit names shouldn't have duplicates. Every parameter shold be filled in.
 - [X] Make copy bit button work
 - [X] Make delete bit button work
-- [ ] Make bits draggable
-- [ ] Make bits position editable by changing X, Y values in table
-- [ ] Edit table - dragable area only in dragging column (first column)
+- [X] Make bits draggable
+- [X] Make bits position editable by changing X, Y values in table
+- [X] Edit table - dragable area only in dragging column (first column)
 - [ ] Make bits replacable - if bit selected on canvas or in table and I choose another bit - replace it in place
 - [ ] In table - operation selector - dropdown list with options
-  - [ ] Profile operations (along, inside, outside)
-  - [ ] Engraving for conical bits
+  - [X] Profile operations (along, inside, outside)
+  - [X] Engraving for conical bits
   - [ ] Pocketing
   - [ ] Chamfering
   - [ ] Re-machining, clean corners
