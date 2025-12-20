@@ -64,7 +64,6 @@ function makerCalculateResultPolygon(
     }
 
     const result = makerjs.model.combineSubtraction(panelModel, unionBits);
-
     const svg = makerjs.exporter.toSVG(result);
     const parser = new DOMParser();
     const doc = parser.parseFromString(svg, "image/svg+xml");

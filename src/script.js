@@ -2016,6 +2016,7 @@ function updatePartShape() {
         bitsOnCanvas
     );
     partPath.setAttribute("d", d);
+    partPath.setAttribute("transform", `translate(${panelX}, ${panelY})`);
 }
 
 function pathsToSvgD(paths, scale) {
@@ -2191,7 +2192,7 @@ function exportToDXF() {
     const panelY = (canvasParameters.height - panelThickness) / 2;
 
     // Get result polygon from Clipper
-    const clipperResult = makerCalculateResultPolygon(
+    let clipperResult = makerCalculateResultPolygon(
         panelWidth,
         panelThickness,
         panelX,
@@ -2199,7 +2200,6 @@ function exportToDXF() {
         bitsOnCanvas
     );
     console.log("Clipper result:", clipperResult);
-
     // Export to DXF with partFront, offset contours, and panel thickness
     const dxfContent = dxfExporter.exportToDXF(
         bitsOnCanvas,
