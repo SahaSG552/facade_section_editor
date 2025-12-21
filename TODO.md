@@ -1,0 +1,4 @@
+- [ ] Maker.js:
+  - [ ] fix boolean difference all bits on canvas (now not catches cylindrical and V bits)
+  - [ ] move result figure to it's place to export to DXF
+- [ ] Fix modal window bits preview (clear bbox, shape duplicates and so on)

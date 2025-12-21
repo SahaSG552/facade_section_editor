@@ -34,11 +34,6 @@ let partPath;
 let bitsVisible = true; // Track bits visibility state
 let shankVisible = true; // Track shank visibility state
 
-const canvasParameters = {
-    width: canvas.getAttribute("width"),
-    height: canvas.getAttribute("height"),
-};
-
 // Canvas manager instance
 let mainCanvasManager;
 let bitsManager; // Bits manager instance
@@ -72,8 +67,11 @@ function initializeSVG() {
     partFront = document.createElementNS(svgNS, "rect");
 
     // Calculate panel anchor position for grid alignment
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const canvasSize = mainCanvasManager
+        ? mainCanvasManager.canvasParameters
+        : { width: 800, height: 600 };
+    const panelX = (canvasSize.width - panelWidth) / 2;
+    const panelY = (canvasSize.height - panelThickness) / 2;
     const anchorOffset = getpanelAnchorOffset();
     const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
     const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
@@ -81,8 +79,6 @@ function initializeSVG() {
     // Create main canvas manager instance
     mainCanvasManager = new CanvasManager({
         canvas: canvas,
-        width: canvasParameters.width,
-        height: canvasParameters.height,
         enableZoom: true,
         enablePan: false, // Disable pan - we'll handle it manually to avoid conflicts with bit dragging
         enableGrid: true,
@@ -91,8 +87,6 @@ function initializeSVG() {
         gridAnchorX: gridAnchorX,
         gridAnchorY: gridAnchorY,
         initialZoom: 1,
-        initialPanX: canvasParameters.width / 2,
-        initialPanY: canvasParameters.height / 2,
         layers: ["grid", "panel", "offsets", "bits", "phantoms", "overlay"],
         onZoom: (zoomLevel, panX, panY) => {
             // Update stroke widths when zoom changes
@@ -260,6 +254,21 @@ function initializeSVG() {
         .addEventListener("click", () => {
             const leftPanel = document.getElementById("left-panel");
             leftPanel.classList.toggle("collapsed");
+            // Update canvas parameters to reflect new canvas size
+            const oldWidth = mainCanvasManager.canvasParameters.width;
+            const oldHeight = mainCanvasManager.canvasParameters.height;
+            mainCanvasManager.canvasParameters.width =
+                canvas.getBoundingClientRect().width;
+            mainCanvasManager.canvasParameters.height =
+                canvas.getBoundingClientRect().height;
+            // Adjust pan to maintain relative position
+            mainCanvasManager.panX =
+                (mainCanvasManager.panX / oldWidth) *
+                mainCanvasManager.canvasParameters.width;
+            mainCanvasManager.panY =
+                (mainCanvasManager.panY / oldHeight) *
+                mainCanvasManager.canvasParameters.height;
+            mainCanvasManager.updateViewBox();
         });
 
     document
@@ -267,6 +276,21 @@ function initializeSVG() {
         .addEventListener("click", () => {
             const rightMenu = document.getElementById("right-menu");
             rightMenu.classList.toggle("collapsed");
+            // Update canvas parameters to reflect new canvas size
+            const oldWidth = mainCanvasManager.canvasParameters.width;
+            const oldHeight = mainCanvasManager.canvasParameters.height;
+            mainCanvasManager.canvasParameters.width =
+                canvas.getBoundingClientRect().width;
+            mainCanvasManager.canvasParameters.height =
+                canvas.getBoundingClientRect().height;
+            // Adjust pan to maintain relative position
+            mainCanvasManager.panX =
+                (mainCanvasManager.panX / oldWidth) *
+                mainCanvasManager.canvasParameters.width;
+            mainCanvasManager.panY =
+                (mainCanvasManager.panY / oldHeight) *
+                mainCanvasManager.canvasParameters.height;
+            mainCanvasManager.updateViewBox();
         });
 
     // Setup theme toggle button
@@ -299,8 +323,9 @@ function cyclepanelAnchor() {
 
 // Update bit positions when panel anchor changes
 function updateBitsForNewAnchor() {
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const oldAnchor = panelAnchor === "top-left" ? "bottom-left" : "top-left";
     const currentAnchorX = panelX;
     const currentAnchorY =
@@ -340,8 +365,9 @@ function updateBitsForNewAnchor() {
 // Update part front view
 function updatepartFront() {
     // Always position part front relative to top anchor for consistent calculations
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
 
     // Position part front relative to panel anchor
@@ -359,10 +385,13 @@ function updatepartFront() {
 
 // Update panel shape
 function updatepanelShape() {
-    partSection.setAttribute("x", (canvasParameters.width - panelWidth) / 2);
+    partSection.setAttribute(
+        "x",
+        (mainCanvasManager.canvasParameters.width - panelWidth) / 2
+    );
     partSection.setAttribute(
         "y",
-        (canvasParameters.height - panelThickness) / 2
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2
     );
     partSection.setAttribute("width", panelWidth);
     partSection.setAttribute("height", panelThickness);
@@ -378,8 +407,9 @@ function updatepanelAnchorIndicator() {
     const indicator = document.getElementById("panel-anchor-indicator");
     indicator.innerHTML = ""; // Clear
 
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
 
     let anchorX, anchorY;
     if (panelAnchor === "top-left") {
@@ -417,8 +447,9 @@ function updatepanelAnchorIndicator() {
 
 // Update grid anchor position
 function updateGridAnchor() {
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const anchorOffset = getpanelAnchorOffset();
     const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
     const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
@@ -449,8 +480,9 @@ function updatepanelParams() {
 
 // New: reposition all bits according to current panel anchor and their stored logical coords
 function updateBitsPositions() {
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const anchorOffset = getpanelAnchorOffset();
     const anchorX = panelX + anchorOffset.x;
     const anchorY = panelY + anchorOffset.y;
@@ -500,8 +532,9 @@ function updatePhantomBits() {
     phantomsLayer.innerHTML = ""; // Clear all phantom bits
 
     // Always calculate relative to top anchor for consistent offset calculations
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
     const anchorX = panelX + anchorOffset.x;
     const anchorY = panelY + anchorOffset.y;
@@ -584,8 +617,9 @@ function updateOffsetContours() {
     offsetContours = [];
 
     // Always calculate relative to top anchor for consistent offset calculations
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
     const anchorX = panelX + anchorOffset.x;
     const anchorY = panelY + anchorOffset.y;
@@ -953,8 +987,9 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
     const bitsLayer = document.getElementById("bits-layer");
 
     updatepanelParams();
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const centerX = panelX + panelWidth / 2;
     const centerY = panelY;
 
@@ -1630,9 +1665,9 @@ function fitToScale() {
     if (allElements.length === 0) {
         mainCanvasManager.fitToScale({
             minX: 0,
-            maxX: canvasParameters.width,
+            maxX: mainCanvasManager.canvasParameters.width,
             minY: 0,
-            maxY: canvasParameters.height,
+            maxY: mainCanvasManager.canvasParameters.height,
             padding: 20,
         });
         return;
@@ -1733,8 +1768,9 @@ function transformYFromDisplay(displayY, anchorOffset) {
 
 // Helper function to get panel anchor coordinates
 function getPanelAnchorCoords() {
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const offset = getpanelAnchorOffset();
     return {
         x: panelX + offset.x,
@@ -1932,8 +1968,9 @@ function updateTableCoordinates(bitIndex, newX, newY) {
 
 // Clipper functions for part subtraction
 function getpanelPolygon() {
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     return [
         {
             X: Math.round(panelX * CLIPPER_SCALE),
@@ -2028,8 +2065,9 @@ function updatePartShape() {
     if (!showPart) {
         return;
     }
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     const d = makerCalculateResultPolygon(
         panelWidth,
         panelThickness,
@@ -2210,8 +2248,9 @@ function exportToDXF() {
     }
 
     // Calculate panel position
-    const panelX = (canvasParameters.width - panelWidth) / 2;
-    const panelY = (canvasParameters.height - panelThickness) / 2;
+    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+    const panelY =
+        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
 
     // Get result polygon from Clipper
     let clipperResult = makerCalculateResultPolygon(
@@ -2360,8 +2399,12 @@ async function restoreBitPositions(positionsData) {
         if (bitData) {
             try {
                 // Create bit on canvas at the saved position
-                const panelX = (canvasParameters.width - panelWidth) / 2;
-                const panelY = (canvasParameters.height - panelThickness) / 2;
+                const panelX =
+                    (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+                const panelY =
+                    (mainCanvasManager.canvasParameters.height -
+                        panelThickness) /
+                    2;
                 const centerX = panelX + panelWidth / 2;
                 const centerY = panelY + panelThickness / 2;
 
@@ -2499,6 +2542,19 @@ function initializeTheme() {
         themeToggle.title = "Switch to Dark Theme";
     }
 }
+
+// Add window resize listener for responsive canvas
+window.addEventListener("resize", () => {
+    if (mainCanvasManager) {
+        mainCanvasManager.resize();
+        // Update all canvas elements after resize
+        updatepanelShape();
+        updateBitsPositions();
+        updateOffsetContours();
+        updatePhantomBits();
+        if (showPart) updatePartShape();
+    }
+});
 
 // Call initialize function when the page loads
 window.addEventListener("load", initialize);

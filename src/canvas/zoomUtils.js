@@ -38,11 +38,8 @@ export function calculateElementsBBox(elements) {
     const originalViewBox = svg.getAttribute("viewBox");
 
     // Temporarily set viewBox to identity to get stable CTM calculations
-    const canvasParams = svg.canvasParameters || { width: 800, height: 600 };
-    svg.setAttribute(
-        "viewBox",
-        `0 0 ${canvasParams.width} ${canvasParams.height}`
-    );
+    const rect = svg.getBoundingClientRect();
+    svg.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
 
     try {
         // Helper function to get bbox in absolute coordinates
@@ -137,9 +134,14 @@ export function zoomToBBox(canvasManager, bbox, padding = 0) {
     const contentWidth = width + 2 * padding;
     const contentHeight = height + 2 * padding;
 
+    // Get current pixel dimensions
+    const rect = canvasManager.canvas.getBoundingClientRect();
+    const pixelWidth = rect.width;
+    const pixelHeight = rect.height;
+
     // Calculate zoom level to fit the content
-    const zoomX = canvasManager.canvasParameters.width / contentWidth;
-    const zoomY = canvasManager.canvasParameters.height / contentHeight;
+    const zoomX = pixelWidth / contentWidth;
+    const zoomY = pixelHeight / contentHeight;
     canvasManager.zoomLevel = Math.min(zoomX, zoomY);
 
     // Center on the bbox center
@@ -172,16 +174,21 @@ export function zoomToElements(canvasManager, elements, padding = 0) {
 export function fitToBounds(canvasManager, bounds) {
     if (!bounds) {
         // Default fit
+        const rect = canvasManager.canvas.getBoundingClientRect();
         canvasManager.zoomLevel = 1;
-        canvasManager.panX = canvasManager.canvasParameters.width / 2;
-        canvasManager.panY = canvasManager.canvasParameters.height / 2;
+        canvasManager.panX = rect.width / 2;
+        canvasManager.panY = rect.height / 2;
     } else {
         const { minX, maxX, minY, maxY, padding = 20 } = bounds;
         const contentWidth = maxX - minX + 2 * padding;
         const contentHeight = maxY - minY + 2 * padding;
 
-        const zoomX = canvasManager.canvasParameters.width / contentWidth;
-        const zoomY = canvasManager.canvasParameters.height / contentHeight;
+        const rect = canvasManager.canvas.getBoundingClientRect();
+        const pixelWidth = rect.width;
+        const pixelHeight = rect.height;
+
+        const zoomX = pixelWidth / contentWidth;
+        const zoomY = pixelHeight / contentHeight;
         canvasManager.zoomLevel = Math.min(zoomX, zoomY);
 
         canvasManager.panX = (minX + maxX) / 2;

@@ -17,17 +17,9 @@ class GridRenderer {
             this.defs.removeChild(existingPattern);
         }
 
-        // Calculate offset - grid start point aligned to anchor or pan
-        let startX =
-            this.config.anchorX !== null
-                ? this.config.anchorX
-                : this.config.panX;
-        let startY =
-            this.config.anchorY !== null
-                ? this.config.anchorY
-                : this.config.panY;
-        let xOffset = startX;
-        let yOffset = startY;
+        // Calculate offset - grid start from 0 to cover entire canvas
+        let xOffset = 0;
+        let yOffset = 0;
 
         // Create pattern
         const pattern = document.createElementNS(this.svgNS, "pattern");
@@ -125,10 +117,15 @@ class CanvasManager {
         }
 
         this.canvas = this.config.canvas;
-        this.canvasParameters = {
-            width: this.config.width,
-            height: this.config.height,
-        };
+        this.updateCanvasSize();
+
+        // Set SVG width and height to 100% for responsive sizing
+        this.canvas.setAttribute("width", "100%");
+        this.canvas.setAttribute("height", "100%");
+
+        // Установка начального pan в центре канваса
+        this.panX = this.canvasParameters.width / 2;
+        this.panY = this.canvasParameters.height / 2;
 
         // Установка viewBox
         this.canvas.setAttribute(
@@ -156,6 +153,15 @@ class CanvasManager {
         // Инициализация событий мыши если включены
         if (this.config.enableMouseEvents) {
             this.setupMouseEvents();
+        }
+
+        // Add ResizeObserver to monitor container size changes
+        const container = this.canvas.parentElement;
+        if (container) {
+            this.resizeObserver = new ResizeObserver(() => {
+                this.resize();
+            });
+            this.resizeObserver.observe(container);
         }
 
         // Начальная настройка viewBox
@@ -198,8 +204,9 @@ class CanvasManager {
         }
 
         // Calculate current viewBox bounds
-        const viewBoxWidth = this.canvasParameters.width / this.zoomLevel;
-        const viewBoxHeight = this.canvasParameters.height / this.zoomLevel;
+        const rect = this.canvas.getBoundingClientRect();
+        const viewBoxWidth = rect.width / this.zoomLevel;
+        const viewBoxHeight = rect.height / this.zoomLevel;
         const viewBoxX = this.panX - viewBoxWidth / 2;
         const viewBoxY = this.panY - viewBoxHeight / 2;
 
@@ -291,8 +298,9 @@ class CanvasManager {
     }
 
     updateViewBox() {
-        const viewBoxWidth = this.canvasParameters.width / this.zoomLevel;
-        const viewBoxHeight = this.canvasParameters.height / this.zoomLevel;
+        const rect = this.canvas.getBoundingClientRect();
+        const viewBoxWidth = rect.width / this.zoomLevel;
+        const viewBoxHeight = rect.height / this.zoomLevel;
         const viewBoxX = this.panX - viewBoxWidth / 2;
         const viewBoxY = this.panY - viewBoxHeight / 2;
 
@@ -323,16 +331,16 @@ class CanvasManager {
         const oldZoom = this.zoomLevel;
         this.zoomLevel *= zoomFactor;
 
-        const oldViewBoxWidth = this.canvasParameters.width / oldZoom;
-        const oldViewBoxHeight = this.canvasParameters.height / oldZoom;
+        const oldViewBoxWidth = rect.width / oldZoom;
+        const oldViewBoxHeight = rect.height / oldZoom;
         const oldViewBoxX = this.panX - oldViewBoxWidth / 2;
         const oldViewBoxY = this.panY - oldViewBoxHeight / 2;
 
         const svgX = oldViewBoxX + (mouseX / rect.width) * oldViewBoxWidth;
         const svgY = oldViewBoxY + (mouseY / rect.height) * oldViewBoxHeight;
 
-        const newViewBoxWidth = this.canvasParameters.width / this.zoomLevel;
-        const newViewBoxHeight = this.canvasParameters.height / this.zoomLevel;
+        const newViewBoxWidth = rect.width / this.zoomLevel;
+        const newViewBoxHeight = rect.height / this.zoomLevel;
 
         const newViewBoxX = svgX - (mouseX / rect.width) * newViewBoxWidth;
         const newViewBoxY = svgY - (mouseY / rect.height) * newViewBoxHeight;
@@ -408,8 +416,8 @@ class CanvasManager {
         const mouseX = x - rect.left;
         const mouseY = y - rect.top;
 
-        const viewBoxWidth = this.canvasParameters.width / this.zoomLevel;
-        const viewBoxHeight = this.canvasParameters.height / this.zoomLevel;
+        const viewBoxWidth = rect.width / this.zoomLevel;
+        const viewBoxHeight = rect.height / this.zoomLevel;
         const viewBoxX = this.panX - viewBoxWidth / 2;
         const viewBoxY = this.panY - viewBoxHeight / 2;
 
@@ -452,6 +460,38 @@ class CanvasManager {
         if (this.layers[name] && element.parentNode === this.layers[name]) {
             this.layers[name].removeChild(element);
         }
+    }
+
+    // Обновление размеров канваса на основе контейнера
+    updateCanvasSize() {
+        const container = this.canvas.parentElement;
+        if (container) {
+            // Use clientWidth/Height to get content area dimensions (excluding padding)
+            this.canvasParameters = {
+                width: container.clientWidth,
+                height: container.clientHeight,
+            };
+        } else {
+            // Fallback to default if no container
+            this.canvasParameters = {
+                width: this.config.width || 800,
+                height: this.config.height || 600,
+            };
+        }
+    }
+
+    // Изменение размера канваса (вызывается при resize окна)
+    resize() {
+        const oldWidth = this.canvasParameters.width;
+        const oldHeight = this.canvasParameters.height;
+
+        this.updateCanvasSize();
+
+        // Корректируем pan чтобы сохранить относительное положение
+        this.panX = (this.panX / oldWidth) * this.canvasParameters.width;
+        this.panY = (this.panY / oldHeight) * this.canvasParameters.height;
+
+        this.updateViewBox();
     }
 }
 
