@@ -2260,7 +2260,6 @@ function exportToDXF() {
         panelY,
         bitsOnCanvas
     );
-    console.log("Clipper result:", clipperResult);
     // Export to DXF with partFront, offset contours, and panel thickness
     const dxfContent = dxfExporter.exportToDXF(
         bitsOnCanvas,
