@@ -198,7 +198,8 @@ export default class BitsManager {
         x = 0,
         y = 0,
         isSelected = false,
-        includeShank = true
+        includeShank = true,
+        strokeWidth = 1
     ) {
         // Create a group to contain bit and shank shapes
         const group = document.createElementNS(svgNS, "g");
@@ -291,12 +292,18 @@ export default class BitsManager {
 
         if (bitShape) {
             bitShape.setAttribute("stroke", "black");
+            bitShape.setAttribute("stroke-width", strokeWidth);
             bitShape.classList.add("bit-shape");
             group.appendChild(bitShape);
         }
 
         // Add shank if parameters are present and includeShank is true
-        if (includeShank && bit.shankDiameter && bit.totalLength) {
+        if (
+            includeShank &&
+            bit.shankDiameter &&
+            bit.totalLength &&
+            bit.totalLength > bit.length
+        ) {
             const shankLength = bit.totalLength - bit.length;
             const shankShape = document.createElementNS(svgNS, "rect");
             shankShape.setAttribute("x", x - bit.shankDiameter / 2);
@@ -305,6 +312,7 @@ export default class BitsManager {
             shankShape.setAttribute("height", shankLength);
             shankShape.setAttribute("fill", "rgba(64, 64, 64, 0.1)");
             shankShape.setAttribute("stroke", "black");
+            shankShape.setAttribute("stroke-width", strokeWidth);
             shankShape.classList.add("shank-shape");
             group.appendChild(shankShape);
         }
@@ -495,14 +503,7 @@ export default class BitsManager {
         delete newBit.id; // ensure new id created
 
         // Find the group name for this bit
-        const allBits = await getBits();
-        let groupName = null;
-        for (const group in allBits) {
-            if (allBits[group].some((b) => b.id === bit.id)) {
-                groupName = group;
-                break;
-            }
-        }
+        const groupName = await this.findBitGroupName(bit);
 
         if (groupName) {
             addBit(groupName, newBit);
@@ -512,14 +513,7 @@ export default class BitsManager {
     async handleDeleteClick(e, bit) {
         if (confirm(`Are you sure you want to delete ${bit.name}?`)) {
             // Find the group name for this bit
-            const allBits = await getBits();
-            let groupName = null;
-            for (const group in allBits) {
-                if (allBits[group].some((b) => b.id === bit.id)) {
-                    groupName = group;
-                    break;
-                }
-            }
+            const groupName = await this.findBitGroupName(bit);
 
             if (groupName) {
                 deleteBit(groupName, bit.id);
@@ -532,6 +526,200 @@ export default class BitsManager {
         return Object.values(all || {})
             .flat()
             .some((bit) => bit.name === name && bit.id !== excludeId);
+    }
+
+    // Helper method to find group name for a bit
+    async findBitGroupName(bit) {
+        const allBits = await getBits();
+        for (const group in allBits) {
+            if (allBits[group].some((b) => b.id === bit.id)) {
+                return group;
+            }
+        }
+        return null;
+    }
+
+    // Helper method to collect bit parameters from form
+    collectBitParameters(form, groupName) {
+        const name = form.querySelector("#bit-name").value.trim();
+        const diameter = parseFloat(
+            evaluateMathExpression(form.querySelector("#bit-diameter").value)
+        );
+        const length = parseFloat(
+            evaluateMathExpression(form.querySelector("#bit-length").value)
+        );
+        const toolNumber = parseInt(
+            evaluateMathExpression(form.querySelector("#bit-toolnumber").value),
+            10
+        );
+
+        // Color picker is now in the toolbar, not in the form
+        const colorInput = document.querySelector("#bit-color");
+        const color = colorInput ? colorInput.value : "#cccccc";
+        let bitParams = {
+            name,
+            diameter,
+            length,
+            toolNumber,
+            fillColor: color,
+        };
+
+        // Add shank parameters if present
+        const shankDiameterStr =
+            form.querySelector("#bit-shankDiameter")?.value;
+        if (shankDiameterStr) {
+            const shankDiameter = parseFloat(
+                evaluateMathExpression(shankDiameterStr)
+            );
+            if (!isNaN(shankDiameter)) bitParams.shankDiameter = shankDiameter;
+        }
+
+        const totalLengthStr = form.querySelector("#bit-totalLength")?.value;
+        if (totalLengthStr) {
+            const totalLength = parseFloat(
+                evaluateMathExpression(totalLengthStr)
+            );
+            if (!isNaN(totalLength)) bitParams.totalLength = totalLength;
+        }
+
+        // Add group-specific parameters
+        if (groupName === "conical") {
+            bitParams.angle = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-angle").value)
+            );
+        }
+        if (groupName === "ball") {
+            bitParams.height = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-height").value)
+            );
+        }
+        if (groupName === "fillet" || groupName === "bull") {
+            bitParams.height = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-height").value)
+            );
+            bitParams.cornerRadius = parseFloat(
+                evaluateMathExpression(
+                    form.querySelector("#bit-cornerRadius").value
+                )
+            );
+            bitParams.flat = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-flat").value)
+            );
+        }
+
+        return bitParams;
+    }
+
+    // Helper method to validate bit parameters
+    validateBitParameters(form, groupName) {
+        const name = form.querySelector("#bit-name").value.trim();
+        if (!name) return false;
+
+        const diameter = form.querySelector("#bit-diameter")?.value;
+        if (!diameter) return false;
+
+        const length = form.querySelector("#bit-length")?.value;
+        if (!length) return false;
+
+        const toolNumber = form.querySelector("#bit-toolnumber")?.value;
+        if (!toolNumber) return false;
+
+        if (groupName === "conical") {
+            const angle = form.querySelector("#bit-angle")?.value;
+            if (!angle) return false;
+        }
+
+        if (groupName === "ball") {
+            const height = form.querySelector("#bit-height")?.value;
+            if (!height) return false;
+        }
+
+        if (groupName === "fillet" || groupName === "bull") {
+            const height = form.querySelector("#bit-height")?.value;
+            const cornerRadius = form.querySelector("#bit-cornerRadius")?.value;
+            const flat = form.querySelector("#bit-flat")?.value;
+            if (!height || !cornerRadius || !flat) return false;
+        }
+
+        return true;
+    }
+
+    // Helper method to build bit payload for saving
+    buildBitPayload(form, groupName) {
+        const diameter = parseFloat(
+            evaluateMathExpression(form.querySelector("#bit-diameter").value)
+        );
+        const length = parseFloat(
+            evaluateMathExpression(form.querySelector("#bit-length").value)
+        );
+        const toolNumber =
+            parseInt(
+                evaluateMathExpression(
+                    form.querySelector("#bit-toolnumber").value
+                ),
+                10
+            ) || 1;
+
+        // Color picker is now in the toolbar, not in the form
+        const colorInput = document.querySelector("#bit-color");
+        const color = colorInput ? colorInput.value : "#cccccc";
+        const payload = {
+            name: form.querySelector("#bit-name").value.trim(),
+            diameter,
+            length,
+            toolNumber,
+            fillColor: color,
+        };
+
+        // Add optional shank parameters
+        const shankDiameterStr =
+            form.querySelector("#bit-shankDiameter")?.value;
+        if (shankDiameterStr) {
+            const shankDiameter = parseFloat(
+                evaluateMathExpression(shankDiameterStr)
+            );
+            if (!isNaN(shankDiameter)) payload.shankDiameter = shankDiameter;
+        }
+
+        const totalLengthStr = form.querySelector("#bit-totalLength")?.value;
+        if (totalLengthStr) {
+            const totalLength = parseFloat(
+                evaluateMathExpression(totalLengthStr)
+            );
+            if (!isNaN(totalLength)) payload.totalLength = totalLength;
+        }
+
+        // Add group-specific parameters
+        if (groupName === "conical") {
+            const angle = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-angle").value)
+            );
+            payload.angle = angle;
+        }
+        if (groupName === "ball") {
+            const height = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-height").value)
+            );
+            payload.height = height;
+        }
+        if (groupName === "fillet" || groupName === "bull") {
+            const height = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-height").value)
+            );
+            payload.height = height;
+            const cornerRadius = parseFloat(
+                evaluateMathExpression(
+                    form.querySelector("#bit-cornerRadius").value
+                )
+            );
+            payload.cornerRadius = cornerRadius;
+            const flat = parseFloat(
+                evaluateMathExpression(form.querySelector("#bit-flat").value)
+            );
+            payload.flat = flat;
+        }
+
+        return payload;
     }
 
     openNewBitMenu(groupName) {
@@ -552,7 +740,7 @@ export default class BitsManager {
         const defaultFlat = bit ? bit.flat : "";
         const defaultShankDiameter = bit ? bit.shankDiameter : "";
         const defaultTotalLength = bit ? bit.totalLength : "";
-        const defaultColor = bit ? bit.fillColor : "#cccccc";
+        const defaultColor = bit && bit.fillColor ? bit.fillColor : "#cccccc";
         const defaultName = bit ? bit.name : "";
 
         const modal = document.createElement("div");
@@ -577,18 +765,15 @@ export default class BitsManager {
           
           <label for="bit-toolnumber">Tool Number:</label>
           <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
-          <input type="color" id="bit-color" value="${
-              defaultColor || "#cccccc"
-          }">
         </form>
         <div id="bit-preview" class="bit-preview">
           <svg id="bit-preview-canvas" width="200" height="200"></svg>
           <div id="preview-toolbar">
-            <button id="preview-zoom-in" title="Zoom In">+</button>
-            <button id="preview-zoom-out" title="Zoom Out">-</button>
-            <button id="preview-fit" title="Fit to Scale">Fit</button>
-            <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
-            
+          <button id="preview-zoom-in" title="Zoom In">+</button>
+          <button id="preview-zoom-out" title="Zoom Out">-</button>
+          <button id="preview-fit" title="Fit to Scale">Fit</button>
+          <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
+          <input type="color" id="bit-color" value="${defaultColor}" title="Bit Color">
           </div>
         </div>
 
@@ -676,79 +861,11 @@ export default class BitsManager {
         };
 
         const previewFitToScale = () => {
-            if (checkBitParametersFilled()) {
-                // Collect parameters
-                const name = form.querySelector("#bit-name").value.trim();
-                const diameter = parseFloat(
-                    evaluateMathExpression(
-                        form.querySelector("#bit-diameter").value
-                    )
+            if (this.validateBitParameters(form, groupName)) {
+                const tempBitParams = this.collectBitParameters(
+                    form,
+                    groupName
                 );
-                const length = parseFloat(
-                    evaluateMathExpression(
-                        form.querySelector("#bit-length").value
-                    )
-                );
-                const color = form.querySelector("#bit-color").value;
-
-                let tempBitParams = {
-                    name,
-                    diameter,
-                    length,
-                    fillColor: color,
-                };
-
-                // Add shank parameters if present
-                const shankDiameterStr =
-                    form.querySelector("#bit-shankDiameter")?.value;
-                const totalLengthStr =
-                    form.querySelector("#bit-totalLength")?.value;
-
-                if (shankDiameterStr && totalLengthStr) {
-                    const shankDiameter = parseFloat(
-                        evaluateMathExpression(shankDiameterStr)
-                    );
-                    const totalLength = parseFloat(
-                        evaluateMathExpression(totalLengthStr)
-                    );
-                    if (!isNaN(shankDiameter) && !isNaN(totalLength)) {
-                        tempBitParams.shankDiameter = shankDiameter;
-                        tempBitParams.totalLength = totalLength;
-                    }
-                }
-
-                // Add other parameters based on group
-                if (groupName === "conical") {
-                    tempBitParams.angle = parseFloat(
-                        evaluateMathExpression(
-                            form.querySelector("#bit-angle").value
-                        )
-                    );
-                }
-                if (groupName === "ball") {
-                    tempBitParams.height = parseFloat(
-                        evaluateMathExpression(
-                            form.querySelector("#bit-height").value
-                        )
-                    );
-                }
-                if (groupName === "fillet" || groupName === "bull") {
-                    tempBitParams.height = parseFloat(
-                        evaluateMathExpression(
-                            form.querySelector("#bit-height").value
-                        )
-                    );
-                    tempBitParams.cornerRadius = parseFloat(
-                        evaluateMathExpression(
-                            form.querySelector("#bit-cornerRadius").value
-                        )
-                    );
-                    tempBitParams.flat = parseFloat(
-                        evaluateMathExpression(
-                            form.querySelector("#bit-flat").value
-                        )
-                    );
-                }
 
                 // Create temp group to get bounds
                 const tempGroup = this.createBitShapeElement(
@@ -759,20 +876,6 @@ export default class BitsManager {
                     true
                 );
                 const bounds = getSVGBounds(tempGroup);
-
-                // Debug: draw bbox rectangle
-                const debugLayer = previewCanvasManager.getLayer("bits");
-                const bboxRect = document.createElementNS(svgNS, "rect");
-                bboxRect.setAttribute("x", bounds.centerX - bounds.width / 2);
-                bboxRect.setAttribute("y", bounds.centerY - bounds.height / 2);
-                bboxRect.setAttribute("width", bounds.width);
-                bboxRect.setAttribute("height", bounds.height);
-                bboxRect.setAttribute("fill", "none");
-                bboxRect.setAttribute("stroke", "red");
-                bboxRect.setAttribute("stroke-width", "1");
-                bboxRect.setAttribute("stroke-dasharray", "5,5");
-                bboxRect.classList.add("debug-bbox");
-                debugLayer.appendChild(bboxRect);
 
                 // Use CanvasManager's fitToSVGElement method
                 previewCanvasManager.fitToSVGElement(tempGroup, 5);
@@ -820,8 +923,9 @@ export default class BitsManager {
         const updateBitPreview = () => {
             // Clear bits layer
             const previewBitsLayer = previewCanvasManager.getLayer("bits");
+            previewBitsLayer.innerHTML = ""; // Always clear first
 
-            if (!checkBitParametersFilled()) {
+            if (!this.validateBitParameters(form, groupName)) {
                 // Show placeholder text if parameters are not complete
                 const text = document.createElementNS(svgNS, "text");
                 text.setAttribute("x", previewCanvasManager.panX);
@@ -834,85 +938,7 @@ export default class BitsManager {
                 return;
             }
 
-            // Collect parameters
-            const name = form.querySelector("#bit-name").value.trim();
-            const diameter = parseFloat(
-                evaluateMathExpression(
-                    form.querySelector("#bit-diameter").value
-                )
-            );
-            const length = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-length").value)
-            );
-            const toolNumber = parseInt(
-                evaluateMathExpression(
-                    form.querySelector("#bit-toolnumber").value
-                ),
-                10
-            );
-
-            const color = form.querySelector("#bit-color").value;
-            let bitParams = {
-                name,
-                diameter,
-                length,
-                toolNumber,
-                fillColor: color,
-            };
-
-            // Add shank parameters for preview
-            const shankDiameterStr =
-                form.querySelector("#bit-shankDiameter")?.value;
-            if (shankDiameterStr) {
-                const shankDiameter = parseFloat(
-                    evaluateMathExpression(shankDiameterStr)
-                );
-                if (!isNaN(shankDiameter))
-                    bitParams.shankDiameter = shankDiameter;
-            }
-
-            const totalLengthStr =
-                form.querySelector("#bit-totalLength")?.value;
-            if (totalLengthStr) {
-                const totalLength = parseFloat(
-                    evaluateMathExpression(totalLengthStr)
-                );
-                if (!isNaN(totalLength)) bitParams.totalLength = totalLength;
-            }
-
-            if (groupName === "conical") {
-                bitParams.angle = parseFloat(
-                    evaluateMathExpression(
-                        form.querySelector("#bit-angle").value
-                    )
-                );
-            }
-
-            if (groupName === "ball") {
-                bitParams.height = parseFloat(
-                    evaluateMathExpression(
-                        form.querySelector("#bit-height").value
-                    )
-                );
-            }
-
-            if (groupName === "fillet" || groupName === "bull") {
-                bitParams.height = parseFloat(
-                    evaluateMathExpression(
-                        form.querySelector("#bit-height").value
-                    )
-                );
-                bitParams.cornerRadius = parseFloat(
-                    evaluateMathExpression(
-                        form.querySelector("#bit-cornerRadius").value
-                    )
-                );
-                bitParams.flat = parseFloat(
-                    evaluateMathExpression(
-                        form.querySelector("#bit-flat").value
-                    )
-                );
-            }
+            const bitParams = this.collectBitParameters(form, groupName);
 
             // Calculate bounds for positioning
             const tempGroup = this.createBitShapeElement(
@@ -940,19 +966,24 @@ export default class BitsManager {
                 previewZoomInitialized = true;
             }
 
+            // Calculate stroke width based on zoom level
+            const strokeWidth = Math.max(
+                0.1,
+                0.5 / Math.sqrt(previewCanvasManager.zoomLevel)
+            );
+
             // Create bit shape centered at pan position
             const shape = this.createBitShapeElement(
                 bitParams,
                 groupName,
                 previewCanvasManager.panX - bounds.centerX,
                 previewCanvasManager.panY - bounds.centerY,
-                true // isSelected = true for modal preview
+                true, // isSelected = true for modal preview
+                true, // includeShank = true
+                strokeWidth // pass calculated stroke width
             );
 
             previewBitsLayer.appendChild(shape);
-
-            // Update stroke width after adding to DOM
-            updatePreviewStrokeWidths();
         };
 
         // Preview zoom event handlers
@@ -978,7 +1009,7 @@ export default class BitsManager {
             .querySelector("#preview-toggle-grid")
             .addEventListener("click", () => {
                 togglePreviewGrid();
-                updateBitPreview();
+                //updateBitPreview();
             });
 
         // Add math evaluation on blur for all text inputs
@@ -995,14 +1026,48 @@ export default class BitsManager {
         const numberInputs = form.querySelectorAll('input[type="number"]');
         numberInputs.forEach((input) => {
             input.addEventListener("input", updateBitPreview);
+            previewFitToScale();
         });
 
         // Update preview on color input change
-        const colorInput = form.querySelector("#bit-color");
+        const colorInput = modal.querySelector("#bit-color");
         colorInput.addEventListener("input", updateBitPreview);
+
+        // Update canvas bit in real-time for edit operations
+        if (isEdit && bit) {
+            const updateCanvasBit = () => {
+                // Collect current parameters from form and update canvas bit
+                const currentParams = this.collectBitParameters(
+                    form,
+                    groupName
+                );
+                if (this.onUpdateCanvasBitWithParams) {
+                    this.onUpdateCanvasBitWithParams(
+                        bit.id,
+                        currentParams,
+                        groupName
+                    );
+                }
+            };
+
+            // Update canvas when ANY parameter changes (not just shank)
+            const allInputs = form.querySelectorAll(
+                'input[type="text"], input[type="number"]'
+            );
+            const colorInput = modal.querySelector("#bit-color");
+
+            allInputs.forEach((input) => {
+                input.addEventListener("input", updateCanvasBit);
+            });
+
+            if (colorInput) {
+                colorInput.addEventListener("input", updateCanvasBit);
+            }
+        }
 
         // Initial preview update
         updateBitPreview();
+        previewFitToScale();
         form.addEventListener("submit", async (e) => {
             e.preventDefault();
             const name = form.querySelector("#bit-name").value.trim();
@@ -1014,76 +1079,7 @@ export default class BitsManager {
                 return;
             }
 
-            const diameterStr = evaluateMathExpression(
-                form.querySelector("#bit-diameter").value
-            );
-            const diameter = parseFloat(diameterStr);
-            const lengthStr = evaluateMathExpression(
-                form.querySelector("#bit-length").value
-            );
-            const length = parseFloat(lengthStr);
-            const toolNumberStr = evaluateMathExpression(
-                form.querySelector("#bit-toolnumber").value
-            );
-            const toolNumber = parseInt(toolNumberStr, 10) || 1;
-
-            const color = form.querySelector("#bit-color").value;
-            const payload = {
-                name,
-                diameter,
-                length,
-                toolNumber,
-                fillColor: color,
-            };
-
-            // Add optional shank parameters
-            const shankDiameterStr =
-                form.querySelector("#bit-shankDiameter")?.value;
-            if (shankDiameterStr) {
-                const shankDiameter = parseFloat(
-                    evaluateMathExpression(shankDiameterStr)
-                );
-                if (!isNaN(shankDiameter))
-                    payload.shankDiameter = shankDiameter;
-            }
-
-            const totalLengthStr =
-                form.querySelector("#bit-totalLength")?.value;
-            if (totalLengthStr) {
-                const totalLength = parseFloat(
-                    evaluateMathExpression(totalLengthStr)
-                );
-                if (!isNaN(totalLength)) payload.totalLength = totalLength;
-            }
-
-            if (groupName === "conical") {
-                const angleStr = evaluateMathExpression(
-                    form.querySelector("#bit-angle").value
-                );
-                payload.angle = parseFloat(angleStr);
-            }
-
-            if (groupName === "ball") {
-                const heightStr = evaluateMathExpression(
-                    form.querySelector("#bit-height").value
-                );
-                payload.height = parseFloat(heightStr);
-            }
-
-            if (groupName === "fillet" || groupName === "bull") {
-                const heightStr = evaluateMathExpression(
-                    form.querySelector("#bit-height").value
-                );
-                payload.height = parseFloat(heightStr);
-                const cornerRadiusStr = evaluateMathExpression(
-                    form.querySelector("#bit-cornerRadius").value
-                );
-                payload.cornerRadius = parseFloat(cornerRadiusStr);
-                const flatStr = evaluateMathExpression(
-                    form.querySelector("#bit-flat").value
-                );
-                payload.flat = parseFloat(flatStr);
-            }
+            const payload = this.buildBitPayload(form, groupName);
 
             let updatedBit;
             if (isEdit) {

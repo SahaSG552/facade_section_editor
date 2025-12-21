@@ -39,6 +39,10 @@ let mainCanvasManager;
 let bitsManager; // Bits manager instance
 let gridSize = 1; // Default grid size in pixels (1mm = 10px)
 
+// Panel click-outside handlers (global scope for resize listener access)
+let leftPanelClickOutsideHandler = null;
+let rightPanelClickOutsideHandler = null;
+
 // Pan variables for canvas panning
 
 // Pan variables for canvas panning
@@ -210,6 +214,75 @@ function initializeSVG() {
             bitsManager.createBitShapeElement.bind(bitsManager)
         );
     bitsManager.onUpdateCanvasBits = (bitId) => updateCanvasBitsForBitId(bitId);
+    bitsManager.onUpdateCanvasBitWithParams = (bitId, newParams, groupName) =>
+        updateCanvasBitWithParams(bitId, newParams, groupName);
+
+    // Update canvas bit with new parameters (for real-time editing)
+    function updateCanvasBitWithParams(bitId, newParams, groupName) {
+        bitsOnCanvas.forEach((bit, index) => {
+            if (bit.bitData.id === bitId) {
+                // Update the bit data with new parameters
+                bit.bitData = { ...bit.bitData, ...newParams };
+
+                // Update bit name if it changed
+                if (newParams.name && newParams.name !== bit.name) {
+                    bit.name = newParams.name;
+                }
+
+                // Redraw shape group with updated parameters and correct selection state
+                const oldShapeGroup = bit.group.querySelector("g");
+                if (oldShapeGroup) {
+                    const isSelected = selectedBitIndices.includes(index);
+                    const newShapeGroup = bitsManager.createBitShapeElement(
+                        bit.bitData,
+                        groupName,
+                        bit.baseAbsX,
+                        bit.baseAbsY,
+                        isSelected
+                    );
+
+                    // Apply highlight stroke if selected
+                    if (isSelected) {
+                        const newBitShape =
+                            newShapeGroup.querySelector(".bit-shape");
+                        const newShankShape =
+                            newShapeGroup.querySelector(".shank-shape");
+                        const thickness = Math.max(
+                            0.1,
+                            0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
+                        );
+
+                        if (newBitShape) {
+                            newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                            newBitShape.setAttribute("stroke-width", thickness);
+                        }
+                        if (newShankShape) {
+                            newShankShape.setAttribute("stroke", "#00BFFF");
+                            newShankShape.setAttribute(
+                                "stroke-width",
+                                thickness
+                            );
+
+                            newShankShape.style.display = shankVisible
+                                ? "block"
+                                : "none";
+                        }
+                    }
+
+                    bit.group.replaceChild(newShapeGroup, oldShapeGroup);
+                }
+            }
+        });
+
+        // Update the table to reflect name changes
+        updateBitsSheet();
+
+        // Update offset contours and phantom bits if parameters affect them
+        updateOffsetContours();
+        updatePhantomBits();
+
+        if (showPart) updatePartShape();
+    }
 
     // Setup export/import buttons
     document.getElementById("export-bits-btn").addEventListener("click", () => {
@@ -250,49 +323,161 @@ function initializeSVG() {
         input.click();
     });
 
-    // Setup panel toggle buttons
+    // Setup panel toggle buttons with overlay mode for small screens
+
     document
         .getElementById("toggle-left-panel")
         .addEventListener("click", () => {
             const leftPanel = document.getElementById("left-panel");
-            leftPanel.classList.toggle("collapsed");
-            // Update canvas parameters to reflect new canvas size
-            const oldWidth = mainCanvasManager.canvasParameters.width;
-            const oldHeight = mainCanvasManager.canvasParameters.height;
-            mainCanvasManager.canvasParameters.width =
-                canvas.getBoundingClientRect().width;
-            mainCanvasManager.canvasParameters.height =
-                canvas.getBoundingClientRect().height;
-            // Adjust pan to maintain relative position
-            mainCanvasManager.panX =
-                (mainCanvasManager.panX / oldWidth) *
-                mainCanvasManager.canvasParameters.width;
-            mainCanvasManager.panY =
-                (mainCanvasManager.panY / oldHeight) *
-                mainCanvasManager.canvasParameters.height;
-            mainCanvasManager.updateViewBox();
+            const isSmallScreen = window.innerWidth <= 768;
+
+            if (isSmallScreen) {
+                // Overlay mode for small screens
+                console.log("Left panel toggle clicked (small screen)", {
+                    overlayVisible:
+                        leftPanel.classList.contains("overlay-visible"),
+                    collapsed: leftPanel.classList.contains("collapsed"),
+                    display: leftPanel.style.display,
+                    windowWidth: window.innerWidth,
+                });
+
+                // Toggle panel visibility
+                if (leftPanel.classList.contains("overlay-visible")) {
+                    console.log("Hiding left panel");
+                    // Hide panel
+                    leftPanel.classList.remove("overlay-visible");
+                    leftPanel.classList.add("collapsed");
+                    leftPanel.style.display = "none";
+
+                    // Remove click-outside handler if it exists
+                    if (leftPanelClickOutsideHandler) {
+                        document.removeEventListener(
+                            "click",
+                            leftPanelClickOutsideHandler
+                        );
+                        leftPanelClickOutsideHandler = null;
+                    }
+                } else {
+                    console.log("Showing left panel");
+                    // Show panel
+                    leftPanel.classList.remove("collapsed");
+                    leftPanel.classList.add("overlay-visible");
+                    leftPanel.style.display = "flex"; // Force show in overlay mode
+
+                    // Add click-outside handler to hide the panel
+                    leftPanelClickOutsideHandler = (e) => {
+                        console.log(
+                            "Click outside detected for left panel",
+                            e.target
+                        );
+                        if (
+                            !leftPanel.contains(e.target) &&
+                            !e.target.closest("#toggle-left-panel")
+                        ) {
+                            console.log("Hiding left panel via click outside");
+                            leftPanel.classList.remove("overlay-visible");
+                            leftPanel.classList.add("collapsed");
+                            leftPanel.style.display = "none";
+                            updateCanvasAfterPanelToggle();
+                            document.removeEventListener(
+                                "click",
+                                leftPanelClickOutsideHandler
+                            );
+                            leftPanelClickOutsideHandler = null;
+                        }
+                    };
+
+                    // Use setTimeout to avoid immediate trigger
+                    setTimeout(() => {
+                        document.addEventListener(
+                            "click",
+                            leftPanelClickOutsideHandler
+                        );
+                    }, 10);
+                }
+            } else {
+                // Normal collapse/expand mode for larger screens
+                leftPanel.classList.toggle("collapsed");
+                // Remove overlay classes and styles for normal mode
+                leftPanel.classList.remove("overlay-visible");
+                leftPanel.style.display = "";
+                // Remove click-outside handler if it exists
+                if (leftPanelClickOutsideHandler) {
+                    document.removeEventListener(
+                        "click",
+                        leftPanelClickOutsideHandler
+                    );
+                    leftPanelClickOutsideHandler = null;
+                }
+            }
+
+            // Update canvas parameters
+            updateCanvasAfterPanelToggle();
         });
 
     document
         .getElementById("toggle-right-menu")
         .addEventListener("click", () => {
             const rightMenu = document.getElementById("right-menu");
-            rightMenu.classList.toggle("collapsed");
-            // Update canvas parameters to reflect new canvas size
-            const oldWidth = mainCanvasManager.canvasParameters.width;
-            const oldHeight = mainCanvasManager.canvasParameters.height;
-            mainCanvasManager.canvasParameters.width =
-                canvas.getBoundingClientRect().width;
-            mainCanvasManager.canvasParameters.height =
-                canvas.getBoundingClientRect().height;
-            // Adjust pan to maintain relative position
-            mainCanvasManager.panX =
-                (mainCanvasManager.panX / oldWidth) *
-                mainCanvasManager.canvasParameters.width;
-            mainCanvasManager.panY =
-                (mainCanvasManager.panY / oldHeight) *
-                mainCanvasManager.canvasParameters.height;
-            mainCanvasManager.updateViewBox();
+
+            // Check if panel is currently visible
+            const isVisible =
+                !rightMenu.classList.contains("collapsed") &&
+                (window.innerWidth > 1000 ||
+                    rightMenu.style.display === "flex");
+
+            if (isVisible) {
+                // Hide panel
+                rightMenu.classList.add("collapsed");
+                if (window.innerWidth <= 1000) {
+                    rightMenu.style.display = "none";
+                }
+
+                // Remove click-outside handler if it exists
+                if (rightPanelClickOutsideHandler) {
+                    document.removeEventListener(
+                        "click",
+                        rightPanelClickOutsideHandler
+                    );
+                    rightPanelClickOutsideHandler = null;
+                }
+            } else {
+                // Show panel
+                rightMenu.classList.remove("collapsed");
+                if (window.innerWidth <= 1000) {
+                    rightMenu.style.display = "flex"; // Force show in overlay mode
+                }
+
+                // Add click-outside handler to hide the panel
+                rightPanelClickOutsideHandler = (e) => {
+                    if (
+                        !rightMenu.contains(e.target) &&
+                        !e.target.closest("#toggle-right-menu")
+                    ) {
+                        rightMenu.classList.add("collapsed");
+                        if (window.innerWidth <= 1000) {
+                            rightMenu.style.display = "none";
+                        }
+                        updateCanvasAfterPanelToggle();
+                        document.removeEventListener(
+                            "click",
+                            rightPanelClickOutsideHandler
+                        );
+                        rightPanelClickOutsideHandler = null;
+                    }
+                };
+
+                // Use setTimeout to avoid immediate trigger
+                setTimeout(() => {
+                    document.addEventListener(
+                        "click",
+                        rightPanelClickOutsideHandler
+                    );
+                }, 10);
+            }
+
+            // Update canvas parameters
+            updateCanvasAfterPanelToggle();
         });
 
     // Setup theme toggle button
@@ -301,6 +486,24 @@ function initializeSVG() {
 
     // Initialize theme from localStorage or system preference
     initializeTheme();
+}
+
+// Helper function to update canvas after panel toggle
+function updateCanvasAfterPanelToggle() {
+    const oldWidth = mainCanvasManager.canvasParameters.width;
+    const oldHeight = mainCanvasManager.canvasParameters.height;
+    mainCanvasManager.canvasParameters.width =
+        canvas.getBoundingClientRect().width;
+    mainCanvasManager.canvasParameters.height =
+        canvas.getBoundingClientRect().height;
+    // Adjust pan to maintain relative position
+    mainCanvasManager.panX =
+        (mainCanvasManager.panX / oldWidth) *
+        mainCanvasManager.canvasParameters.width;
+    mainCanvasManager.panY =
+        (mainCanvasManager.panY / oldHeight) *
+        mainCanvasManager.canvasParameters.height;
+    mainCanvasManager.updateViewBox();
 }
 
 // Cycle panel anchor
@@ -2529,7 +2732,7 @@ function initializeTheme() {
     }
 }
 
-// Add window resize listener for responsive canvas
+// Add window resize listener for responsive canvas and panel visibility
 window.addEventListener("resize", () => {
     if (mainCanvasManager) {
         mainCanvasManager.resize();
@@ -2539,6 +2742,38 @@ window.addEventListener("resize", () => {
         updateOffsetContours();
         updatePhantomBits();
         if (showPart) updatePartShape();
+    }
+
+    // Auto-show panels when screen becomes wide enough
+    const leftPanel = document.getElementById("left-panel");
+    const rightMenu = document.getElementById("right-menu");
+
+    // Show left panel when screen is wider than 768px
+    if (window.innerWidth > 768 && leftPanel) {
+        leftPanel.classList.remove("collapsed", "overlay-visible");
+        leftPanel.style.display = ""; // Reset to default display
+        if (leftPanelClickOutsideHandler) {
+            document.removeEventListener("click", leftPanelClickOutsideHandler);
+            leftPanelClickOutsideHandler = null;
+        }
+    }
+
+    // Show right menu when screen is wider than 1000px
+    if (window.innerWidth > 1000 && rightMenu) {
+        rightMenu.classList.remove("collapsed", "overlay-visible");
+        rightMenu.style.display = ""; // Reset to default display
+        if (rightPanelClickOutsideHandler) {
+            document.removeEventListener(
+                "click",
+                rightPanelClickOutsideHandler
+            );
+            rightPanelClickOutsideHandler = null;
+        }
+    }
+
+    // Update canvas after panel changes
+    if (mainCanvasManager) {
+        updateCanvasAfterPanelToggle();
     }
 });
 

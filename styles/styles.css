@@ -608,8 +608,8 @@ html {
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  max-width: 350px;
-  width: 90%;
+  width: 600px;
+  max-width: 90vw;
   max-height: 80%;
   overflow-y: auto;
 }
@@ -627,7 +627,7 @@ html {
 
 .bit-preview {
   flex-shrink: 0;
-  min-width: 200px;
+  width: 200px;
   height: 200px;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
@@ -649,21 +649,27 @@ html {
   display: flex;
   justify-content: center;
   gap: 5px;
-  padding: 5px;
+  height: 30px;
+  padding: 3px 5px;
   border-bottom: 1px solid hsl(var(--border));
   background-color: hsl(var(--muted));
 }
 
+#preview-toolbar input[type="color"],
 #preview-toolbar button {
-  padding: 4px 8px;
+  height: 24px;
+  min-width: 35px;
+  padding: 0 6px;
   font-size: 12px;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--card));
   color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
+  box-sizing: border-box;
 }
 
+#preview-toolbar input[type="color"]:hover,
 #preview-toolbar button:hover {
   background-color: hsl(var(--accent));
   color: hsl(var(--accent-foreground));
@@ -732,8 +738,20 @@ html {
   #right-menu {
     display: none;
   }
+  /* Keep toggle buttons visible on small screens */
   #app-header button#toggle-right-menu {
-    display: none;
+    display: flex;
+  }
+
+  /* Overlay mode for small screens */
+  #right-menu:not(.collapsed) {
+    position: fixed;
+    top: 60px;
+    right: 0;
+    bottom: 0;
+    width: 400px;
+    z-index: 50;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -744,10 +762,22 @@ html {
   #left-panel {
     display: none;
   }
+  /* Keep toggle buttons visible on small screens */
   #app-header button#toggle-left-panel {
-    display: none;
+    display: flex;
   }
   #app-header h1 {
     font-size: 16px;
+  }
+
+  /* Overlay mode for small screens */
+  #left-panel:not(.collapsed) {
+    position: fixed;
+    top: 60px;
+    left: 0;
+    bottom: 0;
+    width: 90px;
+    z-index: 50;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
   }
 }
