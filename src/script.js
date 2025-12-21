@@ -253,6 +253,28 @@ function initializeSVG() {
         };
         input.click();
     });
+
+    // Setup panel toggle buttons
+    document
+        .getElementById("toggle-left-panel")
+        .addEventListener("click", () => {
+            const leftPanel = document.getElementById("left-panel");
+            leftPanel.classList.toggle("collapsed");
+        });
+
+    document
+        .getElementById("toggle-right-menu")
+        .addEventListener("click", () => {
+            const rightMenu = document.getElementById("right-menu");
+            rightMenu.classList.toggle("collapsed");
+        });
+
+    // Setup theme toggle button
+    const themeToggle = document.getElementById("theme-toggle");
+    themeToggle.addEventListener("click", toggleTheme);
+
+    // Initialize theme from localStorage or system preference
+    initializeTheme();
 }
 
 // Cycle panel anchor
@@ -2430,6 +2452,52 @@ function clearAllBits() {
     if (showPart) updatePartShape();
 
     logOperation(`Cleared ${bitCount} bits from canvas`);
+}
+
+// Theme switching functions
+function toggleTheme() {
+    const html = document.documentElement;
+    const themeToggle = document.getElementById("theme-toggle");
+    const svg = themeToggle.querySelector("svg");
+
+    if (html.classList.contains("dark")) {
+        // Switch to light theme
+        html.classList.remove("dark");
+        localStorage.setItem("theme", "light");
+        // Change to sun icon for light theme
+        svg.innerHTML =
+            '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
+        themeToggle.title = "Switch to Dark Theme";
+    } else {
+        // Switch to dark theme
+        html.classList.add("dark");
+        localStorage.setItem("theme", "dark");
+        // Change to moon icon for dark theme
+        svg.innerHTML =
+            '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
+        themeToggle.title = "Switch to Light Theme";
+    }
+}
+
+function initializeTheme() {
+    const savedTheme = localStorage.getItem("theme");
+    const themeToggle = document.getElementById("theme-toggle");
+    const svg = themeToggle.querySelector("svg");
+
+    if (savedTheme === "dark") {
+        document.documentElement.classList.add("dark");
+        // Set moon icon for dark theme
+        svg.innerHTML =
+            '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
+        themeToggle.title = "Switch to Light Theme";
+    } else {
+        // Default to light theme
+        document.documentElement.classList.remove("dark");
+        // Set sun icon for light theme
+        svg.innerHTML =
+            '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
+        themeToggle.title = "Switch to Dark Theme";
+    }
 }
 
 // Call initialize function when the page loads

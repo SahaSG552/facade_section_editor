@@ -1,23 +1,130 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 0%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 0%;
+  --primary: 212 100% 50%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 0%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 0%;
+  --border: 0 0% 90%;
+  --input: 0 0% 96%;
+  --ring: 212 100% 50%;
+  --radius: 12px;
+}
+
+.dark {
+  --background: 0 0% 9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 9%;
+  --card-foreground: 0 0% 98%;
+  --primary: 212 100% 50%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 15%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 15%;
+  --muted-foreground: 0 0% 65%;
+  --accent: 0 0% 15%;
+  --accent-foreground: 0 0% 98%;
+  --border: 0 0% 15%;
+  --input: 0 0% 15%;
+  --ring: 212 100% 50%;
+}
+
 body,
 html {
   margin: 0;
   padding: 0;
-  font-family: Arial, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   box-sizing: border-box;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+}
+
+#app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background-color: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  position: relative;
+}
+
+#app-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: hsl(var(--card-foreground));
+  flex: 1;
+  text-align: center;
+}
+
+#header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#app-header button {
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: hsl(var(--muted-foreground));
+}
+
+#app-header button:hover {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+#app-header button:active {
+  background-color: hsl(var(--secondary));
+}
+
+#theme-toggle {
+  padding: 8px;
+  font-size: 16px;
 }
 
 #app {
   display: flex;
-  height: 100vh;
+  height: calc(100vh - 60px);
   width: 100%;
   overflow: hidden;
+}
+
+/* Collapsed panels */
+#left-panel.collapsed {
+  display: none;
+}
+
+#right-menu.collapsed {
+  display: none;
 }
 
 /* ===== ЛЕВАЯ ПАНЕЛЬ (Tools + Title) ===== */
 #left-panel {
   flex-shrink: 0;
   width: 90px;
-  background-color: transparent;
+  background-color: hsl(var(--card));
   display: flex;
   flex-direction: column;
   position: relative;
@@ -30,7 +137,8 @@ html {
   font-size: 13px;
   text-align: center;
   flex-shrink: 0;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--card-foreground));
 }
 
 #bits-actions {
@@ -38,25 +146,27 @@ html {
   gap: 5px;
   padding: 5px;
   justify-content: center;
-  border-bottom: 1px solid #ccc;
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 #bits-actions button {
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid #ccc;
-  background-color: white;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius);
   flex: 1;
 }
 
 #bits-actions button:hover {
-  background-color: #e0e0e0;
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #bits-actions button:active {
-  background-color: #d0d0d0;
+  background-color: hsl(var(--secondary));
 }
 
 /* ===== ЦЕНТРАЛЬНАЯ КОЛОНКА (Canvas) ===== */
@@ -68,7 +178,7 @@ html {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background-color: #e0e0e0;
+  background-color: hsl(var(--muted));
   overflow: auto;
   padding: 10px;
   position: relative;
@@ -81,34 +191,36 @@ html {
   gap: 5px;
   margin-bottom: 10px;
   margin-top: -50px;
-  background-color: #f0f0f0;
+  background-color: hsl(var(--card));
   padding: 5px;
-  border-radius: 4px;
-  border: 1px solid #ccc;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
 }
 
 #zoom-toolbar button {
   padding: 5px 10px;
   font-size: 12px;
-  border: 1px solid #ccc;
-  background-color: white;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
-  border-radius: 3px;
-  flex: 1;               /* заставляет всех иметь одинаковую ширину */
-  width: auto;           /* ширину берём от контента */
+  border-radius: var(--radius);
+  flex: 1;
+  width: auto;
 }
 
 #zoom-toolbar button:hover {
-  background-color: #e0e0e0;
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #zoom-toolbar button:active {
-  background-color: #d0d0d0;
+  background-color: hsl(var(--secondary));
 }
 
 #canvas {
-  background-color: white;
-  border: 1px solid #ccc;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   max-width: 100%;
   max-height: 100%;
   flex-shrink: 0;
@@ -118,11 +230,11 @@ html {
 #right-menu {
   flex-shrink: 0;
   width: 500px;
-  background-color: #f0f0f0;
+  background-color: hsl(var(--card));
   padding: 20px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid #ccc;
+  border-left: 1px solid hsl(var(--border));
   overflow-y: auto;
   position: relative;
   z-index: 2;
@@ -137,18 +249,24 @@ html {
 #operations h3 {
   margin-top: 0;
   font-size: 14px;
+  color: hsl(var(--card-foreground));
 }
 
-#part-params label,
-#part-params input {
+#part-params label {
   display: block;
   margin-bottom: 10px;
   font-size: 12px;
+  color: hsl(var(--muted-foreground));
 }
 
 #part-params input {
   width: 100%;
   box-sizing: border-box;
+  background-color: hsl(var(--input));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  border-radius: var(--radius);
+  padding: 8px;
 }
 
 /* ===== BITS DATABASE (Left panel) ===== */
@@ -181,7 +299,7 @@ html {
 }
 
 .bit-group:hover {
-  background-color: #e0e0e0;
+  background-color: hsl(var(--accent));
   border-radius: 40px;
 }
 
@@ -194,13 +312,13 @@ html {
 .bit-list {
   display: none;
   position: fixed;
-  background-color: white;
-  border: 1px solid #ccc;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   padding: 8px;
   z-index: 30;
   min-width: 130px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-  border-radius: 4px;
+  border-radius: var(--radius);
   white-space: nowrap;
   pointer-events: auto;
   left: 0;
@@ -229,14 +347,14 @@ html {
   flex-shrink: 0;
   pointer-events: auto;
   padding: 8px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   transition: background-color 0.2s;
   cursor: pointer;
   gap: 5px;
 }
 
 .bit:hover {
-  background-color: #e0e0e0;
+  background-color: hsl(var(--accent));
 }
 
 .bit:last-child {
@@ -276,8 +394,9 @@ html {
   bottom: -18px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: white;
-  border-radius: 8px;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
   padding: 2px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
   z-index: 31;
@@ -312,42 +431,45 @@ html {
 #operations-header h3 {
   margin: 0;
   flex-shrink: 0;
+  color: hsl(var(--card-foreground));
 }
 
 /* ===== OPERATIONS TOOLBAR ===== */
 #operations-toolbar {
   display: inline-flex;
   gap: 5px;
-  background-color: #f0f0f0;
+  background-color: hsl(var(--muted));
   padding: 5px;
-  border-radius: 4px;
-  border: 1px solid #ccc;
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
   width: 280px;
 }
 
 #operations-toolbar button {
   padding: 5px 10px;
   font-size: 12px;
-  border: 1px solid #ccc;
-  background-color: white;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius);
   flex: 1;
   width: auto;
 }
 
 #operations-toolbar button:hover {
-  background-color: #e0e0e0;
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #operations-toolbar button:active {
-  background-color: #d0d0d0;
+  background-color: hsl(var(--secondary));
 }
 
 /* ===== OPERATIONS LOG ===== */
 #operations-log {
   font-size: 11px;
-  color: #666;
+  color: hsl(var(--muted-foreground));
   margin: 5px 0;
   min-height: 18px;
   opacity: 1;
@@ -366,28 +488,33 @@ html {
   flex-direction: column;
   min-height: 0;
   max-height: 400px;
+  padding: 0;
 }
 
 #operations table {
-  width: 100%;
+  width: calc(100% + 40px);
+  margin-left: -20px;
+  margin-right: -20px;
   border-collapse: collapse;
   font-size: 12px;
   overflow-y: auto;
-  table-layout: fixed;  /* Фиксированная ширина колонок */
+  table-layout: fixed;
 }
 
 #operations th,
 #operations td {
-  border: 1px solid #ddd;
+  border: 1px solid hsl(var(--border));
   padding: 6px;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   word-wrap: break-word;
+  color: hsl(var(--card-foreground));
 }
 
 #operations th {
-  background-color: #e0e0e0;
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
   font-weight: bold;
   position: sticky;
   top: 0;
@@ -444,16 +571,19 @@ html {
 
 /* Highlight selected row */
 .selected-bit-row {
-  background-color: #cce7ff;
+  background-color: hsl(var(--accent));
 }
 
 #operations td input {
-  width: 100%;  /* Инпут занимает всю ширину колонки */
+  width: 100%;
   box-sizing: border-box;
   font-size: 11px;
   padding: 2px;
-  border: 1px solid #ccc;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   height: 24px;
+  border-radius: var(--radius);
 }
 
 /* ===== MODAL ===== */
@@ -471,9 +601,10 @@ html {
 }
 
 .modal-content {
-  background-color: white;
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   padding: 20px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   max-width: 350px;
   width: 90%;
@@ -496,11 +627,11 @@ html {
   flex-shrink: 0;
   min-width: 200px;
   height: 200px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
   display: flex;
   flex-direction: column;
-  background-color: #f9f9f9;
+  background-color: hsl(var(--muted));
 }
 
 .bit-preview svg {
@@ -517,40 +648,46 @@ html {
   justify-content: center;
   gap: 5px;
   padding: 5px;
-  border-bottom: 1px solid #ddd;
-  background-color: #f5f5f5;
+  border-bottom: 1px solid hsl(var(--border));
+  background-color: hsl(var(--muted));
 }
 
 #preview-toolbar button {
   padding: 4px 8px;
   font-size: 12px;
-  border: 1px solid #ccc;
-  background-color: white;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: var(--radius);
 }
 
 #preview-toolbar button:hover {
-  background-color: #e0e0e0;
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .modal-content h2 {
   margin-top: 0;
   font-size: 18px;
+  color: hsl(var(--card-foreground));
 }
 
 .modal-content label {
   display: block;
   margin-bottom: 5px;
   font-size: 14px;
+  color: hsl(var(--muted-foreground));
 }
 
 .modal-content input {
   width: 100%;
   padding: 8px;
   margin-bottom: 15px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+  border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 14px;
 }
@@ -564,17 +701,51 @@ html {
 .button-group button {
   padding: 8px 16px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius);
   cursor: pointer;
   font-size: 14px;
 }
 
 .button-group button[type="button"] {
-  background-color: #ccc;
-  color: black;
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .button-group button[type="submit"] {
-  background-color: #18663e;
-  color: white;
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 1200px) {
+  #right-menu {
+    width: 400px;
+  }
+}
+
+@media (max-width: 1000px) {
+  #right-menu.collapsed {
+    display: none !important;
+  }
+  #right-menu {
+    display: none;
+  }
+  #app-header button#toggle-right-menu {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  #left-panel.collapsed {
+    display: none !important;
+  }
+  #left-panel {
+    display: none;
+  }
+  #app-header button#toggle-left-panel {
+    display: none;
+  }
+  #app-header h1 {
+    font-size: 16px;
+  }
 }
