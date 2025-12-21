@@ -14,7 +14,7 @@ class DXFExporter {
     /**
      * Export bits on canvas to DXF format
      * @param {Array} bitsOnCanvas - Array of bit objects from the canvas
-     * @param {Object} makerResult - Result model from Maker.js operations
+     * @param {SVGElement} partPathElement - SVG path element from updatePartShape with transform
      * @param {SVGElement} partFront - The part front SVG rectangle element
      * @param {Array} offsetContours - Array of offset contour objects
      * @param {number} panelThickness - Panel thickness for layer naming
@@ -22,7 +22,7 @@ class DXFExporter {
      */
     exportToDXF(
         bitsOnCanvas,
-        makerResult,
+        partPathElement,
         partFront,
         offsetContours,
         panelThickness
@@ -49,7 +49,7 @@ class DXFExporter {
         // DXF Entities (the actual geometry)
         this.writeEntities(
             bitsOnCanvas,
-            makerResult,
+            partPathElement,
             partFront,
             offsetContours,
             panelThickness
@@ -620,7 +620,7 @@ class DXFExporter {
      */
     writeEntities(
         bitsOnCanvas,
-        makerResult,
+        partPathElement,
         partFront,
         offsetContours,
         panelThickness
@@ -642,8 +642,8 @@ class DXFExporter {
             });
         }
 
-        // Write result polygon from Maker.js
-        this.writeResultPolygon(makerResult, "Default");
+        // Write result polygon from partPath
+        this.writeResultPolygon(partPathElement, "Default");
 
         // Write bit shapes
         bitsOnCanvas.forEach((bit, index) => {
@@ -967,30 +967,30 @@ class DXFExporter {
     }
 
     /**
-     * Write result polygon as DXF LWPOLYLINE from SVG path
-     * @param {string} svgPath - SVG path string from Maker.js
+     * Write result polygon as DXF LWPOLYLINE from SVG path element
+     * @param {SVGElement} pathElement - SVG path element with transform
      * @param {string} layerName - Layer name for the result
      */
-    writeResultPolygon(svgPath, layerName = "Result") {
-        if (!svgPath || svgPath.trim().length === 0) return;
+    writeResultPolygon(pathElement, layerName = "Default") {
+        if (!pathElement) return;
 
-        // Create a temporary SVG element to parse the path
-        const tempSvg = document.createElementNS(
-            "http://www.w3.org/2000/svg",
-            "svg"
-        );
-        const pathElement = document.createElementNS(
-            "http://www.w3.org/2000/svg",
-            "path"
-        );
-        pathElement.setAttribute("d", svgPath);
-        tempSvg.appendChild(pathElement);
+        // Extract transform from the path element
+        const transform = pathElement.getAttribute("transform") || "";
+        let offsetX = 0,
+            offsetY = 0;
+        if (transform) {
+            const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+            if (match) {
+                offsetX = parseFloat(match[1]) || 0;
+                offsetY = parseFloat(match[2]) || 0;
+            }
+        }
 
         // Convert SVG coordinates to DXF coordinates (flip Y axis)
         const convertY = (y) => -y;
 
-        // Write as SVG path
-        this.writeSVGPath(pathElement, 0, 0, layerName, convertY);
+        // Write as SVG path with extracted offset
+        this.writeSVGPath(pathElement, offsetX, offsetY, layerName, convertY);
     }
 
     /**

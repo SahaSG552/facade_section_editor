@@ -101,6 +101,8 @@ function initializeSVG() {
 
     // Add panel rectangle to layer
     panelLayer.appendChild(partSection);
+    partSection.id = "panel-section";
+    partFront.id = "part-front";
 
     // Add part front rectangle to layer
     panelLayer.appendChild(partFront);
@@ -2063,7 +2065,7 @@ function ensureCounterClockwise(points) {
 function updatePartShape() {
     // Don't perform calculations if Part view is not enabled
     if (!showPart) {
-        return;
+        return partPath;
     }
     const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
     const panelY =
@@ -2077,21 +2079,7 @@ function updatePartShape() {
     );
     partPath.setAttribute("d", d);
     partPath.setAttribute("transform", `translate(${panelX}, ${panelY})`);
-}
-
-function pathsToSvgD(paths, scale) {
-    let d = "";
-    paths.forEach((path) => {
-        if (path.length > 0) {
-            const start = path[0];
-            d += `M ${start.X / scale} ${start.Y / scale}`;
-            for (let i = 1; i < path.length; i++) {
-                d += ` L ${path[i].X / scale} ${path[i].Y / scale}`;
-            }
-            d += " Z";
-        }
-    });
-    return d;
+    return partPath;
 }
 
 // Toggle bits visibility
@@ -2247,28 +2235,27 @@ function exportToDXF() {
         return;
     }
 
-    // Calculate panel position
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    // Get updated partPath object with current bit positions
+    const isPartVisible = showPart;
+    if (!isPartVisible) {
+        showPart = true;
+    }
 
-    // Get result polygon from Clipper
-    let clipperResult = makerCalculateResultPolygon(
-        panelWidth,
-        panelThickness,
-        panelX,
-        panelY,
-        bitsOnCanvas
-    );
-    // Export to DXF with partFront, offset contours, and panel thickness
+    const partPath = updatePartShape();
+
+    console.log(partPath);
+
+    // Export to DXF with partPath, partFront, offset contours, and panel thickness
     const dxfContent = dxfExporter.exportToDXF(
         bitsOnCanvas,
-        clipperResult,
+        partPath,
         partFront,
         offsetContours,
         panelThickness
     );
-
+    if (!isPartVisible) {
+        showPart = false;
+    }
     // Download the file
     dxfExporter.downloadDXF(dxfContent);
 
