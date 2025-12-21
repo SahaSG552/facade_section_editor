@@ -88,7 +88,22 @@ function makerCalculateResultPolygon(
         unionBits = makerjs.model.combineUnion(unionBits, bitModels[i]);
     }
 
-    const result = makerjs.model.combineSubtraction(panelModel, unionBits);
+    // Создаём контейнер-модель с origin в [0, 0]
+    const container = {
+        origin: [0, 0], // Глобальный origin
+        models: {
+            main: panelModel,
+            subtract: unionBits,
+        },
+    };
+
+    const result = makerjs.model.combineSubtraction(
+        container.models.main,
+        container.models.subtract
+    );
+
+    // Устанавливаем origin результата (если нужно дополнительное смещение)
+    result.origin = [panelX, panelY]; // Или любое, чтобы подвинуть весь результат
     const svg = makerjs.exporter.toSVG(result);
     const parser = new DOMParser();
     const doc = parser.parseFromString(svg, "image/svg+xml");
