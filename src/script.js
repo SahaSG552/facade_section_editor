@@ -348,52 +348,12 @@ function initializeSVG() {
                     leftPanel.classList.remove("overlay-visible");
                     leftPanel.classList.add("collapsed");
                     leftPanel.style.display = "none";
-
-                    // Remove click-outside handler if it exists
-                    if (leftPanelClickOutsideHandler) {
-                        document.removeEventListener(
-                            "click",
-                            leftPanelClickOutsideHandler
-                        );
-                        leftPanelClickOutsideHandler = null;
-                    }
                 } else {
                     console.log("Showing left panel");
                     // Show panel
                     leftPanel.classList.remove("collapsed");
                     leftPanel.classList.add("overlay-visible");
                     leftPanel.style.display = "flex"; // Force show in overlay mode
-
-                    // Add click-outside handler to hide the panel
-                    leftPanelClickOutsideHandler = (e) => {
-                        console.log(
-                            "Click outside detected for left panel",
-                            e.target
-                        );
-                        if (
-                            !leftPanel.contains(e.target) &&
-                            !e.target.closest("#toggle-left-panel")
-                        ) {
-                            console.log("Hiding left panel via click outside");
-                            leftPanel.classList.remove("overlay-visible");
-                            leftPanel.classList.add("collapsed");
-                            leftPanel.style.display = "none";
-                            updateCanvasAfterPanelToggle();
-                            document.removeEventListener(
-                                "click",
-                                leftPanelClickOutsideHandler
-                            );
-                            leftPanelClickOutsideHandler = null;
-                        }
-                    };
-
-                    // Use setTimeout to avoid immediate trigger
-                    setTimeout(() => {
-                        document.addEventListener(
-                            "click",
-                            leftPanelClickOutsideHandler
-                        );
-                    }, 10);
                 }
             } else {
                 // Normal collapse/expand mode for larger screens
@@ -401,14 +361,6 @@ function initializeSVG() {
                 // Remove overlay classes and styles for normal mode
                 leftPanel.classList.remove("overlay-visible");
                 leftPanel.style.display = "";
-                // Remove click-outside handler if it exists
-                if (leftPanelClickOutsideHandler) {
-                    document.removeEventListener(
-                        "click",
-                        leftPanelClickOutsideHandler
-                    );
-                    leftPanelClickOutsideHandler = null;
-                }
             }
 
             // Update canvas parameters
@@ -432,48 +384,12 @@ function initializeSVG() {
                 if (window.innerWidth <= 1000) {
                     rightMenu.style.display = "none";
                 }
-
-                // Remove click-outside handler if it exists
-                if (rightPanelClickOutsideHandler) {
-                    document.removeEventListener(
-                        "click",
-                        rightPanelClickOutsideHandler
-                    );
-                    rightPanelClickOutsideHandler = null;
-                }
             } else {
                 // Show panel
                 rightMenu.classList.remove("collapsed");
                 if (window.innerWidth <= 1000) {
                     rightMenu.style.display = "flex"; // Force show in overlay mode
                 }
-
-                // Add click-outside handler to hide the panel
-                rightPanelClickOutsideHandler = (e) => {
-                    if (
-                        !rightMenu.contains(e.target) &&
-                        !e.target.closest("#toggle-right-menu")
-                    ) {
-                        rightMenu.classList.add("collapsed");
-                        if (window.innerWidth <= 1000) {
-                            rightMenu.style.display = "none";
-                        }
-                        updateCanvasAfterPanelToggle();
-                        document.removeEventListener(
-                            "click",
-                            rightPanelClickOutsideHandler
-                        );
-                        rightPanelClickOutsideHandler = null;
-                    }
-                };
-
-                // Use setTimeout to avoid immediate trigger
-                setTimeout(() => {
-                    document.addEventListener(
-                        "click",
-                        rightPanelClickOutsideHandler
-                    );
-                }, 10);
             }
 
             // Update canvas parameters

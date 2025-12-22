@@ -499,9 +499,7 @@ html {
 }
 
 #operations table {
-  width: calc(100% + 40px);
-  margin-left: -20px;
-  margin-right: -20px;
+  width: 100%;
   border-collapse: collapse;
   font-size: 12px;
   overflow-y: auto;
@@ -528,52 +526,62 @@ html {
   z-index: 5;
 }
 
-/* Колонка Al - 30px */
-#operations th:nth-child(6),
-#operations td:nth-child(6) {
-  width: 30px;
-}
-
-/* Колонка OP - 30px */
-#operations th:nth-child(7),
-#operations td:nth-child(7) {
-  width: 30px;
-}
-
-/* Колонка Col - 30px */
-#operations th:nth-child(8),
-#operations td:nth-child(8) {
-  width: 30px;
-}
-
-/* Колонка Del - 30px */
-#operations th:nth-child(9),
-#operations td:nth-child(9) {
-  width: 30px;
-}
-
-/* Колонки = и № - 20px каждая */
+/* Пропорциональные ширины колонок с приоритетом Name */
 #operations th:nth-child(1),
-#operations td:nth-child(1),
-#operations th:nth-child(2),
-#operations td:nth-child(2){
-  width: 20px;
+#operations td:nth-child(1) {
+  min-width: 15px;
+  width: 5%;
 }
 
-/* Колонка Name - шире на 150px и выравнена по левому краю */
+#operations th:nth-child(2),
+#operations td:nth-child(2) {
+  min-width: 15px;
+  width: 6%;
+}
+
+/* Колонка Name - приоритетная, уменьшается в последнюю очередь */
 #operations th:nth-child(3),
 #operations td:nth-child(3) {
-  width: 150px;
+  min-width: 30px;
+  width: 33.34%;
   text-align: left;
   padding-left: 8px;
 }
 
-/* Колонки X, Y - 50px каждая */
 #operations th:nth-child(4),
-#operations td:nth-child(4),
+#operations td:nth-child(4) {
+  min-width: 15px;
+  width: 13%;
+}
+
 #operations th:nth-child(5),
 #operations td:nth-child(5) {
-  width: 50px;
+  min-width: 15px;
+  width: 13%;
+}
+
+#operations th:nth-child(6),
+#operations td:nth-child(6) {
+  min-width: 15px;
+  width: 8.33%;
+}
+
+#operations th:nth-child(7),
+#operations td:nth-child(7) {
+  min-width: 15px;
+  width: 8.33%;
+}
+
+#operations th:nth-child(8),
+#operations td:nth-child(8) {
+  min-width: 15px;
+  width: 8.33%;
+}
+
+#operations th:nth-child(9),
+#operations td:nth-child(9) {
+  min-width: 15px;
+  width: 8.33%;
 }
 
 /* Highlight selected row */
@@ -752,11 +760,59 @@ html {
   #right-menu:not(.collapsed) {
     position: fixed;
     top: 60px;
+    left: 0;
     right: 0;
-    bottom: 0;
-    width: 400px;
+    max-height: calc(100vh - 60px);
+    width: 100vw;
     z-index: 50;
     box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+    padding: 8px;
+    /* Adjust sizes for small screens */
+    font-size: 12px;
+    /* Enable scroll with hidden scrollbar */
+    overflow-y: auto;
+    scrollbar-width: none; /* Firefox */
+    height: -webkit-fill-available;
+  }
+
+  /* Hide scrollbar in Webkit browsers */
+  #right-menu:not(.collapsed)::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Adjust elements for small screens */
+  #right-menu:not(.collapsed) #operations {
+    max-height: none;
+    flex: 1;
+  }
+
+  #right-menu:not(.collapsed) #part-params {
+    margin-bottom: 15px;
+  }
+
+  #right-menu:not(.collapsed) #operations-header h3 {
+    font-size: 13px;
+  }
+
+  #right-menu:not(.collapsed) #operations-toolbar {
+    width: 100%;
+    padding: 4px;
+  }
+
+  #right-menu:not(.collapsed) table {
+    font-size: 11px;
+  }
+
+  #right-menu:not(.collapsed) input,
+  #right-menu:not(.collapsed) button,
+  #right-menu:not(.collapsed) select {
+    font-size: 11px;
+    padding: 4px;
+  }
+
+  #right-menu:not(.collapsed) #operations-toolbar button {
+    padding: 4px 8px;
+    font-size: 11px;
   }
 }
 
