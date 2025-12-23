@@ -71,11 +71,27 @@ let touchDragStartX = 0;
 let touchDragStartY = 0;
 let touchIdentifier = null; // Track which touch we're following
 
+// Touch pan variables
+let isTouchPanning = false;
+let touchPanStartX = 0;
+let touchPanStartY = 0;
+let touchPanStartPanX = 0;
+let touchPanStartPanY = 0;
+
 // Auto-scroll variables
 let autoScrollActive = false;
 let autoScrollInterval = null;
 let autoScrollSpeed = 50; // pixels per second
 let autoScrollThreshold = 50; // pixels from edge to start auto-scroll
+
+// Pinch-to-zoom variables
+let isPinching = false;
+let initialPinchDistance = 0;
+let initialPinchCenterX = 0;
+let initialPinchCenterY = 0;
+let initialZoomLevel = 1;
+let initialPanX = 0;
+let initialPanY = 0;
 
 // BitsManager will be created in initializeSVG after CanvasManager is set up
 
@@ -228,6 +244,13 @@ function initializeSVG() {
     canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
     canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
     canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
+    canvas.addEventListener("gesturestart", handleGestureStart, {
+        passive: false,
+    });
+    canvas.addEventListener("gesturechange", handleGestureChange, {
+        passive: false,
+    });
+    canvas.addEventListener("gestureend", handleGestureEnd, { passive: false });
 
     // Create BitsManager instance now that CanvasManager is available
     bitsManager = new BitsManager(mainCanvasManager);
@@ -670,14 +693,15 @@ function updatePhantomBits() {
                         bit.groupName,
                         phantomAbsX,
                         phantomAbsY,
-                        false // not selected
+                        false, // not selected
+                        false // includeShank = false for phantom bits
                     );
 
-                    // Set gray stroke for phantom
+                    // Set gray stroke for phantom (same thickness as regular bits)
                     phantomShape.setAttribute("stroke", "gray");
                     phantomShape.setAttribute(
                         "stroke-width",
-                        getAdaptiveStrokeWidth()
+                        getAdaptiveStrokeWidth(mainCanvasManager.zoomLevel)
                     );
                     phantomShape.setAttribute(
                         "fill",
@@ -1574,6 +1598,8 @@ function updateBitPosition(index, newX, newY) {
     redrawBitsOnCanvas();
     updateOffsetContours();
     updatePhantomBits();
+    // Update stroke widths after phantom bits are recreated
+    updateStrokeWidths();
     // Update part shape if part view is enabled and bits were moved via table coordinates
     if (showPart) updatePartShape();
 }
@@ -1722,6 +1748,16 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
             contour.element.setAttribute("stroke-width", thickness);
         }
     });
+    // Update phantom bit stroke widths
+    const phantomsLayer = mainCanvasManager?.getLayer("phantoms");
+    if (phantomsLayer) {
+        const phantomShapes = phantomsLayer.querySelectorAll(
+            ".phantom-bit .bit-shape"
+        );
+        phantomShapes.forEach((shape) => {
+            shape.setAttribute("stroke-width", thickness);
+        });
+    }
 }
 
 function fitToScale() {
@@ -1987,6 +2023,9 @@ function handleMouseMove(e) {
         let newX = anchorX - anchorOffset.x;
         let newY = anchorY - anchorOffset.y;
 
+        // Check if we need to auto-scroll for mouse drag
+        checkAutoScroll(e.clientX, e.clientY);
+
         // Update bit position
         updateBitPosition(draggedBitIndex, newX, newY);
 
@@ -2100,14 +2139,23 @@ function handleTouchStart(e) {
             }
         }
 
-        // If touched empty area, clear selections
-        if (!touchedBit && selectedBitIndices.length > 0) {
-            selectedBitIndices.forEach((index) => {
-                resetBitHighlight(index);
-            });
-            selectedBitIndices = [];
-            updateBitsSheet();
-            redrawBitsOnCanvas();
+        // If touched empty area, start panning or clear selections
+        if (!touchedBit) {
+            if (selectedBitIndices.length > 0) {
+                selectedBitIndices.forEach((index) => {
+                    resetBitHighlight(index);
+                });
+                selectedBitIndices = [];
+                updateBitsSheet();
+                redrawBitsOnCanvas();
+            }
+
+            // Start touch panning
+            isTouchPanning = true;
+            touchPanStartX = touch.clientX;
+            touchPanStartY = touch.clientY;
+            touchPanStartPanX = mainCanvasManager.panX;
+            touchPanStartPanY = mainCanvasManager.panY;
         }
     }
 }
@@ -2152,6 +2200,19 @@ function handleTouchMove(e) {
 
         // Update table inputs
         updateTableCoordinates(draggedBitIndex, newX, newY);
+    } else if (isTouchPanning && e.touches.length === 1) {
+        // Handle touch panning
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - touchPanStartX;
+        const deltaY = touch.clientY - touchPanStartY;
+
+        // Convert screen delta to SVG delta based on zoom level
+        const svgDeltaX = deltaX / mainCanvasManager.zoomLevel;
+        const svgDeltaY = deltaY / mainCanvasManager.zoomLevel;
+
+        mainCanvasManager.panX = touchPanStartPanX - svgDeltaX;
+        mainCanvasManager.panY = touchPanStartPanY - svgDeltaY;
+        mainCanvasManager.updateViewBox();
     }
 }
 
@@ -2179,6 +2240,10 @@ function handleTouchEnd(e) {
 
         // Update part shape after dragging is complete
         if (showPart) updatePartShape();
+    }
+
+    if (isTouchPanning) {
+        isTouchPanning = false;
     }
 }
 
@@ -2263,6 +2328,85 @@ function stopAutoScroll() {
         autoScrollInterval = null;
     }
     autoScrollActive = false;
+}
+
+// Pinch-to-zoom gesture handlers
+function handleGestureStart(e) {
+    e.preventDefault();
+
+    isPinching = true;
+    initialPinchDistance = getDistance(
+        e.touches[0].clientX,
+        e.touches[0].clientY,
+        e.touches[1].clientX,
+        e.touches[1].clientY
+    );
+
+    // Calculate center point between two fingers
+    initialPinchCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    initialPinchCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+    initialZoomLevel = mainCanvasManager.zoomLevel;
+    initialPanX = mainCanvasManager.panX;
+    initialPanY = mainCanvasManager.panY;
+}
+
+function handleGestureChange(e) {
+    e.preventDefault();
+
+    if (!isPinching) return;
+
+    const currentDistance = getDistance(
+        e.touches[0].clientX,
+        e.touches[0].clientY,
+        e.touches[1].clientX,
+        e.touches[1].clientY
+    );
+
+    const currentCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const currentCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+
+    // Calculate new zoom level
+    const zoomRatio = currentDistance / initialPinchDistance;
+    let newZoomLevel = initialZoomLevel * zoomRatio;
+
+    // Clamp zoom level to reasonable bounds
+    newZoomLevel = Math.max(0.1, Math.min(10, newZoomLevel));
+
+    // Calculate pan adjustment to keep the pinch center in place
+    const centerBeforeZoom = mainCanvasManager.screenToSvg(
+        initialPinchCenterX,
+        initialPinchCenterY
+    );
+    const centerAfterZoom = mainCanvasManager.screenToSvg(
+        currentCenterX,
+        currentCenterY
+    );
+
+    // Adjust pan to keep the center point in the same place
+    const panAdjustmentX = centerAfterZoom.x - centerBeforeZoom.x;
+    const panAdjustmentY = centerAfterZoom.y - centerBeforeZoom.y;
+
+    // Apply zoom and pan
+    mainCanvasManager.zoomLevel = newZoomLevel;
+    mainCanvasManager.panX = initialPanX - panAdjustmentX;
+    mainCanvasManager.panY = initialPanY - panAdjustmentY;
+
+    mainCanvasManager.updateViewBox();
+
+    // Update stroke widths for better visual feedback
+    updateStrokeWidths(newZoomLevel);
+}
+
+function handleGestureEnd(e) {
+    e.preventDefault();
+
+    isPinching = false;
+}
+
+// Helper function to calculate distance between two points
+function getDistance(x1, y1, x2, y2) {
+    return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 }
 
 // Update table coordinates without recreating the entire table
