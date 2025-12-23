@@ -36,7 +36,10 @@
       "diameter": 25.4,
       "length": 19,
       "angle": 90,
-      "toolNumber": 1
+      "toolNumber": 1,
+      "fillColor": "#369b54",
+      "shankDiameter": 12,
+      "totalLength": 50
     },
     {
       "id": "con-2",

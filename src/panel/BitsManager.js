@@ -403,7 +403,7 @@ export default class BitsManager {
                 actionIcons.className = "action-icons";
                 ["edit", "copy", "remove"].forEach((action) => {
                     const actionIcon = this.createActionIcon(action);
-                    actionIcon.addEventListener("click", (e) => {
+                    actionIcon.addEventListener("click", async (e) => {
                         e.stopPropagation();
 
                         switch (action) {
@@ -412,13 +412,14 @@ export default class BitsManager {
                                 this.openBitModal(groupName, bit);
                                 break;
                             case "copy":
-                                this.handleCopyClick(e, bit);
+                                await this.handleCopyClick(e, bit);
+                                this.refreshBitGroups();
                                 break;
                             case "remove":
-                                this.handleDeleteClick(e, bit);
+                                await this.handleDeleteClick(e, bit);
+                                this.refreshBitGroups();
                                 break;
                         }
-                        this.refreshBitGroups();
                     });
                     actionIcons.appendChild(actionIcon);
                 });

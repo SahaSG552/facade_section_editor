@@ -7,10 +7,15 @@ import { zoomToBBox, calculateElementsBBox } from "./canvas/zoomUtils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
-import dxfExporter from "./utils/dxfExporter.js";
+import ExportModule from "./export/ExportModule.js";
 import { OffsetCalculator } from "./utils/offsetCalculator.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
 import { makerCalculateResultPolygon } from "./utils/makerProcessor.js";
+
+// Import new modular system
+import { app } from "./app/main.js";
+import CanvasModule from "./canvas/CanvasModule.js";
+import BitsModule from "./bits/BitsModule.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -60,6 +65,18 @@ let dragStartX = 0;
 let dragStartY = 0;
 let dragStarted = false; // Flag to track if drag actually started (mouse moved)
 
+// Touch drag variables
+let isTouchDragging = false;
+let touchDragStartX = 0;
+let touchDragStartY = 0;
+let touchIdentifier = null; // Track which touch we're following
+
+// Auto-scroll variables
+let autoScrollActive = false;
+let autoScrollInterval = null;
+let autoScrollSpeed = 50; // pixels per second
+let autoScrollThreshold = 50; // pixels from edge to start auto-scroll
+
 // BitsManager will be created in initializeSVG after CanvasManager is set up
 
 // Initialize SVG elements using CanvasManager
@@ -70,33 +87,37 @@ function initializeSVG() {
     // Create part front rectangle
     partFront = document.createElementNS(svgNS, "rect");
 
-    // Calculate panel anchor position for grid alignment
-    const canvasSize = mainCanvasManager
-        ? mainCanvasManager.canvasParameters
-        : { width: 800, height: 600 };
-    const panelX = (canvasSize.width - panelWidth) / 2;
-    const panelY = (canvasSize.height - panelThickness) / 2;
-    const anchorOffset = getpanelAnchorOffset();
-    const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
-    const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
+    // Check if CanvasManager already exists (from modular system)
+    if (!mainCanvasManager) {
+        // Calculate panel anchor position for grid alignment
+        const canvasSize = { width: 800, height: 600 };
+        const panelX = (canvasSize.width - panelWidth) / 2;
+        const panelY = (canvasSize.height - panelThickness) / 2;
+        const anchorOffset = getpanelAnchorOffset();
+        const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
+        const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
 
-    // Create main canvas manager instance
-    mainCanvasManager = new CanvasManager({
-        canvas: canvas,
-        enableZoom: true,
-        enablePan: false, // Disable pan - we'll handle it manually to avoid conflicts with bit dragging
-        enableGrid: true,
-        enableMouseEvents: true,
-        gridSize: gridSize,
-        gridAnchorX: gridAnchorX,
-        gridAnchorY: gridAnchorY,
-        initialZoom: 1,
-        layers: ["grid", "panel", "offsets", "bits", "phantoms", "overlay"],
-        onZoom: (zoomLevel, panX, panY) => {
-            // Update stroke widths when zoom changes
-            updateStrokeWidths(zoomLevel);
-        },
-    });
+        // Create main canvas manager instance only if it doesn't exist
+        mainCanvasManager = new CanvasManager({
+            canvas: canvas,
+            enableZoom: true,
+            enablePan: false, // Disable pan - we'll handle it manually to avoid conflicts with bit dragging
+            enableGrid: true,
+            enableMouseEvents: true,
+            gridSize: gridSize,
+            gridAnchorX: gridAnchorX,
+            gridAnchorY: gridAnchorY,
+            initialZoom: 1,
+            layers: ["grid", "panel", "offsets", "bits", "phantoms", "overlay"],
+            onZoom: (zoomLevel, panX, panY) => {
+                // Update stroke widths when zoom changes
+                updateStrokeWidths(zoomLevel);
+            },
+        });
+
+        // Make it available globally for modules
+        window.mainCanvasManager = mainCanvasManager;
+    }
 
     // Get layer references
     const panelLayer = mainCanvasManager.getLayer("panel");
@@ -198,10 +219,15 @@ function initializeSVG() {
         .getElementById("clear-btn")
         .addEventListener("click", clearAllBits);
 
-    // Add mouse event listeners for bit dragging
+    // Add mouse and touch event listeners for bit dragging
     canvas.addEventListener("mousedown", handleMouseDown);
     canvas.addEventListener("mousemove", handleMouseMove);
     canvas.addEventListener("mouseup", handleMouseUp);
+
+    // Touch event listeners for mobile devices
+    canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+    canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
 
     // Create BitsManager instance now that CanvasManager is available
     bitsManager = new BitsManager(mainCanvasManager);
@@ -323,85 +349,22 @@ function initializeSVG() {
         input.click();
     });
 
-    // Setup panel toggle buttons with overlay mode for small screens
-
+    // Setup panel toggle buttons - now handled by UI Module
+    const uiModule = app.getModule("ui");
     document
         .getElementById("toggle-left-panel")
-        .addEventListener("click", () => {
-            const leftPanel = document.getElementById("left-panel");
-            const isSmallScreen = window.innerWidth <= 768;
-
-            if (isSmallScreen) {
-                // Overlay mode for small screens
-                console.log("Left panel toggle clicked (small screen)", {
-                    overlayVisible:
-                        leftPanel.classList.contains("overlay-visible"),
-                    collapsed: leftPanel.classList.contains("collapsed"),
-                    display: leftPanel.style.display,
-                    windowWidth: window.innerWidth,
-                });
-
-                // Toggle panel visibility
-                if (leftPanel.classList.contains("overlay-visible")) {
-                    console.log("Hiding left panel");
-                    // Hide panel
-                    leftPanel.classList.remove("overlay-visible");
-                    leftPanel.classList.add("collapsed");
-                    leftPanel.style.display = "none";
-                } else {
-                    console.log("Showing left panel");
-                    // Show panel
-                    leftPanel.classList.remove("collapsed");
-                    leftPanel.classList.add("overlay-visible");
-                    leftPanel.style.display = "flex"; // Force show in overlay mode
-                }
-            } else {
-                // Normal collapse/expand mode for larger screens
-                leftPanel.classList.toggle("collapsed");
-                // Remove overlay classes and styles for normal mode
-                leftPanel.classList.remove("overlay-visible");
-                leftPanel.style.display = "";
-            }
-
-            // Update canvas parameters
-            updateCanvasAfterPanelToggle();
-        });
+        .addEventListener("click", () => uiModule.toggleLeftPanel());
 
     document
         .getElementById("toggle-right-menu")
-        .addEventListener("click", () => {
-            const rightMenu = document.getElementById("right-menu");
-
-            // Check if panel is currently visible
-            const isVisible =
-                !rightMenu.classList.contains("collapsed") &&
-                (window.innerWidth > 1000 ||
-                    rightMenu.style.display === "flex");
-
-            if (isVisible) {
-                // Hide panel
-                rightMenu.classList.add("collapsed");
-                if (window.innerWidth <= 1000) {
-                    rightMenu.style.display = "none";
-                }
-            } else {
-                // Show panel
-                rightMenu.classList.remove("collapsed");
-                if (window.innerWidth <= 1000) {
-                    rightMenu.style.display = "flex"; // Force show in overlay mode
-                }
-            }
-
-            // Update canvas parameters
-            updateCanvasAfterPanelToggle();
-        });
+        .addEventListener("click", () => uiModule.toggleRightMenu());
 
     // Setup theme toggle button
     const themeToggle = document.getElementById("theme-toggle");
-    themeToggle.addEventListener("click", toggleTheme);
-
-    // Initialize theme from localStorage or system preference
-    initializeTheme();
+    themeToggle.addEventListener("click", () => {
+        const uiModule = app.getModule("ui");
+        uiModule.toggleTheme();
+    });
 }
 
 // Helper function to update canvas after panel toggle
@@ -1281,10 +1244,9 @@ function updateBitsSheet() {
         // Color picker
         const colorCell = document.createElement("td");
         const colorInput = document.createElement("input");
+        colorInput.id = `bit-color-input`;
         colorInput.type = "color";
         colorInput.value = bit.color || "#cccccc";
-        colorInput.style.width = "40px";
-        colorInput.style.height = "25px";
         colorInput.style.border = "1px solid #ccc";
         colorInput.style.borderRadius = "3px";
         colorInput.style.cursor = "pointer";
@@ -2066,6 +2028,243 @@ function handleMouseUp(e) {
     }
 }
 
+// Touch event handlers for mobile devices
+function handleTouchStart(e) {
+    e.preventDefault(); // Prevent scrolling and other default touch behaviors
+
+    if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        const svgCoords = mainCanvasManager.screenToSvg(
+            touch.clientX,
+            touch.clientY
+        );
+
+        // Check if touching any bit (selected or not) - but only if bits are visible
+        let touchedBit = false;
+        if (bitsVisible) {
+            for (let i = 0; i < bitsOnCanvas.length; i++) {
+                const bit = bitsOnCanvas[i];
+                if (bit && bit.group) {
+                    const shape = bit.group.querySelector(".bit-shape");
+                    if (shape) {
+                        // Get the transform from the group
+                        const transform = bit.group.getAttribute("transform");
+                        let dx = 0,
+                            dy = 0;
+                        if (transform) {
+                            const match = transform.match(
+                                /translate\(([^,]+),\s*([^)]+)\)/
+                            );
+                            if (match) {
+                                dx = parseFloat(match[1]) || 0;
+                                dy = parseFloat(match[2]) || 0;
+                            }
+                        }
+
+                        // Transform touch coordinates to local shape coordinates
+                        const localX = svgCoords.x - dx;
+                        const localY = svgCoords.y - dy;
+
+                        // Check if touch is on the fill of the bit shape
+                        if (shape.isPointInFill(new DOMPoint(localX, localY))) {
+                            // Also check adaptive distance tolerance
+                            const bitCenterX = bit.baseAbsX + dx;
+                            const bitCenterY = bit.baseAbsY + dy;
+                            const distance = Math.sqrt(
+                                (svgCoords.x - bitCenterX) ** 2 +
+                                    (svgCoords.y - bitCenterY) ** 2
+                            );
+                            const tolerance = 30; // Slightly larger tolerance for touch
+                            if (distance <= tolerance) {
+                                touchedBit = true;
+                                touchIdentifier = touch.identifier;
+
+                                // If touching a selected bit, prepare for dragging
+                                if (selectedBitIndices.includes(i)) {
+                                    isTouchDragging = true;
+                                    draggedBitIndex = i;
+                                    touchDragStartX = svgCoords.x;
+                                    touchDragStartY = svgCoords.y;
+                                    dragStarted = false;
+                                    return;
+                                }
+                                // If touching an unselected bit, select it
+                                else {
+                                    selectBit(i);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // If touched empty area, clear selections
+        if (!touchedBit && selectedBitIndices.length > 0) {
+            selectedBitIndices.forEach((index) => {
+                resetBitHighlight(index);
+            });
+            selectedBitIndices = [];
+            updateBitsSheet();
+            redrawBitsOnCanvas();
+        }
+    }
+}
+
+function handleTouchMove(e) {
+    e.preventDefault();
+
+    if (isTouchDragging && e.touches.length === 1) {
+        const touch = Array.from(e.touches).find(
+            (t) => t.identifier === touchIdentifier
+        );
+        if (!touch) return;
+
+        // Set flag that drag has started
+        dragStarted = true;
+
+        const svgCoords = mainCanvasManager.screenToSvg(
+            touch.clientX,
+            touch.clientY
+        );
+        const bit = bitsOnCanvas[draggedBitIndex];
+        const anchorOffset = getAnchorOffset(bit);
+        const panelAnchorCoords = getPanelAnchorCoords();
+
+        // Calculate desired anchor position
+        let anchorX = svgCoords.x - panelAnchorCoords.x;
+        let anchorY = svgCoords.y - panelAnchorCoords.y;
+
+        // Snap anchor to grid
+        anchorX = mainCanvasManager.snapToGrid(anchorX);
+        anchorY = mainCanvasManager.snapToGrid(anchorY);
+
+        // Center position = anchor - offset
+        let newX = anchorX - anchorOffset.x;
+        let newY = anchorY - anchorOffset.y;
+
+        // Check if we need to auto-scroll
+        checkAutoScroll(touch.clientX, touch.clientY);
+
+        // Update bit position
+        updateBitPosition(draggedBitIndex, newX, newY);
+
+        // Update table inputs
+        updateTableCoordinates(draggedBitIndex, newX, newY);
+    }
+}
+
+function handleTouchEnd(e) {
+    // Only process if this is our tracked touch
+    const endedTouch = Array.from(e.changedTouches).find(
+        (t) => t.identifier === touchIdentifier
+    );
+    if (!endedTouch) return;
+
+    if (isTouchDragging) {
+        isTouchDragging = false;
+
+        // If drag didn't actually start, deselect the bit
+        if (!dragStarted && draggedBitIndex !== null) {
+            selectBit(draggedBitIndex);
+        }
+
+        draggedBitIndex = null;
+        dragStarted = false;
+        touchIdentifier = null;
+
+        // Stop auto-scroll
+        stopAutoScroll();
+
+        // Update part shape after dragging is complete
+        if (showPart) updatePartShape();
+    }
+}
+
+// Auto-scroll functions for mobile drag support
+function checkAutoScroll(clientX, clientY) {
+    const canvasRect = canvas.getBoundingClientRect();
+    const scrollThreshold = autoScrollThreshold;
+    let scrollX = 0;
+    let scrollY = 0;
+
+    // Check horizontal auto-scroll
+    if (clientX < canvasRect.left + scrollThreshold) {
+        scrollX = -autoScrollSpeed;
+    } else if (clientX > canvasRect.right - scrollThreshold) {
+        scrollX = autoScrollSpeed;
+    }
+
+    // Check vertical auto-scroll
+    if (clientY < canvasRect.top + scrollThreshold) {
+        scrollY = -autoScrollSpeed;
+    } else if (clientY > canvasRect.bottom - scrollThreshold) {
+        scrollY = autoScrollSpeed;
+    }
+
+    if (scrollX !== 0 || scrollY !== 0) {
+        startAutoScroll(scrollX, scrollY);
+    } else {
+        stopAutoScroll();
+    }
+}
+
+function startAutoScroll(scrollX, scrollY) {
+    if (autoScrollActive) return;
+
+    autoScrollActive = true;
+
+    autoScrollInterval = setInterval(() => {
+        // Scroll the canvas by converting screen pixels to SVG units
+        const svgScrollX = scrollX / mainCanvasManager.zoomLevel;
+        const svgScrollY = scrollY / mainCanvasManager.zoomLevel;
+
+        mainCanvasManager.panX += svgScrollX;
+        mainCanvasManager.panY += svgScrollY;
+        mainCanvasManager.updateViewBox();
+
+        // Continue dragging the bit to follow the scroll
+        if (isTouchDragging && draggedBitIndex !== null) {
+            const bit = bitsOnCanvas[draggedBitIndex];
+            const anchorOffset = getAnchorOffset(bit);
+            const panelAnchorCoords = getPanelAnchorCoords();
+
+            // Recalculate position after scroll
+            const svgCoords = mainCanvasManager.screenToSvg(
+                Array.from(canvas.ownerDocument.touches).find(
+                    (t) => t.identifier === touchIdentifier
+                )?.clientX || 0,
+                Array.from(canvas.ownerDocument.touches).find(
+                    (t) => t.identifier === touchIdentifier
+                )?.clientY || 0
+            );
+
+            if (svgCoords.x !== 0 || svgCoords.y !== 0) {
+                let anchorX = svgCoords.x - panelAnchorCoords.x;
+                let anchorY = svgCoords.y - panelAnchorCoords.y;
+
+                anchorX = mainCanvasManager.snapToGrid(anchorX);
+                anchorY = mainCanvasManager.snapToGrid(anchorY);
+
+                let newX = anchorX - anchorOffset.x;
+                let newY = anchorY - anchorOffset.y;
+
+                updateBitPosition(draggedBitIndex, newX, newY);
+                updateTableCoordinates(draggedBitIndex, newX, newY);
+            }
+        }
+    }, 50); // Update every 50ms
+}
+
+function stopAutoScroll() {
+    if (autoScrollInterval) {
+        clearInterval(autoScrollInterval);
+        autoScrollInterval = null;
+    }
+    autoScrollActive = false;
+}
+
 // Update table coordinates without recreating the entire table
 function updateTableCoordinates(bitIndex, newX, newY) {
     const sheetBody = document.getElementById("bits-sheet-body");
@@ -2332,7 +2531,8 @@ function initialize() {
                         const restoredCount = await restoreBitPositions(
                             positionsData
                         );
-                        logOperation(
+                        const uiModule = app.getModule("ui");
+                        uiModule.logOperation(
                             `Auto-loaded ${restoredCount} saved bit positions`
                         );
                         updateOffsetContours(); // Update offset contours after loading saved positions
@@ -2348,7 +2548,7 @@ function initialize() {
 }
 
 // Export to DXF function
-function exportToDXF() {
+async function exportToDXF() {
     if (bitsOnCanvas.length === 0) {
         alert("No bits on canvas to export. Please add some bits first.");
         return;
@@ -2364,21 +2564,36 @@ function exportToDXF() {
 
     console.log(partPath);
 
-    // Export to DXF with partPath, partFront, offset contours, and panel thickness
-    const dxfContent = dxfExporter.exportToDXF(
-        bitsOnCanvas,
-        partPath,
-        partFront,
-        offsetContours,
-        panelThickness
-    );
-    if (!isPartVisible) {
-        showPart = false;
-    }
-    // Download the file
-    dxfExporter.downloadDXF(dxfContent);
+    try {
+        // Get the export module from the app
+        const exportModule = app.getModule("export");
+        if (!exportModule) {
+            throw new Error("Export module not found");
+        }
 
-    console.log("DXF export completed. File downloaded.");
+        // Export to DXF with partPath, partFront, offset contours, and panel thickness
+        const dxfContent = exportModule.exportToDXF(
+            bitsOnCanvas,
+            partPath,
+            partFront,
+            offsetContours,
+            panelThickness
+        );
+
+        if (!isPartVisible) {
+            showPart = false;
+        }
+
+        // Download the file
+        exportModule.downloadDXF(dxfContent);
+
+        console.log("DXF export completed. File downloaded.");
+        logOperation("DXF export completed successfully");
+    } catch (error) {
+        console.error("Failed to export DXF:", error);
+        logOperation("Failed to export DXF: " + error.message);
+        alert("Failed to export DXF. Please check console for details.");
+    }
 }
 
 // Logging function for operations
@@ -2602,52 +2817,6 @@ function clearAllBits() {
     logOperation(`Cleared ${bitCount} bits from canvas`);
 }
 
-// Theme switching functions
-function toggleTheme() {
-    const html = document.documentElement;
-    const themeToggle = document.getElementById("theme-toggle");
-    const svg = themeToggle.querySelector("svg");
-
-    if (html.classList.contains("dark")) {
-        // Switch to light theme
-        html.classList.remove("dark");
-        localStorage.setItem("theme", "light");
-        // Change to sun icon for light theme
-        svg.innerHTML =
-            '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
-        themeToggle.title = "Switch to Dark Theme";
-    } else {
-        // Switch to dark theme
-        html.classList.add("dark");
-        localStorage.setItem("theme", "dark");
-        // Change to moon icon for dark theme
-        svg.innerHTML =
-            '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
-        themeToggle.title = "Switch to Light Theme";
-    }
-}
-
-function initializeTheme() {
-    const savedTheme = localStorage.getItem("theme");
-    const themeToggle = document.getElementById("theme-toggle");
-    const svg = themeToggle.querySelector("svg");
-
-    if (savedTheme === "dark") {
-        document.documentElement.classList.add("dark");
-        // Set moon icon for dark theme
-        svg.innerHTML =
-            '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
-        themeToggle.title = "Switch to Light Theme";
-    } else {
-        // Default to light theme
-        document.documentElement.classList.remove("dark");
-        // Set sun icon for light theme
-        svg.innerHTML =
-            '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
-        themeToggle.title = "Switch to Dark Theme";
-    }
-}
-
 // Add window resize listener for responsive canvas and panel visibility
 window.addEventListener("resize", () => {
     if (mainCanvasManager) {
@@ -2693,5 +2862,28 @@ window.addEventListener("resize", () => {
     }
 });
 
+// Initialize modular system and then start the application
+async function initializeModularSystem() {
+    try {
+        // Initialize the modular application
+        await app.start();
+
+        // Get module instances
+        const canvasModule = app.getModule("canvas");
+        const bitsModule = app.getModule("bits");
+
+        console.log("Modular system initialized successfully");
+        console.log("Canvas module:", canvasModule);
+        console.log("Bits module:", bitsModule);
+
+        // Start the original initialization
+        initialize();
+    } catch (error) {
+        console.error("Failed to initialize modular system:", error);
+        // Fallback to original initialization if modular system fails
+        initialize();
+    }
+}
+
 // Call initialize function when the page loads
-window.addEventListener("load", initialize);
+window.addEventListener("load", initializeModularSystem);
