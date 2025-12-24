@@ -129,6 +129,14 @@ function initializeSVG() {
                 // Update stroke widths when zoom changes
                 updateStrokeWidths(zoomLevel);
             },
+            // onTap: (e) => {
+            //     // Handle tap for selection
+            //     handleCanvasTap(e);
+            // },
+            // onDoubleTap: (e) => {
+            //     // Handle double tap for clearing selections
+            //     handleCanvasDoubleTap(e);
+            // },
         });
 
         // Make it available globally for modules

@@ -59,6 +59,7 @@ class GridRenderer {
         rect.setAttribute("width", this.config.width);
         rect.setAttribute("height", this.config.height);
         rect.setAttribute("fill", `url(#${this.config.id}-pattern)`);
+        rect.setAttribute("pointer-events", "none"); // Allow touch events to pass through to container
         this.gridLayer.appendChild(rect);
     }
 }
@@ -175,6 +176,7 @@ class CanvasManager {
             });
         }
 
+        // Mouse events for desktop
         this.canvas.addEventListener(
             "mousedown",
             this.handleMouseDown.bind(this)
@@ -187,6 +189,207 @@ class CanvasManager {
         this.canvas.addEventListener(
             "mouseleave",
             this.handleMouseUp.bind(this)
+        );
+
+        // Touch events for mobile devices
+        this.setupTouchEvents();
+    }
+
+    setupTouchEvents() {
+        // Use basic touch events for standard panning and zooming
+        this.setupBasicTouchEvents();
+        // // Use Hammer.js for standard touch gestures (panning and zooming)
+        // this.setupHammerGestures();
+    }
+
+    setupHammerGestures() {
+        // Use canvas container for gestures to allow panning from anywhere
+        const container = this.canvas.parentElement;
+        if (!container) return;
+
+        // Create Hammer manager
+        this.hammerManager = new Hammer.Manager(container);
+
+        // Add recognizers
+        const pan = new Hammer.Pan({ threshold: 10, pointers: 1 });
+        const pinch = new Hammer.Pinch({ threshold: 0 });
+        const tap = new Hammer.Tap({ taps: 1 });
+
+        this.hammerManager.add([pan, pinch, tap]);
+
+        // Handle pan gestures (single finger drag for panning)
+        this.hammerManager.on("panstart", (e) => {
+            if (this.config.enablePan) {
+                this.isDragging = true;
+                this.lastPanX = e.center.x;
+                this.lastPanY = e.center.y;
+                e.preventDefault();
+            }
+        });
+
+        this.hammerManager.on("panmove", (e) => {
+            if (this.isDragging && this.config.enablePan) {
+                const deltaX = e.center.x - this.lastPanX;
+                const deltaY = e.center.y - this.lastPanY;
+
+                const svgDeltaX = deltaX / this.zoomLevel;
+                const svgDeltaY = deltaY / this.zoomLevel;
+
+                this.panX -= svgDeltaX;
+                this.panY -= svgDeltaY;
+
+                this.lastPanX = e.center.x;
+                this.lastPanY = e.center.y;
+
+                this.updateViewBox();
+                e.preventDefault();
+            }
+        });
+
+        this.hammerManager.on("panend", (e) => {
+            if (this.isDragging) {
+                this.isDragging = false;
+            }
+        });
+
+        // Handle pinch gestures (two finger zoom)
+        this.hammerManager.on("pinchstart", (e) => {
+            if (this.config.enableZoom) {
+                this.pinchStartZoom = this.zoomLevel;
+                // Store the initial pinch center
+                const rect = this.canvas.getBoundingClientRect();
+                this.pinchStartCenter = {
+                    x: e.center.x - rect.left,
+                    y: e.center.y - rect.top,
+                };
+                e.preventDefault();
+            }
+        });
+
+        this.hammerManager.on("pinchmove", (e) => {
+            if (this.config.enableZoom && this.pinchStartZoom) {
+                // Calculate new zoom level
+                let newZoom = this.pinchStartZoom * e.scale;
+
+                // Apply smoothing to reduce abruptness
+                const smoothingFactor = 0.8;
+                newZoom =
+                    this.zoomLevel +
+                    (newZoom - this.zoomLevel) * smoothingFactor;
+
+                // Limit zoom levels
+                const minZoom = 0.1;
+                const maxZoom = 10;
+                newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
+
+                // Only update if zoom changed significantly
+                if (Math.abs(newZoom - this.zoomLevel) > 0.01) {
+                    this.zoomLevel = newZoom;
+
+                    // Adjust pan to zoom towards the fixed pinch center
+                    const rect = this.canvas.getBoundingClientRect();
+                    const pinchX = this.pinchStartCenter.x;
+                    const pinchY = this.pinchStartCenter.y;
+
+                    const oldViewBoxWidth = rect.width / this.pinchStartZoom;
+                    const oldViewBoxHeight = rect.height / this.pinchStartZoom;
+                    const oldViewBoxX = this.panX - oldViewBoxWidth / 2;
+                    const oldViewBoxY = this.panY - oldViewBoxHeight / 2;
+
+                    const svgX =
+                        oldViewBoxX + (pinchX / rect.width) * oldViewBoxWidth;
+                    const svgY =
+                        oldViewBoxY + (pinchY / rect.height) * oldViewBoxHeight;
+
+                    const newViewBoxWidth = rect.width / this.zoomLevel;
+                    const newViewBoxHeight = rect.height / this.zoomLevel;
+
+                    const newViewBoxX =
+                        svgX - (pinchX / rect.width) * newViewBoxWidth;
+                    const newViewBoxY =
+                        svgY - (pinchY / rect.height) * newViewBoxHeight;
+
+                    this.panX = newViewBoxX + newViewBoxWidth / 2;
+                    this.panY = newViewBoxY + newViewBoxHeight / 2;
+
+                    this.updateViewBox();
+                }
+                e.preventDefault();
+            }
+        });
+
+        this.hammerManager.on("pinchend", (e) => {
+            this.pinchStartZoom = null;
+            this.pinchStartCenter = null;
+        });
+
+        // Handle tap gestures
+        this.hammerManager.on("tap", (e) => {
+            // Could be used for selection or other interactions
+            if (this.config.onTap) {
+                this.config.onTap(e);
+            }
+        });
+
+        // // Handle double tap for selection clearing
+        // const doubleTap = new Hammer.Tap({ event: "doubletap", taps: 2 });
+        // this.hammerManager.add(doubleTap);
+
+        // this.hammerManager.on("doubletap", (e) => {
+        //     if (this.config.onDoubleTap) {
+        //         this.config.onDoubleTap(e);
+        //     }
+        // });
+    }
+
+    setupBasicTouchEvents() {
+        // Fallback touch event handlers for mobile devices
+        const container = this.canvas.parentElement;
+        if (container) {
+            container.addEventListener(
+                "touchstart",
+                this.handleTouchStart.bind(this),
+                {
+                    passive: false,
+                }
+            );
+            container.addEventListener(
+                "touchmove",
+                this.handleTouchMove.bind(this),
+                {
+                    passive: false,
+                }
+            );
+            container.addEventListener(
+                "touchend",
+                this.handleTouchEnd.bind(this),
+                {
+                    passive: false,
+                }
+            );
+        }
+
+        // Also keep canvas events for compatibility
+        this.canvas.addEventListener(
+            "touchstart",
+            this.handleTouchStart.bind(this),
+            {
+                passive: false,
+            }
+        );
+        this.canvas.addEventListener(
+            "touchmove",
+            this.handleTouchMove.bind(this),
+            {
+                passive: false,
+            }
+        );
+        this.canvas.addEventListener(
+            "touchend",
+            this.handleTouchEnd.bind(this),
+            {
+                passive: false,
+            }
         );
     }
 
@@ -408,6 +611,98 @@ class CanvasManager {
         if (this.config.onMouseUp) {
             this.config.onMouseUp(e);
         }
+    }
+
+    // === TOUCH EVENT HANDLERS ===
+    handleTouchStart(e) {
+        if (e.touches.length === 1 && this.config.enablePan) {
+            // Single touch for panning
+            e.preventDefault();
+            this.isDragging = true;
+            this.lastMouseX = e.touches[0].clientX;
+            this.lastMouseY = e.touches[0].clientY;
+        } else if (e.touches.length === 2 && this.config.enableZoom) {
+            // Two finger pinch for zooming
+            e.preventDefault();
+            this.handlePinchStart(e);
+        }
+    }
+
+    handleTouchMove(e) {
+        if (
+            this.isDragging &&
+            e.touches.length === 1 &&
+            this.config.enablePan
+        ) {
+            // Single touch panning
+            e.preventDefault();
+            const deltaX = e.touches[0].clientX - this.lastMouseX;
+            const deltaY = e.touches[0].clientY - this.lastMouseY;
+
+            const svgDeltaX = deltaX / this.zoomLevel;
+            const svgDeltaY = deltaY / this.zoomLevel;
+
+            this.panX -= svgDeltaX;
+            this.panY -= svgDeltaY;
+
+            this.lastMouseX = e.touches[0].clientX;
+            this.lastMouseY = e.touches[0].clientY;
+
+            this.updateViewBox();
+        } else if (e.touches.length === 2 && this.config.enableZoom) {
+            // Two finger pinch zooming
+            e.preventDefault();
+            this.handlePinchMove(e);
+        }
+    }
+
+    handleTouchEnd(e) {
+        if (this.isDragging) {
+            this.isDragging = false;
+        }
+        if (this.pinchStartDistance) {
+            this.pinchStartDistance = null;
+            this.pinchStartZoom = null;
+            this.pinchStartCenterX = null;
+            this.pinchStartCenterY = null;
+        }
+    }
+
+    handlePinchStart(e) {
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        this.pinchStartDistance = this.getTouchDistance(touch1, touch2);
+        this.pinchStartZoom = this.zoomLevel;
+        this.pinchStartCenterX = (touch1.clientX + touch2.clientX) / 2;
+        this.pinchStartCenterY = (touch1.clientY + touch2.clientY) / 2;
+    }
+
+    handlePinchMove(e) {
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        const currentDistance = this.getTouchDistance(touch1, touch2);
+
+        if (this.pinchStartDistance && this.pinchStartZoom) {
+            const zoomFactor = currentDistance / this.pinchStartDistance;
+            let newZoom = this.pinchStartZoom * zoomFactor;
+
+            // Limit zoom levels
+            const minZoom = 0.1;
+            const maxZoom = 10;
+            newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
+
+            // Only update if zoom changed significantly
+            if (Math.abs(newZoom - this.zoomLevel) > 0.01) {
+                this.zoomLevel = newZoom;
+                this.updateViewBox();
+            }
+        }
+    }
+
+    getTouchDistance(touch1, touch2) {
+        const dx = touch1.clientX - touch2.clientX;
+        const dy = touch1.clientY - touch2.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
     }
 
     // === UTILITY METHODS ===

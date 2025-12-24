@@ -2,12 +2,22 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="mobile-web-app-capable" content="yes">
-        <meta name="HandheldFriendly" content="true"/>
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+        />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="HandheldFriendly" content="true" />
+        <meta name="theme-color" content="#ffffff" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="Facade Editor" />
         <title>Furniture Facade Section Editor</title>
         <link rel="stylesheet" href="styles/styles.css" />
+        <script
+            type="module"
+            src="https://cdn.jsdelivr.net/npm/@capacitor/core@5.0.0/dist/capacitor.js"
+        ></script>
     </head>
     <body>
         <header id="app-header">
@@ -205,6 +215,7 @@
         <script src="node_modules\clipper-lib\clipper.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bezier-js@2/bezier.js"></script>
         <script src="https://unpkg.com/makerjs@0.18.1/dist/browser.maker.js"></script>
+        <script src="node_modules/hammerjs/hammer.min.js"></script>
         <script src="src/script.js" type="module"></script>
     </body>
 </html>

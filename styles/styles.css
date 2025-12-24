@@ -106,7 +106,7 @@ html {
 
 #app {
   display: flex;
-  height: calc(100vh - 60px);
+  height: calc(100dvh - 60px);
   width: 100%;
   overflow: hidden;
 }
@@ -184,6 +184,7 @@ html {
   position: relative;
   z-index: 1;
   box-sizing: border-box;
+  min-height: 0; /* Allow flex shrinking */
 }
 
 /* ===== ZOOM TOOLBAR ===== */
@@ -226,6 +227,7 @@ html {
   height: 100%;
   flex-shrink: 0;
   box-sizing: border-box;
+  touch-action: none; /* Prevent default touch behaviors */
 }
 
 /* ===== ПРАВАЯ КОЛОНКА (Settings) ===== */

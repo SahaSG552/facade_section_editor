@@ -4,9 +4,19 @@
   "description": "This project aims to create furniture facade cross sections using router bits and CNC operations. The upcoming phase will involve generating 3D models of furniture facades with custom designs.",
   "main": "index.js",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
+    "cap:init": "cap init",
+    "cap:add:android": "cap add android",
+    "cap:add:ios": "cap add ios",
+    "cap:sync": "cap sync",
+    "cap:sync:android": "cap sync android",
+    "cap:sync:ios": "cap sync ios",
+    "cap:open:android": "cap open android",
+    "cap:open:ios": "cap open ios",
+    "cap:build:android": "npm run build && cap sync android && cap open android",
+    "cap:build:ios": "npm run build && cap sync ios && cap open ios",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -23,11 +33,16 @@
   "homepage": "https://github.com/SahaSG552/facade_section_editor#readme",
   "dependencies": {
     "clipper-lib": "^6.4.2",
+    "hammerjs": "^2.0.8",
     "jsdom": "^27.3.0",
     "makerjs": "^0.17.6",
     "three": "^0.182.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^5.0.0",
+    "@capacitor/cli": "^5.0.0",
+    "@capacitor/core": "^5.0.0",
+    "@capacitor/ios": "^5.0.0",
     "@types/three": "^0.182.0",
     "vite": "^4.4.9"
   }

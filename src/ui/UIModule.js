@@ -81,19 +81,44 @@ class UIModule extends BaseModule {
     toggleLeftPanel() {
         const leftPanel = document.getElementById("left-panel");
         const isSmallScreen = window.innerWidth <= 768;
+        const isMobile = this.isMobileDevice();
 
-        if (isSmallScreen) {
-            // Overlay mode for small screens
+        if (isSmallScreen || isMobile) {
+            // Overlay mode for small screens and mobile devices
             if (leftPanel.classList.contains("overlay-visible")) {
                 // Hide panel
                 leftPanel.classList.remove("overlay-visible");
                 leftPanel.classList.add("collapsed");
                 leftPanel.style.display = "none";
+                // Remove click outside handler
+                if (this.leftPanelClickOutsideHandler) {
+                    document.removeEventListener(
+                        "click",
+                        this.leftPanelClickOutsideHandler
+                    );
+                    this.leftPanelClickOutsideHandler = null;
+                }
             } else {
                 // Show panel
                 leftPanel.classList.remove("collapsed");
                 leftPanel.classList.add("overlay-visible");
                 leftPanel.style.display = "flex";
+                // Add click outside handler to close panel
+                this.leftPanelClickOutsideHandler = (e) => {
+                    if (
+                        !leftPanel.contains(e.target) &&
+                        !e.target.closest("#app-header button")
+                    ) {
+                        this.toggleLeftPanel();
+                    }
+                };
+                // Use setTimeout to avoid immediate trigger
+                setTimeout(() => {
+                    document.addEventListener(
+                        "click",
+                        this.leftPanelClickOutsideHandler
+                    );
+                }, 10);
             }
         } else {
             // Normal collapse/expand mode for larger screens
@@ -268,6 +293,18 @@ class UIModule extends BaseModule {
 
         input.click();
         return input;
+    }
+
+    /**
+     * Check if the current device is a mobile device
+     */
+    isMobileDevice() {
+        return (
+            /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+                navigator.userAgent
+            ) ||
+            (window.innerWidth <= 768 && window.innerHeight <= 1024)
+        );
     }
 }
 
