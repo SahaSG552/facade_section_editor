@@ -189,7 +189,7 @@ html {
 
 /* ===== ZOOM TOOLBAR ===== */
 #zoom-toolbar {
-  display: inline-flex;
+  display: flex;
   gap: 5px;
   margin-bottom: 10px;
   margin-top: -50px;
@@ -197,18 +197,25 @@ html {
   padding: 5px;
   border-radius: var(--radius);
   border: 1px solid hsl(var(--border));
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 #zoom-toolbar button {
-  padding: 5px 10px;
-  font-size: 12px;
+  padding: 5px 8px;
+  font-size: 11px;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--card));
   color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
-  flex: 1;
-  width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #zoom-toolbar button:hover {
@@ -218,6 +225,25 @@ html {
 
 #zoom-toolbar button:active {
   background-color: hsl(var(--secondary));
+}
+
+#zoom-toolbar input {
+  width: 40px;
+  font-size: 11px;
+  padding: 3px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+  border-radius: var(--radius);
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+#zoom-toolbar label {
+  font-size: 11px;
+  margin: auto;
+  flex: 0 0 auto;
 }
 
 #canvas {
@@ -445,13 +471,16 @@ html {
 
 /* ===== OPERATIONS TOOLBAR ===== */
 #operations-toolbar {
-  display: inline-flex;
+  display: flex;
   gap: 5px;
   background-color: hsl(var(--muted));
   padding: 5px;
   border-radius: var(--radius);
   border: 1px solid hsl(var(--border));
-  width: 280px;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
 }
 
 #operations-toolbar button {
@@ -462,8 +491,10 @@ html {
   color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
-  flex: 1;
-  width: auto;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #operations-toolbar button:hover {
@@ -797,7 +828,7 @@ html {
   }
 
   #right-menu:not(.collapsed) #operations-toolbar {
-    width: 100%;
+    width: auto;
     padding: 4px;
   }
 
@@ -842,5 +873,46 @@ html {
     width: 90px;
     z-index: 50;
     box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Make zoom toolbar buttons smaller on mobile */
+  #zoom-toolbar button {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  #zoom-toolbar input {
+    width: 35px;
+    font-size: 10px;
+    padding: 2px;
+  }
+
+  #zoom-toolbar label {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Extra small screens - make zoom toolbar even more compact */
+  #zoom-toolbar button {
+    padding: 3px 5px;
+    font-size: 9px;
+    min-width: 20px;
+  }
+
+  #zoom-toolbar input {
+    width: 30px;
+    font-size: 9px;
+    padding: 1px;
+  }
+
+  #zoom-toolbar label {
+    font-size: 9px;
+  }
+
+  /* Allow wrapping on very small screens */
+  #zoom-toolbar {
+    gap: 3px;
+    padding: 3px;
   }
 }

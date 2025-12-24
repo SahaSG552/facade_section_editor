@@ -87,11 +87,12 @@ let autoScrollThreshold = 50; // pixels from edge to start auto-scroll
 // Pinch-to-zoom variables
 let isPinching = false;
 let initialPinchDistance = 0;
-let initialPinchCenterX = 0;
-let initialPinchCenterY = 0;
 let initialZoomLevel = 1;
-let initialPanX = 0;
-let initialPanY = 0;
+
+// Double-tap variables
+let lastTapTime = 0;
+let lastTapX = 0;
+let lastTapY = 0;
 
 // BitsManager will be created in initializeSVG after CanvasManager is set up
 
@@ -252,13 +253,6 @@ function initializeSVG() {
     canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
     canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
     canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
-    canvas.addEventListener("gesturestart", handleGestureStart, {
-        passive: false,
-    });
-    canvas.addEventListener("gesturechange", handleGestureChange, {
-        passive: false,
-    });
-    canvas.addEventListener("gestureend", handleGestureEnd, { passive: false });
 
     // Create BitsManager instance now that CanvasManager is available
     bitsManager = new BitsManager(mainCanvasManager);
@@ -1100,8 +1094,6 @@ function updateCanvasBitsForBitId(bitId) {
 
 // Draw bit shape
 function drawBitShape(bit, groupName, createBitShapeElementFn) {
-    const bitsLayer = document.getElementById("bits-layer");
-
     updatepanelParams();
     const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
     const panelY =
@@ -2381,24 +2373,27 @@ function handleGestureChange(e) {
     // Clamp zoom level to reasonable bounds
     newZoomLevel = Math.max(0.1, Math.min(10, newZoomLevel));
 
-    // Calculate pan adjustment to keep the pinch center in place
-    const centerBeforeZoom = mainCanvasManager.screenToSvg(
+    // Calculate the SVG point that should remain at the center
+    const svgCenterPoint = mainCanvasManager.screenToSvg(
         initialPinchCenterX,
         initialPinchCenterY
     );
-    const centerAfterZoom = mainCanvasManager.screenToSvg(
-        currentCenterX,
-        currentCenterY
-    );
 
-    // Adjust pan to keep the center point in the same place
-    const panAdjustmentX = centerAfterZoom.x - centerBeforeZoom.x;
-    const panAdjustmentY = centerAfterZoom.y - centerBeforeZoom.y;
+    // Temporarily set new zoom to calculate new pan
+    const oldZoom = mainCanvasManager.zoomLevel;
+    mainCanvasManager.zoomLevel = newZoomLevel;
+
+    // Calculate new pan to keep the center point in place
+    const rect = mainCanvasManager.canvas.getBoundingClientRect();
+    const viewBoxWidth = rect.width / newZoomLevel;
+    const viewBoxHeight = rect.height / newZoomLevel;
+
+    const newPanX = svgCenterPoint.x - viewBoxWidth / 2;
+    const newPanY = svgCenterPoint.y - viewBoxHeight / 2;
 
     // Apply zoom and pan
-    mainCanvasManager.zoomLevel = newZoomLevel;
-    mainCanvasManager.panX = initialPanX - panAdjustmentX;
-    mainCanvasManager.panY = initialPanY - panAdjustmentY;
+    mainCanvasManager.panX = newPanX;
+    mainCanvasManager.panY = newPanY;
 
     mainCanvasManager.updateViewBox();
 
