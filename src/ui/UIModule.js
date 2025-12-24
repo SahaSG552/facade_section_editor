@@ -141,7 +141,7 @@ class UIModule extends BaseModule {
      */
     updateCanvasAfterPanelToggle() {
         // Get canvas manager from app
-        const canvasModule = this.app.getModule("canvas");
+        const canvasModule = this.app?.getModule("canvas");
         if (!canvasModule || !canvasModule.canvasManager) return;
 
         const canvasManager = canvasModule.canvasManager;
@@ -180,7 +180,7 @@ class UIModule extends BaseModule {
      */
     handleWindowResize() {
         // Get canvas manager
-        const canvasModule = this.app.getModule("canvas");
+        const canvasModule = this.app?.getModule("canvas");
         if (canvasModule && canvasModule.canvasManager) {
             canvasModule.canvasManager.resize();
             // Update all canvas elements after resize
