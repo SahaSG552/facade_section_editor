@@ -75,6 +75,42 @@ html {
   gap: 8px;
 }
 
+/* View Toggle Buttons */
+.view-toggle {
+  display: flex;
+  gap: 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+}
+
+.view-toggle-btn {
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  font-weight: 500;
+  border: none !important;
+  border-radius: 0 !important;
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-right: 1px solid hsl(var(--border)) !important;
+}
+
+.view-toggle-btn:last-child {
+  border-right: none !important;
+}
+
+.view-toggle-btn:hover {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.view-toggle-btn.active {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
 #app-header button {
   background: none;
   border: none;
@@ -185,6 +221,57 @@ html {
   z-index: 1;
   box-sizing: border-box;
   min-height: 0; /* Allow flex shrinking */
+}
+
+/* Three.js Canvas Container */
+#three-canvas-container {
+  flex: 1;
+  flex-shrink: 1;
+  min-width: 200px;
+  display: none; /* Hidden by default */
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background-color: hsl(var(--background));
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  min-height: 0;
+  border-left: 1px solid hsl(var(--border));
+}
+
+#three-canvas-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* View modes */
+#app.view-2d #canvas-container {
+  display: flex;
+}
+
+#app.view-2d #three-canvas-container {
+  display: none;
+}
+
+#app.view-3d #canvas-container {
+  display: none;
+}
+
+#app.view-3d #three-canvas-container {
+  display: flex;
+}
+
+#app.view-both #canvas-container {
+  display: flex;
+  flex: 1;
+}
+
+#app.view-both #three-canvas-container {
+  display: flex;
+  flex: 1;
 }
 
 /* ===== ZOOM TOOLBAR ===== */
@@ -889,6 +976,22 @@ html {
 
   #zoom-toolbar label {
     font-size: 10px;
+  }
+
+  /* Mobile: only show one view at a time (force 2D or 3D, not both) */
+  #app.view-both #canvas-container {
+    display: flex;
+    flex: 1;
+  }
+
+  #app.view-both #three-canvas-container {
+    display: none; /* On mobile, "Both" mode shows only 2D */
+  }
+
+  /* Hide view toggle text on mobile, make buttons smaller */
+  .view-toggle-btn {
+    padding: 4px 8px !important;
+    font-size: 10px !important;
   }
 }
 

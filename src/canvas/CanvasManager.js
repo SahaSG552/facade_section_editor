@@ -620,9 +620,24 @@ class CanvasManager {
         const container = this.canvas.parentElement;
         if (container) {
             // Use clientWidth/Height to get content area dimensions (excluding padding)
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // If container is hidden (display: none), dimensions will be 0
+            // Use previous values or defaults to avoid NaN
             this.canvasParameters = {
-                width: container.clientWidth,
-                height: container.clientHeight,
+                width:
+                    width > 0
+                        ? width
+                        : this.canvasParameters?.width ||
+                          this.config.width ||
+                          800,
+                height:
+                    height > 0
+                        ? height
+                        : this.canvasParameters?.height ||
+                          this.config.height ||
+                          600,
             };
         } else {
             // Fallback to default if no container

@@ -585,6 +585,11 @@ function updatepanelParams() {
     updateOffsetContours();
     updatePhantomBits();
     if (showPart) updatePartShape();
+
+    // Update 3D view if it's visible
+    if (window.threeModule) {
+        updateThreeView();
+    }
 }
 
 // New: reposition all bits according to current panel anchor and their stored logical coords
@@ -624,6 +629,9 @@ let bitsLayer;
 
 // Offset contours for each bit
 let offsetContours = [];
+
+// Make offsetContours globally accessible for ThreeModule
+window.offsetContours = offsetContours;
 
 // Helper function to convert bit coordinates to top anchor coordinates
 function convertToTopAnchorCoordinates(bit) {
@@ -3018,18 +3026,115 @@ async function initializeModularSystem() {
         // Get module instances
         const canvasModule = app.getModule("canvas");
         const bitsModule = app.getModule("bits");
+        const threeModule = app.getModule("three");
 
         console.log("Modular system initialized successfully");
         console.log("Canvas module:", canvasModule);
         console.log("Bits module:", bitsModule);
+        console.log("Three module:", threeModule);
+
+        // Initialize Three.js module
+        if (threeModule) {
+            await threeModule.init();
+            // Make it globally accessible
+            window.threeModule = threeModule;
+        }
 
         // Start the original initialization
         initialize();
+
+        // Setup view toggle buttons
+        setupViewToggle(threeModule);
     } catch (error) {
         console.error("Failed to initialize modular system:", error);
         // Fallback to original initialization if modular system fails
         initialize();
     }
+}
+
+// Setup view toggle buttons (2D/3D/Both)
+function setupViewToggle(threeModule) {
+    const view2DBtn = document.getElementById("view-2d");
+    const view3DBtn = document.getElementById("view-3d");
+    const viewBothBtn = document.getElementById("view-both");
+    const appContainer = document.getElementById("app");
+
+    let currentView = "2d"; // Default view
+
+    // Function to update active button state
+    function updateActiveButton(activeBtn) {
+        [view2DBtn, view3DBtn, viewBothBtn].forEach((btn) => {
+            btn.classList.remove("active");
+        });
+        activeBtn.classList.add("active");
+    }
+
+    // Function to switch view
+    function switchView(view) {
+        currentView = view;
+
+        // Remove all view classes
+        appContainer.classList.remove("view-2d", "view-3d", "view-both");
+
+        // Add current view class
+        appContainer.classList.add(`view-${view}`);
+
+        // Update 3D view with current data if switching to 3D or both
+        if (threeModule && (view === "3d" || view === "both")) {
+            updateThreeView();
+        }
+
+        // Handle resize for canvas managers
+        if (mainCanvasManager) {
+            setTimeout(() => {
+                mainCanvasManager.resize();
+                updatepanelShape();
+                updateBitsPositions();
+            }, 100);
+        }
+
+        // Handle Three.js resize
+        if (threeModule && (view === "3d" || view === "both")) {
+            setTimeout(() => {
+                threeModule.onWindowResize();
+            }, 100);
+        }
+    }
+
+    // 2D view button
+    view2DBtn.addEventListener("click", () => {
+        switchView("2d");
+        updateActiveButton(view2DBtn);
+    });
+
+    // 3D view button
+    view3DBtn.addEventListener("click", () => {
+        switchView("3d");
+        updateActiveButton(view3DBtn);
+    });
+
+    // Both views button
+    viewBothBtn.addEventListener("click", () => {
+        switchView("both");
+        updateActiveButton(viewBothBtn);
+    });
+
+    // Set initial view (just update classes without resize)
+    appContainer.classList.add("view-2d");
+    updateActiveButton(view2DBtn);
+}
+
+// Function to update Three.js view with current panel and bits data
+function updateThreeView() {
+    const threeModule = window.threeModule;
+    if (!threeModule) return;
+
+    threeModule.updatePanel(
+        panelWidth,
+        panelHeight,
+        panelThickness,
+        bitsOnCanvas
+    );
 }
 
 // Call initialize function when the page loads

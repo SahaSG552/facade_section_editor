@@ -42,6 +42,29 @@
             </button>
             <h1>Facade Section Editor</h1>
             <div id="header-actions">
+                <div id="view-toggle" class="view-toggle">
+                    <button
+                        id="view-2d"
+                        class="view-toggle-btn active"
+                        title="2D View"
+                    >
+                        2D
+                    </button>
+                    <button
+                        id="view-3d"
+                        class="view-toggle-btn"
+                        title="3D View"
+                    >
+                        3D
+                    </button>
+                    <button
+                        id="view-both"
+                        class="view-toggle-btn"
+                        title="Both Views"
+                    >
+                        Both
+                    </button>
+                </div>
                 <button id="theme-toggle" title="Toggle Theme">
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -146,6 +169,9 @@
                     </button>
                 </div>
             </div>
+            <div id="three-canvas-container">
+                <!-- Three.js canvas will be inserted here -->
+            </div>
             <div id="right-menu">
                 <div id="part-params">
                     <h3>Part Parameters</h3>
@@ -215,7 +241,7 @@
         <script src="node_modules\clipper-lib\clipper.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bezier-js@2/bezier.js"></script>
         <script src="https://unpkg.com/makerjs@0.18.1/dist/browser.maker.js"></script>
-        <script src="node_modules/hammerjs/hammer.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
         <script src="src/script.js" type="module"></script>
     </body>
 </html>
