@@ -334,23 +334,20 @@ export default class ThreeModule extends BaseModule {
                 pathData.substring(0, 100) + "..."
             );
 
-            // Parse path to get points
-            const pathPoints = this.parsePathToPoints(pathData);
-            if (pathPoints.length < 2) {
-                console.log(
-                    `Not enough points for bit ${bitIndex}:`,
-                    pathPoints.length
-                );
+            // Parse path to get curves instead of points
+            const pathCurves = this.parsePathToCurves(pathData);
+            if (pathCurves.length === 0) {
+                console.log(`No curves found for bit ${bitIndex}:`, pathData);
                 continue;
             }
 
             console.log(
-                `Parsed ${pathPoints.length} points for bit ${bitIndex}`
+                `Parsed ${pathCurves.length} curves for bit ${bitIndex}`
             );
 
-            // Create 3D curve from path points
-            const curve3D = this.createCurveFromPath(
-                pathPoints,
+            // Create 3D curve from path curves
+            const curve3D = this.createCurveFromCurves(
+                pathCurves,
                 partFrontX,
                 partFrontY,
                 partFrontWidth,
@@ -391,61 +388,150 @@ export default class ThreeModule extends BaseModule {
     }
 
     /**
-     * Parse SVG path data to array of points
+     * Parse SVG path data to array of THREE.Curve objects
      */
-    parsePathToPoints(pathData) {
-        const points = [];
+    parsePathToCurves(pathData) {
+        const curves = [];
         const commands = pathData.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
 
         let currentX = 0;
         let currentY = 0;
+        let startX = 0;
+        let startY = 0;
 
         commands?.forEach((cmd) => {
-            const type = cmd[0];
-            const coords = cmd
+            const type = cmd[0].toUpperCase();
+            const params = cmd
                 .slice(1)
                 .trim()
                 .split(/[\s,]+/)
-                .map(Number);
+                .map(Number)
+                .filter((n) => !isNaN(n));
 
             switch (type) {
                 case "M": // Move to
-                    currentX = coords[0];
-                    currentY = coords[1];
-                    points.push({ x: currentX, y: currentY });
+                    if (params.length >= 2) {
+                        currentX = params[0];
+                        currentY = params[1];
+                        startX = currentX;
+                        startY = currentY;
+                    }
                     break;
                 case "L": // Line to
-                    currentX = coords[0];
-                    currentY = coords[1];
-                    points.push({ x: currentX, y: currentY });
+                    if (params.length >= 2) {
+                        const x = params[0];
+                        const y = params[1];
+                        curves.push(
+                            new THREE.LineCurve3(
+                                new THREE.Vector3(currentX, currentY, 0),
+                                new THREE.Vector3(x, y, 0)
+                            )
+                        );
+                        currentX = x;
+                        currentY = y;
+                    }
                     break;
                 case "H": // Horizontal line
-                    currentX = coords[0];
-                    points.push({ x: currentX, y: currentY });
+                    if (params.length >= 1) {
+                        const x = params[0];
+                        curves.push(
+                            new THREE.LineCurve3(
+                                new THREE.Vector3(currentX, currentY, 0),
+                                new THREE.Vector3(x, currentY, 0)
+                            )
+                        );
+                        currentX = x;
+                    }
                     break;
                 case "V": // Vertical line
-                    currentY = coords[0];
-                    points.push({ x: currentX, y: currentY });
+                    if (params.length >= 1) {
+                        const y = params[0];
+                        curves.push(
+                            new THREE.LineCurve3(
+                                new THREE.Vector3(currentX, currentY, 0),
+                                new THREE.Vector3(currentX, y, 0)
+                            )
+                        );
+                        currentY = y;
+                    }
+                    break;
+                case "C": // Cubic Bézier curve
+                    if (params.length >= 6) {
+                        const cp1x = params[0];
+                        const cp1y = params[1];
+                        const cp2x = params[2];
+                        const cp2y = params[3];
+                        const x = params[4];
+                        const y = params[5];
+                        curves.push(
+                            new THREE.CubicBezierCurve3(
+                                new THREE.Vector3(currentX, currentY, 0),
+                                new THREE.Vector3(cp1x, cp1y, 0),
+                                new THREE.Vector3(cp2x, cp2y, 0),
+                                new THREE.Vector3(x, y, 0)
+                            )
+                        );
+                        currentX = x;
+                        currentY = y;
+                    }
+                    break;
+                case "Q": // Quadratic Bézier curve
+                    if (params.length >= 4) {
+                        const cpx = params[0];
+                        const cpy = params[1];
+                        const x = params[2];
+                        const y = params[3];
+                        curves.push(
+                            new THREE.QuadraticBezierCurve3(
+                                new THREE.Vector3(currentX, currentY, 0),
+                                new THREE.Vector3(cpx, cpy, 0),
+                                new THREE.Vector3(x, y, 0)
+                            )
+                        );
+                        currentX = x;
+                        currentY = y;
+                    }
+                    break;
+                case "A": // Arc (approximated as line for simplicity)
+                    if (params.length >= 7) {
+                        const x = params[5];
+                        const y = params[6];
+                        curves.push(
+                            new THREE.LineCurve3(
+                                new THREE.Vector3(currentX, currentY, 0),
+                                new THREE.Vector3(x, y, 0)
+                            )
+                        );
+                        currentX = x;
+                        currentY = y;
+                    }
                     break;
                 case "Z": // Close path
-                    if (points.length > 0) {
-                        points.push({ x: points[0].x, y: points[0].y });
+                    if (curves.length > 0) {
+                        curves.push(
+                            new THREE.LineCurve3(
+                                new THREE.Vector3(currentX, currentY, 0),
+                                new THREE.Vector3(startX, startY, 0)
+                            )
+                        );
                     }
+                    currentX = startX;
+                    currentY = startY;
                     break;
             }
         });
 
-        return points;
+        return curves;
     }
 
     /**
-     * Create 3D curve from 2D path points
-     * Path points are in 2D canvas coordinates (from SVG offsetContour)
+     * Create 3D curve from 2D path curves
+     * Curves are in 2D canvas coordinates (from SVG offsetContour)
      * partFront defines the position and size of the front view in canvas space
      * Panel in 3D is positioned at (0, 0, 0) with front face at z=thickness/2
      */
-    createCurveFromPath(
-        pathPoints,
+    createCurveFromCurves(
+        pathCurves,
         partFrontX,
         partFrontY,
         partFrontWidth,
@@ -454,69 +540,191 @@ export default class ThreeModule extends BaseModule {
         panelThickness,
         panelAnchor
     ) {
-        console.log("Creating curve from path:", {
-            pointsCount: pathPoints.length,
-            firstPoint: pathPoints[0],
-            lastPoint: pathPoints[pathPoints.length - 1],
-            partFrontX,
-            partFrontY,
-            partFrontWidth,
-            partFrontHeight,
+        console.log("Creating curve from curves:", {
+            curvesCount: pathCurves.length,
+            firstCurve: pathCurves[0],
             depth,
+            panelThickness,
+            panelAnchor,
         });
 
-        const points3D = pathPoints.map((p) => {
-            // Panel in 3D space:
-            // - X=0 is horizontal center
-            // - Y=0 is bottom of panel
-            // - Z=0 is front face, negative Z goes into material
+        // Create 3D versions of curves
+        const curves3D = pathCurves
+            .map((curve) => {
+                if (curve instanceof THREE.LineCurve3) {
+                    const v1 = this.convertPoint2DTo3D(
+                        curve.v1.x,
+                        curve.v1.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    const v2 = this.convertPoint2DTo3D(
+                        curve.v2.x,
+                        curve.v2.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    return new THREE.LineCurve3(v1, v2);
+                } else if (curve instanceof THREE.CubicBezierCurve3) {
+                    const v0 = this.convertPoint2DTo3D(
+                        curve.v0.x,
+                        curve.v0.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    const v1 = this.convertPoint2DTo3D(
+                        curve.v1.x,
+                        curve.v1.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    const v2 = this.convertPoint2DTo3D(
+                        curve.v2.x,
+                        curve.v2.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    const v3 = this.convertPoint2DTo3D(
+                        curve.v3.x,
+                        curve.v3.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    return new THREE.CubicBezierCurve3(v0, v1, v2, v3);
+                } else if (curve instanceof THREE.QuadraticBezierCurve3) {
+                    const v0 = this.convertPoint2DTo3D(
+                        curve.v0.x,
+                        curve.v0.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    const v1 = this.convertPoint2DTo3D(
+                        curve.v1.x,
+                        curve.v1.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    const v2 = this.convertPoint2DTo3D(
+                        curve.v2.x,
+                        curve.v2.y,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                    return new THREE.QuadraticBezierCurve3(v0, v1, v2);
+                }
+                // For unsupported curves, approximate with line
+                return null;
+            })
+            .filter((c) => c !== null);
 
-            // Path points are in canvas coordinates (same as partFront SVG element)
-            // Need to convert from canvas space to panel-relative 3D space
-
-            // Convert X: subtract partFront left edge, then center
-            const x3d = p.x - partFrontX - partFrontWidth / 2;
-
-            // Convert Y: path Y is in canvas space where Y increases downward
-            // partFrontY is the top of the front view rectangle
-            // In 3D, Y=0 is bottom and increases upward
-            // So: subtract from partFront bottom to get distance from bottom
-            const partFrontBottom = partFrontY + partFrontHeight;
-            const y3d = partFrontBottom - p.y;
-
-            // Z: depth into material from the anchor surface
-            let z3d;
-            if (panelAnchor === "top-left") {
-                // From front surface inward
-                z3d = depth - panelThickness / 2;
-            } else if (panelAnchor === "bottom-left") {
-                // From back surface inward
-                z3d = depth + panelThickness / 2;
-            } else {
-                // Default to front
-                z3d = -depth;
-            }
-
-            return new THREE.Vector3(x3d, y3d, z3d);
+        console.log("Sample 3D curves:", {
+            first: curves3D[0],
+            middle: curves3D[Math.floor(curves3D.length / 2)],
+            last: curves3D[curves3D.length - 1],
         });
 
-        console.log("Sample 3D points:", {
-            first: points3D[0],
-            middle: points3D[Math.floor(points3D.length / 2)],
-            last: points3D[points3D.length - 1],
-        });
-
-        // Create exact path using line segments (no smoothing)
-        // CurvePath allows us to build a path from multiple curves
+        // Create exact path using the curves
         const path = new THREE.CurvePath();
-
-        for (let i = 0; i < points3D.length - 1; i++) {
-            // Create a straight line segment between consecutive points
-            const segment = new THREE.LineCurve3(points3D[i], points3D[i + 1]);
-            path.add(segment);
-        }
+        curves3D.forEach((curve) => {
+            path.add(curve);
+        });
 
         return path;
+    }
+
+    /**
+     * Convert 2D point to 3D coordinates
+     */
+    convertPoint2DTo3D(
+        x2d,
+        y2d,
+        partFrontX,
+        partFrontY,
+        partFrontWidth,
+        partFrontHeight,
+        depth,
+        panelThickness,
+        panelAnchor
+    ) {
+        // Panel in 3D space:
+        // - X=0 is horizontal center
+        // - Y=0 is bottom of panel
+        // - Z depends on anchor
+
+        // Convert X: subtract partFront left edge, then center
+        const x3d = x2d - partFrontX - partFrontWidth / 2;
+
+        // Convert Y: path Y is in canvas space where Y increases downward
+        // partFrontY is the top of the front view rectangle
+        // In 3D, Y=0 is bottom and increases upward
+        // Adjust based on panel anchor
+        const partFrontBottom = partFrontY + partFrontHeight;
+        let y3d = partFrontBottom - y2d;
+
+        // For bottom-left anchor, invert Y (material bottom becomes Y=0)
+        if (panelAnchor === "bottom-left") {
+            y3d = y2d - partFrontY;
+        }
+
+        // Z: depth into material from the anchor surface
+        let z3d;
+        if (panelAnchor === "top-left") {
+            // From front surface inward
+            z3d = depth - panelThickness / 2;
+        } else if (panelAnchor === "bottom-left") {
+            // From back surface inward
+            z3d = depth + panelThickness / 2;
+        } else {
+            // Default to front
+            z3d = -depth;
+        }
+
+        return new THREE.Vector3(x3d, y3d, z3d);
     }
 
     /**
@@ -575,8 +783,7 @@ export default class ThreeModule extends BaseModule {
                             );
                             if (shapes.length > 0) {
                                 let shape = shapes[0];
-                                // Rotate the profile 90 degrees before extrusion
-                                shape = this.rotateShape(shape, Math.PI / 2);
+                                // No rotation needed here, rotation is done in ProfiledContourGeometry
                                 resolve(shape);
                             } else {
                                 resolve(this.createFallbackShape(bitData));
@@ -648,20 +855,38 @@ export default class ThreeModule extends BaseModule {
      */
     extrudeAlongPath(profile, curve, color) {
         try {
-            // Sample the curve to get path segments
-            const segments = Math.max(100, Math.floor(curve.getLength() / 2));
+            // Get contour points from the curve
+            const segments = Math.max(50, Math.floor(curve.getLength() / 5));
+            const contourPoints = curve.getPoints(segments);
 
-            // Use TubeGeometry for extrusion along path
-            // Note: TubeGeometry creates a tube, but we can use ExtrudeGeometry for custom profiles
-            const extrudeSettings = {
-                steps: segments,
-                bevelEnabled: false,
-                extrudePath: curve,
-            };
+            // Convert Vector3 to Vector2 for ProfiledContourGeometry
+            let contour = contourPoints.map(
+                (p) => new THREE.Vector3(p.x, p.y, p.z)
+            );
 
-            const geometry = new THREE.ExtrudeGeometry(
+            // Determine if the path is closed
+            // Check if first and last points are close enough
+            const firstPoint = contour[0];
+            const lastPoint = contour[contour.length - 1];
+            const contourClosed = firstPoint.distanceTo(lastPoint) < 0.01;
+
+            // For closed contours, remove the duplicate last point
+            if (contourClosed && contour.length > 1) {
+                contour = contour.slice(0, -1);
+            }
+
+            console.log("Extruding with mitered corners:", {
+                profilePoints: profile.getPoints().length,
+                contourPoints: contour.length,
+                contourClosed,
+                curveLength: curve.getLength(),
+            });
+
+            // Use ProfiledContourGeometry for mitered corners
+            const geometry = this.ProfiledContourGeometry(
                 profile,
-                extrudeSettings
+                contour,
+                contourClosed
             );
 
             const material = new THREE.MeshStandardMaterial({
@@ -680,6 +905,152 @@ export default class ThreeModule extends BaseModule {
         } catch (error) {
             console.error("Error extruding along path:", error);
             return null;
+        }
+    }
+
+    /**
+     * Create profiled contour geometry with mitered corners
+     * Based on https://jsfiddle.net/prisoner849/bygy1xkt/
+     */
+    ProfiledContourGeometry(profileShape, contour, contourClosed) {
+        try {
+            contourClosed = contourClosed !== undefined ? contourClosed : true;
+
+            let profileGeometry = new THREE.ShapeGeometry(profileShape);
+            profileGeometry.rotateX(-Math.PI * 0.5);
+            let profile = profileGeometry.attributes.position;
+
+            let profilePoints = new Float32Array(
+                profile.count * contour.length * 3
+            );
+
+            for (let i = 0; i < contour.length; i++) {
+                let v1 = new THREE.Vector2().subVectors(
+                    contour[i - 1 < 0 ? contour.length - 1 : i - 1],
+                    contour[i]
+                );
+                let v2 = new THREE.Vector2().subVectors(
+                    contour[i + 1 == contour.length ? 0 : i + 1],
+                    contour[i]
+                );
+                let angle = v2.angle() - v1.angle();
+                let halfAngle = angle * 0.5;
+
+                let hA = halfAngle;
+                let tA = v2.angle() + Math.PI * 0.5;
+                if (!contourClosed) {
+                    if (i == 0 || i == contour.length - 1) {
+                        hA = Math.PI * 0.5;
+                    }
+                    if (i == contour.length - 1) {
+                        tA = v1.angle() - Math.PI * 0.5;
+                    }
+                }
+
+                let shift = Math.tan(hA - Math.PI * 0.5);
+                let shiftMatrix = new THREE.Matrix4().set(
+                    1,
+                    0,
+                    0,
+                    0,
+                    -shift,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1
+                );
+
+                let tempAngle = tA;
+                let rotationMatrix = new THREE.Matrix4().set(
+                    Math.cos(tempAngle),
+                    -Math.sin(tempAngle),
+                    0,
+                    0,
+                    Math.sin(tempAngle),
+                    Math.cos(tempAngle),
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1
+                );
+
+                let translationMatrix = new THREE.Matrix4().set(
+                    1,
+                    0,
+                    0,
+                    contour[i].x,
+                    0,
+                    1,
+                    0,
+                    contour[i].y,
+                    0,
+                    0,
+                    1,
+                    contour[i].z,
+                    0,
+                    0,
+                    0,
+                    1
+                );
+
+                let cloneProfile = profile.clone();
+                cloneProfile.applyMatrix4(shiftMatrix);
+                cloneProfile.applyMatrix4(rotationMatrix);
+                cloneProfile.applyMatrix4(translationMatrix);
+
+                profilePoints.set(
+                    cloneProfile.array,
+                    cloneProfile.count * i * 3
+                );
+            }
+
+            let fullProfileGeometry = new THREE.BufferGeometry();
+            fullProfileGeometry.setAttribute(
+                "position",
+                new THREE.BufferAttribute(profilePoints, 3)
+            );
+            let index = [];
+
+            let lastCorner =
+                contourClosed == false ? contour.length - 1 : contour.length;
+            for (let i = 0; i < lastCorner; i++) {
+                for (let j = 0; j < profile.count; j++) {
+                    let currCorner = i;
+                    let nextCorner = i + 1 == contour.length ? 0 : i + 1;
+                    let currPoint = j;
+                    let nextPoint = j + 1 == profile.count ? 0 : j + 1;
+
+                    let a = nextPoint + profile.count * currCorner;
+                    let b = currPoint + profile.count * currCorner;
+                    let c = currPoint + profile.count * nextCorner;
+                    let d = nextPoint + profile.count * nextCorner;
+
+                    index.push(a, b, d);
+                    index.push(b, c, d);
+                }
+            }
+
+            fullProfileGeometry.setIndex(index);
+            fullProfileGeometry.computeVertexNormals();
+
+            return fullProfileGeometry;
+        } catch (error) {
+            console.error("Error in ProfiledContourGeometry:", error);
+            // Fallback to simple box geometry
+            return new THREE.BoxGeometry(1, 1, 1);
         }
     }
 
