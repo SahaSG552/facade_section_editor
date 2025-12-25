@@ -581,6 +581,8 @@ function updatepanelParams() {
 
     updatepanelShape();
     updateBitsPositions();
+    // Assign profile paths to bits for 3D rendering
+    bitsManager.assignProfilePathsToBits(bitsOnCanvas);
     updateGridAnchor(); // Update grid anchor when panel changes
     updateOffsetContours();
     updatePhantomBits();
@@ -733,6 +735,9 @@ function updateOffsetContours() {
 
     // Clear the offset contours array
     offsetContours = [];
+
+    // Update global reference
+    window.offsetContours = offsetContours;
 
     // Always calculate relative to top anchor for consistent offset calculations
     const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
@@ -1137,6 +1142,8 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
         groupName: groupName, // store the group name for updates
     };
     bitsOnCanvas.push(newBit);
+    // Assign profile path to the new bit
+    bitsManager.assignProfilePathsToBits([newBit]);
     updateBitsSheet();
     updateStrokeWidths();
     updateOffsetContours();
@@ -2920,6 +2927,8 @@ async function restoreBitPositions(positionsData) {
                 };
 
                 bitsOnCanvas.push(newBit);
+                // Assign profile path to the restored bit
+                bitsManager.assignProfilePathsToBits([newBit]);
                 restoredCount++;
 
                 // Apply the saved position
@@ -3125,15 +3134,16 @@ function setupViewToggle(threeModule) {
 }
 
 // Function to update Three.js view with current panel and bits data
-function updateThreeView() {
+async function updateThreeView() {
     const threeModule = window.threeModule;
     if (!threeModule) return;
 
-    threeModule.updatePanel(
+    await threeModule.updatePanel(
         panelWidth,
         panelHeight,
         panelThickness,
-        bitsOnCanvas
+        bitsOnCanvas,
+        panelAnchor
     );
 }
 

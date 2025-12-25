@@ -1167,4 +1167,141 @@ export default class BitsManager {
             this.onUpdateCanvasBits(bitId);
         }
     }
+
+    // Assign profilePath to bits based on their SVG shapes
+    assignProfilePathsToBits(bits) {
+        bits.forEach((bit) => {
+            // Use bit.bitData as the bit parameters
+            const bitParams = bit.bitData;
+            // Create temporary bit shape at origin (0,0) without shank
+            const group = this.createBitShapeElement(
+                bitParams,
+                bit.groupName,
+                0,
+                0,
+                false,
+                false
+            );
+            const bitShape = group.querySelector(".bit-shape");
+
+            let pathData = "";
+
+            if (bitShape) {
+                if (bitShape.tagName === "rect") {
+                    // Convert rect to path
+                    const x = parseFloat(bitShape.getAttribute("x"));
+                    const y = parseFloat(bitShape.getAttribute("y"));
+                    const w = parseFloat(bitShape.getAttribute("width"));
+                    const h = parseFloat(bitShape.getAttribute("height"));
+                    if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+                        pathData = `M ${x} ${y} L ${x + w} ${y} L ${x + w} ${
+                            y + h
+                        } L ${x} ${y + h} Z`;
+                    }
+                } else if (bitShape.tagName === "polygon") {
+                    // Convert polygon points to path
+                    const pointsStr = bitShape.getAttribute("points");
+                    if (pointsStr) {
+                        const points = pointsStr
+                            .trim()
+                            .split(/\s+/)
+                            .filter((p) => p.includes(","));
+                        if (points.length > 0) {
+                            pathData = "M " + points.join(" L ") + " Z";
+                        }
+                    }
+                } else if (bitShape.tagName === "path") {
+                    // Use path d attribute directly
+                    pathData = bitShape.getAttribute("d") || "";
+                }
+            }
+
+            // Invert Y coordinates to match Three.js coordinate system (SVG Y is down, Three.js Y is up)
+            if (pathData) {
+                pathData = this.invertYInPath(pathData);
+                // Ensure the path is closed
+                if (!pathData.trim().endsWith("Z")) {
+                    pathData += " Z";
+                }
+            }
+
+            // Assign to bitData
+            if (!bit.bitData) bit.bitData = {};
+            bit.bitData.profilePath = pathData;
+        });
+    }
+
+    // Invert Y coordinates in SVG path data
+    invertYInPath(pathData) {
+        const commands = pathData.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
+        const result = [];
+        commands.forEach((cmd) => {
+            const type = cmd[0].toUpperCase();
+            const params = cmd
+                .slice(1)
+                .trim()
+                .split(/[\s,]+/)
+                .map(Number)
+                .filter((n) => !isNaN(n));
+            result.push(type);
+            let i = 0;
+            while (i < params.length) {
+                if (type === "M" || type === "L" || type === "T") {
+                    // x y
+                    result.push(params[i], -params[i + 1]);
+                    i += 2;
+                } else if (type === "H") {
+                    // x
+                    result.push(params[i]);
+                    i += 1;
+                } else if (type === "V") {
+                    // y
+                    result.push(-params[i]);
+                    i += 1;
+                } else if (type === "C") {
+                    // x1 y1 x2 y2 x y
+                    result.push(
+                        params[i],
+                        -params[i + 1],
+                        params[i + 2],
+                        -params[i + 3],
+                        params[i + 4],
+                        -params[i + 5]
+                    );
+                    i += 6;
+                } else if (type === "S" || type === "Q") {
+                    // x1 y1 x y
+                    result.push(
+                        params[i],
+                        -params[i + 1],
+                        params[i + 2],
+                        -params[i + 3]
+                    );
+                    i += 4;
+                } else if (type === "A") {
+                    // rx ry angle large sweep x y
+                    // Invert sweep flag when Y is inverted to maintain correct arc direction
+                    const sweep = 1 - params[i + 4];
+                    result.push(
+                        params[i],
+                        params[i + 1],
+                        params[i + 2],
+                        params[i + 3],
+                        sweep,
+                        params[i + 5],
+                        -params[i + 6]
+                    );
+                    i += 7;
+                } else if (type === "Z") {
+                    // nothing
+                    break;
+                } else {
+                    // unknown, add as is
+                    result.push(...params.slice(i));
+                    break;
+                }
+            }
+        });
+        return result.join(" ");
+    }
 }
