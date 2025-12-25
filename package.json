@@ -35,7 +35,8 @@
     "clipper-lib": "^6.4.2",
     "jsdom": "^27.3.0",
     "makerjs": "^0.17.6",
-    "three": "^0.182.0"
+    "three": "^0.182.0",
+    "three-bvh-csg": "^0.0.17"
   },
   "devDependencies": {
     "@capacitor/android": "^5.0.0",

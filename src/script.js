@@ -39,6 +39,10 @@ let partPath;
 let bitsVisible = true; // Track bits visibility state
 let shankVisible = true; // Track shank visibility state
 
+// Make these available to other modules via window
+window.showPart = showPart;
+window.bitsVisible = bitsVisible;
+
 // Canvas manager instance
 let mainCanvasManager;
 let bitsManager; // Bits manager instance
@@ -333,6 +337,11 @@ function initializeSVG() {
         updatePhantomBits();
 
         if (showPart) updatePartShape();
+
+        // Update 3D view
+        if (window.threeModule) {
+            updateThreeView();
+        }
     }
 
     // Setup export/import buttons
@@ -1038,7 +1047,7 @@ function createpanelAnchorButton(anchor) {
 }
 
 // Update canvas bits when a bit in the library is changed
-function updateCanvasBitsForBitId(bitId) {
+async function updateCanvasBitsForBitId(bitId) {
     // Get the updated bit from the library
     const allBits = getBits();
     let updatedBitData = null;
@@ -1057,6 +1066,9 @@ function updateCanvasBitsForBitId(bitId) {
             bit.bitData = updatedBitData;
             // Update name
             bit.name = updatedBitData.name;
+
+            // Reassign profile path in case it changed
+            bitsManager.assignProfilePathsToBits([bit]);
 
             // Redraw shape group with correct selection state
             const oldShapeGroup = bit.group.querySelector("g");
@@ -1100,9 +1112,30 @@ function updateCanvasBitsForBitId(bitId) {
         }
     });
 
+    // Update 3D view immediately after profile paths are updated
+    if (window.threeModule) {
+        await updateThreeView();
+        // If in Part view, recalculate CSG with new profile
+        if (showPart) {
+            window.threeModule.applyCSGOperation(true);
+        }
+    }
+
     // Update the table
     updateBitsSheet();
+    // Update offset contours and phantom bits since bit shape may have changed
+    updateOffsetContours();
+    updatePhantomBits();
     if (showPart) updatePartShape();
+
+    // Update 3D view
+    if (window.threeModule) {
+        await updateThreeView();
+        // If in Part view, recalculate CSG with updated shapes
+        if (showPart) {
+            window.threeModule.applyCSGOperation(true);
+        }
+    }
 }
 
 // Draw bit shape
@@ -1200,12 +1233,12 @@ function updateBitsSheet() {
         xInput.type = "text";
         const anchorOffset = getAnchorOffset(bit);
         xInput.value = bit.x + anchorOffset.x;
-        xInput.addEventListener("change", () => {
+        xInput.addEventListener("change", async () => {
             const val = evaluateMathExpression(xInput.value);
             xInput.value = val;
             const newAnchorX = parseFloat(val) || 0;
             const newX = newAnchorX - anchorOffset.x;
-            updateBitPosition(index, newX, bit.y);
+            await updateBitPosition(index, newX, bit.y);
         });
         xCell.appendChild(xInput);
         row.appendChild(xCell);
@@ -1215,11 +1248,11 @@ function updateBitsSheet() {
         const yInput = document.createElement("input");
         yInput.type = "text";
         yInput.value = transformYForDisplay(bit.y, anchorOffset);
-        yInput.addEventListener("change", () => {
+        yInput.addEventListener("change", async () => {
             const val = evaluateMathExpression(yInput.value);
             yInput.value = val;
             const newY = transformYFromDisplay(val, anchorOffset);
-            updateBitPosition(index, bit.x, newY);
+            await updateBitPosition(index, bit.x, newY);
         });
         yCell.appendChild(yInput);
         row.appendChild(yCell);
@@ -1233,9 +1266,9 @@ function updateBitsSheet() {
         alignBtn.style.padding = "0";
         alignBtn.style.cursor = "pointer";
         alignBtn.appendChild(createAlignmentButton(bit.alignment || "center"));
-        alignBtn.addEventListener("click", (e) => {
+        alignBtn.addEventListener("click", async (e) => {
             e.stopPropagation();
-            cycleAlignment(index);
+            await cycleAlignment(index);
         });
         alignCell.appendChild(alignBtn);
         row.appendChild(alignCell);
@@ -1275,6 +1308,14 @@ function updateBitsSheet() {
             bit.operation = opSelect.value;
             updateOffsetContours(); // Update offsets when operation changes
             updatePhantomBits(); // Update phantom bits when operation changes
+            // Update 3D view
+            if (window.threeModule) {
+                updateThreeView();
+                // If in Part view, recalculate CSG with new operation
+                if (showPart) {
+                    window.threeModule.applyCSGOperation(true);
+                }
+            }
         });
 
         opCell.appendChild(opSelect);
@@ -1315,6 +1356,11 @@ function updateBitsSheet() {
             // Update offset contour color
             updateOffsetContours();
             updatePhantomBits();
+
+            // Update 3D view
+            if (window.threeModule) {
+                updateThreeView();
+            }
         });
 
         colorCell.appendChild(colorInput);
@@ -1398,10 +1444,15 @@ function deleteBitFromCanvas(index) {
     updateOffsetContours();
     updatePhantomBits();
     if (showPart) updatePartShape();
+
+    // Update 3D view
+    if (window.threeModule) {
+        updateThreeView();
+    }
 }
 
 // Cycle alignment state
-function cycleAlignment(index) {
+async function cycleAlignment(index) {
     const bit = bitsOnCanvas[index];
     if (!bit) return;
 
@@ -1420,7 +1471,7 @@ function cycleAlignment(index) {
     if (deltaX !== 0 || deltaY !== 0) {
         const newX = bit.x + deltaX;
         const newY = bit.y + deltaY;
-        updateBitPosition(index, newX, newY);
+        await updateBitPosition(index, newX, newY);
     }
 
     // Update the table to show new alignment button
@@ -1428,6 +1479,11 @@ function cycleAlignment(index) {
 
     // Recalculate part shape if part view is enabled
     if (showPart) updatePartShape();
+
+    // Update 3D view
+    if (window.threeModule) {
+        updateThreeView();
+    }
 }
 
 // Select a bit and highlight it on canvas (multi-selection support)
@@ -1544,7 +1600,7 @@ function resetBitHighlight(index) {
     }
 }
 
-function updateBitPosition(index, newX, newY) {
+async function updateBitPosition(index, newX, newY) {
     // update panel params to get correct panel origin
     updatepanelParams();
     const anchorCoords = getPanelAnchorCoords();
@@ -1617,6 +1673,15 @@ function updateBitPosition(index, newX, newY) {
     updateStrokeWidths();
     // Update part shape if part view is enabled and bits were moved via table coordinates
     if (showPart) updatePartShape();
+
+    // Update 3D view
+    if (window.threeModule) {
+        await updateThreeView();
+        // If in Part view, recalculate CSG with new bit positions
+        if (showPart) {
+            window.threeModule.applyCSGOperation(true);
+        }
+    }
 }
 
 function handleDragStart(e) {
@@ -2565,6 +2630,7 @@ function updatePartShape() {
 // Toggle bits visibility
 function toggleBitsVisibility() {
     bitsVisible = !bitsVisible;
+    window.bitsVisible = bitsVisible; // Update window reference
     const bitsBtn = document.getElementById("bits-btn");
     const phantomsLayer = mainCanvasManager.getLayer("phantoms");
 
@@ -2593,6 +2659,11 @@ function toggleBitsVisibility() {
         bitsBtn.classList.add("bits-hidden");
         bitsBtn.title = "Show Bits";
     }
+
+    // Update 3D view to show/hide bit meshes
+    if (window.threeModule) {
+        window.threeModule.toggleBitMeshesVisibility(bitsVisible);
+    }
 }
 
 // Toggle shank visibility
@@ -2618,13 +2689,16 @@ function toggleShankVisibility() {
     }
 }
 
-function togglePartView() {
+async function togglePartView() {
     if (!bitsLayer || !partSection || !partPath) {
         console.error("SVG elements not initialized");
         return;
     }
 
     showPart = !showPart;
+    window.showPart = showPart; // Update window reference
+    console.log("togglePartView: showPart changed to", showPart);
+
     const partBtn = document.getElementById("part-btn");
 
     if (showPart) {
@@ -2644,6 +2718,17 @@ function togglePartView() {
         partBtn.classList.remove("part-visible");
         partBtn.classList.add("part-hidden");
         partBtn.title = "Show Part";
+    }
+
+    // Update 3D view and apply CSG logic
+    if (window.threeModule) {
+        console.log("togglePartView: showPart =", showPart);
+
+        // Always update 3D view with current panel/bits data first
+        await updateThreeView();
+
+        // Then apply or remove CSG based on showPart flag
+        window.threeModule.applyCSGOperation(showPart);
     }
 }
 
@@ -2682,6 +2767,9 @@ function initialize() {
     // Initial fit to scale after all initialization is complete
     requestAnimationFrame(() => {
         fitToScale();
+
+        // Initialize 3D panel view
+        updateThreeView();
 
         // Auto-load saved bit positions after everything is initialized
         setTimeout(async () => {
@@ -3098,6 +3186,7 @@ function setupViewToggle(threeModule) {
             setTimeout(() => {
                 mainCanvasManager.resize();
                 updatepanelShape();
+                updateOffsetContours(); // Update offset contours after panel shape changes
                 updateBitsPositions();
             }, 100);
         }
