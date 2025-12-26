@@ -11,6 +11,12 @@ import ExportModule from "./export/ExportModule.js";
 import { OffsetCalculator } from "./utils/offsetCalculator.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
 import { makerCalculateResultPolygon } from "./utils/makerProcessor.js";
+import LoggerFactory from "./core/LoggerFactory.js";
+import eventBus from "./core/eventBus.js";
+import appState from "./state/AppState.js";
+import csgScheduler from "./scheduling/CSGScheduler.js";
+import InteractionManager from "./interaction/InteractionManager.js";
+import PanelManager from "./panel/PanelManager.js";
 
 // Import new modular system
 import { app } from "./app/main.js";
@@ -18,6 +24,7 @@ import CanvasModule from "./canvas/CanvasModule.js";
 import BitsModule from "./bits/BitsModule.js";
 // SVG namespace
 const svgNS = "http://www.w3.org/2000/svg";
+const log = LoggerFactory.createLogger("Script");
 
 // Get DOM elements
 const canvas = document.getElementById("canvas");
@@ -32,8 +39,6 @@ let panelWidth = 400;
 let panelHeight = 600;
 let panelThickness = 19;
 let panelAnchor = "top-left"; // "top-left" or "bottom-left"
-
-const CLIPPER_SCALE = 1000; // Kept for DXF export compatibility
 let showPart = false;
 let partPath;
 let bitsVisible = true; // Track bits visibility state
@@ -47,68 +52,31 @@ window.isDraggingBit = false;
 // Canvas manager instance
 let mainCanvasManager;
 let bitsManager; // Bits manager instance
+let interactionManager; // Interaction manager instance
+let panelManager; // Panel manager instance
 let gridSize = 1; // Default grid size in pixels (1mm = 10px)
+
+// Sync initial state into AppState
+appState.setPanelSize(panelWidth, panelHeight);
+appState.setPanelThickness(panelThickness);
+appState.setPanelAnchor(panelAnchor);
+appState.setShowPart(showPart);
+appState.setBitsVisible(bitsVisible);
+appState.setShankVisible(shankVisible);
+appState.setGridSize(gridSize);
 
 // Panel click-outside handlers (global scope for resize listener access)
 let leftPanelClickOutsideHandler = null;
 let rightPanelClickOutsideHandler = null;
 
-// Pan variables for canvas panning
-
-// Pan variables for canvas panning
-let isPanning = false;
-let panStartX = 0;
-let panStartY = 0;
-let csgDebounceTimer = null;
-let isDraggingBit = false;
-let panStartPanX = 0;
-let panStartPanY = 0;
-
-// Drag variables for selected bits (now supports multi-selection)
-let draggedBitIndex = null; // Index of the bit being dragged (for multi-selection)
+// Bit selection state (managed by interaction manager)
 let selectedBitIndices = []; // Array of selected bit indices
-let dragStartX = 0;
-let dragStartY = 0;
-let dragStarted = false; // Flag to track if drag actually started (mouse moved)
-
-// Touch drag variables
-let isTouchDragging = false;
-let touchDragStartX = 0;
-let touchDragStartY = 0;
-let touchIdentifier = null; // Track which touch we're following
-
-// Touch pan variables
-let isTouchPanning = false;
-let touchPanStartX = 0;
-let touchPanStartY = 0;
-let touchPanStartPanX = 0;
-let touchPanStartPanY = 0;
-
-// Auto-scroll variables
-let autoScrollActive = false;
-let autoScrollInterval = null;
-let autoScrollSpeed = 50; // pixels per second
-let autoScrollThreshold = 50; // pixels from edge to start auto-scroll
-
-// Pinch-to-zoom variables
-let isPinching = false;
-let initialPinchDistance = 0;
-let initialZoomLevel = 1;
-
-// Double-tap variables
-let lastTapTime = 0;
-let lastTapX = 0;
-let lastTapY = 0;
 
 // BitsManager will be created in initializeSVG after CanvasManager is set up
 
 // Initialize SVG elements using CanvasManager
 function initializeSVG() {
-    // Create panel rectangle first (before CanvasManager to avoid callback issues)
-    partSection = document.createElementNS(svgNS, "rect");
-
-    // Create part front rectangle
-    partFront = document.createElementNS(svgNS, "rect");
+    // Note: partSection and partFront will be created by PanelManager via initializeSVGElements()
 
     // Check if CanvasManager already exists (from modular system)
     if (!mainCanvasManager) {
@@ -136,14 +104,6 @@ function initializeSVG() {
                 // Update stroke widths when zoom changes
                 updateStrokeWidths(zoomLevel);
             },
-            // onTap: (e) => {
-            //     // Handle tap for selection
-            //     handleCanvasTap(e);
-            // },
-            // onDoubleTap: (e) => {
-            //     // Handle double tap for clearing selections
-            //     handleCanvasDoubleTap(e);
-            // },
         });
 
         // Make it available globally for modules
@@ -154,14 +114,6 @@ function initializeSVG() {
     const panelLayer = mainCanvasManager.getLayer("panel");
     bitsLayer = mainCanvasManager.getLayer("bits");
     const phantomsLayer = mainCanvasManager.getLayer("phantoms");
-
-    // Add panel rectangle to layer
-    panelLayer.appendChild(partSection);
-    partSection.id = "panel-section";
-    partFront.id = "part-front";
-
-    // Add part front rectangle to layer
-    panelLayer.appendChild(partFront);
 
     // Create part path
     partPath = document.createElementNS(svgNS, "path");
@@ -176,9 +128,6 @@ function initializeSVG() {
     const panelAnchorIndicator = document.createElementNS(svgNS, "g");
     panelAnchorIndicator.id = "panel-anchor-indicator";
     panelLayer.appendChild(panelAnchorIndicator);
-
-    // Initial draw of panel shape
-    updatepanelShape();
 
     // Add zoom button event listeners
     document
@@ -202,6 +151,7 @@ function initializeSVG() {
         const val = evaluateMathExpression(e.target.value);
         e.target.value = val;
         gridSize = parseFloat(val) || 1;
+        appState.setGridSize(gridSize);
         // Update grid size in canvas manager
         mainCanvasManager.config.gridSize = gridSize;
         // Update grid anchor position with new grid size
@@ -250,16 +200,6 @@ function initializeSVG() {
         .getElementById("clear-btn")
         .addEventListener("click", clearAllBits);
 
-    // Add mouse and touch event listeners for bit dragging
-    canvas.addEventListener("mousedown", handleMouseDown);
-    canvas.addEventListener("mousemove", handleMouseMove);
-    canvas.addEventListener("mouseup", handleMouseUp);
-
-    // Touch event listeners for mobile devices
-    canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
-    canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
-    canvas.addEventListener("touchend", handleTouchEnd, { passive: false });
-
     // Create BitsManager instance now that CanvasManager is available
     bitsManager = new BitsManager(mainCanvasManager);
 
@@ -273,6 +213,69 @@ function initializeSVG() {
     bitsManager.onUpdateCanvasBits = (bitId) => updateCanvasBitsForBitId(bitId);
     bitsManager.onUpdateCanvasBitWithParams = (bitId, newParams, groupName) =>
         updateCanvasBitWithParams(bitId, newParams, groupName);
+
+    // Initialize InteractionManager for mouse/touch events
+    interactionManager = new InteractionManager(canvas, mainCanvasManager, {
+        autoScrollSpeed: 50,
+        autoScrollThreshold: 50,
+        bitTolerance: 20,
+        touchTolerance: 30,
+    });
+
+    // Set callbacks for InteractionManager
+    interactionManager.setCallbacks({
+        getBitsOnCanvas: () => bitsOnCanvas,
+        getSelectedBitIndices: () => selectedBitIndices,
+        selectBit: selectBit,
+        resetBitHighlight: resetBitHighlight,
+        updateBitPosition: updateBitPosition,
+        updateTableCoordinates: updateTableCoordinates,
+        updatePartShape: updatePartShape,
+        getAnchorOffset: getAnchorOffset,
+        getPanelAnchorCoords: getPanelAnchorCoords,
+        updateBitsSheet: updateBitsSheet,
+        redrawBitsOnCanvas: redrawBitsOnCanvas,
+        getBitsVisible: () => bitsVisible,
+        getShowPart: () => showPart,
+        getThreeModule: () => window.threeModule,
+        getCsgScheduler: () => csgScheduler,
+    });
+
+    // Initialize PanelManager for panel shape and anchor operations
+    panelManager = new PanelManager({
+        canvas: canvas,
+        canvasManager: mainCanvasManager,
+        bitsManager: bitsManager,
+        panelWidth: panelWidth,
+        panelHeight: panelHeight,
+        panelThickness: panelThickness,
+        panelAnchor: panelAnchor,
+        gridSize: gridSize,
+        onPanelUpdate: () => {
+            // Update panel dimensions in script scope
+            panelWidth = panelManager.getWidth();
+            panelHeight = panelManager.getHeight();
+            panelThickness = panelManager.getThickness();
+        },
+        onAnchorChange: (newAnchor) => {
+            panelAnchor = newAnchor;
+            updateBitsForNewAnchor();
+            updateOffsetContours();
+            updatePhantomBits();
+            if (showPart) updatePartShape();
+        },
+        getAdaptiveStrokeWidth: getAdaptiveStrokeWidth,
+        updatePartShape: updatePartShape,
+        updateOffsetContours: updateOffsetContours,
+        updatePhantomBits: updatePhantomBits,
+        updateBitsSheet: updateBitsSheet,
+    });
+
+    // Initialize SVG elements for panel manager
+    panelManager.initializeSVGElements();
+    // Sync panel element references for legacy helpers
+    partSection = panelManager.partSection;
+    partFront = panelManager.partFront;
 
     // Update canvas bit with new parameters (for real-time editing)
     function updateCanvasBitWithParams(bitId, newParams, groupName) {
@@ -423,22 +426,17 @@ function updateCanvasAfterPanelToggle() {
 
 // Cycle panel anchor
 function cyclepanelAnchor() {
-    // Cycle between "top-left" and "bottom-left"
-    panelAnchor = panelAnchor === "top-left" ? "bottom-left" : "top-left";
+    if (panelManager) {
+        panelManager.cyclePanelAnchor();
+        panelAnchor = panelManager.getAnchor();
 
-    // Update button icon
-    const panelAnchorBtn = document.getElementById("panel-anchor-btn");
-    panelAnchorBtn.innerHTML = "";
-    panelAnchorBtn.appendChild(createpanelAnchorButton(panelAnchor));
-
-    // Recalculate bit positions relative to new anchor
-    updateBitsForNewAnchor();
-
-    // Update grid anchor position
-    updateGridAnchor();
-
-    // Update indicator
-    updatepanelAnchorIndicator();
+        // Update button icon
+        const panelAnchorBtn = document.getElementById("panel-anchor-btn");
+        if (panelAnchorBtn) {
+            panelAnchorBtn.innerHTML = "";
+            panelAnchorBtn.appendChild(createpanelAnchorButton(panelAnchor));
+        }
+    }
 }
 
 // Update bit positions when panel anchor changes
@@ -484,124 +482,67 @@ function updateBitsForNewAnchor() {
 
 // Update part front view
 function updatepartFront() {
-    // Always position part front relative to top anchor for consistent calculations
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
-
-    // Position part front relative to panel anchor
-    const anchorX = panelX + anchorOffset.x;
-    const anchorY = panelY;
-
-    partFront.setAttribute("x", anchorX);
-    partFront.setAttribute("y", anchorY - panelHeight - 100); // 100mm gap above panel anchor
-    partFront.setAttribute("width", panelWidth);
-    partFront.setAttribute("height", panelHeight);
-    partFront.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
-    partFront.setAttribute("stroke", "black");
-    partFront.setAttribute("stroke-width", getAdaptiveStrokeWidth());
+    if (panelManager) {
+        panelManager.updatePartFront();
+    }
 }
 
 // Update panel shape
 function updatepanelShape() {
-    partSection.setAttribute(
-        "x",
-        (mainCanvasManager.canvasParameters.width - panelWidth) / 2
-    );
-    partSection.setAttribute(
-        "y",
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2
-    );
-    partSection.setAttribute("width", panelWidth);
-    partSection.setAttribute("height", panelThickness);
-    partSection.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
-    partSection.setAttribute("stroke", "black");
-
-    updatepartFront();
-    updatepanelAnchorIndicator();
+    if (panelManager) {
+        panelManager.updatePanelShape();
+    } else {
+        // Fallback if panelManager not initialized yet
+        partSection.setAttribute(
+            "x",
+            (mainCanvasManager.canvasParameters.width - panelWidth) / 2
+        );
+        partSection.setAttribute(
+            "y",
+            (mainCanvasManager.canvasParameters.height - panelThickness) / 2
+        );
+        partSection.setAttribute("width", panelWidth);
+        partSection.setAttribute("height", panelThickness);
+        partSection.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
+    }
 }
 
 // Update panel anchor indicator (always visible)
 function updatepanelAnchorIndicator() {
-    const indicator = document.getElementById("panel-anchor-indicator");
-    indicator.innerHTML = ""; // Clear
-
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-
-    let anchorX, anchorY;
-    if (panelAnchor === "top-left") {
-        anchorX = panelX;
-        anchorY = panelY;
-    } else if (panelAnchor === "bottom-left") {
-        anchorX = panelX;
-        anchorY = panelY + panelThickness;
+    if (panelManager) {
+        panelManager.updatePanelAnchorIndicator();
     }
-
-    // Draw a small cross
-    const crossSize = 5;
-    const thickness = Math.max(
-        0.1,
-        0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
-    );
-    const horizontal = document.createElementNS(svgNS, "line");
-    horizontal.setAttribute("x1", anchorX - crossSize);
-    horizontal.setAttribute("y1", anchorY);
-    horizontal.setAttribute("x2", anchorX + crossSize);
-    horizontal.setAttribute("y2", anchorY);
-    horizontal.setAttribute("stroke", "red");
-    horizontal.setAttribute("stroke-width", thickness);
-    indicator.appendChild(horizontal);
-
-    const vertical = document.createElementNS(svgNS, "line");
-    vertical.setAttribute("x1", anchorX);
-    vertical.setAttribute("y1", anchorY - crossSize);
-    vertical.setAttribute("x2", anchorX);
-    vertical.setAttribute("y2", anchorY + crossSize);
-    vertical.setAttribute("stroke", "red");
-    vertical.setAttribute("stroke-width", thickness);
-    indicator.appendChild(vertical);
 }
 
 // Update grid anchor position
 function updateGridAnchor() {
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = getpanelAnchorOffset();
-    const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
-    const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
-
-    if (mainCanvasManager) {
-        mainCanvasManager.config.gridAnchorX = gridAnchorX;
-        mainCanvasManager.config.gridAnchorY = gridAnchorY;
-        if (mainCanvasManager.gridEnabled) {
-            mainCanvasManager.drawGrid();
-        }
+    if (panelManager) {
+        panelManager.updateGridAnchor();
     }
 }
 
 // Update panel parameters
 function updatepanelParams() {
-    // Update panel dimensions
-    panelWidth = parseInt(panelWidthInput.value) || panelWidth;
-    panelHeight = parseInt(panelHeightInput.value) || panelHeight;
-    panelThickness = parseInt(panelThicknessInput.value) || panelThickness;
+    if (panelManager) {
+        // Update panel manager with new dimensions
+        panelManager.updatePanelParams();
 
-    updatepanelShape();
-    updateBitsPositions();
-    // Assign profile paths to bits for 3D rendering
-    bitsManager.assignProfilePathsToBits(bitsOnCanvas);
-    updateGridAnchor(); // Update grid anchor when panel changes
-    updateOffsetContours();
-    updatePhantomBits();
-    if (showPart) updatePartShape();
+        // Sync local variables
+        panelWidth = panelManager.getWidth();
+        panelHeight = panelManager.getHeight();
+        panelThickness = panelManager.getThickness();
 
-    // Update 3D view if it's visible
-    if (window.threeModule) {
-        updateThreeView();
+        // Update bits and other elements
+        updateBitsPositions();
+        bitsManager.assignProfilePathsToBits(bitsOnCanvas);
+        updateOffsetContours();
+        updatePhantomBits();
+        if (showPart) updatePartShape();
+
+        // Update 3D view if it's visible
+        if (window.threeModule) {
+            updateThreeView();
+        }
     }
 }
 
@@ -1120,11 +1061,7 @@ async function updateCanvasBitsForBitId(bitId) {
         // If in Part view, show base panel and debounce CSG recalculation
         if (showPart) {
             window.threeModule.showBasePanel();
-            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
-            csgDebounceTimer = setTimeout(() => {
-                window.threeModule.applyCSGOperation(true);
-                csgDebounceTimer = null;
-            }, 200);
+            csgScheduler.schedule(true);
         }
     }
 
@@ -1141,11 +1078,7 @@ async function updateCanvasBitsForBitId(bitId) {
         // If in Part view, show base panel and debounce CSG recalculation
         if (showPart) {
             window.threeModule.showBasePanel();
-            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
-            csgDebounceTimer = setTimeout(() => {
-                window.threeModule.applyCSGOperation(true);
-                csgDebounceTimer = null;
-            }, 200);
+            csgScheduler.schedule(true);
         }
     }
 }
@@ -1326,11 +1259,7 @@ function updateBitsSheet() {
                 // If in Part view, show base panel and debounce CSG with new operation
                 if (showPart) {
                     window.threeModule.showBasePanel();
-                    if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
-                    csgDebounceTimer = setTimeout(() => {
-                        window.threeModule.applyCSGOperation(true);
-                        csgDebounceTimer = null;
-                    }, 200);
+                    csgScheduler.schedule(true);
                 }
             }
         });
@@ -1697,12 +1626,8 @@ async function updateBitPosition(index, newX, newY) {
         // If in Part view, show base panel and schedule CSG recalculation
         if (showPart) {
             //window.threeModule.showBasePanel();
-            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
-            csgDebounceTimer = setTimeout(() => {
-                console.log("CSG recalculation after table input");
-                window.threeModule.applyCSGOperation(true);
-                csgDebounceTimer = null;
-            }, 200);
+            log.debug("CSG recalculation after table input");
+            csgScheduler.schedule(true);
         }
     }
 }
@@ -2015,532 +1940,7 @@ function getAnchorOffset(bit) {
             return { x: 0, y: 0 };
     }
 }
-
-// Mouse event handlers for bit dragging and panning
-function handleMouseDown(e) {
-    if (e.button === 0) {
-        // Left mouse button
-        const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
-
-        // Check if clicking on any bit (selected or not) - but only if bits are visible
-        let clickedOnBit = false;
-        if (bitsVisible) {
-            for (let i = 0; i < bitsOnCanvas.length; i++) {
-                const bit = bitsOnCanvas[i];
-                if (bit && bit.group) {
-                    const shape = bit.group.querySelector(".bit-shape");
-                    if (shape) {
-                        // Get the transform from the group
-                        const transform = bit.group.getAttribute("transform");
-                        let dx = 0,
-                            dy = 0;
-                        if (transform) {
-                            const match = transform.match(
-                                /translate\(([^,]+),\s*([^)]+)\)/
-                            );
-                            if (match) {
-                                dx = parseFloat(match[1]) || 0;
-                                dy = parseFloat(match[2]) || 0;
-                            }
-                        }
-
-                        // Transform click coordinates to local shape coordinates
-                        const localX = svgCoords.x - dx;
-                        const localY = svgCoords.y - dy;
-
-                        // Check if click is on the fill of the bit shape
-                        if (shape.isPointInFill(new DOMPoint(localX, localY))) {
-                            // Also check adaptive distance tolerance (smaller when zoomed in)
-                            const bitCenterX = bit.baseAbsX + dx;
-                            const bitCenterY = bit.baseAbsY + dy;
-                            const distance = Math.sqrt(
-                                (svgCoords.x - bitCenterX) ** 2 +
-                                    (svgCoords.y - bitCenterY) ** 2
-                            );
-                            const tolerance = 20;
-                            if (distance <= tolerance) {
-                                clickedOnBit = true;
-
-                                // If clicking on a selected bit, prepare for potential deselection or dragging
-                                if (selectedBitIndices.includes(i)) {
-                                    // Start dragging the selected bit
-                                    isDraggingBit = true;
-                                    draggedBitIndex = i;
-                                    // Cancel any pending CSG operations when drag starts
-                                    if (csgDebounceTimer) {
-                                        clearTimeout(csgDebounceTimer);
-                                        csgDebounceTimer = null;
-                                        console.log(
-                                            "Cancelled pending CSG due to drag start"
-                                        );
-                                    }
-                                    dragStartX = svgCoords.x;
-                                    dragStartY = svgCoords.y;
-                                    dragStarted = false; // Reset flag
-                                    canvas.style.cursor = "pointer";
-                                    return;
-                                }
-                                // If clicking on an unselected bit, select it (but don't start dragging)
-                                else {
-                                    selectBit(i);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // If clicked on empty canvas area, clear all selections
-        if (!clickedOnBit && selectedBitIndices.length > 0) {
-            selectedBitIndices.forEach((index) => {
-                resetBitHighlight(index);
-            });
-            selectedBitIndices = [];
-            updateBitsSheet();
-            redrawBitsOnCanvas();
-        }
-
-        // Otherwise, start panning
-        isPanning = true;
-        panStartX = e.clientX;
-        panStartY = e.clientY;
-        panStartPanX = mainCanvasManager.panX;
-        panStartPanY = mainCanvasManager.panY;
-        canvas.style.cursor = "grabbing";
-    }
-}
-
-function handleMouseMove(e) {
-    if (isDraggingBit && draggedBitIndex !== null) {
-        // Set flag that drag has started
-        dragStarted = true;
-        window.isDraggingBit = true;
-
-        // Clear any pending CSG recalculation during drag
-        if (csgDebounceTimer) {
-            clearTimeout(csgDebounceTimer);
-            csgDebounceTimer = null;
-        }
-
-        // Show base panel during drag
-        if (window.threeModule && window.showPart) {
-            window.threeModule.showBasePanel();
-        }
-
-        const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
-
-        const bit = bitsOnCanvas[draggedBitIndex];
-        const anchorOffset = getAnchorOffset(bit);
-        const panelAnchorCoords = getPanelAnchorCoords();
-
-        // Calculate desired anchor position
-        let anchorX = svgCoords.x - panelAnchorCoords.x;
-        let anchorY = svgCoords.y - panelAnchorCoords.y;
-
-        // Snap anchor to grid
-        anchorX = mainCanvasManager.snapToGrid(anchorX);
-        anchorY = mainCanvasManager.snapToGrid(anchorY);
-
-        // Then center position = anchorX - anchorOffset.x
-        let newX = anchorX - anchorOffset.x;
-        let newY = anchorY - anchorOffset.y;
-
-        // Check if we need to auto-scroll for mouse drag
-        checkAutoScroll(e.clientX, e.clientY);
-
-        // Update bit position
-        updateBitPosition(draggedBitIndex, newX, newY);
-
-        // Update table inputs
-        updateTableCoordinates(draggedBitIndex, newX, newY);
-    } else if (isPanning) {
-        // Handle panning
-        const deltaX = e.clientX - panStartX;
-        const deltaY = e.clientY - panStartY;
-
-        // Convert screen delta to SVG delta based on zoom level
-        const svgDeltaX = deltaX / mainCanvasManager.zoomLevel;
-        const svgDeltaY = deltaY / mainCanvasManager.zoomLevel;
-
-        mainCanvasManager.panX = panStartPanX - svgDeltaX;
-        mainCanvasManager.panY = panStartPanY - svgDeltaY;
-        mainCanvasManager.updateViewBox();
-    }
-}
-
-function handleMouseUp(e) {
-    if (isDraggingBit) {
-        isDraggingBit = false;
-        window.isDraggingBit = false;
-
-        // If drag didn't actually start (just a click), deselect the bit
-        if (!dragStarted && draggedBitIndex !== null) {
-            selectBit(draggedBitIndex);
-        }
-
-        draggedBitIndex = null;
-        dragStarted = false; // Reset flag
-        canvas.style.cursor = "grab";
-
-        // Update part shape after dragging is complete only if Part view is enabled
-        if (showPart) updatePartShape();
-
-        // Show base panel immediately, then apply CSG after short delay
-        if (window.threeModule && window.showPart) {
-            window.threeModule.showBasePanel();
-            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
-            csgDebounceTimer = setTimeout(() => {
-                console.log("CSG debounce timer fired after drag end");
-                window.threeModule.applyCSGOperation(true);
-                csgDebounceTimer = null;
-            }, 200);
-        }
-    } else if (isPanning) {
-        isPanning = false;
-        canvas.style.cursor = "grab";
-    }
-}
-
-// Touch event handlers for mobile devices
-function handleTouchStart(e) {
-    e.preventDefault(); // Prevent scrolling and other default touch behaviors
-
-    if (e.touches.length === 1) {
-        const touch = e.touches[0];
-        const svgCoords = mainCanvasManager.screenToSvg(
-            touch.clientX,
-            touch.clientY
-        );
-
-        // Check if touching any bit (selected or not) - but only if bits are visible
-        let touchedBit = false;
-        if (bitsVisible) {
-            for (let i = 0; i < bitsOnCanvas.length; i++) {
-                const bit = bitsOnCanvas[i];
-                if (bit && bit.group) {
-                    const shape = bit.group.querySelector(".bit-shape");
-                    if (shape) {
-                        // Get the transform from the group
-                        const transform = bit.group.getAttribute("transform");
-                        let dx = 0,
-                            dy = 0;
-                        if (transform) {
-                            const match = transform.match(
-                                /translate\(([^,]+),\s*([^)]+)\)/
-                            );
-                            if (match) {
-                                dx = parseFloat(match[1]) || 0;
-                                dy = parseFloat(match[2]) || 0;
-                            }
-                        }
-
-                        // Transform touch coordinates to local shape coordinates
-                        const localX = svgCoords.x - dx;
-                        const localY = svgCoords.y - dy;
-
-                        // Check if touch is on the fill of the bit shape
-                        if (shape.isPointInFill(new DOMPoint(localX, localY))) {
-                            // Also check adaptive distance tolerance
-                            const bitCenterX = bit.baseAbsX + dx;
-                            const bitCenterY = bit.baseAbsY + dy;
-                            const distance = Math.sqrt(
-                                (svgCoords.x - bitCenterX) ** 2 +
-                                    (svgCoords.y - bitCenterY) ** 2
-                            );
-                            const tolerance = 30; // Slightly larger tolerance for touch
-                            if (distance <= tolerance) {
-                                touchedBit = true;
-                                touchIdentifier = touch.identifier;
-
-                                // If touching a selected bit, prepare for dragging
-                                if (selectedBitIndices.includes(i)) {
-                                    isTouchDragging = true;
-                                    draggedBitIndex = i;
-                                    touchDragStartX = svgCoords.x;
-                                    touchDragStartY = svgCoords.y;
-                                    dragStarted = false;
-                                    return;
-                                }
-                                // If touching an unselected bit, select it
-                                else {
-                                    selectBit(i);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // If touched empty area, start panning or clear selections
-        if (!touchedBit) {
-            if (selectedBitIndices.length > 0) {
-                selectedBitIndices.forEach((index) => {
-                    resetBitHighlight(index);
-                });
-                selectedBitIndices = [];
-                updateBitsSheet();
-                redrawBitsOnCanvas();
-            }
-
-            // Start touch panning
-            isTouchPanning = true;
-            touchPanStartX = touch.clientX;
-            touchPanStartY = touch.clientY;
-            touchPanStartPanX = mainCanvasManager.panX;
-            touchPanStartPanY = mainCanvasManager.panY;
-        }
-    }
-}
-
-function handleTouchMove(e) {
-    e.preventDefault();
-
-    if (isTouchDragging && e.touches.length === 1) {
-        const touch = Array.from(e.touches).find(
-            (t) => t.identifier === touchIdentifier
-        );
-        if (!touch) return;
-
-        // Set flag that drag has started
-        dragStarted = true;
-
-        const svgCoords = mainCanvasManager.screenToSvg(
-            touch.clientX,
-            touch.clientY
-        );
-        const bit = bitsOnCanvas[draggedBitIndex];
-        const anchorOffset = getAnchorOffset(bit);
-        const panelAnchorCoords = getPanelAnchorCoords();
-
-        // Calculate desired anchor position
-        let anchorX = svgCoords.x - panelAnchorCoords.x;
-        let anchorY = svgCoords.y - panelAnchorCoords.y;
-
-        // Snap anchor to grid
-        anchorX = mainCanvasManager.snapToGrid(anchorX);
-        anchorY = mainCanvasManager.snapToGrid(anchorY);
-
-        // Center position = anchor - offset
-        let newX = anchorX - anchorOffset.x;
-        let newY = anchorY - anchorOffset.y;
-
-        // Check if we need to auto-scroll
-        checkAutoScroll(touch.clientX, touch.clientY);
-
-        // Update bit position
-        updateBitPosition(draggedBitIndex, newX, newY);
-
-        // Update table inputs
-        updateTableCoordinates(draggedBitIndex, newX, newY);
-    } else if (isTouchPanning && e.touches.length === 1) {
-        // Handle touch panning
-        const touch = e.touches[0];
-        const deltaX = touch.clientX - touchPanStartX;
-        const deltaY = touch.clientY - touchPanStartY;
-
-        // Convert screen delta to SVG delta based on zoom level
-        const svgDeltaX = deltaX / mainCanvasManager.zoomLevel;
-        const svgDeltaY = deltaY / mainCanvasManager.zoomLevel;
-
-        mainCanvasManager.panX = touchPanStartPanX - svgDeltaX;
-        mainCanvasManager.panY = touchPanStartPanY - svgDeltaY;
-        mainCanvasManager.updateViewBox();
-    }
-}
-
-function handleTouchEnd(e) {
-    // Only process if this is our tracked touch
-    const endedTouch = Array.from(e.changedTouches).find(
-        (t) => t.identifier === touchIdentifier
-    );
-    if (!endedTouch) return;
-
-    if (isTouchDragging) {
-        isTouchDragging = false;
-
-        // If drag didn't actually start, deselect the bit
-        if (!dragStarted && draggedBitIndex !== null) {
-            selectBit(draggedBitIndex);
-        }
-
-        draggedBitIndex = null;
-        dragStarted = false;
-        touchIdentifier = null;
-
-        // Stop auto-scroll
-        stopAutoScroll();
-
-        // Update part shape after dragging is complete
-        if (showPart) updatePartShape();
-    }
-
-    if (isTouchPanning) {
-        isTouchPanning = false;
-    }
-}
-
-// Auto-scroll functions for mobile drag support
-function checkAutoScroll(clientX, clientY) {
-    const canvasRect = canvas.getBoundingClientRect();
-    const scrollThreshold = autoScrollThreshold;
-    let scrollX = 0;
-    let scrollY = 0;
-
-    // Check horizontal auto-scroll
-    if (clientX < canvasRect.left + scrollThreshold) {
-        scrollX = -autoScrollSpeed;
-    } else if (clientX > canvasRect.right - scrollThreshold) {
-        scrollX = autoScrollSpeed;
-    }
-
-    // Check vertical auto-scroll
-    if (clientY < canvasRect.top + scrollThreshold) {
-        scrollY = -autoScrollSpeed;
-    } else if (clientY > canvasRect.bottom - scrollThreshold) {
-        scrollY = autoScrollSpeed;
-    }
-
-    if (scrollX !== 0 || scrollY !== 0) {
-        startAutoScroll(scrollX, scrollY);
-    } else {
-        stopAutoScroll();
-    }
-}
-
-function startAutoScroll(scrollX, scrollY) {
-    if (autoScrollActive) return;
-
-    autoScrollActive = true;
-
-    autoScrollInterval = setInterval(() => {
-        // Scroll the canvas by converting screen pixels to SVG units
-        const svgScrollX = scrollX / mainCanvasManager.zoomLevel;
-        const svgScrollY = scrollY / mainCanvasManager.zoomLevel;
-
-        mainCanvasManager.panX += svgScrollX;
-        mainCanvasManager.panY += svgScrollY;
-        mainCanvasManager.updateViewBox();
-
-        // Continue dragging the bit to follow the scroll
-        if (isTouchDragging && draggedBitIndex !== null) {
-            const bit = bitsOnCanvas[draggedBitIndex];
-            const anchorOffset = getAnchorOffset(bit);
-            const panelAnchorCoords = getPanelAnchorCoords();
-
-            // Recalculate position after scroll
-            const svgCoords = mainCanvasManager.screenToSvg(
-                Array.from(canvas.ownerDocument.touches).find(
-                    (t) => t.identifier === touchIdentifier
-                )?.clientX || 0,
-                Array.from(canvas.ownerDocument.touches).find(
-                    (t) => t.identifier === touchIdentifier
-                )?.clientY || 0
-            );
-
-            if (svgCoords.x !== 0 || svgCoords.y !== 0) {
-                let anchorX = svgCoords.x - panelAnchorCoords.x;
-                let anchorY = svgCoords.y - panelAnchorCoords.y;
-
-                anchorX = mainCanvasManager.snapToGrid(anchorX);
-                anchorY = mainCanvasManager.snapToGrid(anchorY);
-
-                let newX = anchorX - anchorOffset.x;
-                let newY = anchorY - anchorOffset.y;
-
-                updateBitPosition(draggedBitIndex, newX, newY);
-                updateTableCoordinates(draggedBitIndex, newX, newY);
-            }
-        }
-    }, 50); // Update every 50ms
-}
-
-function stopAutoScroll() {
-    if (autoScrollInterval) {
-        clearInterval(autoScrollInterval);
-        autoScrollInterval = null;
-    }
-    autoScrollActive = false;
-}
-
-// Pinch-to-zoom gesture handlers
-function handleGestureStart(e) {
-    e.preventDefault();
-
-    isPinching = true;
-    initialPinchDistance = getDistance(
-        e.touches[0].clientX,
-        e.touches[0].clientY,
-        e.touches[1].clientX,
-        e.touches[1].clientY
-    );
-
-    // Calculate center point between two fingers
-    initialPinchCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-    initialPinchCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-
-    initialZoomLevel = mainCanvasManager.zoomLevel;
-    initialPanX = mainCanvasManager.panX;
-    initialPanY = mainCanvasManager.panY;
-}
-
-function handleGestureChange(e) {
-    e.preventDefault();
-
-    if (!isPinching) return;
-
-    const currentDistance = getDistance(
-        e.touches[0].clientX,
-        e.touches[0].clientY,
-        e.touches[1].clientX,
-        e.touches[1].clientY
-    );
-
-    const currentCenterX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-    const currentCenterY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-
-    // Calculate new zoom level
-    const zoomRatio = currentDistance / initialPinchDistance;
-    let newZoomLevel = initialZoomLevel * zoomRatio;
-
-    // Clamp zoom level to reasonable bounds
-    newZoomLevel = Math.max(0.1, Math.min(10, newZoomLevel));
-
-    // Calculate the SVG point that should remain at the center
-    const svgCenterPoint = mainCanvasManager.screenToSvg(
-        initialPinchCenterX,
-        initialPinchCenterY
-    );
-
-    // Temporarily set new zoom to calculate new pan
-    const oldZoom = mainCanvasManager.zoomLevel;
-    mainCanvasManager.zoomLevel = newZoomLevel;
-
-    // Calculate new pan to keep the center point in place
-    const rect = mainCanvasManager.canvas.getBoundingClientRect();
-    const viewBoxWidth = rect.width / newZoomLevel;
-    const viewBoxHeight = rect.height / newZoomLevel;
-
-    const newPanX = svgCenterPoint.x - viewBoxWidth / 2;
-    const newPanY = svgCenterPoint.y - viewBoxHeight / 2;
-
-    // Apply zoom and pan
-    mainCanvasManager.panX = newPanX;
-    mainCanvasManager.panY = newPanY;
-
-    mainCanvasManager.updateViewBox();
-
-    // Update stroke widths for better visual feedback
-    updateStrokeWidths(newZoomLevel);
-}
-
-function handleGestureEnd(e) {
-    e.preventDefault();
-
-    isPinching = false;
-}
+// Interaction handlers now managed by InteractionManager
 
 // Helper function to calculate distance between two points
 function getDistance(x1, y1, x2, y2) {
@@ -2553,12 +1953,8 @@ function updateTableCoordinates(bitIndex, newX, newY) {
     if (window.threeModule && window.showPart) {
         window.threeModule.showBasePanel();
         // Schedule CSG recalculation
-        if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
-        csgDebounceTimer = setTimeout(() => {
-            console.log("CSG recalculation after table input");
-            window.threeModule.applyCSGOperation(true);
-            csgDebounceTimer = null;
-        }, 200);
+        log.debug("CSG recalculation after table input");
+        csgScheduler.schedule(true);
     }
 
     const sheetBody = document.getElementById("bits-sheet-body");
@@ -2578,100 +1974,6 @@ function updateTableCoordinates(bitIndex, newX, newY) {
             if (yInput) yInput.value = transformYForDisplay(newY, anchorOffset);
         }
     }
-}
-
-// Clipper functions for part subtraction
-function getpanelPolygon() {
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-    return [
-        {
-            X: Math.round(panelX * CLIPPER_SCALE),
-            Y: Math.round(panelY * CLIPPER_SCALE),
-        },
-        {
-            X: Math.round((panelX + panelWidth) * CLIPPER_SCALE),
-            Y: Math.round(panelY * CLIPPER_SCALE),
-        },
-        {
-            X: Math.round((panelX + panelWidth) * CLIPPER_SCALE),
-            Y: Math.round((panelY + panelThickness) * CLIPPER_SCALE),
-        },
-        {
-            X: Math.round(panelX * CLIPPER_SCALE),
-            Y: Math.round((panelY + panelThickness) * CLIPPER_SCALE),
-        },
-    ];
-}
-
-function getBitPolygon(bit) {
-    const group = bit.group;
-    const transform = group.getAttribute("transform");
-    if (!transform) return [];
-    const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
-    if (!match) return [];
-    const dx = parseFloat(match[1]);
-    const dy = parseFloat(match[2]);
-    const shape = group.querySelector(".bit-shape");
-    if (!shape) return [];
-    return getShapePoints(shape, dx, dy);
-}
-
-function getShapePoints(shape, baseX, baseY) {
-    let points = [];
-    if (shape.tagName === "rect") {
-        const x = parseFloat(shape.getAttribute("x")) + baseX;
-        const y = parseFloat(shape.getAttribute("y")) + baseY;
-        const w = parseFloat(shape.getAttribute("width"));
-        const h = parseFloat(shape.getAttribute("height"));
-        points = [
-            { x: x, y: y },
-            { x: x + w, y: y },
-            { x: x + w, y: y + h },
-            { x: x, y: y + h },
-        ];
-    } else if (shape.tagName === "polygon") {
-        const pts = shape.getAttribute("points").trim().split(/\s+/);
-        points = pts.map((p) => {
-            const [px, py] = p.split(",").map(Number);
-            return { x: px + baseX, y: py + baseY };
-        });
-    } else if (shape.tagName === "path") {
-        const path = shape;
-        const totalLength = path.getTotalLength();
-        const numPoints = 200; // Increase sampling points
-        for (let i = 0; i < numPoints; i++) {
-            const length = (i / (numPoints - 1)) * totalLength;
-            const point = path.getPointAtLength(length);
-            points.push({ x: point.x + baseX, y: point.y + baseY });
-        }
-    }
-    // Ensure counter-clockwise orientation
-    points = ensureCounterClockwise(points);
-    return points.map((p) => ({
-        X: Math.round(p.x * CLIPPER_SCALE),
-        Y: Math.round(p.y * CLIPPER_SCALE),
-    }));
-}
-
-// Ensure polygon is oriented counter-clockwise
-function ensureCounterClockwise(points) {
-    if (points.length < 3) return points;
-
-    // Calculate signed area
-    let area = 0;
-    for (let i = 0; i < points.length; i++) {
-        const j = (i + 1) % points.length;
-        area += points[i].x * points[j].y - points[j].x * points[i].y;
-    }
-
-    // If area is negative, polygon is clockwise, so reverse
-    if (area < 0) {
-        points.reverse();
-    }
-
-    return points;
 }
 
 function updatePartShape() {
@@ -2698,6 +2000,7 @@ function updatePartShape() {
 function toggleBitsVisibility() {
     bitsVisible = !bitsVisible;
     window.bitsVisible = bitsVisible; // Update window reference
+    appState.setBitsVisible(bitsVisible);
     const bitsBtn = document.getElementById("bits-btn");
     const phantomsLayer = mainCanvasManager.getLayer("phantoms");
 
@@ -2736,6 +2039,7 @@ function toggleBitsVisibility() {
 // Toggle shank visibility
 function toggleShankVisibility() {
     shankVisible = !shankVisible;
+    appState.setShankVisible(shankVisible);
     const shankBtn = document.getElementById("shank-btn");
 
     bitsOnCanvas.forEach((bit) => {
@@ -2758,13 +2062,14 @@ function toggleShankVisibility() {
 
 async function togglePartView() {
     if (!bitsLayer || !partSection || !partPath) {
-        console.error("SVG elements not initialized");
+        log.error("SVG elements not initialized");
         return;
     }
 
     showPart = !showPart;
     window.showPart = showPart; // Update window reference
-    console.log("togglePartView: showPart changed to", showPart);
+    appState.setShowPart(showPart);
+    log.info("togglePartView: showPart changed", { showPart });
 
     const partBtn = document.getElementById("part-btn");
 
@@ -2789,13 +2094,15 @@ async function togglePartView() {
 
     // Update 3D view and apply CSG logic
     if (window.threeModule) {
-        console.log("togglePartView: showPart =", showPart);
-
         // Always update 3D view with current panel/bits data first
         await updateThreeView();
 
         // Then apply or remove CSG based on showPart flag
-        window.threeModule.applyCSGOperation(showPart);
+        if (showPart) {
+            csgScheduler.schedule(true);
+        } else {
+            window.threeModule.showBasePanel();
+        }
     }
 }
 
@@ -3192,16 +2499,20 @@ async function initializeModularSystem() {
         const bitsModule = app.getModule("bits");
         const threeModule = app.getModule("three");
 
-        console.log("Modular system initialized successfully");
-        console.log("Canvas module:", canvasModule);
-        console.log("Bits module:", bitsModule);
-        console.log("Three module:", threeModule);
+        log.info("Modular system initialized successfully");
+        log.debug("Canvas module:", canvasModule);
+        log.debug("Bits module:", bitsModule);
+        log.debug("Three module:", threeModule);
 
         // Initialize Three.js module
         if (threeModule) {
             await threeModule.init();
             // Make it globally accessible
             window.threeModule = threeModule;
+            // Configure centralized CSG scheduler
+            csgScheduler.configure((apply) =>
+                threeModule.applyCSGOperation(apply)
+            );
         }
 
         // Start the original initialization
@@ -3213,7 +2524,7 @@ async function initializeModularSystem() {
         // Setup view toggle buttons
         setupViewToggle(threeModule);
     } catch (error) {
-        console.error("Failed to initialize modular system:", error);
+        log.error("Failed to initialize modular system:", error);
         // Fallback to original initialization if modular system fails
         initialize();
         setupMaterialSelector();
@@ -3329,7 +2640,7 @@ function setupMaterialSelector() {
         const mode = e.target.value;
         window.threeModule.setMaterialMode(mode);
         if (window.showPart) {
-            window.threeModule.applyCSGOperation(true);
+            csgScheduler.schedule(true);
         } else {
             window.threeModule.showBasePanel();
         }

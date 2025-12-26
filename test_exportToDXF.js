@@ -68,7 +68,7 @@ describe("exportToDXF Function - Thorough Testing", () => {
             bitData: { diameter: 10 },
         });
 
-        // Mock clipper result
+        // Mock polygon result
         makerCalculateResultPolygon.mockReturnValue([
             { X: 0, Y: 0 },
             { X: 400, Y: 0 },
@@ -110,8 +110,8 @@ describe("exportToDXF Function - Thorough Testing", () => {
         expect(dxfExporter.downloadDXF).not.toHaveBeenCalled();
     });
 
-    test("3. Edge case: Empty clipper result", () => {
-        // Setup: Add bit but mock empty clipper result
+    test("3. Edge case: Empty result polygon", () => {
+        // Setup: Add bit but mock empty polygon result
         bitsOnCanvas.push({
             name: "Test Bit",
             x: 100,
@@ -140,8 +140,8 @@ describe("exportToDXF Function - Thorough Testing", () => {
         );
     });
 
-    test("4. Edge case: Null clipper result", () => {
-        // Setup: Add bit but mock null clipper result
+    test("4. Edge case: Null result polygon", () => {
+        // Setup: Add bit but mock null polygon result
         bitsOnCanvas.push({
             name: "Test Bit",
             x: 100,
@@ -357,7 +357,7 @@ describe("exportToDXF Function - Thorough Testing", () => {
     });
 
     test("10. Edge case: makerCalculateResultPolygon throws error", () => {
-        // Setup: Add bit and mock clipper function to throw error
+        // Setup: Add bit and mock result polygon calculator to throw error
         bitsOnCanvas.push({
             name: "Test Bit",
             x: 100,
@@ -368,11 +368,13 @@ describe("exportToDXF Function - Thorough Testing", () => {
         });
 
         makerCalculateResultPolygon.mockImplementation(() => {
-            throw new Error("Clipper calculation failed");
+            throw new Error("Result polygon calculation failed");
         });
 
         // Execute and expect error handling
-        expect(() => exportToDXF()).toThrow("Clipper calculation failed");
+        expect(() => exportToDXF()).toThrow(
+            "Result polygon calculation failed"
+        );
     });
 });
 

@@ -209,8 +209,8 @@ class DXFExporter {
         // Layer 0 (default)
         // this.writeLayer("0", 7, 0, 0, 0); // White color
 
-        // Result layer for Clipper
-        this.writeLayer("Default", 0, 0, 0, 0); // Green color for Clipper
+        // Result layer for combined contour
+        this.writeLayer("Default", 0, 0, 0, 0); // Base layer for merged result
 
         // Part front layer
         if (partFront) {

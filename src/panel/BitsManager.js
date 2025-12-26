@@ -16,7 +16,6 @@ export default class BitsManager {
     constructor(canvasManager) {
         this.canvasManager = canvasManager;
         this.bitGroups = document.getElementById("bit-groups");
-        this.CLIPPER_SCALE = 1000;
     }
 
     // Create SVG icon
