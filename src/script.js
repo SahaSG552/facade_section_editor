@@ -42,6 +42,7 @@ let shankVisible = true; // Track shank visibility state
 // Make these available to other modules via window
 window.showPart = showPart;
 window.bitsVisible = bitsVisible;
+window.isDraggingBit = false;
 
 // Canvas manager instance
 let mainCanvasManager;
@@ -58,11 +59,12 @@ let rightPanelClickOutsideHandler = null;
 let isPanning = false;
 let panStartX = 0;
 let panStartY = 0;
+let csgDebounceTimer = null;
+let isDraggingBit = false;
 let panStartPanX = 0;
 let panStartPanY = 0;
 
 // Drag variables for selected bits (now supports multi-selection)
-let isDraggingBit = false;
 let draggedBitIndex = null; // Index of the bit being dragged (for multi-selection)
 let selectedBitIndices = []; // Array of selected bit indices
 let dragStartX = 0;
@@ -1115,9 +1117,14 @@ async function updateCanvasBitsForBitId(bitId) {
     // Update 3D view immediately after profile paths are updated
     if (window.threeModule) {
         await updateThreeView();
-        // If in Part view, recalculate CSG with new profile
+        // If in Part view, show base panel and debounce CSG recalculation
         if (showPart) {
-            window.threeModule.applyCSGOperation(true);
+            window.threeModule.showBasePanel();
+            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
+            csgDebounceTimer = setTimeout(() => {
+                window.threeModule.applyCSGOperation(true);
+                csgDebounceTimer = null;
+            }, 200);
         }
     }
 
@@ -1131,9 +1138,14 @@ async function updateCanvasBitsForBitId(bitId) {
     // Update 3D view
     if (window.threeModule) {
         await updateThreeView();
-        // If in Part view, recalculate CSG with updated shapes
+        // If in Part view, show base panel and debounce CSG recalculation
         if (showPart) {
-            window.threeModule.applyCSGOperation(true);
+            window.threeModule.showBasePanel();
+            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
+            csgDebounceTimer = setTimeout(() => {
+                window.threeModule.applyCSGOperation(true);
+                csgDebounceTimer = null;
+            }, 200);
         }
     }
 }
@@ -1311,9 +1323,14 @@ function updateBitsSheet() {
             // Update 3D view
             if (window.threeModule) {
                 updateThreeView();
-                // If in Part view, recalculate CSG with new operation
+                // If in Part view, show base panel and debounce CSG with new operation
                 if (showPart) {
-                    window.threeModule.applyCSGOperation(true);
+                    window.threeModule.showBasePanel();
+                    if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
+                    csgDebounceTimer = setTimeout(() => {
+                        window.threeModule.applyCSGOperation(true);
+                        csgDebounceTimer = null;
+                    }, 200);
                 }
             }
         });
@@ -1677,9 +1694,15 @@ async function updateBitPosition(index, newX, newY) {
     // Update 3D view
     if (window.threeModule) {
         await updateThreeView();
-        // If in Part view, recalculate CSG with new bit positions
+        // If in Part view, show base panel and schedule CSG recalculation
         if (showPart) {
-            window.threeModule.applyCSGOperation(true);
+            //window.threeModule.showBasePanel();
+            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
+            csgDebounceTimer = setTimeout(() => {
+                console.log("CSG recalculation after table input");
+                window.threeModule.applyCSGOperation(true);
+                csgDebounceTimer = null;
+            }, 200);
         }
     }
 }
@@ -2043,6 +2066,14 @@ function handleMouseDown(e) {
                                     // Start dragging the selected bit
                                     isDraggingBit = true;
                                     draggedBitIndex = i;
+                                    // Cancel any pending CSG operations when drag starts
+                                    if (csgDebounceTimer) {
+                                        clearTimeout(csgDebounceTimer);
+                                        csgDebounceTimer = null;
+                                        console.log(
+                                            "Cancelled pending CSG due to drag start"
+                                        );
+                                    }
                                     dragStartX = svgCoords.x;
                                     dragStartY = svgCoords.y;
                                     dragStarted = false; // Reset flag
@@ -2084,6 +2115,18 @@ function handleMouseMove(e) {
     if (isDraggingBit && draggedBitIndex !== null) {
         // Set flag that drag has started
         dragStarted = true;
+        window.isDraggingBit = true;
+
+        // Clear any pending CSG recalculation during drag
+        if (csgDebounceTimer) {
+            clearTimeout(csgDebounceTimer);
+            csgDebounceTimer = null;
+        }
+
+        // Show base panel during drag
+        if (window.threeModule && window.showPart) {
+            window.threeModule.showBasePanel();
+        }
 
         const svgCoords = mainCanvasManager.screenToSvg(e.clientX, e.clientY);
 
@@ -2129,6 +2172,7 @@ function handleMouseMove(e) {
 function handleMouseUp(e) {
     if (isDraggingBit) {
         isDraggingBit = false;
+        window.isDraggingBit = false;
 
         // If drag didn't actually start (just a click), deselect the bit
         if (!dragStarted && draggedBitIndex !== null) {
@@ -2141,6 +2185,17 @@ function handleMouseUp(e) {
 
         // Update part shape after dragging is complete only if Part view is enabled
         if (showPart) updatePartShape();
+
+        // Show base panel immediately, then apply CSG after short delay
+        if (window.threeModule && window.showPart) {
+            window.threeModule.showBasePanel();
+            if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
+            csgDebounceTimer = setTimeout(() => {
+                console.log("CSG debounce timer fired after drag end");
+                window.threeModule.applyCSGOperation(true);
+                csgDebounceTimer = null;
+            }, 200);
+        }
     } else if (isPanning) {
         isPanning = false;
         canvas.style.cursor = "grab";
@@ -2494,6 +2549,18 @@ function getDistance(x1, y1, x2, y2) {
 
 // Update table coordinates without recreating the entire table
 function updateTableCoordinates(bitIndex, newX, newY) {
+    // Show base panel when coordinates change
+    if (window.threeModule && window.showPart) {
+        window.threeModule.showBasePanel();
+        // Schedule CSG recalculation
+        if (csgDebounceTimer) clearTimeout(csgDebounceTimer);
+        csgDebounceTimer = setTimeout(() => {
+            console.log("CSG recalculation after table input");
+            window.threeModule.applyCSGOperation(true);
+            csgDebounceTimer = null;
+        }, 200);
+    }
+
     const sheetBody = document.getElementById("bits-sheet-body");
     const rows = sheetBody.querySelectorAll("tr");
 
@@ -3140,12 +3207,16 @@ async function initializeModularSystem() {
         // Start the original initialization
         initialize();
 
+        // Populate material selector once Three.js module is ready
+        setupMaterialSelector();
+
         // Setup view toggle buttons
         setupViewToggle(threeModule);
     } catch (error) {
         console.error("Failed to initialize modular system:", error);
         // Fallback to original initialization if modular system fails
         initialize();
+        setupMaterialSelector();
     }
 }
 
@@ -3234,6 +3305,35 @@ async function updateThreeView() {
         bitsOnCanvas,
         panelAnchor
     );
+}
+
+function setupMaterialSelector() {
+    const select = document.getElementById("material-select");
+    if (!select || !window.threeModule) return;
+
+    const registry = window.threeModule.materialRegistry || {};
+    select.innerHTML = "";
+
+    Object.entries(registry).forEach(([key, entry]) => {
+        if (entry && entry.enabled !== false) {
+            const option = document.createElement("option");
+            option.value = key;
+            option.textContent = key;
+            select.appendChild(option);
+        }
+    });
+
+    select.value = window.threeModule.currentMaterialKey;
+
+    select.addEventListener("change", (e) => {
+        const mode = e.target.value;
+        window.threeModule.setMaterialMode(mode);
+        if (window.showPart) {
+            window.threeModule.applyCSGOperation(true);
+        } else {
+            window.threeModule.showBasePanel();
+        }
+    });
 }
 
 // Call initialize function when the page loads

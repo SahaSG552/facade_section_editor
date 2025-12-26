@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
-import { Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
+import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import BaseModule from "../core/BaseModule.js";
 
 export default class ThreeModule extends BaseModule {
@@ -17,6 +17,79 @@ export default class ThreeModule extends BaseModule {
         // Panel mesh
         this.panelMesh = null;
 
+        // Track if CSG (part view) is active
+        this.csgActive = false;
+
+        // Materials registry and current mode
+        this.materialRegistry = {
+            shaded: {
+                enabled: true,
+                factory: () =>
+                    new THREE.MeshStandardMaterial({
+                        color: 0xdeb887,
+                        roughness: 0.8,
+                        metalness: 0.1,
+                        wireframe: false,
+                    }),
+            },
+            shadedEdges: {
+                enabled: true,
+                factory: () =>
+                    new THREE.MeshStandardMaterial({
+                        color: 0xdeb887,
+                        roughness: 0.75,
+                        metalness: 0.25,
+                        wireframe: false,
+                    }),
+            },
+            wireframe: {
+                enabled: true,
+                factory: () =>
+                    new THREE.MeshStandardMaterial({
+                        color: 0xdeb887,
+                        roughness: 1,
+                        metalness: 0,
+                        wireframe: true,
+                    }),
+            },
+            clay: {
+                enabled: true,
+                factory: () =>
+                    new THREE.MeshStandardMaterial({
+                        color: 0xbfb6aa,
+                        roughness: 0.95,
+                        metalness: 0.05,
+                        wireframe: false,
+                    }),
+            },
+            metal: {
+                enabled: true,
+                factory: () =>
+                    new THREE.MeshStandardMaterial({
+                        color: 0xcccccc,
+                        roughness: 0.25,
+                        metalness: 0.9,
+                        wireframe: false,
+                    }),
+            },
+            glass: {
+                enabled: true,
+                factory: () =>
+                    new THREE.MeshPhysicalMaterial({
+                        color: 0xffffff,
+                        roughness: 0,
+                        metalness: 0,
+                        transmission: 0.6,
+                        transparent: true,
+                        opacity: 0.4,
+                        ior: 1.4,
+                        thickness: 10,
+                        wireframe: false,
+                    }),
+            },
+        };
+        this.currentMaterialKey = "shaded";
+
         // Original panel data (before CSG operation) - for toggle
         this.originalPanelGeometry = null;
         this.originalPanelMaterial = null;
@@ -24,10 +97,10 @@ export default class ThreeModule extends BaseModule {
         this.originalPanelRotation = null;
         this.originalPanelScale = null;
 
-        // Bit path meshes (includes visualization and extrudes)
+        // Bit path visualization meshes (thick polylines)
         this.bitPathMeshes = [];
 
-        // Only extrude meshes for CSG operations
+        // Extrude meshes for CSG operations
         this.bitExtrudeMeshes = [];
 
         // Lighting
@@ -41,6 +114,24 @@ export default class ThreeModule extends BaseModule {
 
         // CSG related
         this.partMesh = null;
+        this.basePanelMesh = null;
+        this.lastCSGSignature = null;
+        this.panelBBox = null;
+        this.csgVisible = false;
+        this.csgBusy = false;
+        this.csgQueuedApply = null;
+        this.useUnionBeforeSubtract = true;
+        this.stats = null;
+
+        // Serialize updatePanel calls to avoid overlapping builds
+        this.updatePanelRunning = false;
+        this.updatePanelQueuedArgs = null;
+
+        // Track last panel/bits signature to skip redundant rebuilds
+        this.lastPanelUpdateSignature = null;
+
+        // Independent toggles
+        this.edgesEnabled = false; // overlay edge lines off by default
     }
 
     async init() {
@@ -73,6 +164,9 @@ export default class ThreeModule extends BaseModule {
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
 
+        // Add minimal on-canvas controls (material + wireframe + edges)
+        this.initMaterialControls();
+
         // Create controls
         this.controls = new OrbitControls(
             this.camera,
@@ -101,10 +195,115 @@ export default class ThreeModule extends BaseModule {
         // Add wireframe toggle button
         this.addWireframeToggle();
 
+        // Add CSG mode toggle
+        this.addCSGModeToggle();
+
+        // Add Stats widget
+        this.addStatsWidget();
+
         // Start animation loop
         this.animate();
 
         console.log("ThreeModule: Initialized successfully");
+    }
+
+    initMaterialControls() {
+        try {
+            const wrap = document.createElement("div");
+            wrap.style.position = "absolute";
+            wrap.style.top = "8px";
+            wrap.style.right = "8px";
+            wrap.style.display = "flex";
+            wrap.style.gap = "8px";
+            wrap.style.padding = "6px 8px";
+            wrap.style.background = "rgba(255,255,255,0.9)";
+            wrap.style.borderRadius = "6px";
+            wrap.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)";
+            wrap.style.zIndex = "101";
+
+            // Material selector
+            const select = document.createElement("select");
+            select.title = "Material";
+            Object.entries(this.materialRegistry)
+                .filter(([, entry]) => entry.enabled !== false)
+                .forEach(([key]) => {
+                    const opt = document.createElement("option");
+                    opt.value = key;
+                    opt.textContent = key;
+                    select.appendChild(opt);
+                });
+            select.value = this.currentMaterialKey;
+            select.addEventListener("change", () => {
+                this.setMaterialMode(select.value);
+            });
+
+            // Wireframe toggle (mesh wireframe)
+            const wfLabel = document.createElement("label");
+            wfLabel.style.display = "flex";
+            wfLabel.style.alignItems = "center";
+            wfLabel.style.gap = "4px";
+            const wf = document.createElement("input");
+            wf.type = "checkbox";
+            wf.checked = this.wireframeMode;
+            wf.title = "Wireframe Mesh";
+            wf.addEventListener("change", () => {
+                this.toggleWireframe();
+            });
+            const wfText = document.createElement("span");
+            wfText.textContent = "Wireframe";
+            wfLabel.appendChild(wf);
+            wfLabel.appendChild(wfText);
+
+            // Edges overlay toggle
+            const edLabel = document.createElement("label");
+            edLabel.style.display = "flex";
+            edLabel.style.alignItems = "center";
+            edLabel.style.gap = "4px";
+            const ed = document.createElement("input");
+            ed.type = "checkbox";
+            ed.checked = this.edgesEnabled;
+            ed.title = "Edges Overlay";
+            ed.addEventListener("change", () => {
+                this.setEdgesEnabled(ed.checked);
+            });
+            const edText = document.createElement("span");
+            edText.textContent = "Edges";
+            edLabel.appendChild(ed);
+            edLabel.appendChild(edText);
+
+            wrap.appendChild(select);
+            wrap.appendChild(wfLabel);
+            wrap.appendChild(edLabel);
+
+            // Position wrap inside container (over renderer)
+            this.container.style.position = "relative";
+            this.container.appendChild(wrap);
+            this.materialControls = { wrap, select, wf, ed };
+        } catch (e) {
+            console.warn("Failed to init material controls:", e);
+        }
+    }
+
+    setEdgesEnabled(enabled) {
+        this.edgesEnabled = enabled;
+        // Toggle existing edge overlays if present
+        if (this.panelMesh && this.panelMesh.userData.edgeLines) {
+            this.panelMesh.userData.edgeLines.visible =
+                enabled && this.panelMesh.visible;
+        }
+        if (this.partMesh && this.partMesh.userData.edgeLines) {
+            this.partMesh.userData.edgeLines.visible =
+                enabled && this.partMesh.visible;
+        }
+        // Create overlays on demand if enabled
+        if (enabled) {
+            if (this.panelMesh && !this.panelMesh.userData.edgeLines) {
+                this.addEdgeVisualization(this.panelMesh);
+            }
+            if (this.partMesh && !this.partMesh.userData.edgeLines) {
+                this.addEdgeVisualization(this.partMesh);
+            }
+        }
     }
 
     setupLighting() {
@@ -173,6 +372,69 @@ export default class ThreeModule extends BaseModule {
         this.wireframeToggleBtn = toggleBtn;
     }
 
+    addCSGModeToggle() {
+        const container = document.createElement("div");
+        container.style.position = "absolute";
+        container.style.top = "50px";
+        container.style.right = "10px";
+        container.style.padding = "8px";
+        container.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
+        container.style.border = "1px solid #ccc";
+        container.style.borderRadius = "4px";
+        container.style.zIndex = "100";
+        container.style.fontSize = "12px";
+        container.style.display = "flex";
+        container.style.alignItems = "center";
+        container.style.gap = "6px";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.id = "csg-union-mode";
+        checkbox.checked = this.useUnionBeforeSubtract;
+        checkbox.style.cursor = "pointer";
+
+        const label = document.createElement("label");
+        label.htmlFor = "csg-union-mode";
+        label.textContent = "Union bits before subtract";
+        label.style.cursor = "pointer";
+        label.style.userSelect = "none";
+
+        checkbox.addEventListener("change", () => {
+            this.useUnionBeforeSubtract = checkbox.checked;
+            console.log(
+                "CSG mode changed to:",
+                this.useUnionBeforeSubtract ? "Union" : "Sequential"
+            );
+            // Invalidate cache to force recalculation
+            this.lastCSGSignature = null;
+            // Reapply CSG if currently in Part view
+            if (window.showPart && this.bitExtrudeMeshes.length > 0) {
+                this.applyCSGOperation(true);
+            }
+        });
+
+        container.appendChild(checkbox);
+        container.appendChild(label);
+        this.container.appendChild(container);
+        this.csgModeToggle = container;
+    }
+
+    addStatsWidget() {
+        // Check if Stats is available
+        if (typeof Stats === "undefined") {
+            console.warn("Stats.js not loaded, skipping stats widget");
+            return;
+        }
+
+        this.stats = new Stats();
+        this.stats.showPanel(0); // 0: fps, 1: ms, 2: mb
+        this.stats.dom.style.position = "absolute";
+        this.stats.dom.style.left = "10px";
+        this.stats.dom.style.top = "10px";
+        this.stats.dom.style.zIndex = "100";
+        this.container.appendChild(this.stats.dom);
+    }
+
     toggleWireframe() {
         this.wireframeMode = !this.wireframeMode;
 
@@ -197,6 +459,29 @@ export default class ThreeModule extends BaseModule {
         }
     }
 
+    buildPanelBitsSignature(width, height, thickness, bits = [], panelAnchor) {
+        const bitSig = bits.map((b) => ({
+            name: b.name || b.id || "bit",
+            x: b.x,
+            y: b.y,
+            op: b.operation,
+            profile:
+                b.bitData?.profilePath ||
+                b.bitData?.name ||
+                b.bitData?.id ||
+                b.bitData?.type ||
+                "profile",
+        }));
+
+        return JSON.stringify({
+            w: width,
+            h: height,
+            t: thickness,
+            anchor: panelAnchor,
+            bits: bitSig,
+        });
+    }
+
     /**
      * Create or update the panel visualization
      * @param {number} width - Panel width in mm
@@ -212,6 +497,18 @@ export default class ThreeModule extends BaseModule {
         bits = [],
         panelAnchor = "top-left"
     ) {
+        // Prevent overlapping runs: if already running, queue the latest request
+        if (this.updatePanelRunning) {
+            this.updatePanelQueuedArgs = {
+                width,
+                height,
+                thickness,
+                bits,
+                panelAnchor,
+            };
+            return;
+        }
+        this.updatePanelRunning = true;
         console.log("ThreeModule: Updating panel", {
             width,
             height,
@@ -219,106 +516,168 @@ export default class ThreeModule extends BaseModule {
             bits: bits.length,
         });
 
-        // Remove all meshes
-        if (this.panelMesh) {
-            this.scene.remove(this.panelMesh);
-            // Only dispose if we haven't saved this as original (for toggle support)
-            if (this.panelMesh.geometry !== this.originalPanelGeometry) {
-                this.panelMesh.geometry?.dispose();
-            }
-            if (this.panelMesh.material !== this.originalPanelMaterial) {
-                this.panelMesh.material?.dispose();
-            }
-            // Always remove edge visualization
-            if (this.panelMesh.userData.edgeLines) {
-                this.scene.remove(this.panelMesh.userData.edgeLines);
-                this.panelMesh.userData.edgeLines.geometry?.dispose();
-                this.panelMesh.userData.edgeLines.material?.dispose();
-            }
-            this.panelMesh = null;
-        }
-        if (this.partMesh) {
-            this.scene.remove(this.partMesh);
-            this.partMesh.geometry.dispose();
-            this.partMesh.material.dispose();
-            this.partMesh = null;
-        }
-        this.bitPathMeshes.forEach((mesh) => {
-            this.scene.remove(mesh);
-            mesh.geometry.dispose();
-            mesh.material.dispose();
-        });
-        this.bitPathMeshes = [];
-        this.bitExtrudeMeshes = [];
+        try {
+            const nextSignature = this.buildPanelBitsSignature(
+                width,
+                height,
+                thickness,
+                bits,
+                panelAnchor
+            );
 
-        // Create panel geometry
-        const geometry = new THREE.BoxGeometry(width, height, thickness);
-        const material = new THREE.MeshStandardMaterial({
-            color: 0xdeb887, // BurlyWood color
-            roughness: 0.8,
-            metalness: 0.1,
-            wireframe: this.wireframeMode,
-        });
-        this.panelMesh = new THREE.Mesh(geometry, material);
-        this.panelMesh.castShadow = true;
-        this.panelMesh.receiveShadow = true;
-        this.panelMesh.position.set(0, height / 2, 0);
+            if (this.lastPanelUpdateSignature === nextSignature) {
+                console.log(
+                    "updatePanel: signature unchanged, skipping rebuild"
+                );
+                return;
+            }
 
-        // Save original panel data on first creation (before any CSG)
-        if (!this.originalPanelGeometry) {
+            // Remove all meshes
+            if (this.panelMesh) {
+                this.scene.remove(this.panelMesh);
+                // Only dispose if we haven't saved this as original (for toggle support)
+                if (this.panelMesh.geometry !== this.originalPanelGeometry) {
+                    this.panelMesh.geometry?.dispose();
+                }
+                if (this.panelMesh.material !== this.originalPanelMaterial) {
+                    this.panelMesh.material?.dispose();
+                }
+                // Always remove edge visualization
+                if (this.panelMesh.userData.edgeLines) {
+                    this.scene.remove(this.panelMesh.userData.edgeLines);
+                    this.panelMesh.userData.edgeLines.geometry?.dispose();
+                    this.panelMesh.userData.edgeLines.material?.dispose();
+                }
+                this.panelMesh = null;
+            }
+            if (this.partMesh) {
+                this.partMesh.visible = false;
+                if (this.partMesh.userData.edgeLines) {
+                    this.partMesh.userData.edgeLines.visible = false;
+                }
+            }
+            this.bitPathMeshes.forEach((mesh) => {
+                this.scene.remove(mesh);
+                mesh.geometry.dispose();
+                mesh.material.dispose();
+            });
+            this.bitPathMeshes = [];
+            this.bitExtrudeMeshes.forEach((mesh) => {
+                this.scene.remove(mesh);
+                mesh.geometry.dispose();
+                mesh.material.dispose();
+            });
+            this.bitExtrudeMeshes = [];
+            this.lastCSGSignature = null;
+            this.csgActive = false;
+            this.csgVisible = false;
+            this.panelBBox = null;
+
+            // Create panel geometry
+            const geometry = new THREE.BoxGeometry(width, height, thickness);
+            const materialEntry =
+                this.materialRegistry[this.currentMaterialKey];
+            const material = materialEntry
+                ? materialEntry.factory()
+                : new THREE.MeshStandardMaterial({
+                      color: 0xdeb887, // BurlyWood color
+                      roughness: 0.8,
+                      metalness: 0.1,
+                  });
+            material.wireframe = this.wireframeMode;
+            this.panelMesh = new THREE.Mesh(geometry, material);
+            this.panelMesh.castShadow = true;
+            this.panelMesh.receiveShadow = true;
+            this.panelMesh.position.set(0, height / 2, 0);
+            this.basePanelMesh = this.panelMesh;
+
+            // Save original panel data on first creation (before any CSG)
             this.originalPanelGeometry = this.panelMesh.geometry.clone();
             this.originalPanelMaterial = this.panelMesh.material.clone();
             this.originalPanelPosition = this.panelMesh.position.clone();
             this.originalPanelRotation = this.panelMesh.rotation.clone();
             this.originalPanelScale = this.panelMesh.scale.clone();
+            this.panelBBox = this.computeWorldBBox(
+                this.originalPanelGeometry,
+                this.originalPanelPosition,
+                this.originalPanelRotation,
+                this.originalPanelScale
+            );
             console.log("Original panel data saved at creation");
-        }
 
-        // Create bit path extrusions
-        if (bits && bits.length > 0) {
-            await this.createBitPathExtrusions(
-                bits,
-                width,
-                height,
-                thickness,
-                panelAnchor
-            );
-        }
+            // Create bit path extrusions
+            if (bits && bits.length > 0) {
+                await this.createBitPathExtrusions(
+                    bits,
+                    width,
+                    height,
+                    thickness,
+                    panelAnchor
+                );
+            }
 
-        // Adjust camera to fit panel
-        this.fitCameraToPanel(width, height, thickness);
+            // Adjust camera to fit panel
+            this.fitCameraToPanel(width, height, thickness);
 
-        // Add meshes to scene (will apply CSG later if needed)
-        console.log("updatePanel: Adding panel mesh and bit meshes to scene", {
-            bitPathMeshesCount: this.bitPathMeshes.length,
-            bitsVisible: window.bitsVisible,
-            showPart: window.showPart,
-        });
-
-        this.scene.add(this.panelMesh);
-
-        // Only add bit meshes if they should be visible
-        // In Part view, they will be hidden by applyCSGOperation()
-        if (window.bitsVisible !== false) {
+            // Add meshes to scene (will apply CSG later if needed)
             console.log(
-                "updatePanel: Adding",
-                this.bitPathMeshes.length,
-                "bit meshes to scene"
+                "updatePanel: Adding panel mesh and bit meshes to scene",
+                {
+                    bitPathLinesCount: this.bitPathMeshes.length,
+                    bitExtrudeMeshesCount: this.bitExtrudeMeshes.length,
+                    bitsVisible: window.bitsVisible,
+                    showPart: window.showPart,
+                }
             );
-            this.bitPathMeshes.forEach((mesh) => {
-                this.scene.add(mesh);
-                // Don't auto-show in Part view - applyCSGOperation will control visibility
-                mesh.visible = !window.showPart;
-            });
-        } else {
-            console.log("updatePanel: Bits not visible, hiding bit meshes");
-            this.bitPathMeshes.forEach((mesh) => {
-                mesh.visible = false;
-            });
-        }
 
-        // Note: Do NOT call applyCSGOperation here - let the caller handle CSG logic
-        // This allows proper control over when CSG is applied vs when panel is just updated
+            this.scene.add(this.panelMesh);
+
+            // Only add bit meshes if they should be visible
+            // In Part view, they will be hidden by applyCSGOperation()
+            if (window.bitsVisible !== false) {
+                console.log("updatePanel: Adding bit meshes to scene", {
+                    bitPathLines: this.bitPathMeshes.length,
+                    bitExtrudes: this.bitExtrudeMeshes.length,
+                });
+                this.bitPathMeshes.forEach((mesh) => {
+                    this.scene.add(mesh);
+                    mesh.visible = !window.showPart;
+                });
+                this.bitExtrudeMeshes.forEach((mesh) => {
+                    this.scene.add(mesh);
+                    mesh.visible = !window.showPart;
+                });
+            } else {
+                console.log("updatePanel: Bits not visible, hiding bit meshes");
+                this.bitPathMeshes.forEach((mesh) => {
+                    mesh.visible = false;
+                });
+                this.bitExtrudeMeshes.forEach((mesh) => {
+                    mesh.visible = false;
+                });
+            }
+
+            // Mark existing CSG mesh as stale (will be recomputed on demand)
+            this.lastPanelUpdateSignature = nextSignature;
+
+            // Note: Do NOT call applyCSGOperation here - let the caller handle CSG logic
+            // This allows proper control over when CSG is applied vs when panel is just updated
+        } catch (error) {
+            console.error("ThreeModule: updatePanel failed", error);
+        } finally {
+            this.updatePanelRunning = false;
+            if (this.updatePanelQueuedArgs) {
+                const queued = this.updatePanelQueuedArgs;
+                this.updatePanelQueuedArgs = null;
+                await this.updatePanel(
+                    queued.width,
+                    queued.height,
+                    queued.thickness,
+                    queued.bits,
+                    queued.panelAnchor
+                );
+            }
+        }
     }
 
     /**
@@ -335,7 +694,21 @@ export default class ThreeModule extends BaseModule {
         panelThickness,
         panelAnchor
     ) {
-        console.log("ThreeModule: Creating bit path extrusions", bits.length);
+        // Deduplicate incoming bits by their SVG group reference to avoid duplicates
+        const seenGroups = new Set();
+        const uniqueBits = [];
+        for (const b of bits) {
+            const key = b && b.group ? b.group : b;
+            if (!seenGroups.has(key)) {
+                seenGroups.add(key);
+                uniqueBits.push(b);
+            }
+        }
+
+        console.log("ThreeModule: Creating bit path extrusions", {
+            bitsCount: bits.length,
+            uniqueBitsCount: uniqueBits.length,
+        });
 
         // Get offset contours from the main canvas
         const offsetContours = window.offsetContours || [];
@@ -360,7 +733,7 @@ export default class ThreeModule extends BaseModule {
             height: partFrontHeight,
         });
 
-        for (const [bitIndex, bit] of bits.entries()) {
+        for (const [bitIndex, bit] of uniqueBits.entries()) {
             console.log(`Processing bit ${bitIndex}:`, {
                 x: bit.x,
                 y: bit.y,
@@ -425,6 +798,7 @@ export default class ThreeModule extends BaseModule {
             // Add path visualization for debugging (thick colored line)
             const pathLine = this.createPathVisualization(curve3D, bit.color);
             if (pathLine) {
+                pathLine.userData.bitIndex = bitIndex;
                 this.bitPathMeshes.push(pathLine);
                 console.log(`Added path visualization for bit ${bitIndex}`);
             }
@@ -445,7 +819,8 @@ export default class ThreeModule extends BaseModule {
             );
 
             if (extrudeMesh) {
-                this.bitPathMeshes.push(extrudeMesh);
+                extrudeMesh.userData.operation = bit.operation || "subtract";
+                extrudeMesh.userData.bitIndex = bitIndex;
                 this.bitExtrudeMeshes.push(extrudeMesh);
                 console.log(`Created extrude mesh for bit ${bitIndex}`);
             } else {
@@ -1190,6 +1565,176 @@ export default class ThreeModule extends BaseModule {
         this.bitPathMeshes.forEach((mesh) => {
             mesh.visible = visible;
         });
+        this.bitExtrudeMeshes.forEach((mesh) => {
+            mesh.visible = visible;
+        });
+    }
+
+    // Compute world-space bounding box for a mesh (or geometry with transform)
+    computeWorldBBox(geometry, position, rotation, scale) {
+        const bbox = new THREE.Box3();
+        geometry.computeBoundingBox();
+        bbox.copy(geometry.boundingBox);
+        const matrix = new THREE.Matrix4();
+        const pos = position || new THREE.Vector3();
+        const rot = rotation || new THREE.Euler();
+        const scl = scale || new THREE.Vector3(1, 1, 1);
+        matrix.compose(pos, new THREE.Quaternion().setFromEuler(rot), scl);
+        bbox.applyMatrix4(matrix);
+        return bbox;
+    }
+
+    buildCSGSignature(bitMeshes = []) {
+        const panelSignature = {
+            geometry: this.originalPanelGeometry?.uuid,
+            position: this.originalPanelPosition
+                ? this.originalPanelPosition.toArray()
+                : null,
+            rotation: this.originalPanelRotation
+                ? [
+                      this.originalPanelRotation.x,
+                      this.originalPanelRotation.y,
+                      this.originalPanelRotation.z,
+                  ]
+                : null,
+            scale: this.originalPanelScale
+                ? this.originalPanelScale.toArray()
+                : null,
+        };
+
+        const bits = bitMeshes.map((mesh) => ({
+            geometry: mesh.geometry?.uuid,
+            position: mesh.position.toArray(),
+            rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
+            scale: mesh.scale.toArray(),
+            operation: mesh.userData?.operation,
+        }));
+
+        return JSON.stringify({ panel: panelSignature, bits });
+    }
+
+    filterIntersectingExtrudes(panelBBox) {
+        if (!panelBBox) return [];
+
+        const intersecting = [];
+        this.bitExtrudeMeshes.forEach((mesh, idx) => {
+            if (!mesh.geometry) {
+                console.warn(`Bit mesh ${idx} missing geometry, skipping`);
+                return;
+            }
+
+            const bbox = this.computeWorldBBox(
+                mesh.geometry,
+                mesh.position,
+                mesh.rotation,
+                mesh.scale
+            );
+
+            if (bbox.intersectsBox(panelBBox)) {
+                intersecting.push(mesh);
+            } else {
+                console.log(`Bit mesh ${idx} culls out of panel bounds`);
+            }
+        });
+
+        return intersecting;
+    }
+
+    showBasePanel() {
+        if (this.panelMesh) {
+            this.panelMesh.visible = true;
+            if (this.edgesEnabled) {
+                if (!this.panelMesh.userData.edgeLines) {
+                    this.addEdgeVisualization(this.panelMesh);
+                } else {
+                    this.panelMesh.userData.edgeLines.visible = true;
+                }
+            } else if (this.panelMesh.userData.edgeLines) {
+                this.panelMesh.userData.edgeLines.visible = false;
+            }
+        }
+
+        if (this.partMesh) {
+            this.partMesh.visible = false;
+            if (this.partMesh.userData.edgeLines) {
+                this.partMesh.userData.edgeLines.visible = false;
+            }
+        }
+
+        this.bitPathMeshes.forEach((mesh) => {
+            mesh.visible = window.bitsVisible !== false;
+        });
+        this.bitExtrudeMeshes.forEach((mesh) => {
+            mesh.visible = window.bitsVisible !== false;
+        });
+
+        this.csgVisible = false;
+    }
+
+    showCSGResult() {
+        if (this.panelMesh) {
+            this.panelMesh.visible = false;
+            if (this.panelMesh.userData.edgeLines) {
+                this.panelMesh.userData.edgeLines.visible = false;
+            }
+        }
+
+        if (this.partMesh) {
+            if (!this.scene.children.includes(this.partMesh)) {
+                this.scene.add(this.partMesh);
+            }
+            this.partMesh.visible = true;
+            if (this.edgesEnabled) {
+                if (!this.partMesh.userData.edgeLines) {
+                    this.addEdgeVisualization(this.partMesh);
+                } else {
+                    this.partMesh.userData.edgeLines.visible = true;
+                }
+            } else if (this.partMesh.userData.edgeLines) {
+                this.partMesh.userData.edgeLines.visible = false;
+            }
+        }
+
+        this.bitPathMeshes.forEach((mesh) => {
+            mesh.visible = false;
+        });
+        this.bitExtrudeMeshes.forEach((mesh) => {
+            mesh.visible = false;
+        });
+
+        this.csgVisible = true;
+    }
+
+    // Update current material mode and apply to panel (and CSG result)
+    setMaterialMode(modeKey) {
+        const entry = this.materialRegistry[modeKey];
+        if (!entry || entry.enabled === false) {
+            console.warn("Material mode not available:", modeKey);
+            return;
+        }
+        this.currentMaterialKey = modeKey;
+        const mat = entry.factory();
+        mat.wireframe = this.wireframeMode;
+
+        // Update original material reference for restoration
+        this.originalPanelMaterial = mat.clone();
+
+        if (this.panelMesh) {
+            if (this.panelMesh.material) this.panelMesh.material.dispose();
+            this.panelMesh.material = mat.clone();
+        }
+
+        if (this.partMesh) {
+            if (this.partMesh.material) this.partMesh.material.dispose();
+            const pm = entry.factory();
+            pm.wireframe = this.wireframeMode;
+            this.partMesh.material = pm;
+        }
+    }
+
+    // Allow external registration or enable/disable materials
+    registerMaterial(modeKey, factory, enabled = true) {
+        this.materialRegistry[modeKey] = { factory, enabled };
     }
 
     /**
@@ -1198,6 +1743,7 @@ export default class ThreeModule extends BaseModule {
      */
     addEdgeVisualization(mesh) {
         try {
+            if (!this.edgesEnabled) return;
             // Create edges from the geometry
             const edges = new THREE.EdgesGeometry(mesh.geometry);
             const lineSegments = new THREE.LineSegments(
@@ -1219,11 +1765,7 @@ export default class ThreeModule extends BaseModule {
             this.scene.add(lineSegments);
             mesh.userData.edgeLines = lineSegments;
 
-            // Enhance material for better visibility - increase metalness for subtle highlights
-            if (mesh.material && mesh.material.isMeshStandardMaterial) {
-                mesh.material.metalness = 0.3;
-                mesh.material.roughness = 0.7;
-            }
+            // Keep material properties as-is; edges overlay is independent
 
             console.log("Added edge visualization to mesh");
         } catch (error) {
@@ -1245,54 +1787,181 @@ export default class ThreeModule extends BaseModule {
             this.bitExtrudeMeshes.length
         );
 
-        if (!this.originalPanelGeometry || !this.originalPanelMaterial) {
-            console.error("Original panel data not available!");
+        // Block CSG during active drag to prevent broken topology
+        if (window.isDraggingBit) {
+            console.log("CSG blocked: drag in progress");
+            this.csgQueuedApply = apply;
             return;
         }
 
+        // Prevent overlapping CSG runs (rapid mouse moves / table drags)
+        if (this.csgBusy) {
+            this.partMesh.visible = false;
+            if (this.partMesh.userData.edgeLines) {
+                this.partMesh.userData.edgeLines.visible = false;
+            }
+            return;
+        }
+
+        // Update panel bbox if missing
+        if (!this.panelBBox) {
+            this.panelBBox = this.computeWorldBBox(
+                this.originalPanelGeometry,
+                this.originalPanelPosition,
+                this.originalPanelRotation,
+                this.originalPanelScale
+            );
+        }
+
         try {
-            if (apply) {
-                // ===== PART VIEW: Apply CSG subtraction from original panel =====
-                console.log(
-                    "Applying CSG: subtracting current bits from original panel"
+            if (!apply) {
+                console.log("Restoring base panel (Material view)");
+                this.showBasePanel();
+                this.csgBusy = false;
+                return;
+            }
+
+            // ===== PART VIEW: Apply CSG subtraction from original panel =====
+            console.log(
+                "Applying CSG with optimized filtering/caching from original panel"
+            );
+            console.log("CSG Operation Start:", {
+                timestamp: Date.now(),
+                mode: this.useUnionBeforeSubtract ? "Union" : "Sequential",
+                totalBits: this.bitExtrudeMeshes.length,
+            });
+
+            if (!this.bitExtrudeMeshes.length) {
+                console.warn("No extrude meshes available, showing base panel");
+                this.showBasePanel();
+                this.csgBusy = false;
+                return;
+            }
+
+            // Cull non-intersecting bits first
+            const intersectingMeshes = this.filterIntersectingExtrudes(
+                this.panelBBox
+            );
+            // Deduplicate by logical bit identity (bitIndex) to avoid double subtraction
+            const uniqueIntersectingMeshes = [];
+            const seenByBit = new Set();
+            // Iterate from end to prefer latest-created mesh per bit
+            for (let i = intersectingMeshes.length - 1; i >= 0; i--) {
+                const m = intersectingMeshes[i];
+                const key = m.userData?.bitIndex ?? m.geometry?.uuid ?? m.uuid;
+                if (!seenByBit.has(key)) {
+                    seenByBit.add(key);
+                    uniqueIntersectingMeshes.unshift(m);
+                }
+            }
+            const csgSignature = this.buildCSGSignature(
+                uniqueIntersectingMeshes
+            );
+
+            if (
+                this.csgActive &&
+                this.partMesh &&
+                this.lastCSGSignature === csgSignature
+            ) {
+                console.log("CSG signature unchanged - reusing cached result");
+                this.showCSGResult();
+                return;
+            }
+
+            if (uniqueIntersectingMeshes.length === 0) {
+                console.warn(
+                    "No intersecting bits with panel, skipping CSG subtraction"
                 );
+                this.lastCSGSignature = csgSignature;
+                this.csgActive = false;
+                this.showBasePanel();
+                this.csgBusy = false;
+                return;
+            }
 
-                // Immediately hide bit meshes in Part view
-                this.bitPathMeshes.forEach((mesh) => {
-                    mesh.visible = false;
-                });
+            // Prepare base brush
+            const panelBrush = new Brush(this.originalPanelGeometry.clone());
+            const panelPosition =
+                this.originalPanelPosition || new THREE.Vector3();
+            const panelRotation =
+                this.originalPanelRotation || new THREE.Euler();
+            const panelScale =
+                this.originalPanelScale || new THREE.Vector3(1, 1, 1);
+            panelBrush.position.copy(panelPosition);
+            panelBrush.rotation.copy(panelRotation);
+            panelBrush.scale.copy(panelScale);
+            panelBrush.updateMatrixWorld(true);
 
-                // Start with fresh clone of original panel
-                const panelGeometry = this.originalPanelGeometry.clone();
-                const panelBrush = new Brush(panelGeometry);
-                panelBrush.position.copy(this.originalPanelPosition);
-                panelBrush.rotation.copy(this.originalPanelRotation);
-                panelBrush.scale.copy(this.originalPanelScale);
-                panelBrush.updateMatrixWorld(true);
+            const evaluator = new Evaluator();
+            evaluator.attributes = ["position", "normal"];
 
-                let resultBrush = panelBrush;
-                let successCount = 0;
+            let resultBrush;
+            let processed = 0;
 
-                // Subtract each current extrude from the panel
-                for (let i = 0; i < this.bitExtrudeMeshes.length; i++) {
-                    const bitMesh = this.bitExtrudeMeshes[i];
+            if (this.useUnionBeforeSubtract) {
+                // MODE 1: Union all intersecting bits, then subtract once
+                console.log("Using UNION mode: combining all bits first");
+                console.time("CSG Union+Subtract");
+                let unionBrush = null;
 
-                    if (!bitMesh.geometry) {
-                        console.warn(`Bit mesh ${i} has no geometry, skipping`);
-                        continue;
-                    }
-
+                uniqueIntersectingMeshes.forEach((bitMesh, idx) => {
                     try {
-                        // Create brush from current bit mesh (with current position)
                         const bitBrush = new Brush(bitMesh.geometry);
                         bitBrush.position.copy(bitMesh.position);
                         bitBrush.rotation.copy(bitMesh.rotation);
                         bitBrush.scale.copy(bitMesh.scale);
                         bitBrush.updateMatrixWorld(true);
 
-                        // Subtract this bit from result
-                        const evaluator = new Evaluator();
-                        evaluator.attributes = ["position", "normal"];
+                        if (!unionBrush) {
+                            unionBrush = bitBrush;
+                        } else {
+                            unionBrush = evaluator.evaluate(
+                                unionBrush,
+                                bitBrush,
+                                ADDITION
+                            );
+                        }
+                        processed++;
+                    } catch (error) {
+                        console.warn(
+                            `Error building brush for bit ${idx}:`,
+                            error.message
+                        );
+                    }
+                });
+
+                if (!unionBrush) {
+                    console.warn(
+                        "Failed to build union brush, showing base panel"
+                    );
+                    this.lastCSGSignature = csgSignature;
+                    this.csgActive = false;
+                    this.showBasePanel();
+                    this.csgBusy = false;
+                    return;
+                }
+
+                // Subtract the union from the panel in a single operation
+                resultBrush = evaluator.evaluate(
+                    panelBrush,
+                    unionBrush,
+                    SUBTRACTION
+                );
+            } else {
+                // MODE 2: Sequential subtraction (no union)
+                console.log(
+                    "Using SEQUENTIAL mode: subtracting bits one by one"
+                );
+                console.time("CSG Sequential");
+                resultBrush = panelBrush;
+
+                for (const bitMesh of uniqueIntersectingMeshes) {
+                    try {
+                        const bitBrush = new Brush(bitMesh.geometry);
+                        bitBrush.position.copy(bitMesh.position);
+                        bitBrush.rotation.copy(bitMesh.rotation);
+                        bitBrush.scale.copy(bitMesh.scale);
+                        bitBrush.updateMatrixWorld(true);
 
                         resultBrush = evaluator.evaluate(
                             resultBrush,
@@ -1300,126 +1969,89 @@ export default class ThreeModule extends BaseModule {
                             SUBTRACTION
                         );
 
-                        if (resultBrush) {
-                            successCount++;
-                            console.log(`Successfully subtracted bit ${i}`);
-                        } else {
-                            console.warn(`Subtraction failed for bit ${i}`);
+                        if (!resultBrush) {
+                            console.warn(
+                                `Sequential subtraction failed at bit ${processed}`
+                            );
+                            break;
                         }
+                        processed++;
                     } catch (error) {
                         console.warn(
-                            `Error subtracting bit mesh ${i}:`,
+                            `Error in sequential subtraction for bit ${processed}:`,
                             error.message
                         );
+                        break;
                     }
                 }
-
-                // Replace panel with CSG result
-                if (successCount > 0 && resultBrush) {
-                    // Remove current panel from scene
-                    if (this.panelMesh) {
-                        this.scene.remove(this.panelMesh);
-                        // Only dispose if it's a CSG result (not the original)
-                        if (
-                            this.panelMesh.geometry !==
-                            this.originalPanelGeometry
-                        ) {
-                            this.panelMesh.geometry?.dispose();
-                        }
-                        if (
-                            this.panelMesh.material !==
-                            this.originalPanelMaterial
-                        ) {
-                            this.panelMesh.material?.dispose();
-                        }
-                        // Remove edge visualization
-                        if (this.panelMesh.userData.edgeLines) {
-                            this.scene.remove(
-                                this.panelMesh.userData.edgeLines
-                            );
-                            this.panelMesh.userData.edgeLines.geometry?.dispose();
-                            this.panelMesh.userData.edgeLines.material?.dispose();
-                        }
-                    }
-
-                    // Create new mesh with CSG result
-                    const resultMaterial = new THREE.MeshStandardMaterial({
-                        color: 0xdeb887,
-                        roughness: 0.8,
-                        metalness: 0.1,
-                        wireframe: this.wireframeMode,
-                    });
-                    resultBrush.material = resultMaterial;
-                    resultBrush.castShadow = true;
-                    resultBrush.receiveShadow = true;
-
-                    // Add to scene
-                    this.scene.add(resultBrush);
-                    this.panelMesh = resultBrush;
-
-                    // Add edge visualization
-                    this.addEdgeVisualization(resultBrush);
-
-                    console.log(
-                        `CSG applied successfully, subtracted ${successCount} bits`
-                    );
-                } else {
-                    console.error("CSG failed, keeping original panel visible");
-                }
-            } else {
-                // ===== MATERIAL VIEW: Restore original panel =====
-                console.log("Restoring original panel (Material view)");
-
-                // Remove CSG panel if it exists
-                if (this.panelMesh) {
-                    this.scene.remove(this.panelMesh);
-                    // Only dispose CSG results, not original geometry
-                    if (
-                        this.panelMesh.geometry &&
-                        this.panelMesh.geometry !== this.originalPanelGeometry
-                    ) {
-                        this.panelMesh.geometry.dispose();
-                    }
-                    if (
-                        this.panelMesh.material &&
-                        this.panelMesh.material !== this.originalPanelMaterial
-                    ) {
-                        this.panelMesh.material.dispose();
-                    }
-                    // Remove edge visualization
-                    if (this.panelMesh.userData.edgeLines) {
-                        this.scene.remove(this.panelMesh.userData.edgeLines);
-                        this.panelMesh.userData.edgeLines.geometry?.dispose();
-                        this.panelMesh.userData.edgeLines.material?.dispose();
-                    }
-                }
-
-                // Create fresh mesh from original panel (clone, not reuse)
-                const originalPanel = new THREE.Mesh(
-                    this.originalPanelGeometry.clone(),
-                    this.originalPanelMaterial.clone()
-                );
-                originalPanel.position.copy(this.originalPanelPosition);
-                originalPanel.rotation.copy(this.originalPanelRotation);
-                originalPanel.scale.copy(this.originalPanelScale);
-                originalPanel.castShadow = true;
-                originalPanel.receiveShadow = true;
-
-                this.scene.add(originalPanel);
-                this.panelMesh = originalPanel;
-
-                // Add edge visualization
-                this.addEdgeVisualization(originalPanel);
-
-                console.log("Original panel restored");
-
-                // Show bit meshes in Material view
-                this.bitPathMeshes.forEach((mesh) => {
-                    mesh.visible = window.bitsVisible !== false;
-                });
+                console.timeEnd("CSG Sequential");
             }
+
+            if (!resultBrush) {
+                console.error(
+                    "CSG subtraction failed, reverting to base panel"
+                );
+                this.lastCSGSignature = null;
+                this.csgActive = false;
+                this.showBasePanel();
+                this.csgBusy = false;
+                return;
+            }
+
+            // Dispose previous CSG mesh if present
+            if (this.partMesh) {
+                if (this.partMesh.userData.edgeLines) {
+                    this.scene.remove(this.partMesh.userData.edgeLines);
+                    this.partMesh.userData.edgeLines.geometry?.dispose();
+                    this.partMesh.userData.edgeLines.material?.dispose();
+                }
+                this.scene.remove(this.partMesh);
+                this.partMesh.geometry?.dispose();
+                this.partMesh.material?.dispose();
+            }
+
+            const materialEntry =
+                this.materialRegistry[this.currentMaterialKey];
+            const resultMaterial = materialEntry
+                ? materialEntry.factory()
+                : this.originalPanelMaterial.clone();
+            resultMaterial.wireframe = this.wireframeMode;
+
+            resultBrush.material = resultMaterial;
+            resultBrush.castShadow = true;
+            resultBrush.receiveShadow = true;
+
+            this.partMesh = resultBrush;
+            if (this.edgesEnabled) {
+                this.addEdgeVisualization(resultBrush);
+            }
+            this.lastCSGSignature = csgSignature;
+            this.csgActive = true;
+
+            this.showCSGResult();
+
+            console.log(
+                `CSG applied successfully, processed ${processed} intersecting bits`
+            );
+            console.log("CSG Operation End:", {
+                timestamp: Date.now(),
+                success: true,
+                bitsProcessed: processed,
+            });
         } catch (error) {
             console.error("Error in applyCSGOperation:", error);
+            console.log("CSG Operation End:", {
+                timestamp: Date.now(),
+                success: false,
+                error: error.message,
+            });
+        } finally {
+            this.csgBusy = false;
+            if (this.csgQueuedApply !== null) {
+                const queued = this.csgQueuedApply;
+                this.csgQueuedApply = null;
+                this.applyCSGOperation(queued);
+            }
         }
     }
 
@@ -1456,6 +2088,8 @@ export default class ThreeModule extends BaseModule {
     animate() {
         this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
 
+        if (this.stats) this.stats.begin();
+
         if (this.controls) {
             this.controls.update();
         }
@@ -1463,6 +2097,8 @@ export default class ThreeModule extends BaseModule {
         if (this.renderer && this.scene && this.camera) {
             this.renderer.render(this.scene, this.camera);
         }
+
+        if (this.stats) this.stats.end();
     }
 
     /**
@@ -1535,32 +2171,6 @@ export default class ThreeModule extends BaseModule {
     }
 
     /**
-     * Add debug button for extrude visualization
-     */
-    addDebugExstrudeButton() {
-        const debugBtn = document.createElement("button");
-        debugBtn.textContent = "Debug Extrudes";
-        debugBtn.style.position = "absolute";
-        debugBtn.style.top = "110px";
-        debugBtn.style.right = "10px";
-        debugBtn.style.padding = "8px 16px";
-        debugBtn.style.backgroundColor = "rgba(100, 200, 255, 0.9)";
-        debugBtn.style.border = "1px solid #ccc";
-        debugBtn.style.borderRadius = "4px";
-        debugBtn.style.cursor = "pointer";
-        debugBtn.style.zIndex = "100";
-        debugBtn.style.fontSize = "12px";
-        debugBtn.style.fontWeight = "500";
-
-        debugBtn.addEventListener("click", () => {
-            this.toggleExtrudeVisualization();
-        });
-
-        this.container.appendChild(debugBtn);
-        this.debugExstrudeBtn = debugBtn;
-    }
-
-    /**
      * Show or hide the 3D canvas
      */
     setVisible(visible) {
@@ -1593,6 +2203,11 @@ export default class ThreeModule extends BaseModule {
         }
 
         this.bitPathMeshes.forEach((mesh) => {
+            mesh.geometry.dispose();
+            mesh.material.dispose();
+        });
+
+        this.bitExtrudeMeshes.forEach((mesh) => {
             mesh.geometry.dispose();
             mesh.material.dispose();
         });
