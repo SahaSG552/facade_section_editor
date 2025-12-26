@@ -300,12 +300,6 @@ export default class ThreeModule extends BaseModule {
             return;
         }
         this.updatePanelRunning = true;
-        this.log.info("Updating panel", {
-            width,
-            height,
-            thickness,
-            bits: bits.length,
-        });
 
         try {
             const nextSignature = this.buildPanelBitsSignature(
@@ -317,9 +311,19 @@ export default class ThreeModule extends BaseModule {
             );
 
             if (this.lastPanelUpdateSignature === nextSignature) {
-                this.log.info("signature unchanged, skipping rebuild");
+                this.log.debug(
+                    "Panel signature unchanged, skipping 3D rebuild"
+                );
                 return;
             }
+
+            // Only log when actually updating (signature changed)
+            this.log.info("Updating 3D panel", {
+                width,
+                height,
+                thickness,
+                bits: bits.length,
+            });
 
             // Remove all meshes
             if (this.panelMesh) {

@@ -84,21 +84,18 @@ class PanelManager {
     /**
      * Transform Y coordinate for display (considering anchor)
      */
-    transformYForDisplay(rawY, anchorOffset) {
-        if (this.panelAnchor === "bottom-left") {
-            return rawY - this.panelThickness;
-        }
-        return rawY;
+    transformYForDisplay(rawY, anchorOffset = { x: 0, y: 0 }) {
+        const displayY = rawY + (anchorOffset.y || 0);
+        return this.panelAnchor === "bottom-left" ? -displayY : displayY;
     }
 
     /**
      * Transform Y coordinate from display (considering anchor)
      */
-    transformYFromDisplay(displayY, anchorOffset) {
-        if (this.panelAnchor === "bottom-left") {
-            return displayY + this.panelThickness;
-        }
-        return displayY;
+    transformYFromDisplay(displayY, anchorOffset = { x: 0, y: 0 }) {
+        const adjustedY =
+            this.panelAnchor === "bottom-left" ? -displayY : displayY;
+        return adjustedY - (anchorOffset.y || 0);
     }
 
     /**
@@ -119,6 +116,79 @@ class PanelManager {
     }
 
     /**
+     * Update bit logical positions after anchor change
+     */
+    updateBitsForNewAnchor(bits = []) {
+        const panelX =
+            (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
+        const panelY =
+            (this.canvasManager.canvasParameters.height - this.panelThickness) /
+            2;
+        const previousAnchor =
+            this.panelAnchor === "top-left" ? "bottom-left" : "top-left";
+
+        const currentAnchorX = panelX;
+        const currentAnchorY =
+            previousAnchor === "top-left"
+                ? panelY
+                : panelY + this.panelThickness;
+        const newAnchorX = panelX;
+        const newAnchorY =
+            this.panelAnchor === "top-left"
+                ? panelY
+                : panelY + this.panelThickness;
+
+        bits.forEach((bit) => {
+            const physicalX = currentAnchorX + bit.x;
+            const physicalY = currentAnchorY + bit.y;
+
+            const newX = physicalX - newAnchorX;
+            const newY = physicalY - newAnchorY;
+
+            bit.x = newX;
+            bit.y = newY;
+
+            if (this.updateBitsSheet) {
+                this.updateBitsSheet();
+            }
+
+            const newAbsX = newAnchorX + newX;
+            const newAbsY = newAnchorY + newY;
+            const dx = newAbsX - bit.baseAbsX;
+            const dy = newAbsY - bit.baseAbsY;
+            if (bit.group) {
+                bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
+            }
+        });
+    }
+
+    /**
+     * Reposition bits to match current anchor and logical coordinates
+     */
+    updateBitsPositions(bits = []) {
+        const panelX =
+            (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
+        const panelY =
+            (this.canvasManager.canvasParameters.height - this.panelThickness) /
+            2;
+        const anchorOffset = this.getPanelAnchorOffset();
+        const anchorX = panelX + anchorOffset.x;
+        const anchorY = panelY + anchorOffset.y;
+
+        bits.forEach((bit) => {
+            const desiredAbsX = anchorX + (bit.x || 0);
+            const desiredAbsY = anchorY + (bit.y || 0);
+
+            const dx = desiredAbsX - bit.baseAbsX;
+            const dy = desiredAbsY - bit.baseAbsY;
+
+            if (bit.group) {
+                bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
+            }
+        });
+    }
+
+    /**
      * Cycle panel anchor between top-left and bottom-left
      */
     cyclePanelAnchor() {
@@ -133,6 +203,8 @@ class PanelManager {
         }
 
         this.onAnchorChange(this.panelAnchor);
+        this.updatePanelAnchorIndicator();
+        this.updateGridAnchor();
         log.debug(`Panel anchor changed to: ${this.panelAnchor}`);
     }
 

@@ -222,12 +222,8 @@ export default class InteractionManager {
 
         // Clear selections if clicked on empty area
         if (!clickedOnBit && selectedBitIndices.length > 0) {
-            selectedBitIndices.forEach((index) => {
-                this.callbacks.resetBitHighlight?.(index);
-            });
-            selectedBitIndices.length = 0;
-            this.callbacks.updateBitsSheet?.();
-            this.callbacks.redrawBitsOnCanvas?.();
+            // Use clearBitSelection callback to properly sync with SelectionManager
+            this.callbacks.clearBitSelection?.();
         }
 
         // Start panning

@@ -7,6 +7,8 @@ import { zoomToBBox, calculateElementsBBox } from "./canvas/zoomUtils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
+import BitsTableManager from "./panel/BitsTableManager.js";
+import SelectionManager from "./selection/SelectionManager.js";
 import ExportModule from "./export/ExportModule.js";
 import { OffsetCalculator } from "./utils/offsetCalculator.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
@@ -52,8 +54,10 @@ window.isDraggingBit = false;
 // Canvas manager instance
 let mainCanvasManager;
 let bitsManager; // Bits manager instance
+let bitsTableManager; // Bits table manager instance
 let interactionManager; // Interaction manager instance
 let panelManager; // Panel manager instance
+let selectionManager; // Selection manager instance
 let gridSize = 1; // Default grid size in pixels (1mm = 10px)
 
 // Sync initial state into AppState
@@ -69,8 +73,7 @@ appState.setGridSize(gridSize);
 let leftPanelClickOutsideHandler = null;
 let rightPanelClickOutsideHandler = null;
 
-// Bit selection state (managed by interaction manager)
-let selectedBitIndices = []; // Array of selected bit indices
+// Bit selection is managed by SelectionManager
 
 // BitsManager will be created in initializeSVG after CanvasManager is set up
 
@@ -108,6 +111,33 @@ function initializeSVG() {
 
         // Make it available globally for modules
         window.mainCanvasManager = mainCanvasManager;
+
+        // Watch for canvas container size changes (e.g., when switching 2D/3D/Both views)
+        // and refresh phantom bits and offset contours to prevent misalignment
+        let lastCanvasWidth = mainCanvasManager.canvasParameters.width;
+        let lastCanvasHeight = mainCanvasManager.canvasParameters.height;
+
+        const resizeObserver = new ResizeObserver(() => {
+            const currentWidth = mainCanvasManager.canvasParameters.width;
+            const currentHeight = mainCanvasManager.canvasParameters.height;
+
+            // Trigger refresh only if dimensions actually changed
+            if (
+                currentWidth !== lastCanvasWidth ||
+                currentHeight !== lastCanvasHeight
+            ) {
+                lastCanvasWidth = currentWidth;
+                lastCanvasHeight = currentHeight;
+                log.debug("Canvas size changed, refreshing phantom bits", {
+                    currentWidth,
+                    currentHeight,
+                });
+                updateOffsetContours();
+                updatePhantomBits();
+            }
+        });
+
+        resizeObserver.observe(canvas);
     }
 
     // Get layer references
@@ -203,6 +233,36 @@ function initializeSVG() {
     // Create BitsManager instance now that CanvasManager is available
     bitsManager = new BitsManager(mainCanvasManager);
 
+    // Create SelectionManager to manage bit selection and highlighting
+    selectionManager = new SelectionManager({
+        getBits: () => bitsOnCanvas,
+        bitsManager: bitsManager,
+        mainCanvasManager: mainCanvasManager,
+        isShankVisible: () => shankVisible,
+        onSelectionChange: handleSelectionChange,
+    });
+
+    // Create BitsTableManager for bits table interactions
+    bitsTableManager = new BitsTableManager({
+        getAnchorOffset: getAnchorOffset,
+        transformYForDisplay: transformYForDisplay,
+        transformYFromDisplay: transformYFromDisplay,
+        evaluateMathExpression: evaluateMathExpression,
+        createAlignmentButton: createAlignmentButton,
+        getOperationsForGroup: getOperationsForGroup,
+    });
+
+    bitsTableManager.setCallbacks({
+        onSelectBit: selectBit,
+        onChangePosition: updateBitPosition,
+        onCycleAlignment: cycleAlignment,
+        onChangeOperation: handleOperationChange,
+        onChangeColor: handleColorChange,
+        onDeleteBit: deleteBitFromCanvas,
+        onReorderBits: reorderBits,
+        onClearSelection: clearBitSelection,
+    });
+
     // Set up callbacks for BitsManager to communicate with main canvas
     bitsManager.onDrawBitShape = (bit, groupName) =>
         drawBitShape(
@@ -225,9 +285,10 @@ function initializeSVG() {
     // Set callbacks for InteractionManager
     interactionManager.setCallbacks({
         getBitsOnCanvas: () => bitsOnCanvas,
-        getSelectedBitIndices: () => selectedBitIndices,
+        getSelectedBitIndices: () => selectionManager.getSelectedIndices(),
         selectBit: selectBit,
         resetBitHighlight: resetBitHighlight,
+        clearBitSelection: clearBitSelection,
         updateBitPosition: updateBitPosition,
         updateTableCoordinates: updateTableCoordinates,
         updatePartShape: updatePartShape,
@@ -262,6 +323,8 @@ function initializeSVG() {
             updateBitsForNewAnchor();
             updateOffsetContours();
             updatePhantomBits();
+            updatepanelAnchorIndicator();
+            updateGridAnchor();
             if (showPart) updatePartShape();
         },
         getAdaptiveStrokeWidth: getAdaptiveStrokeWidth,
@@ -292,7 +355,7 @@ function initializeSVG() {
                 // Redraw shape group with updated parameters and correct selection state
                 const oldShapeGroup = bit.group.querySelector("g");
                 if (oldShapeGroup) {
-                    const isSelected = selectedBitIndices.includes(index);
+                    const isSelected = selectionManager.isSelected(index);
                     const newShapeGroup = bitsManager.createBitShapeElement(
                         bit.bitData,
                         groupName,
@@ -441,40 +504,41 @@ function cyclepanelAnchor() {
 
 // Update bit positions when panel anchor changes
 function updateBitsForNewAnchor() {
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-    const oldAnchor = panelAnchor === "top-left" ? "bottom-left" : "top-left";
-    const currentAnchorX = panelX;
-    const currentAnchorY =
-        oldAnchor === "top-left" ? panelY : panelY + panelThickness;
-    const newAnchorX = panelX;
-    const newAnchorY =
-        panelAnchor === "top-left" ? panelY : panelY + panelThickness;
+    if (panelManager) {
+        panelManager.updateBitsForNewAnchor(bitsOnCanvas);
+    } else {
+        const panelX =
+            (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+        const panelY =
+            (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+        const oldAnchor =
+            panelAnchor === "top-left" ? "bottom-left" : "top-left";
+        const currentAnchorX = panelX;
+        const currentAnchorY =
+            oldAnchor === "top-left" ? panelY : panelY + panelThickness;
+        const newAnchorX = panelX;
+        const newAnchorY =
+            panelAnchor === "top-left" ? panelY : panelY + panelThickness;
 
-    bitsOnCanvas.forEach((bit) => {
-        // Current physical position
-        const physicalX = currentAnchorX + bit.x;
-        const physicalY = currentAnchorY + bit.y;
+        bitsOnCanvas.forEach((bit) => {
+            const physicalX = currentAnchorX + bit.x;
+            const physicalY = currentAnchorY + bit.y;
 
-        // New relative position based on new anchor
-        const newX = physicalX - newAnchorX;
-        const newY = physicalY - newAnchorY;
+            const newX = physicalX - newAnchorX;
+            const newY = physicalY - newAnchorY;
 
-        // Update bit logical position
-        bit.x = newX;
-        bit.y = newY;
+            bit.x = newX;
+            bit.y = newY;
 
-        // Update table
-        updateBitsSheet();
+            updateBitsSheet();
 
-        // Update canvas position
-        const newAbsX = newAnchorX + newX;
-        const newAbsY = newAnchorY + newY;
-        const dx = newAbsX - bit.baseAbsX;
-        const dy = newAbsY - bit.baseAbsY;
-        bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
-    });
+            const newAbsX = newAnchorX + newX;
+            const newAbsY = newAnchorY + newY;
+            const dx = newAbsX - bit.baseAbsX;
+            const dy = newAbsY - bit.baseAbsY;
+            bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
+        });
+    }
     updateOffsetContours();
     updatePhantomBits();
     if (showPart) updatePartShape();
@@ -548,29 +612,30 @@ function updatepanelParams() {
 
 // New: reposition all bits according to current panel anchor and their stored logical coords
 function updateBitsPositions() {
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = getpanelAnchorOffset();
-    const anchorX = panelX + anchorOffset.x;
-    const anchorY = panelY + anchorOffset.y;
+    if (panelManager) {
+        panelManager.updateBitsPositions(bitsOnCanvas);
+    } else {
+        const panelX =
+            (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+        const panelY =
+            (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+        const anchorOffset = getpanelAnchorOffset();
+        const anchorX = panelX + anchorOffset.x;
+        const anchorY = panelY + anchorOffset.y;
 
-    bitsOnCanvas.forEach((bit) => {
-        // desired absolute position = anchor + logical coords
-        const desiredAbsX = anchorX + (bit.x || 0);
-        const desiredAbsY = anchorY + (bit.y || 0);
+        bitsOnCanvas.forEach((bit) => {
+            const desiredAbsX = anchorX + (bit.x || 0);
+            const desiredAbsY = anchorY + (bit.y || 0);
 
-        // compute translation relative to the element's original absolute coords
-        const dx = desiredAbsX - bit.baseAbsX;
-        const dy = desiredAbsY - bit.baseAbsY;
+            const dx = desiredAbsX - bit.baseAbsX;
+            const dy = desiredAbsY - bit.baseAbsY;
 
-        // apply transform to group's transform
-        if (bit.group) {
-            bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
-        }
-    });
+            if (bit.group) {
+                bit.group.setAttribute("transform", `translate(${dx}, ${dy})`);
+            }
+        });
+    }
 
-    // ensure canvas shows updated order/positions
     redrawBitsOnCanvas();
     if (showPart) updatePartShape();
 }
@@ -578,7 +643,6 @@ function updateBitsPositions() {
 // Global variables for bit management
 let bitsOnCanvas = [];
 let bitCounter = 0;
-let dragSrcRow = null;
 let bitsLayer;
 
 // Offset contours for each bit
@@ -602,17 +666,12 @@ function updatePhantomBits() {
     const phantomsLayer = mainCanvasManager.getLayer("phantoms");
     phantomsLayer.innerHTML = ""; // Clear all phantom bits
 
-    // Always calculate relative to top anchor for consistent offset calculations
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-    const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
-    const anchorX = panelX + anchorOffset.x;
-    const anchorY = panelY + anchorOffset.y;
+    // Get current panel anchor coordinates (recalculated to account for canvas size changes)
+    const anchorCoords = getPanelAnchorCoords();
 
     bitsOnCanvas.forEach((bit, index) => {
         if (bit.operation === "VC") {
-            // Convert bit coordinates to top anchor coordinates for calculations
+            // Convert bit coordinates to top anchor coordinates for offset calculations
             const topAnchorCoords = convertToTopAnchorCoordinates(bit);
             const angle = bit.bitData.angle || 90;
             const bitY = topAnchorCoords.y; // Use top anchor Y coordinate
@@ -648,9 +707,17 @@ function updatePhantomBits() {
                         fillColor: "rgba(128, 128, 128, 0.1)", // Gray with 0.1 opacity
                     };
 
-                    // Position phantom bit at offset x, depth y relative to panel anchor
-                    const phantomAbsX = anchorX + offsets[passIndex + 1];
-                    const phantomAbsY = anchorY + partialResults[passIndex];
+                    // Position phantom bit using bit's logical coordinates and current anchor
+                    // Convert offset back to logical coordinates relative to current anchor
+                    const currentAnchorOffset = getpanelAnchorOffset();
+                    const logicalX =
+                        offsets[passIndex + 1] - currentAnchorOffset.x;
+                    const logicalY =
+                        partialResults[passIndex] - currentAnchorOffset.y;
+
+                    // Calculate absolute position from current anchor
+                    const phantomAbsX = anchorCoords.x + logicalX;
+                    const phantomAbsY = anchorCoords.y + logicalY;
 
                     const phantomShape = bitsManager.createBitShapeElement(
                         phantomBitData,
@@ -1016,7 +1083,7 @@ async function updateCanvasBitsForBitId(bitId) {
             // Redraw shape group with correct selection state
             const oldShapeGroup = bit.group.querySelector("g");
             if (oldShapeGroup) {
-                const isSelected = selectedBitIndices.includes(index);
+                const isSelected = selectionManager.isSelected(index);
                 const newShapeGroup = bitsManager.createBitShapeElement(
                     updatedBitData,
                     bit.groupName,
@@ -1130,237 +1197,76 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
 
 // Update bits sheet
 function updateBitsSheet() {
-    const sheetBody = document.getElementById("bits-sheet-body");
-    sheetBody.innerHTML = "";
-
-    bitsOnCanvas.forEach((bit, index) => {
-        const row = document.createElement("tr");
-        row.setAttribute("data-index", index);
-
-        // Add click handler for row selection (but NOT on inputs, buttons, selects or interactive elements)
-        row.addEventListener("click", (e) => {
-            // Don't select if clicking on input, button, select, svg or other interactive elements
-            if (
-                e.target.tagName === "INPUT" ||
-                e.target.tagName === "SELECT" ||
-                e.target.closest("button") ||
-                e.target.closest("svg") ||
-                e.target.closest("option")
-            ) {
-                return;
-            }
-            e.stopPropagation();
-            selectBit(index);
-        });
-
-        // Drag handle cell (only this cell is draggable)
-        const dragCell = document.createElement("td");
-        dragCell.className = "drag-handle";
-        dragCell.draggable = true;
-        dragCell.textContent = "☰";
-        dragCell.addEventListener("dragstart", handleDragStart);
-        dragCell.addEventListener("dragend", handleDragEnd);
-        row.appendChild(dragCell);
-
-        // Number
-        const numCell = document.createElement("td");
-        numCell.textContent = index + 1;
-        row.appendChild(numCell);
-
-        // Name
-        const nameCell = document.createElement("td");
-        nameCell.textContent = bit.name;
-        row.appendChild(nameCell);
-
-        // X editable
-        const xCell = document.createElement("td");
-        const xInput = document.createElement("input");
-        xInput.type = "text";
-        const anchorOffset = getAnchorOffset(bit);
-        xInput.value = bit.x + anchorOffset.x;
-        xInput.addEventListener("change", async () => {
-            const val = evaluateMathExpression(xInput.value);
-            xInput.value = val;
-            const newAnchorX = parseFloat(val) || 0;
-            const newX = newAnchorX - anchorOffset.x;
-            await updateBitPosition(index, newX, bit.y);
-        });
-        xCell.appendChild(xInput);
-        row.appendChild(xCell);
-
-        // Y editable
-        const yCell = document.createElement("td");
-        const yInput = document.createElement("input");
-        yInput.type = "text";
-        yInput.value = transformYForDisplay(bit.y, anchorOffset);
-        yInput.addEventListener("change", async () => {
-            const val = evaluateMathExpression(yInput.value);
-            yInput.value = val;
-            const newY = transformYFromDisplay(val, anchorOffset);
-            await updateBitPosition(index, bit.x, newY);
-        });
-        yCell.appendChild(yInput);
-        row.appendChild(yCell);
-
-        // Alignment button
-        const alignCell = document.createElement("td");
-        const alignBtn = document.createElement("button");
-        alignBtn.type = "button";
-        alignBtn.style.background = "none";
-        alignBtn.style.border = "none";
-        alignBtn.style.padding = "0";
-        alignBtn.style.cursor = "pointer";
-        alignBtn.appendChild(createAlignmentButton(bit.alignment || "center"));
-        alignBtn.addEventListener("click", async (e) => {
-            e.stopPropagation();
-            await cycleAlignment(index);
-        });
-        alignCell.appendChild(alignBtn);
-        row.appendChild(alignCell);
-
-        // Operations dropdown
-        const opCell = document.createElement("td");
-        const opSelect = document.createElement("select");
-        opSelect.style.width = "100%";
-        opSelect.style.padding = "2px";
-        opSelect.style.border = "1px solid #ccc";
-        opSelect.style.borderRadius = "3px";
-
-        // Get operations for this bit's group
-        const groupOperations = getOperationsForGroup(bit.groupName);
-        const operationLabels = {
-            AL: "Profile Along",
-            OU: "Profile Outside",
-            IN: "Profile Inside",
-            VC: "V-Carve",
-            PO: "Pocketing",
-            RE: "Re-Machining",
-            TS: "T-Slotting",
-            DR: "Drill",
-        };
-
-        groupOperations.forEach((opValue) => {
-            const option = document.createElement("option");
-            option.value = opValue;
-            option.textContent = operationLabels[opValue] || opValue;
-            if (bit.operation === opValue) {
-                option.selected = true;
-            }
-            opSelect.appendChild(option);
-        });
-
-        opSelect.addEventListener("change", () => {
-            bit.operation = opSelect.value;
-            updateOffsetContours(); // Update offsets when operation changes
-            updatePhantomBits(); // Update phantom bits when operation changes
-            // Update 3D view
-            if (window.threeModule) {
-                updateThreeView();
-                // If in Part view, show base panel and debounce CSG with new operation
-                if (showPart) {
-                    window.threeModule.showBasePanel();
-                    csgScheduler.schedule(true);
-                }
-            }
-        });
-
-        opCell.appendChild(opSelect);
-        row.appendChild(opCell);
-
-        // Color picker
-        const colorCell = document.createElement("td");
-        const colorInput = document.createElement("input");
-        colorInput.id = `bit-color-input`;
-        colorInput.type = "color";
-        colorInput.value = bit.color || "#cccccc";
-        colorInput.style.border = "1px solid #ccc";
-        colorInput.style.borderRadius = "3px";
-        colorInput.style.cursor = "pointer";
-
-        colorInput.addEventListener("input", () => {
-            bit.color = colorInput.value;
-            // Note: bit.bitData.fillColor remains unchanged (database default color)
-
-            // Redraw bit shape group with new display color
-            const oldShapeGroup = bit.group?.querySelector("g");
-            if (oldShapeGroup) {
-                // Create shape group with display color instead of default color
-                const bitDataWithDisplayColor = {
-                    ...bit.bitData,
-                    fillColor: bit.color,
-                };
-                const newShapeGroup = bitsManager.createBitShapeElement(
-                    bitDataWithDisplayColor,
-                    bit.groupName,
-                    bit.baseAbsX,
-                    bit.baseAbsY,
-                    selectedBitIndices.includes(index) // Keep selected state
-                );
-                bit.group.replaceChild(newShapeGroup, oldShapeGroup);
-            }
-
-            // Update offset contour color
-            updateOffsetContours();
-            updatePhantomBits();
-
-            // Update 3D view
-            if (window.threeModule) {
-                updateThreeView();
-            }
-        });
-
-        colorCell.appendChild(colorInput);
-        row.appendChild(colorCell);
-
-        // Delete button
-        const delCell = document.createElement("td");
-        const delBtn = document.createElement("button");
-        delBtn.type = "button";
-        delBtn.className = "del-btn";
-        delBtn.textContent = "✕";
-        delBtn.title = "Delete bit from canvas";
-        delBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            deleteBitFromCanvas(index);
-        });
-        delCell.appendChild(delBtn);
-        row.appendChild(delCell);
-
-        // Row drop/dragover handlers (drop allowed anywhere on row)
-        row.addEventListener("dragover", handleDragOver);
-        row.addEventListener("drop", handleDrop);
-
-        // Apply selection style if this bit is selected
-        if (selectedBitIndices.includes(index)) {
-            row.classList.add("selected-bit-row");
-        }
-
-        sheetBody.appendChild(row);
-    });
-
-    // Add click handler to clear selection when clicking on empty area in right-menu
-    const rightMenu = document.getElementById("right-menu");
-    if (rightMenu) {
-        rightMenu.addEventListener("click", (e) => {
-            // Only clear selection if clicking on the right-menu itself or its padding,
-            // not on interactive elements within it
-            const isInteractiveElement = e.target.closest(
-                "input, button, svg, tr, td, th"
-            );
-            if (!isInteractiveElement) {
-                // Clear all selections
-                selectedBitIndices.forEach((index) => {
-                    resetBitHighlight(index);
-                });
-                selectedBitIndices = [];
-
-                // Update table row highlighting
-                updateBitsSheet();
-                // Update anchor point visibility
-                redrawBitsOnCanvas();
-            }
-        });
+    if (bitsTableManager) {
+        bitsTableManager.render(
+            bitsOnCanvas,
+            selectionManager.getSelectedIndices()
+        );
     }
+}
+
+function handleOperationChange(index, newOperation) {
+    const bit = bitsOnCanvas[index];
+    if (!bit) return;
+
+    bit.operation = newOperation;
+    updateOffsetContours();
+    updatePhantomBits();
+
+    if (window.threeModule) {
+        updateThreeView();
+        if (showPart) {
+            window.threeModule.showBasePanel();
+            csgScheduler.schedule(true);
+        }
+    }
+}
+
+function handleColorChange(index, newColor) {
+    const bit = bitsOnCanvas[index];
+    if (!bit) return;
+
+    bit.color = newColor;
+    const oldShapeGroup = bit.group?.querySelector("g");
+    if (oldShapeGroup) {
+        const bitDataWithDisplayColor = {
+            ...bit.bitData,
+            fillColor: bit.color,
+        };
+        const newShapeGroup = bitsManager.createBitShapeElement(
+            bitDataWithDisplayColor,
+            bit.groupName,
+            bit.baseAbsX,
+            bit.baseAbsY,
+            selectionManager.isSelected(index)
+        );
+        bit.group.replaceChild(newShapeGroup, oldShapeGroup);
+    }
+
+    updateOffsetContours();
+    updatePhantomBits();
+
+    if (window.threeModule) {
+        updateThreeView();
+    }
+}
+
+function handleSelectionChange() {
+    updateBitsSheet();
+    redrawBitsOnCanvas();
+}
+
+function clearBitSelection() {
+    selectionManager.clearSelection();
+}
+
+function reorderBits(srcIndex, destIndex) {
+    if (srcIndex === destIndex) return;
+
+    const [removed] = bitsOnCanvas.splice(srcIndex, 1);
+    bitsOnCanvas.splice(destIndex, 0, removed);
+
+    selectionManager.handleReorder(srcIndex, destIndex);
 }
 
 // Delete bit from canvas
@@ -1377,12 +1283,8 @@ function deleteBitFromCanvas(index) {
     // Remove from array
     bitsOnCanvas.splice(index, 1);
 
-    // Update selection indices - remove deleted bit and adjust indices
-    selectedBitIndices = selectedBitIndices
-        .filter((selectedIndex) => selectedIndex !== index) // Remove the deleted bit
-        .map((selectedIndex) =>
-            selectedIndex > index ? selectedIndex - 1 : selectedIndex
-        ); // Adjust indices
+    // Update selection indices via selection manager
+    selectionManager.handleDelete(index);
 
     // Update table
     updateBitsSheet();
@@ -1434,116 +1336,12 @@ async function cycleAlignment(index) {
 
 // Select a bit and highlight it on canvas (multi-selection support)
 function selectBit(index) {
-    const indexInSelection = selectedBitIndices.indexOf(index);
-
-    if (indexInSelection !== -1) {
-        // Bit is already selected, deselect it
-        selectedBitIndices.splice(indexInSelection, 1);
-        resetBitHighlight(index);
-    } else {
-        // Bit is not selected, add it to selection
-        selectedBitIndices.push(index);
-        const bit = bitsOnCanvas[index];
-
-        if (bit && bit.group) {
-            // Find the shape group (contains bit and shank shapes)
-            const shapeGroup = bit.group.querySelector("g");
-            if (shapeGroup) {
-                // Store original attributes for bit shape
-                const bitShape = shapeGroup.querySelector(".bit-shape");
-                const shankShape = shapeGroup.querySelector(".shank-shape");
-
-                if (bitShape) {
-                    bitShape.dataset.originalFill =
-                        bitShape.getAttribute("fill");
-                    bitShape.dataset.originalStroke =
-                        bitShape.getAttribute("stroke");
-                }
-
-                // Redraw entire shape group with selected state
-                const bitDataWithDisplayColor = {
-                    ...bit.bitData,
-                    fillColor: bit.color,
-                };
-                const newShapeGroup = bitsManager.createBitShapeElement(
-                    bitDataWithDisplayColor,
-                    bit.groupName,
-                    bit.baseAbsX,
-                    bit.baseAbsY,
-                    true // isSelected = true for highlighting
-                );
-
-                // Replace old shape group with new one
-                bit.group.replaceChild(newShapeGroup, shapeGroup);
-
-                // Apply highlight stroke to both bit and shank shapes
-                const newBitShape = newShapeGroup.querySelector(".bit-shape");
-                const newShankShape =
-                    newShapeGroup.querySelector(".shank-shape");
-                const thickness = Math.max(
-                    0.1,
-                    0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
-                );
-
-                if (newBitShape) {
-                    newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-                    newBitShape.setAttribute("stroke-width", thickness);
-                }
-                if (newShankShape) {
-                    newShankShape.setAttribute("stroke", "#00BFFF");
-                    newShankShape.setAttribute("stroke-width", thickness);
-                }
-            }
-        }
-    }
-
-    // Update table row highlighting
-    updateBitsSheet();
-    // Update anchor point visibility
-    redrawBitsOnCanvas();
+    selectionManager.toggleSelection(index);
 }
 
 // Reset bit highlight to original state
 function resetBitHighlight(index) {
-    const bit = bitsOnCanvas[index];
-    if (bit && bit.group) {
-        const shapeGroup = bit.group.querySelector("g");
-        if (shapeGroup) {
-            // Redraw entire shape group with normal state
-            const bitDataWithDisplayColor = {
-                ...bit.bitData,
-                fillColor: bit.color,
-            };
-            const newShapeGroup = bitsManager.createBitShapeElement(
-                bitDataWithDisplayColor,
-                bit.groupName,
-                bit.baseAbsX,
-                bit.baseAbsY,
-                false // isSelected = false for normal state
-            );
-
-            // Replace old shape group with new one
-            bit.group.replaceChild(newShapeGroup, shapeGroup);
-
-            // Set stroke widths to scaled thickness
-            const thickness = Math.max(
-                0.1,
-                0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
-            );
-            const newBitShape = newShapeGroup.querySelector(".bit-shape");
-            const newShankShape = newShapeGroup.querySelector(".shank-shape");
-
-            if (newBitShape) {
-                newBitShape.setAttribute("stroke-width", thickness);
-            }
-            if (newShankShape) {
-                newShankShape.setAttribute("stroke", "black");
-                newShankShape.setAttribute("stroke-width", thickness);
-                // Respect global shank visibility setting
-                newShankShape.style.display = shankVisible ? "block" : "none";
-            }
-        }
-    }
+    selectionManager.resetBitHighlight(index);
 }
 
 async function updateBitPosition(index, newX, newY) {
@@ -1553,9 +1351,25 @@ async function updateBitPosition(index, newX, newY) {
     const panelAnchorX = anchorCoords.x;
     const panelAnchorY = anchorCoords.y;
 
+    const selectedBitIndices = selectionManager.getSelectedIndices();
+
+    // Log bit position update
+    const bit = bitsOnCanvas[index];
+    log.debug(
+        `Moving bit #${index} (${
+            bit.bitData?.name || "Unknown"
+        }) from (${bit.x.toFixed(1)}, ${bit.y.toFixed(1)}) to (${newX.toFixed(
+            1
+        )}, ${newY.toFixed(1)})`
+    );
+    if (selectedBitIndices.length > 1) {
+        log.debug(
+            `Multi-selection: moving ${selectedBitIndices.length} bits together`
+        );
+    }
+
     // If this bit is selected and there are multiple selections, move all selected bits by the same delta
     if (selectedBitIndices.includes(index) && selectedBitIndices.length > 1) {
-        const bit = bitsOnCanvas[index];
         const oldX = bit.x;
         const oldY = bit.y;
         const deltaX = newX - oldX;
@@ -1594,7 +1408,6 @@ async function updateBitPosition(index, newX, newY) {
         });
     }
 
-    const bit = bitsOnCanvas[index];
     // compute absolute positions the user expects (relative to panel anchor)
     const newAbsX = panelAnchorX + newX;
     const newAbsY = panelAnchorY + newY;
@@ -1630,57 +1443,6 @@ async function updateBitPosition(index, newX, newY) {
             csgScheduler.schedule(true);
         }
     }
-}
-
-function handleDragStart(e) {
-    // this is the drag-handle cell; find its row
-    dragSrcRow = this.closest("tr");
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", dragSrcRow.getAttribute("data-index"));
-    dragSrcRow.style.opacity = "0.4";
-}
-
-function handleDragOver(e) {
-    if (e.preventDefault) e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    return false;
-}
-
-function handleDrop(e) {
-    if (e.stopPropagation) e.stopPropagation();
-
-    // this is the row where drop occurs
-    if (!dragSrcRow) return false;
-    const srcIndex = parseInt(dragSrcRow.getAttribute("data-index"), 10);
-    const destIndex = parseInt(this.getAttribute("data-index"), 10);
-
-    if (srcIndex !== destIndex) {
-        const [removed] = bitsOnCanvas.splice(srcIndex, 1);
-        bitsOnCanvas.splice(destIndex, 0, removed);
-
-        // Update selectedBitIndices if selected bits were moved
-        selectedBitIndices = selectedBitIndices.map((selectedIndex) => {
-            if (selectedIndex === srcIndex) {
-                return destIndex; // The moved bit stays selected at new position
-            } else if (selectedIndex > srcIndex && selectedIndex <= destIndex) {
-                return selectedIndex - 1; // Adjust indices when bit moves down
-            } else if (selectedIndex >= destIndex && selectedIndex < srcIndex) {
-                return selectedIndex + 1; // Adjust indices when bit moves up
-            }
-            return selectedIndex;
-        });
-
-        // update sheet and canvas
-        updateBitsSheet();
-        redrawBitsOnCanvas();
-    }
-
-    return false;
-}
-
-function handleDragEnd(e) {
-    if (dragSrcRow) dragSrcRow.style.opacity = "1";
-    dragSrcRow = null;
 }
 
 // Redraw bits on canvas preserving their group transforms
@@ -1732,7 +1494,7 @@ function redrawBitsOnCanvas() {
         anchorPoint.appendChild(vertical);
 
         // Only show anchor point for selected bits
-        if (selectedBitIndices.includes(index)) {
+        if (selectionManager.isSelected(index)) {
             anchorPoint.setAttribute("visibility", "visible");
         } else {
             anchorPoint.setAttribute("visibility", "hidden");
@@ -1826,10 +1588,13 @@ function fitToScale() {
 
 /**
  * Zooms to specified elements or bit indices
- * @param {Array} targets - Array of SVG elements or bit indices to zoom to (default: selectedBitIndices)
+ * @param {Array} targets - Array of SVG elements or bit indices to zoom to (default: current selection)
  * @param {number} padding - Padding around the zoomed area
  */
-function zoomToElements(targets = selectedBitIndices, padding = 50) {
+function zoomToElements(
+    targets = selectionManager?.getSelectedIndices() || [],
+    padding = 50
+) {
     if (!targets || targets.length === 0) return;
 
     // Check if targets are bit indices (numbers) or SVG elements
@@ -1886,7 +1651,7 @@ function zoomToElements(targets = selectedBitIndices, padding = 50) {
 }
 
 function zoomToSelected() {
-    zoomToElements(selectedBitIndices, 50);
+    zoomToElements(selectionManager.getSelectedIndices(), 50);
 }
 
 // Helper function to snap value to grid
@@ -1896,25 +1661,32 @@ function snapToGrid(value) {
 
 // Helper function to get panel anchor offset
 function getpanelAnchorOffset() {
-    return panelAnchor === "top-left"
+    return panelManager
+        ? panelManager.getPanelAnchorOffset()
+        : panelAnchor === "top-left"
         ? { x: 0, y: 0 }
         : { x: 0, y: panelThickness };
 }
 
 // Helper function to transform Y coordinate for display based on anchor
 function transformYForDisplay(rawY, anchorOffset) {
+    if (panelManager)
+        return panelManager.transformYForDisplay(rawY, anchorOffset);
     const displayY = rawY + anchorOffset.y;
     return panelAnchor === "bottom-left" ? -displayY : displayY;
 }
 
 // Helper function to transform Y coordinate from display to internal
 function transformYFromDisplay(displayY, anchorOffset) {
+    if (panelManager)
+        return panelManager.transformYFromDisplay(displayY, anchorOffset);
     const adjustedY = panelAnchor === "bottom-left" ? -displayY : displayY;
     return adjustedY - anchorOffset.y;
 }
 
 // Helper function to get panel anchor coordinates
 function getPanelAnchorCoords() {
+    if (panelManager) return panelManager.getPanelAnchorCoords();
     const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
     const panelY =
         (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
@@ -2091,6 +1863,10 @@ async function togglePartView() {
         partBtn.classList.add("part-hidden");
         partBtn.title = "Show Part";
     }
+
+    // Refresh phantom bits and offsets after display change (canvas dimensions may have changed)
+    updateOffsetContours();
+    updatePhantomBits();
 
     // Update 3D view and apply CSG logic
     if (window.threeModule) {
