@@ -35,7 +35,8 @@
     "jsdom": "^27.3.0",
     "makerjs": "^0.17.6",
     "three": "^0.182.0",
-    "three-bvh-csg": "^0.0.17"
+    "three-bvh-csg": "^0.0.17",
+    "threejs-slice-geometry": "^0.2.2"
   },
   "devDependencies": {
     "@capacitor/android": "^5.0.0",

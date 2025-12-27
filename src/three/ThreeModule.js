@@ -52,8 +52,11 @@ export default class ThreeModule extends BaseModule {
         // Track last panel/bits signature to skip redundant rebuilds
         this.lastPanelUpdateSignature = null;
 
-        // EXTRUDE VERSION: V1 (default) or V2 (segmented with lathe)
-        this.extrudeVersionV2 = false;
+        // Extrude version mode: 'V1' | 'V2' | 'V3'
+        this.extrudeVersionMode = "V1";
+        // Optional compare preview (renders V1 alongside V3 for visual check)
+        this.showCompareV1V3 = false;
+        this.compareExtrudeMeshes = [];
     }
 
     async init() {
@@ -85,7 +88,7 @@ export default class ThreeModule extends BaseModule {
         // Add CSG mode toggle
         this.addCSGModeToggle();
 
-        // Add Extrude version toggle (V1 vs V2)
+        // Add Extrude version selector (V1/V2/V3) + compare toggle
         this.addExtrudeVersionToggle();
 
         // Add Stats widget
@@ -253,37 +256,72 @@ export default class ThreeModule extends BaseModule {
         container.style.fontSize = "12px";
         container.style.display = "flex";
         container.style.alignItems = "center";
-        container.style.gap = "6px";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.id = "extrude-version-v2";
-        checkbox.checked = this.extrudeVersionV2;
-        checkbox.style.cursor = "pointer";
+        container.style.gap = "8px";
 
         const label = document.createElement("label");
-        label.htmlFor = "extrude-version-v2";
-        label.textContent = "Extrude V2 (segmented + lathe)";
-        label.style.cursor = "pointer";
+        label.textContent = "Extrude Version:";
         label.style.userSelect = "none";
-        label.title =
-            "V1: Single profile extrude | V2: Segmented path with lathe transitions";
 
-        checkbox.addEventListener("change", () => {
-            this.extrudeVersionV2 = checkbox.checked;
+        const select = document.createElement("select");
+        select.id = "extrude-version-select";
+        ["V1", "V2", "V3"].forEach((v) => {
+            const opt = document.createElement("option");
+            opt.value = v;
+            opt.textContent = v;
+            select.appendChild(opt);
+        });
+        select.value = this.extrudeVersionMode;
+        select.title =
+            "V1: single | V2: segmented+lathe | V3: V1 minus lathe bbox + union lathes";
+
+        const compareWrap = document.createElement("div");
+        compareWrap.style.display = "flex";
+        compareWrap.style.alignItems = "center";
+        compareWrap.style.gap = "4px";
+
+        const compareCb = document.createElement("input");
+        compareCb.type = "checkbox";
+        compareCb.id = "extrude-compare-v1-v3";
+        compareCb.checked = this.showCompareV1V3;
+        compareCb.style.cursor = "pointer";
+
+        const compareLabel = document.createElement("label");
+        compareLabel.htmlFor = "extrude-compare-v1-v3";
+        compareLabel.textContent = "Compare V1 vs V3 (preview)";
+        compareLabel.style.cursor = "pointer";
+        compareLabel.style.userSelect = "none";
+
+        const rebuild = () => {
+            this.extrudeVersionMode = select.value;
+            this.showCompareV1V3 = compareCb.checked;
             this.log.info(
-                "Switched to Extrude V" + (this.extrudeVersionV2 ? "2" : "1")
+                `Extrude mode: ${this.extrudeVersionMode} | compare V1/V3: ${this.showCompareV1V3}`
             );
-            // Invalidate cache and rebuild
+            // Invalidate cache and request a panel rebuild by triggering queued update
             this.lastPanelUpdateSignature = null;
+            // Remove previous compare meshes from scene
+            if (this.compareExtrudeMeshes.length) {
+                this.compareExtrudeMeshes.forEach((m) => {
+                    this.scene.remove(m);
+                    m.geometry?.dispose();
+                    m.material?.dispose();
+                });
+                this.compareExtrudeMeshes = [];
+            }
             // Reapply CSG if currently in Part view
             if (window.showPart && this.bitExtrudeMeshes.length > 0) {
                 this.csgEngine.applyCSGOperation(true);
             }
-        });
+        };
 
-        container.appendChild(checkbox);
+        select.addEventListener("change", rebuild);
+        compareCb.addEventListener("change", rebuild);
+
         container.appendChild(label);
+        container.appendChild(select);
+        compareWrap.appendChild(compareCb);
+        compareWrap.appendChild(compareLabel);
+        container.appendChild(compareWrap);
         this.container.appendChild(container);
         this.extrudeVersionToggle = container;
     }
@@ -679,25 +717,58 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // Extrude profile along curve - use V1 or V2 based on toggle
+            // Extrude profile along curve - use selected mode
             let extrudeMeshes = [];
-            if (this.extrudeVersionV2) {
-                // V2: Segmented extrusion with lathe transitions
-                extrudeMeshes =
-                    this.extrusionBuilder.extrudeAlongPathV2(
+            switch (this.extrudeVersionMode) {
+                case "V2": {
+                    const meshes = this.extrusionBuilder.extrudeAlongPathV2(
                         bitProfile,
                         curve3D,
                         bit.color
-                    ) || [];
-            } else {
-                // V1: Single profile extrusion (original)
-                const extrudeMesh = this.extrusionBuilder.extrudeAlongPath(
-                    bitProfile,
-                    curve3D,
-                    bit.color
-                );
-                if (extrudeMesh) {
-                    extrudeMeshes = [extrudeMesh];
+                    );
+                    extrudeMeshes = meshes || [];
+                    break;
+                }
+                case "V3": {
+                    const mesh = this.extrusionBuilder.extrudeAlongPathV3(
+                        bitProfile,
+                        curve3D,
+                        bit.color
+                    );
+                    if (mesh) extrudeMeshes = [mesh];
+
+                    // Optional: side-by-side preview of V1 vs V3 (do not include in CSG)
+                    if (this.showCompareV1V3) {
+                        const v1Mesh = this.extrusionBuilder.extrudeAlongPath(
+                            bitProfile,
+                            curve3D,
+                            bit.color
+                        );
+                        if (v1Mesh) {
+                            // slight offset so both are visible
+                            v1Mesh.position.x += 15;
+                            v1Mesh.material =
+                                v1Mesh.material?.clone?.() ||
+                                new THREE.MeshStandardMaterial({
+                                    color: 0x44aa44,
+                                });
+                            v1Mesh.material.wireframe =
+                                this.materialManager.isWireframeEnabled();
+                            this.scene.add(v1Mesh);
+                            this.compareExtrudeMeshes.push(v1Mesh);
+                        }
+                    }
+                    break;
+                }
+                case "V1":
+                default: {
+                    const mesh = this.extrusionBuilder.extrudeAlongPath(
+                        bitProfile,
+                        curve3D,
+                        bit.color
+                    );
+                    if (mesh) extrudeMeshes = [mesh];
+                    break;
                 }
             }
 

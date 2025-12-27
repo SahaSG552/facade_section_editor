@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { Brush, Evaluator, ADDITION, SUBTRACTION } from "three-bvh-csg";
 import LoggerFactory from "../core/LoggerFactory.js";
 
 /**
@@ -1012,7 +1013,7 @@ export default class ExtrusionBuilder {
                     const nextDir = directions[(i + 1) % segments.length]; // Next segment direction
                     const cornerColor = debugColors[i % debugColors.length];
 
-                    const junctionMesh = this.createPartialLatheAtJunction(
+                    const latheData = this.createPartialLatheAtJunction(
                         profile,
                         junctionPoint,
                         prevDir,
@@ -1020,8 +1021,8 @@ export default class ExtrusionBuilder {
                         cornerColor,
                         i + 1 // Pass corner number for logging
                     );
-                    if (junctionMesh) {
-                        result.push(junctionMesh);
+                    if (latheData && latheData.mesh) {
+                        result.push(latheData.mesh);
                     }
                 }
             } else {
@@ -1032,7 +1033,7 @@ export default class ExtrusionBuilder {
                     const nextDir = directions[i + 1];
                     const cornerColor = debugColors[i % debugColors.length];
 
-                    const junctionMesh = this.createPartialLatheAtJunction(
+                    const latheData = this.createPartialLatheAtJunction(
                         profile,
                         junctionPoint,
                         prevDir,
@@ -1040,8 +1041,8 @@ export default class ExtrusionBuilder {
                         cornerColor,
                         i + 1 // Pass corner number for logging
                     );
-                    if (junctionMesh) {
-                        result.push(junctionMesh);
+                    if (latheData && latheData.mesh) {
+                        result.push(latheData.mesh);
                     }
                 }
             }
@@ -1055,6 +1056,216 @@ export default class ExtrusionBuilder {
         } catch (error) {
             this.log.error("Error in extrudeAlongPathV2:", error.message);
             return result;
+        }
+    }
+
+    /**
+     * Extrude V3: V1 base extrusion minus lathe bounding boxes, then union with lathes
+     * Returns a single merged mesh suitable for downstream CSG operations
+     * @param {THREE.Shape} profile
+     * @param {THREE.CurvePath} path
+     * @param {string|number} color
+     * @returns {THREE.Mesh|null}
+     */
+    extrudeAlongPathV3(profile, path, color) {
+        try {
+            // 1) Build V1 base extrusion with mitered corners
+            const baseMesh = this.extrudeAlongPath(profile, path, color);
+            if (!baseMesh) {
+                this.log.warn("V3: Base V1 extrusion failed");
+                return null;
+            }
+
+            // 2) Build partial lathes at each junction (reuse V2 splitting logic)
+            const segments = this.splitPathIntoSegments(path);
+            if (segments.length === 0) {
+                this.log.warn("V3: No segments in path");
+                return baseMesh;
+            }
+
+            const firstPoint = segments[0].startPoint;
+            const lastPoint = segments[segments.length - 1].endPoint;
+            const pathClosed = firstPoint.distanceTo(lastPoint) < 0.01;
+
+            const directions = segments.map((seg) =>
+                new THREE.Vector3()
+                    .subVectors(seg.endPoint, seg.startPoint)
+                    .normalize()
+            );
+
+            const latheDataList = [];
+            if (pathClosed) {
+                for (let i = 0; i < segments.length; i++) {
+                    const junctionPoint = segments[i].endPoint;
+                    const prevDir = directions[i];
+                    const nextDir = directions[(i + 1) % segments.length];
+                    const data = this.createPartialLatheAtJunction(
+                        profile,
+                        junctionPoint,
+                        prevDir,
+                        nextDir,
+                        color,
+                        i + 1
+                    );
+                    if (data) latheDataList.push(data);
+                }
+            } else {
+                for (let i = 0; i < segments.length - 1; i++) {
+                    const junctionPoint = segments[i].endPoint;
+                    const prevDir = directions[i];
+                    const nextDir = directions[i + 1];
+                    const data = this.createPartialLatheAtJunction(
+                        profile,
+                        junctionPoint,
+                        prevDir,
+                        nextDir,
+                        color,
+                        i + 1
+                    );
+                    if (data) latheDataList.push(data);
+                }
+            }
+
+            if (latheDataList.length === 0) {
+                this.log.info(
+                    "V3: No lathe junctions created; returning V1 base"
+                );
+                return baseMesh;
+            }
+
+            // 3) Subtract union of wedge geometries from base
+            const evaluator = new Evaluator();
+            evaluator.attributes = ["position", "normal"]; // keep normals
+
+            const baseBrush = new Brush(baseMesh.geometry.clone());
+            baseBrush.position.copy(baseMesh.position);
+            baseBrush.rotation.copy(baseMesh.rotation);
+            baseBrush.scale.copy(baseMesh.scale);
+            baseBrush.updateMatrixWorld(true);
+
+            // Calculate wedge dimensions based on profile size
+            const profilePoints = profile.getPoints();
+            let maxProfileRadius = 0;
+            profilePoints.forEach((p) => {
+                const r = Math.sqrt(p.x * p.x + p.y * p.y);
+                maxProfileRadius = Math.max(maxProfileRadius, r);
+            });
+            const wedgeRadius = maxProfileRadius * 3; // 3x profile radius to ensure coverage
+            const wedgeHeight = 50; // Large enough to pass through extrusion depth
+
+            this.log.debug("Wedge dimensions:", {
+                radius: wedgeRadius,
+                height: wedgeHeight,
+                profileRadius: maxProfileRadius,
+            });
+
+            let wedgeUnionBrush = null;
+            const debugHelpers = []; // Collect debug visualizations
+
+            for (const latheData of latheDataList) {
+                const { junctionPoint, phiStart, phiLength, mesh } = latheData;
+                const cornerNumber = latheData.mesh.userData.cornerNumber || 1;
+
+                // Create wedge geometry matching the lathe angle
+                const wedgeGeom = this.createWedgeGeometry(
+                    junctionPoint,
+                    wedgeRadius,
+                    wedgeHeight,
+                    phiStart,
+                    phiLength,
+                    cornerNumber
+                );
+                const wedgeBrush = new Brush(wedgeGeom);
+                wedgeBrush.position.set(0, 0, 0);
+                wedgeBrush.rotation.set(0, 0, 0);
+                wedgeBrush.scale.set(1, 1, 1);
+                wedgeBrush.updateMatrixWorld(true);
+
+                // Create debug helper for this wedge
+                const debugHelper = this.createWedgeDebugHelper(
+                    junctionPoint,
+                    wedgeRadius,
+                    wedgeHeight,
+                    phiStart,
+                    phiLength,
+                    cornerNumber,
+                    mesh.material.color // Use same color as lathe
+                );
+                debugHelpers.push(debugHelper);
+
+                wedgeUnionBrush = wedgeUnionBrush
+                    ? evaluator.evaluate(wedgeUnionBrush, wedgeBrush, ADDITION)
+                    : wedgeBrush;
+            }
+
+            const cutBaseBrush = evaluator.evaluate(
+                baseBrush,
+                wedgeUnionBrush,
+                SUBTRACTION
+            );
+            if (!cutBaseBrush) {
+                this.log.warn(
+                    "V3: Subtraction of wedge union failed; returning base"
+                );
+                return baseMesh;
+            }
+
+            // 4) Union the lathe bodies back into the cut base
+            let lathesUnionBrush = null;
+            for (const latheData of latheDataList) {
+                const lm = latheData.mesh;
+                const b = new Brush(lm.geometry);
+                b.position.copy(lm.position);
+                b.rotation.copy(lm.rotation);
+                b.scale.copy(lm.scale);
+                b.updateMatrixWorld(true);
+                lathesUnionBrush = lathesUnionBrush
+                    ? evaluator.evaluate(lathesUnionBrush, b, ADDITION)
+                    : b;
+            }
+
+            const finalBrush = evaluator.evaluate(
+                cutBaseBrush,
+                lathesUnionBrush,
+                ADDITION
+            );
+            if (!finalBrush) {
+                this.log.warn("V3: Final union failed; returning base");
+                return baseMesh;
+            }
+
+            // 5) Build final mesh with material similar to base
+            const material =
+                baseMesh.material?.clone?.() ||
+                new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(color || "#cccccc"),
+                    roughness: 0.5,
+                    metalness: 0.2,
+                    side: THREE.FrontSide,
+                    wireframe: this.materialManager
+                        ? this.materialManager.isWireframeEnabled()
+                        : false,
+                });
+            finalBrush.material = material;
+            finalBrush.castShadow = true;
+            finalBrush.receiveShadow = true;
+            finalBrush.userData.isV3Extrude = true;
+
+            // 6) Attach debug helpers to the final brush for visualization
+            debugHelpers.forEach((helper) => {
+                finalBrush.add(helper);
+            });
+
+            this.log.info("V3 extrusion built:", {
+                segments: segments.length,
+                lathes: latheDataList.length,
+                debugHelpers: debugHelpers.length,
+            });
+
+            return finalBrush;
+        } catch (error) {
+            this.log.error("Error in extrudeAlongPathV3:", error.message);
+            return null;
         }
     }
 
@@ -1240,12 +1451,206 @@ export default class ExtrusionBuilder {
             mesh.receiveShadow = true;
             mesh.userData.isPartialLathe = true;
             mesh.userData.angle = angle;
+            mesh.userData.cornerNumber = cornerNumber;
 
-            return mesh;
+            // Return mesh + angle metadata for V3 wedge construction
+            return {
+                mesh,
+                phiStart,
+                phiLength,
+                junctionPoint: point.clone(),
+                angle,
+                cornerNumber,
+            };
         } catch (error) {
             this.log.error("Error creating partial lathe:", error.message);
             return null;
         }
+    }
+
+    /**
+     * Create 2D wedge (sector) shape with proper winding
+     * Profile is drawn in XY plane (matching lathe after rotateX)
+     * Uses same angles as LatheGeometry: phiStart and phiLength
+     * @param {number} radius - Radius of the wedge
+     * @param {number} phiStart - Start angle in radians
+     * @param {number} phiLength - Angular extent in radians
+     * @param {number} cornerNumber - Corner number (unused, kept for compatibility)
+     * @returns {THREE.Shape} 2D wedge shape
+     */
+    createWedgeShape(radius, phiStart, phiLength, cornerNumber) {
+        const shape = new THREE.Shape();
+
+        // Start at center
+        shape.moveTo(0, 0);
+
+        // Line to start point on arc
+        const startX = Math.cos(phiStart) * radius;
+        const startY = Math.sin(phiStart) * radius;
+        shape.lineTo(startX, startY);
+
+        // Draw arc from phiStart to phiStart + phiLength
+        // Same direction as LatheGeometry (CCW sweep)
+        const segments = Math.max(
+            8,
+            Math.ceil(32 * (Math.abs(phiLength) / (2 * Math.PI)))
+        );
+        const angleStep = phiLength / segments;
+
+        for (let i = 1; i <= segments; i++) {
+            const angle = phiStart + angleStep * i;
+            const x = Math.cos(angle) * radius;
+            const y = Math.sin(angle) * radius;
+            shape.lineTo(x, y);
+        }
+
+        // Line back to center
+        shape.lineTo(0, 0);
+
+        return shape;
+    }
+
+    /**
+     * Create a wedge (angular sector) geometry for CSG subtraction
+     * Uses LatheGeometry with rectangular profile + closing planes
+     * @param {THREE.Vector3} center - Center point (junction/vertex)
+     * @param {number} radius - Radius of the wedge
+     * @param {number} height - Height (Z thickness) of the wedge
+     * @param {number} phiStart - Start angle in radians (XY plane before rotation)
+     * @param {number} phiLength - Angular extent in radians
+     * @param {number} cornerNumber - Corner number for winding direction (1-based)
+     * @returns {THREE.BufferGeometry} Wedge geometry
+     */
+    createWedgeGeometry(
+        center,
+        radius,
+        height,
+        phiStart,
+        phiLength,
+        cornerNumber
+    ) {
+        // Create rectangular profile for lathe (from z=-height/2 to z=+height/2)
+        const rectProfile = [
+            new THREE.Vector2(0, -height / 2), // Bottom center
+            new THREE.Vector2(radius, -height / 2), // Bottom outer
+            new THREE.Vector2(radius, height / 2), // Top outer
+            new THREE.Vector2(0, height / 2), // Top center
+        ];
+
+        // Calculate segments based on angle
+        const segments = Math.max(
+            8,
+            Math.ceil(16 * (Math.abs(phiLength) / Math.PI))
+        );
+
+        // Create lathe geometry with same phiStart and phiLength as partial lathe
+        const latheGeometry = new THREE.LatheGeometry(
+            rectProfile,
+            segments,
+            phiStart,
+            phiLength
+        );
+
+        // Rotate to match lathe orientation (XY plane with Z height)
+        latheGeometry.rotateX(-Math.PI / 2);
+
+        // Now create closing planes at start and end of the sector
+        // For odd corners, LatheGeometry uses adjusted phiStart (phiStart + π)
+        // so closing planes need to account for this by rotating them 180° around Z
+        const angleOffset = cornerNumber % 2 === 1 ? Math.PI : 0;
+
+        const startPlane = this.createWedgeSidePlane(
+            radius,
+            height,
+            phiStart + angleOffset
+        );
+
+        // Plane 2: at phiStart + phiLength angle
+        const endPlane = this.createWedgeSidePlane(
+            radius,
+            height,
+            phiStart + phiLength + angleOffset
+        );
+
+        // Merge all geometries
+        const geometries = [latheGeometry, startPlane, endPlane];
+        const mergedGeometry = mergeGeometries(geometries);
+
+        // Recalculate normals to ensure they all point outward
+        mergedGeometry.computeVertexNormals();
+        mergedGeometry.normalizeNormals();
+        mergedGeometry.computeBoundingBox();
+
+        // Translate to junction point
+        mergedGeometry.translate(center.x, center.y, center.z);
+
+        return mergedGeometry;
+    }
+
+    /**
+     * Create a rectangular side plane for wedge closure
+     * @param {number} radius - Wedge radius
+     * @param {number} height - Wedge height
+     * @param {number} angle - Angle in radians for plane orientation
+     * @returns {THREE.BufferGeometry}
+     */
+    createWedgeSidePlane(radius, height, angle) {
+        // Create a vertical rectangle from center to radius
+        const shape = new THREE.Shape();
+        shape.moveTo(0, -height / 2);
+        shape.lineTo(radius, -height / 2);
+        shape.lineTo(radius, height / 2);
+        shape.lineTo(0, height / 2);
+        shape.lineTo(0, -height / 2);
+
+        const geometry = new THREE.ShapeGeometry(shape);
+
+        // Rotate 90° around X to make it vertical (YZ -> XZ plane)
+        geometry.rotateX(Math.PI / 2);
+
+        // Now rotate around Z to align with the angle
+        geometry.rotateZ(angle);
+
+        return geometry;
+    }
+
+    /**
+     * Create debug visualization for wedge geometry
+     * @param {THREE.Vector3} center - Center point
+     * @param {number} radius - Wedge radius
+     * @param {number} height - Wedge height
+     * @param {number} phiStart - Start angle
+     * @param {number} phiLength - Angular extent
+     * @param {number} cornerNumber - Corner number for winding
+     * @param {string|number} color - Debug color
+     * @returns {THREE.Mesh} Debug mesh with wireframe
+     */
+    createWedgeDebugHelper(
+        center,
+        radius,
+        height,
+        phiStart,
+        phiLength,
+        cornerNumber,
+        color
+    ) {
+        const geometry = this.createWedgeGeometry(
+            center,
+            radius,
+            height,
+            phiStart,
+            phiLength,
+            cornerNumber
+        );
+        const material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(color || "#ff00ff"),
+            wireframe: true,
+            transparent: true,
+            opacity: 0.6,
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.userData.isWedgeDebugHelper = true;
+        return mesh;
     }
 
     /**
