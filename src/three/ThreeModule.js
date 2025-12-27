@@ -635,7 +635,9 @@ export default class ThreeModule extends BaseModule {
             let extrudeMeshes = [];
             const isVC = (bit.operation || "").toUpperCase() === "VC";
             const mode = isVC ? "mitered" : "round";
-            this.log.info(`Bit ${bitIndex} op=${bit.operation || "unknown"} → ${mode}`);
+            this.log.info(
+                `Bit ${bitIndex} op=${bit.operation || "unknown"} → ${mode}`
+            );
             if (isVC) {
                 const mesh = this.extrusionBuilder.extrudeAlongPath(
                     bitProfile,
