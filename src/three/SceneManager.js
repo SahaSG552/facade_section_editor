@@ -74,10 +74,12 @@ export default class SceneManager {
         );
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.05;
-        this.controls.screenSpacePanning = false;
+        this.controls.screenSpacePanning = true; // allow easier panning
         this.controls.minDistance = 100;
         this.controls.maxDistance = 2000;
-        this.controls.maxPolarAngle = Math.PI / 2;
+        // Allow looking under the floor to inspect bottom caps
+        this.controls.maxPolarAngle = Math.PI;
+        this.controls.minPolarAngle = 0;
 
         // Setup lighting
         this.setupLighting();

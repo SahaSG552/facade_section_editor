@@ -51,6 +51,9 @@ export default class ThreeModule extends BaseModule {
 
         // Track last panel/bits signature to skip redundant rebuilds
         this.lastPanelUpdateSignature = null;
+
+        // EXTRUDE VERSION: V1 (default) or V2 (segmented with lathe)
+        this.extrudeVersionV2 = false;
     }
 
     async init() {
@@ -81,6 +84,9 @@ export default class ThreeModule extends BaseModule {
 
         // Add CSG mode toggle
         this.addCSGModeToggle();
+
+        // Add Extrude version toggle (V1 vs V2)
+        this.addExtrudeVersionToggle();
 
         // Add Stats widget
         this.sceneManager.addStatsWidget(
@@ -232,6 +238,54 @@ export default class ThreeModule extends BaseModule {
         container.appendChild(label);
         this.container.appendChild(container);
         this.csgModeToggle = container;
+    }
+
+    addExtrudeVersionToggle() {
+        const container = document.createElement("div");
+        container.style.position = "absolute";
+        container.style.top = "90px";
+        container.style.right = "10px";
+        container.style.padding = "8px";
+        container.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
+        container.style.border = "1px solid #ccc";
+        container.style.borderRadius = "4px";
+        container.style.zIndex = "100";
+        container.style.fontSize = "12px";
+        container.style.display = "flex";
+        container.style.alignItems = "center";
+        container.style.gap = "6px";
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.id = "extrude-version-v2";
+        checkbox.checked = this.extrudeVersionV2;
+        checkbox.style.cursor = "pointer";
+
+        const label = document.createElement("label");
+        label.htmlFor = "extrude-version-v2";
+        label.textContent = "Extrude V2 (segmented + lathe)";
+        label.style.cursor = "pointer";
+        label.style.userSelect = "none";
+        label.title =
+            "V1: Single profile extrude | V2: Segmented path with lathe transitions";
+
+        checkbox.addEventListener("change", () => {
+            this.extrudeVersionV2 = checkbox.checked;
+            this.log.info(
+                "Switched to Extrude V" + (this.extrudeVersionV2 ? "2" : "1")
+            );
+            // Invalidate cache and rebuild
+            this.lastPanelUpdateSignature = null;
+            // Reapply CSG if currently in Part view
+            if (window.showPart && this.bitExtrudeMeshes.length > 0) {
+                this.csgEngine.applyCSGOperation(true);
+            }
+        });
+
+        container.appendChild(checkbox);
+        container.appendChild(label);
+        this.container.appendChild(container);
+        this.extrudeVersionToggle = container;
     }
 
     addStatsWidget() {
@@ -625,18 +679,37 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // Extrude profile along curve
-            const extrudeMesh = this.extrusionBuilder.extrudeAlongPath(
-                bitProfile,
-                curve3D,
-                bit.color
-            );
+            // Extrude profile along curve - use V1 or V2 based on toggle
+            let extrudeMeshes = [];
+            if (this.extrudeVersionV2) {
+                // V2: Segmented extrusion with lathe transitions
+                extrudeMeshes =
+                    this.extrusionBuilder.extrudeAlongPathV2(
+                        bitProfile,
+                        curve3D,
+                        bit.color
+                    ) || [];
+            } else {
+                // V1: Single profile extrusion (original)
+                const extrudeMesh = this.extrusionBuilder.extrudeAlongPath(
+                    bitProfile,
+                    curve3D,
+                    bit.color
+                );
+                if (extrudeMesh) {
+                    extrudeMeshes = [extrudeMesh];
+                }
+            }
 
-            if (extrudeMesh) {
-                extrudeMesh.userData.operation = bit.operation || "subtract";
-                extrudeMesh.userData.bitIndex = bitIndex;
-                this.bitExtrudeMeshes.push(extrudeMesh);
-                this.log.debug(`Created extrude mesh for bit ${bitIndex}`);
+            if (extrudeMeshes.length > 0) {
+                extrudeMeshes.forEach((mesh) => {
+                    mesh.userData.operation = bit.operation || "subtract";
+                    mesh.userData.bitIndex = bitIndex;
+                    this.bitExtrudeMeshes.push(mesh);
+                });
+                this.log.debug(
+                    `Created ${extrudeMeshes.length} extrude mesh(es) for bit ${bitIndex}`
+                );
             } else {
                 this.log.debug(
                     `Failed to create extrude mesh for bit ${bitIndex}`

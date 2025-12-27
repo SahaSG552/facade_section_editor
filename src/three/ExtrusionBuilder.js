@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import LoggerFactory from "../core/LoggerFactory.js";
 
 /**
@@ -722,6 +723,300 @@ export default class ExtrusionBuilder {
             this.log.error("Error in createProfiledContourGeometry:", error);
             // Fallback to simple box geometry
             return new THREE.BoxGeometry(1, 1, 1);
+        }
+    }
+
+    /**
+     * ===== EXTRUDE V2: SEGMENTED PATH WITH LATHE TRANSITIONS =====
+     * Splits path into segments (linear + arcs) and extrudes each separately.
+     * Uses LatheGeometry at junction points for smooth revolved transitions.
+     */
+
+    /**
+     * Split path into segments (linear, arc, bezier, etc)
+     * @param {THREE.CurvePath} path - The combined path
+     * @returns {Array<{segment: THREE.Curve, type: string, startPoint: THREE.Vector3, endPoint: THREE.Vector3}>}
+     */
+    splitPathIntoSegments(path) {
+        const segments = [];
+        if (!path.curves || path.curves.length === 0) return segments;
+
+        for (const curve of path.curves) {
+            let type = "line";
+            if (curve instanceof THREE.CubicBezierCurve3) type = "bezier";
+            else if (curve instanceof THREE.QuadraticBezierCurve3)
+                type = "quadratic";
+            else if (curve instanceof THREE.LineCurve3) type = "line";
+
+            segments.push({
+                segment: curve,
+                type,
+                startPoint: curve.getPointAt(0),
+                endPoint: curve.getPointAt(1),
+            });
+        }
+
+        return segments;
+    }
+
+    /**
+     * Extrude V2: Segmented extrusion with lathe junctions
+     * @param {THREE.Shape} profile - The profile shape to extrude
+     * @param {THREE.CurvePath} path - The path to extrude along
+     * @param {string|number} color - Color for mesh
+     * @returns {Array<THREE.Mesh>} Array of segment meshes + junction lathe meshes
+     */
+    extrudeAlongPathV2(profile, path, color) {
+        const result = [];
+
+        try {
+            // Split path into segments
+            const segments = this.splitPathIntoSegments(path);
+            this.log.debug("Split path into", segments.length, "segments");
+
+            if (segments.length === 0) {
+                this.log.warn("No segments found in path");
+                return result;
+            }
+
+            // Extrude each segment separately
+            for (let i = 0; i < segments.length; i++) {
+                const { segment } = segments[i];
+                const segmentMesh = this.extrudeAlongPath(
+                    profile,
+                    segment,
+                    color
+                );
+                if (segmentMesh) {
+                    result.push(segmentMesh);
+                }
+            }
+
+            // Check if path is closed (first and last points are close enough)
+            const firstPoint = segments[0].startPoint;
+            const lastPoint = segments[segments.length - 1].endPoint;
+            const pathClosed = firstPoint.distanceTo(lastPoint) < 0.01;
+
+            this.log.debug("Path closed:", pathClosed);
+
+            // Add lathe transitions at junctions
+            if (pathClosed) {
+                // For closed paths: add lathe at all junction points (all segment endpoints)
+                for (let i = 0; i < segments.length; i++) {
+                    const junctionPoint = segments[i].endPoint;
+                    const junctionMesh = this.createLatheAtPoint(
+                        profile,
+                        junctionPoint
+                    );
+                    if (junctionMesh) {
+                        result.push(junctionMesh);
+                    }
+                }
+            } else {
+                // For open paths: add lathe at start and end points only
+                const startMesh = this.createLatheAtPoint(profile, firstPoint);
+                if (startMesh) {
+                    result.push(startMesh);
+                }
+
+                const endMesh = this.createLatheAtPoint(profile, lastPoint);
+                if (endMesh) {
+                    result.push(endMesh);
+                }
+            }
+
+            this.log.info("Created V2 extrusion with", result.length, "meshes");
+            return result;
+        } catch (error) {
+            this.log.error("Error in extrudeAlongPathV2:", error.message);
+            return result;
+        }
+    }
+
+    /**
+     * Create a lathe (revolve) at a junction point
+     * @param {THREE.Shape} profile - Profile to revolve
+     * @param {THREE.Vector3} point - Junction point in 3D space
+     * @returns {THREE.Mesh|null}
+     */
+    createLatheAtPoint(profile, point) {
+        try {
+            const lathePoints = this.createLatheHalfProfilePoints(
+                profile,
+                null
+            );
+
+            if (!lathePoints || lathePoints.length < 2) {
+                this.log.warn("Not enough points for lathe at junction");
+                return null;
+            }
+
+            // Create lathe geometry - simple revolve without caps for now
+            const latheGeometry = new THREE.LatheGeometry(
+                lathePoints,
+                32,
+                0,
+                Math.PI * 2
+            );
+
+            // Rotate 90 degrees to align properly with path
+            latheGeometry.rotateX(-Math.PI / 2);
+
+            // Position at junction point
+            latheGeometry.translate(point.x, point.y, point.z);
+
+            const material = new THREE.MeshStandardMaterial({
+                color: new THREE.Color("#ffaa00"),
+                roughness: 0.6,
+                metalness: 0.1,
+                side: THREE.FrontSide,
+                wireframe: this.materialManager
+                    ? this.materialManager.isWireframeEnabled()
+                    : false,
+            });
+
+            const mesh = new THREE.Mesh(latheGeometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.userData.isLatheJunction = true;
+
+            return mesh;
+        } catch (error) {
+            this.log.error("Error creating lathe at point:", error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Create end caps (top and bottom discs) for LatheGeometry
+     * @param {Array<THREE.Vector2>} latheProfilePoints
+     * @param {number} rotationX - rotation applied to the lathe body (so caps align)
+     * @returns {THREE.BufferGeometry|null}
+     */
+    createLatheEndCaps(latheProfilePoints, rotationX = 0) {
+        // End caps merging is complex - skipping for now
+        // LatheGeometry looks fine without caps
+        return null;
+    }
+
+    /**
+     * Check if a BufferGeometry is closed (no boundary edges)
+     */
+    isGeometryClosed(geometry) {
+        try {
+            const geom = geometry.index ? geometry : geometry.toNonIndexed();
+            const index = geom.index.array;
+            const edgeCount = new Map();
+            const addEdge = (a, b) => {
+                const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+                edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+            };
+            for (let i = 0; i < index.length; i += 3) {
+                const a = index[i],
+                    b = index[i + 1],
+                    c = index[i + 2];
+                addEdge(a, b);
+                addEdge(b, c);
+                addEdge(c, a);
+            }
+            for (const [, count] of edgeCount) {
+                if (count === 1) return false; // boundary edge
+            }
+            return true;
+        } catch (e) {
+            this.log.warn("isGeometryClosed failed:", e);
+            return false;
+        }
+    }
+
+    /**
+     * Build lathe-ready half profile points from the bit profile shape.
+     * Extracts the right half (x >= 0) of the profile and sorts by Y for proper revolve.
+     * Returns points as Vector2 for LatheGeometry (x = distance from axis, y = height along axis)
+     * @param {THREE.Shape} profile - The bit profile shape
+     * @param {number} toolRadius - Tool radius hint (unused, kept for compatibility)
+     * @returns {Array<THREE.Vector2>}
+     */
+    createLatheHalfProfilePoints(profile, toolRadius) {
+        try {
+            // Get all points from the profile shape
+            const fullProfile = profile.getPoints(64);
+
+            // Find center X and bottom Y (reference point is bottom-center)
+            let sumX = 0,
+                minY = Infinity,
+                maxY = -Infinity;
+            fullProfile.forEach((p) => {
+                sumX += p.x;
+                minY = Math.min(minY, p.y);
+                maxY = Math.max(maxY, p.y);
+            });
+            const centerX = sumX / fullProfile.length;
+            const baseY = minY; // Use bottom as reference, not center
+
+            this.log.debug("Profile reference:", {
+                centerX,
+                baseY,
+                minY,
+                maxY,
+                points: fullProfile.length,
+            });
+
+            // Filter points on the right side (x >= centerX) and translate to bottom-center origin
+            const rightHalf = fullProfile
+                .map((p) => ({
+                    x: p.x - centerX,
+                    y: p.y - baseY, // Shift so bottom is at y=0
+                    distFromCenter: Math.sqrt(
+                        (p.x - centerX) ** 2 + (p.y - baseY) ** 2
+                    ),
+                }))
+                .filter((p) => p.x >= -0.01) // Small tolerance for center line
+                .sort((a, b) => a.y - b.y); // Sort by Y (bottom to top)
+
+            if (rightHalf.length < 2) {
+                this.log.warn(
+                    "Not enough points for lathe profile, using fallback circle"
+                );
+                const r = toolRadius || 5;
+                const pts = [];
+                for (let i = 0; i <= 16; i++) {
+                    const a = (i / 16) * Math.PI;
+                    pts.push(
+                        new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r)
+                    );
+                }
+                return pts;
+            }
+
+            // Convert to Vector2 with (x = distance from axis, y = height)
+            const lathePoints = rightHalf.map(
+                (p) => new THREE.Vector2(Math.abs(p.x), p.y)
+            );
+
+            // Ensure profile touches the axis at start/end to avoid open lathe caps
+            if (lathePoints.length >= 1) {
+                if (lathePoints[0].x > 1e-4) {
+                    lathePoints.unshift(new THREE.Vector2(0, lathePoints[0].y));
+                }
+                const last = lathePoints[lathePoints.length - 1];
+                if (last.x > 1e-4) {
+                    lathePoints.push(new THREE.Vector2(0, last.y));
+                }
+            }
+
+            this.log.debug("Lathe profile points:", lathePoints.length);
+            return lathePoints;
+        } catch (e) {
+            this.log.error("Error creating lathe profile:", e);
+            // Fallback: simple circle
+            const r = toolRadius || 5;
+            const pts = [];
+            for (let i = 0; i <= 16; i++) {
+                const a = (i / 16) * Math.PI;
+                pts.push(new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r));
+            }
+            return pts;
         }
     }
 
