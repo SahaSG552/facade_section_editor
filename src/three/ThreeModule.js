@@ -52,11 +52,7 @@ export default class ThreeModule extends BaseModule {
         // Track last panel/bits signature to skip redundant rebuilds
         this.lastPanelUpdateSignature = null;
 
-        // Extrude version mode: 'V1' | 'V2' | 'V3'
-        this.extrudeVersionMode = "V1";
-        // Optional compare preview (renders V1 alongside V3 for visual check)
-        this.showCompareV1V3 = false;
-        this.compareExtrudeMeshes = [];
+        // Extrude mode is selected automatically per bit operation (VC → mitered, others → round)
     }
 
     async init() {
@@ -88,8 +84,7 @@ export default class ThreeModule extends BaseModule {
         // Add CSG mode toggle
         this.addCSGModeToggle();
 
-        // Add Extrude version selector (V1/V2/V3) + compare toggle
-        this.addExtrudeVersionToggle();
+        // Removed test UI: extrude version selector and compare toggle
 
         // Add Stats widget
         this.sceneManager.addStatsWidget(
@@ -243,88 +238,7 @@ export default class ThreeModule extends BaseModule {
         this.csgModeToggle = container;
     }
 
-    addExtrudeVersionToggle() {
-        const container = document.createElement("div");
-        container.style.position = "absolute";
-        container.style.top = "90px";
-        container.style.right = "10px";
-        container.style.padding = "8px";
-        container.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
-        container.style.border = "1px solid #ccc";
-        container.style.borderRadius = "4px";
-        container.style.zIndex = "100";
-        container.style.fontSize = "12px";
-        container.style.display = "flex";
-        container.style.alignItems = "center";
-        container.style.gap = "8px";
-
-        const label = document.createElement("label");
-        label.textContent = "Extrude Version:";
-        label.style.userSelect = "none";
-
-        const select = document.createElement("select");
-        select.id = "extrude-version-select";
-        ["V1", "V2", "V3"].forEach((v) => {
-            const opt = document.createElement("option");
-            opt.value = v;
-            opt.textContent = v;
-            select.appendChild(opt);
-        });
-        select.value = this.extrudeVersionMode;
-        select.title =
-            "V1: single | V2: segmented+lathe | V3: V1 minus lathe bbox + union lathes";
-
-        const compareWrap = document.createElement("div");
-        compareWrap.style.display = "flex";
-        compareWrap.style.alignItems = "center";
-        compareWrap.style.gap = "4px";
-
-        const compareCb = document.createElement("input");
-        compareCb.type = "checkbox";
-        compareCb.id = "extrude-compare-v1-v3";
-        compareCb.checked = this.showCompareV1V3;
-        compareCb.style.cursor = "pointer";
-
-        const compareLabel = document.createElement("label");
-        compareLabel.htmlFor = "extrude-compare-v1-v3";
-        compareLabel.textContent = "Compare V1 vs V3 (preview)";
-        compareLabel.style.cursor = "pointer";
-        compareLabel.style.userSelect = "none";
-
-        const rebuild = () => {
-            this.extrudeVersionMode = select.value;
-            this.showCompareV1V3 = compareCb.checked;
-            this.log.info(
-                `Extrude mode: ${this.extrudeVersionMode} | compare V1/V3: ${this.showCompareV1V3}`
-            );
-            // Invalidate cache and request a panel rebuild by triggering queued update
-            this.lastPanelUpdateSignature = null;
-            // Remove previous compare meshes from scene
-            if (this.compareExtrudeMeshes.length) {
-                this.compareExtrudeMeshes.forEach((m) => {
-                    this.scene.remove(m);
-                    m.geometry?.dispose();
-                    m.material?.dispose();
-                });
-                this.compareExtrudeMeshes = [];
-            }
-            // Reapply CSG if currently in Part view
-            if (window.showPart && this.bitExtrudeMeshes.length > 0) {
-                this.csgEngine.applyCSGOperation(true);
-            }
-        };
-
-        select.addEventListener("change", rebuild);
-        compareCb.addEventListener("change", rebuild);
-
-        container.appendChild(label);
-        container.appendChild(select);
-        compareWrap.appendChild(compareCb);
-        compareWrap.appendChild(compareLabel);
-        container.appendChild(compareWrap);
-        this.container.appendChild(container);
-        this.extrudeVersionToggle = container;
-    }
+    // addExtrudeVersionToggle removed: mode is selected automatically per operation
 
     addStatsWidget() {
         // Check if Stats is available
@@ -717,59 +631,25 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // Extrude profile along curve - use selected mode
+            // Extrude profile along curve - VC uses mitered, others use round
             let extrudeMeshes = [];
-            switch (this.extrudeVersionMode) {
-                case "V2": {
-                    const meshes = this.extrusionBuilder.extrudeAlongPathV2(
-                        bitProfile,
-                        curve3D,
-                        bit.color
-                    );
-                    extrudeMeshes = meshes || [];
-                    break;
-                }
-                case "V3": {
-                    const mesh = this.extrusionBuilder.extrudeAlongPathV3(
-                        bitProfile,
-                        curve3D,
-                        bit.color
-                    );
-                    if (mesh) extrudeMeshes = [mesh];
-
-                    // Optional: side-by-side preview of V1 vs V3 (do not include in CSG)
-                    if (this.showCompareV1V3) {
-                        const v1Mesh = this.extrusionBuilder.extrudeAlongPath(
-                            bitProfile,
-                            curve3D,
-                            bit.color
-                        );
-                        if (v1Mesh) {
-                            // slight offset so both are visible
-                            v1Mesh.position.x += 15;
-                            v1Mesh.material =
-                                v1Mesh.material?.clone?.() ||
-                                new THREE.MeshStandardMaterial({
-                                    color: 0x44aa44,
-                                });
-                            v1Mesh.material.wireframe =
-                                this.materialManager.isWireframeEnabled();
-                            this.scene.add(v1Mesh);
-                            this.compareExtrudeMeshes.push(v1Mesh);
-                        }
-                    }
-                    break;
-                }
-                case "V1":
-                default: {
-                    const mesh = this.extrusionBuilder.extrudeAlongPath(
-                        bitProfile,
-                        curve3D,
-                        bit.color
-                    );
-                    if (mesh) extrudeMeshes = [mesh];
-                    break;
-                }
+            const isVC = (bit.operation || "").toUpperCase() === "VC";
+            const mode = isVC ? "mitered" : "round";
+            this.log.info(`Bit ${bitIndex} op=${bit.operation || "unknown"} → ${mode}`);
+            if (isVC) {
+                const mesh = this.extrusionBuilder.extrudeAlongPath(
+                    bitProfile,
+                    curve3D,
+                    bit.color
+                );
+                if (mesh) extrudeMeshes = [mesh];
+            } else {
+                const mesh = this.extrusionBuilder.extrudeAlongPathRound(
+                    bitProfile,
+                    curve3D,
+                    bit.color
+                );
+                if (mesh) extrudeMeshes = [mesh];
             }
 
             if (extrudeMeshes.length > 0) {
@@ -787,85 +667,6 @@ export default class ThreeModule extends BaseModule {
                 );
             }
         }
-
-        // For V2 extrusion: group and merge meshes by bit (frez), not by operation
-        // TEMPORARILY DISABLED for testing partial revolves
-        /*
-        if (this.extrudeVersionV2 && this.bitExtrudeMeshes.length > 0) {
-            this.log.info(
-                "Grouping",
-                this.bitExtrudeMeshes.length,
-                "V2 extrude meshes by bit/frez"
-            );
-
-            // Group meshes by bitIndex (each frez/bit separately)
-            const meshesByBit = {};
-            this.bitExtrudeMeshes.forEach((mesh) => {
-                const bitIndex = mesh.userData.bitIndex;
-                if (bitIndex === undefined) return;
-                if (!meshesByBit[bitIndex]) {
-                    meshesByBit[bitIndex] = [];
-                }
-                meshesByBit[bitIndex].push(mesh);
-            });
-
-            this.log.info("Grouped", this.bitExtrudeMeshes.length, "meshes by bit:");
-            for (const [bitIndex, meshes] of Object.entries(meshesByBit)) {
-                const latheCount = meshes.filter((m) => m.userData.isLatheJunction).length;
-                const segmentCount = meshes.filter((m) => !m.userData.isLatheJunction).length;
-                this.log.debug(`  Bit ${bitIndex}: ${segmentCount} segments + ${latheCount} lathe revolves`);
-            }
-
-            // Merge meshes for each bit/frez separately
-            const mergedMeshes = [];
-            for (const [bitIndex, meshes] of Object.entries(meshesByBit)) {
-                if (meshes.length === 0) continue;
-
-                this.log.debug(
-                    `Merging ${meshes.length} meshes for bit index: ${bitIndex}`
-                );
-
-                // Get the operation and color from first mesh in group
-                const operation = meshes[0].userData.operation || "subtract";
-                // Find bit data to get color
-                const bit = bits.find(
-                    (b) => uniqueBits.indexOf(b) === parseInt(bitIndex)
-                );
-                const color = bit?.color || "#cccccc";
-
-                const mergedMesh =
-                    this.extrusionBuilder.mergeExtrudeMeshes(meshes);
-                if (mergedMesh) {
-                    // Preserve operation and bit metadata
-                    mergedMesh.userData.operation = operation;
-                    mergedMesh.userData.bitIndex = parseInt(bitIndex);
-
-                    // Apply correct color to merged mesh
-                    if (mergedMesh.material) {
-                        mergedMesh.material.color.setStyle(color);
-                    }
-
-                    mergedMeshes.push(mergedMesh);
-                    this.log.info(
-                        `Merged ${meshes.length} meshes for bit index ${bitIndex} (color: ${color})`
-                    );
-                }
-            }
-
-            if (mergedMeshes.length > 0) {
-                // Remove old meshes from scene and replace with merged ones
-                this.bitExtrudeMeshes.forEach((mesh) => {
-                    this.scene.remove(mesh);
-                    mesh.geometry?.dispose();
-                    mesh.material?.dispose();
-                });
-                this.bitExtrudeMeshes = mergedMeshes;
-                this.log.info(
-                    "V2 extrusion meshes grouped by bit and merged successfully"
-                );
-            }
-        }
-        */
     }
 
     /**

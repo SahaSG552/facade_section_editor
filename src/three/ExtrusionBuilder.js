@@ -589,116 +589,6 @@ export default class ExtrusionBuilder {
     }
 
     /**
-     * Extrude segment with open ends (no caps) for V2 system
-     * @param {THREE.Shape} profile - The profile shape to extrude
-     * @param {THREE.Curve} curve - The segment curve to extrude along
-     * @param {string|number} color - Color for the mesh material
-     * @param {THREE.Vector3|null} startPrevDir - Direction of previous segment at start (for mitering)
-     * @param {THREE.Vector3|null} endNextDir - Direction of next segment at end (for mitering)
-     * @returns {THREE.Mesh} The extruded mesh with open ends
-     */
-    extrudeSegmentOpen(
-        profile,
-        curve,
-        color,
-        startPrevDir = null,
-        endNextDir = null
-    ) {
-        try {
-            // Get contour points from the curve
-            let segments;
-            if (curve instanceof THREE.LineCurve3) {
-                segments = 1; // Only 2 points for straight line
-            } else {
-                segments = Math.max(50, Math.floor(curve.getLength() / 5));
-            }
-            const contourPoints = curve.getPoints(segments);
-
-            // Convert to Vector3 for ProfiledContourGeometry
-            let contour = contourPoints.map(
-                (p) => new THREE.Vector3(p.x, p.y, p.z)
-            );
-
-            // Open segments are never closed
-            const contourClosed = false;
-
-            this.log.debug("Extruding open segment:", {
-                contourPoints: contour.length,
-                curveLength: curve.getLength(),
-                hasStartMiter: !!startPrevDir,
-                hasEndMiter: !!endNextDir,
-            });
-
-            // TODO: Implement mitering of segment ends based on startPrevDir and endNextDir
-            // This would require modifying the contour endpoints or post-processing the geometry
-            // with CSG plane cuts. For now, segments have flat open ends.
-
-            // Create geometry with open ends (no caps)
-            const geometry = this.createProfiledContourGeometry(
-                profile,
-                contour,
-                contourClosed,
-                true // openEnded = true (no caps)
-            );
-
-            if (!geometry) {
-                throw new Error("Failed to create open segment geometry");
-            }
-
-            // Compute normals
-            geometry.computeVertexNormals();
-            geometry.normalizeNormals();
-
-            const material = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(color || "#cccccc"),
-                roughness: 0.5,
-                metalness: 0.2,
-                side: THREE.DoubleSide, // DoubleSide for open ends
-                wireframe: this.materialManager
-                    ? this.materialManager.isWireframeEnabled()
-                    : false,
-            });
-
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            mesh.userData.isOpenSegment = true;
-
-            // Add debug helpers for miter planes if we have neighbor directions
-            const segmentDir = new THREE.Vector3()
-                .subVectors(curve.getPointAt(1), curve.getPointAt(0))
-                .normalize();
-
-            if (startPrevDir) {
-                const startPoint = curve.getPointAt(0);
-                const helper = this.createMiterPlaneHelper(
-                    startPoint,
-                    segmentDir,
-                    startPrevDir,
-                    "#ff0000" // Red for start
-                );
-                mesh.add(helper);
-            }
-
-            if (endNextDir) {
-                const endPoint = curve.getPointAt(1);
-                const helper = this.createMiterPlaneHelper(
-                    endPoint,
-                    segmentDir,
-                    endNextDir,
-                    "#00ff00" // Green for end
-                );
-                mesh.add(helper);
-            }
-
-            return mesh;
-        } catch (error) {
-            this.log.error("Error extruding open segment:", error.message);
-            return null;
-        }
-    }
-
-    /**
      * Create profiled contour geometry with mitered corners
      * Based on https://jsfiddle.net/prisoner849/bygy1xkt/
      * @param {THREE.Shape} profileShape - Profile shape
@@ -897,191 +787,33 @@ export default class ExtrusionBuilder {
     }
 
     /**
-     * ===== EXTRUDE V2: SEGMENTED PATH WITH LATHE TRANSITIONS =====
-     * Splits path into segments (linear + arcs) and extrudes each separately.
-     * Uses LatheGeometry at junction points for smooth revolved transitions.
-     */
-
-    /**
-     * Split path into segments (linear, arc, bezier, etc)
-     * @param {THREE.CurvePath} path - The combined path
-     * @returns {Array<{segment: THREE.Curve, type: string, startPoint: THREE.Vector3, endPoint: THREE.Vector3}>}
-     */
-    splitPathIntoSegments(path) {
-        const segments = [];
-        if (!path.curves || path.curves.length === 0) return segments;
-
-        for (const curve of path.curves) {
-            let type = "line";
-            if (curve instanceof THREE.CubicBezierCurve3) type = "bezier";
-            else if (curve instanceof THREE.QuadraticBezierCurve3)
-                type = "quadratic";
-            else if (curve instanceof THREE.LineCurve3) type = "line";
-
-            segments.push({
-                segment: curve,
-                type,
-                startPoint: curve.getPointAt(0),
-                endPoint: curve.getPointAt(1),
-            });
-        }
-
-        return segments;
-    }
-
-    /**
-     * Extrude V2: Segmented extrusion with partial lathe junctions
-     * @param {THREE.Shape} profile - The profile shape to extrude
-     * @param {THREE.CurvePath} path - The path to extrude along
-     * @param {string|number} color - Color for mesh
-     * @returns {Array<THREE.Mesh>} Array of open segment meshes + partial lathe meshes
-     */
-    extrudeAlongPathV2(profile, path, color) {
-        const result = [];
-
-        try {
-            // Split path into segments
-            const segments = this.splitPathIntoSegments(path);
-            this.log.debug("Split path into", segments.length, "segments");
-
-            if (segments.length === 0) {
-                this.log.warn("No segments found in path");
-                return result;
-            }
-
-            // Check if path is closed (first and last points are close enough)
-            const firstPoint = segments[0].startPoint;
-            const lastPoint = segments[segments.length - 1].endPoint;
-            const pathClosed = firstPoint.distanceTo(lastPoint) < 0.01;
-
-            // Calculate direction vectors for each segment first
-            const directions = segments.map((seg) => {
-                const dir = new THREE.Vector3()
-                    .subVectors(seg.endPoint, seg.startPoint)
-                    .normalize();
-                return dir;
-            });
-
-            // Extrude each segment with open ends (no caps)
-            for (let i = 0; i < segments.length; i++) {
-                const { segment } = segments[i];
-
-                // Get directions of neighboring segments for mitering
-                let startPrevDir = null;
-                let endNextDir = null;
-
-                if (pathClosed || i > 0) {
-                    // Previous segment direction (for start of current segment)
-                    const prevIndex = i === 0 ? segments.length - 1 : i - 1;
-                    startPrevDir = directions[prevIndex];
-                }
-
-                if (pathClosed || i < segments.length - 1) {
-                    // Next segment direction (for end of current segment)
-                    const nextIndex = (i + 1) % segments.length;
-                    endNextDir = directions[nextIndex];
-                }
-
-                const segmentMesh = this.extrudeSegmentOpen(
-                    profile,
-                    segment,
-                    color,
-                    startPrevDir,
-                    endNextDir
-                );
-                if (segmentMesh) {
-                    result.push(segmentMesh);
-                }
-            }
-
-            this.log.debug(
-                "Path closed:",
-                pathClosed,
-                "segments:",
-                segments.length
-            );
-
-            // Add partial lathe transitions at junctions based on angles
-            // Different colors for each corner for debugging
-            const debugColors = ["#ff0000", "#00ff00", "#0000ff", "#ffff00"];
-
-            if (pathClosed) {
-                // For closed paths: add partial lathe at all junction points
-                for (let i = 0; i < segments.length; i++) {
-                    const junctionPoint = segments[i].endPoint;
-                    const prevDir = directions[i]; // Current segment direction
-                    const nextDir = directions[(i + 1) % segments.length]; // Next segment direction
-                    const cornerColor = debugColors[i % debugColors.length];
-
-                    const latheData = this.createPartialLatheAtJunction(
-                        profile,
-                        junctionPoint,
-                        prevDir,
-                        nextDir,
-                        cornerColor,
-                        i + 1 // Pass corner number for logging
-                    );
-                    if (latheData && latheData.mesh) {
-                        result.push(latheData.mesh);
-                    }
-                }
-            } else {
-                // For open paths: add partial lathes at internal junctions only
-                for (let i = 0; i < segments.length - 1; i++) {
-                    const junctionPoint = segments[i].endPoint;
-                    const prevDir = directions[i];
-                    const nextDir = directions[i + 1];
-                    const cornerColor = debugColors[i % debugColors.length];
-
-                    const latheData = this.createPartialLatheAtJunction(
-                        profile,
-                        junctionPoint,
-                        prevDir,
-                        nextDir,
-                        cornerColor,
-                        i + 1 // Pass corner number for logging
-                    );
-                    if (latheData && latheData.mesh) {
-                        result.push(latheData.mesh);
-                    }
-                }
-            }
-
-            this.log.info(
-                "Created V2 extrusion with",
-                result.length,
-                "meshes (segments + partial lathes)"
-            );
-            return result;
-        } catch (error) {
-            this.log.error("Error in extrudeAlongPathV2:", error.message);
-            return result;
-        }
-    }
-
-    /**
-     * Extrude V3: V1 base extrusion minus lathe bounding boxes, then union with lathes
+     * Extrude with round (revolved) corners: mitered base extrusion minus lathe bounding boxes, then union with lathes
      * Returns a single merged mesh suitable for downstream CSG operations
      * @param {THREE.Shape} profile
      * @param {THREE.CurvePath} path
      * @param {string|number} color
      * @returns {THREE.Mesh|null}
      */
-    extrudeAlongPathV3(profile, path, color) {
+    extrudeAlongPathRound(profile, path, color) {
         try {
-            // 1) Build V1 base extrusion with mitered corners
+            // 1) Build mitered base extrusion (sharp corners)
             const baseMesh = this.extrudeAlongPath(profile, path, color);
             if (!baseMesh) {
-                this.log.warn("V3: Base V1 extrusion failed");
+                this.log.warn("Round extrusion: Base mitered extrusion failed");
                 return null;
             }
 
-            // 2) Build partial lathes at each junction (reuse V2 splitting logic)
-            const segments = this.splitPathIntoSegments(path);
-            if (segments.length === 0) {
-                this.log.warn("V3: No segments in path");
+            // 2) Get path segments (curves) directly
+            if (!path.curves || path.curves.length === 0) {
+                this.log.warn("Round extrusion: No curves in path");
                 return baseMesh;
             }
+
+            const segments = path.curves.map((curve) => ({
+                curve,
+                startPoint: curve.getPointAt(0),
+                endPoint: curve.getPointAt(1),
+            }));
 
             const firstPoint = segments[0].startPoint;
             const lastPoint = segments[segments.length - 1].endPoint;
@@ -1128,7 +860,7 @@ export default class ExtrusionBuilder {
 
             if (latheDataList.length === 0) {
                 this.log.info(
-                    "V3: No lathe junctions created; returning V1 base"
+                    "Round extrusion: No lathe junctions created; returning mitered base"
                 );
                 return baseMesh;
             }
@@ -1160,7 +892,7 @@ export default class ExtrusionBuilder {
             });
 
             let wedgeUnionBrush = null;
-            const debugHelpers = []; // Collect debug visualizations
+            // Debug helpers disabled: wedge geometry should not be visible
 
             for (const latheData of latheDataList) {
                 const { junctionPoint, phiStart, phiLength, mesh } = latheData;
@@ -1181,17 +913,7 @@ export default class ExtrusionBuilder {
                 wedgeBrush.scale.set(1, 1, 1);
                 wedgeBrush.updateMatrixWorld(true);
 
-                // Create debug helper for this wedge
-                const debugHelper = this.createWedgeDebugHelper(
-                    junctionPoint,
-                    wedgeRadius,
-                    wedgeHeight,
-                    phiStart,
-                    phiLength,
-                    cornerNumber,
-                    mesh.material.color // Use same color as lathe
-                );
-                debugHelpers.push(debugHelper);
+                // Debug helper suppressed to hide wedge visualization
 
                 wedgeUnionBrush = wedgeUnionBrush
                     ? evaluator.evaluate(wedgeUnionBrush, wedgeBrush, ADDITION)
@@ -1205,7 +927,7 @@ export default class ExtrusionBuilder {
             );
             if (!cutBaseBrush) {
                 this.log.warn(
-                    "V3: Subtraction of wedge union failed; returning base"
+                    "Round extrusion: Subtraction of wedge union failed; returning base"
                 );
                 return baseMesh;
             }
@@ -1230,7 +952,9 @@ export default class ExtrusionBuilder {
                 ADDITION
             );
             if (!finalBrush) {
-                this.log.warn("V3: Final union failed; returning base");
+                this.log.warn(
+                    "Round extrusion: Final union failed; returning base"
+                );
                 return baseMesh;
             }
 
@@ -1249,22 +973,18 @@ export default class ExtrusionBuilder {
             finalBrush.material = material;
             finalBrush.castShadow = true;
             finalBrush.receiveShadow = true;
-            finalBrush.userData.isV3Extrude = true;
+            finalBrush.userData.isRoundExtrude = true;
 
-            // 6) Attach debug helpers to the final brush for visualization
-            debugHelpers.forEach((helper) => {
-                finalBrush.add(helper);
-            });
+            // 6) Debug helpers are hidden/omitted
 
-            this.log.info("V3 extrusion built:", {
+            this.log.info("Round extrusion built:", {
                 segments: segments.length,
                 lathes: latheDataList.length,
-                debugHelpers: debugHelpers.length,
             });
 
             return finalBrush;
         } catch (error) {
-            this.log.error("Error in extrudeAlongPathV3:", error.message);
+            this.log.error("Error in extrudeAlongPathRound:", error.message);
             return null;
         }
     }
@@ -1453,7 +1173,7 @@ export default class ExtrusionBuilder {
             mesh.userData.angle = angle;
             mesh.userData.cornerNumber = cornerNumber;
 
-            // Return mesh + angle metadata for V3 wedge construction
+            // Return mesh + angle metadata for round (wedge) construction
             return {
                 mesh,
                 phiStart,
@@ -1651,101 +1371,6 @@ export default class ExtrusionBuilder {
         const mesh = new THREE.Mesh(geometry, material);
         mesh.userData.isWedgeDebugHelper = true;
         return mesh;
-    }
-
-    /**
-     * Create visual debug helpers for miter planes at segment endpoints
-     * Shows plane normal and position for debugging segment cuts
-     * @param {THREE.Vector3} point - Point on the plane
-     * @param {THREE.Vector3} segmentDir - Direction of current segment
-     * @param {THREE.Vector3} neighborDir - Direction of neighboring segment (prev or next)
-     * @param {string} debugColor - Color for the helper (default: red for start, green for end)
-     * @returns {THREE.Group} Group containing plane helper visualization
-     */
-    createMiterPlaneHelper(
-        point,
-        segmentDir,
-        neighborDir,
-        debugColor = "#ff0000"
-    ) {
-        const group = new THREE.Group();
-
-        // Calculate bisector direction (average of the two directions)
-        const bisector = new THREE.Vector3()
-            .addVectors(segmentDir, neighborDir)
-            .normalize();
-
-        // For the miter cut, the plane should be perpendicular to the bisector
-        // The plane normal IS the bisector (points along the miter cut direction)
-        const planeNormal = bisector.clone();
-
-        // Calculate perpendicular to both directions for plane orientation
-        const perpendicular = new THREE.Vector3()
-            .crossVectors(segmentDir, neighborDir)
-            .normalize();
-
-        // If vectors are parallel, use a default perpendicular
-        if (perpendicular.length() < 0.001) {
-            perpendicular.set(0, 0, 1);
-        }
-
-        // Create plane helper (visual representation of cutting plane)
-        const planeSize = 15; // Size of the visual plane
-        const planeGeometry = new THREE.PlaneGeometry(planeSize, planeSize);
-        const planeMaterial = new THREE.MeshBasicMaterial({
-            color: new THREE.Color(debugColor),
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.4,
-            wireframe: false,
-        });
-        const planeMesh = new THREE.Mesh(planeGeometry, planeMaterial);
-
-        // Orient plane: normal = bisector (perpendicular to bisector)
-        // Use lookAt to orient the plane
-        const targetPoint = point.clone().add(planeNormal);
-        planeMesh.position.copy(point);
-        planeMesh.lookAt(targetPoint);
-        group.add(planeMesh);
-
-        // Add normal arrow (bisector direction)
-        const arrowHelper = new THREE.ArrowHelper(
-            bisector,
-            point,
-            15, // length
-            new THREE.Color(debugColor).getHex(),
-            3, // head length
-            2 // head width
-        );
-        group.add(arrowHelper);
-
-        // Add edge lines showing plane orientation
-        const edgeLength = planeSize / 2;
-        const up = new THREE.Vector3(0, 1, 0);
-        const right = new THREE.Vector3()
-            .crossVectors(bisector, up)
-            .normalize();
-        if (right.length() < 0.001) {
-            right.set(1, 0, 0);
-        }
-        up.crossVectors(right, bisector).normalize();
-
-        const edgePoints = [
-            point.clone().add(right.clone().multiplyScalar(edgeLength)),
-            point.clone().add(right.clone().multiplyScalar(-edgeLength)),
-        ];
-        const edgeGeometry = new THREE.BufferGeometry().setFromPoints(
-            edgePoints
-        );
-        const edgeMaterial = new THREE.LineBasicMaterial({
-            color: new THREE.Color(debugColor),
-            linewidth: 2,
-        });
-        const edgeLine = new THREE.Line(edgeGeometry, edgeMaterial);
-        group.add(edgeLine);
-
-        group.userData.isMiterPlaneHelper = true;
-        return group;
     }
 
     /**
