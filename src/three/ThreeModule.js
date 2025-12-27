@@ -716,6 +716,85 @@ export default class ThreeModule extends BaseModule {
                 );
             }
         }
+
+        // For V2 extrusion: group and merge meshes by bit (frez), not by operation
+        // TEMPORARILY DISABLED for testing partial revolves
+        /*
+        if (this.extrudeVersionV2 && this.bitExtrudeMeshes.length > 0) {
+            this.log.info(
+                "Grouping",
+                this.bitExtrudeMeshes.length,
+                "V2 extrude meshes by bit/frez"
+            );
+
+            // Group meshes by bitIndex (each frez/bit separately)
+            const meshesByBit = {};
+            this.bitExtrudeMeshes.forEach((mesh) => {
+                const bitIndex = mesh.userData.bitIndex;
+                if (bitIndex === undefined) return;
+                if (!meshesByBit[bitIndex]) {
+                    meshesByBit[bitIndex] = [];
+                }
+                meshesByBit[bitIndex].push(mesh);
+            });
+
+            this.log.info("Grouped", this.bitExtrudeMeshes.length, "meshes by bit:");
+            for (const [bitIndex, meshes] of Object.entries(meshesByBit)) {
+                const latheCount = meshes.filter((m) => m.userData.isLatheJunction).length;
+                const segmentCount = meshes.filter((m) => !m.userData.isLatheJunction).length;
+                this.log.debug(`  Bit ${bitIndex}: ${segmentCount} segments + ${latheCount} lathe revolves`);
+            }
+
+            // Merge meshes for each bit/frez separately
+            const mergedMeshes = [];
+            for (const [bitIndex, meshes] of Object.entries(meshesByBit)) {
+                if (meshes.length === 0) continue;
+
+                this.log.debug(
+                    `Merging ${meshes.length} meshes for bit index: ${bitIndex}`
+                );
+
+                // Get the operation and color from first mesh in group
+                const operation = meshes[0].userData.operation || "subtract";
+                // Find bit data to get color
+                const bit = bits.find(
+                    (b) => uniqueBits.indexOf(b) === parseInt(bitIndex)
+                );
+                const color = bit?.color || "#cccccc";
+
+                const mergedMesh =
+                    this.extrusionBuilder.mergeExtrudeMeshes(meshes);
+                if (mergedMesh) {
+                    // Preserve operation and bit metadata
+                    mergedMesh.userData.operation = operation;
+                    mergedMesh.userData.bitIndex = parseInt(bitIndex);
+
+                    // Apply correct color to merged mesh
+                    if (mergedMesh.material) {
+                        mergedMesh.material.color.setStyle(color);
+                    }
+
+                    mergedMeshes.push(mergedMesh);
+                    this.log.info(
+                        `Merged ${meshes.length} meshes for bit index ${bitIndex} (color: ${color})`
+                    );
+                }
+            }
+
+            if (mergedMeshes.length > 0) {
+                // Remove old meshes from scene and replace with merged ones
+                this.bitExtrudeMeshes.forEach((mesh) => {
+                    this.scene.remove(mesh);
+                    mesh.geometry?.dispose();
+                    mesh.material?.dispose();
+                });
+                this.bitExtrudeMeshes = mergedMeshes;
+                this.log.info(
+                    "V2 extrusion meshes grouped by bit and merged successfully"
+                );
+            }
+        }
+        */
     }
 
     /**
