@@ -669,7 +669,9 @@ export default class ThreeModule extends BaseModule {
                 );
                 // extrudeAlongPathRound now returns an array of separate meshes
                 if (meshArray) {
-                    extrudeMeshes = Array.isArray(meshArray) ? meshArray : [meshArray];
+                    extrudeMeshes = Array.isArray(meshArray)
+                        ? meshArray
+                        : [meshArray];
                 }
             }
 

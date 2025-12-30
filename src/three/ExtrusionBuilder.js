@@ -851,7 +851,7 @@ export default class ExtrusionBuilder {
                 segmentMeshes.push(mesh);
             }
 
-// Create lathes at junctions
+            // Create lathes at junctions
             if (pathClosed) {
                 for (let i = 0; i < segments.length; i++) {
                     const junctionPoint = segments[i].endPoint;
