@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
+import ManifoldCSG from "./ManifoldCSG.js";
 import { LoggerFactory } from "../core/LoggerFactory.js";
 
 /**
@@ -46,6 +47,13 @@ class CSGEngine {
         // References to other managers
         this.materialManager = null;
         this.computeWorldBBox = null; // Function reference from ThreeModule
+
+        // Manifold backend
+        this.manifoldCSG = new ManifoldCSG(this.log);
+        this.useManifoldBackend = true;
+        this.manifoldTolerance = 1e-3; // Panel tolerance
+        this.manifoldCutterTolerance = 0.01; // Higher tolerance for cutter cleanup (round extrusions)
+        this.manifoldSimplifyTolerance = 0.01;
     }
 
     /**
@@ -68,7 +76,7 @@ class CSGEngine {
     /**
      * Apply or remove CSG boolean operation (subtract bits from panel)
      */
-    applyCSGOperation(apply) {
+    async applyCSGOperation(apply) {
         this.log.info(
             "applyCSGOperation called with apply:",
             apply,
@@ -93,6 +101,8 @@ class CSGEngine {
             }
             return;
         }
+
+        this.csgBusy = true;
 
         // Update panel bbox if missing
         if (!this.panelBBox && this.computeWorldBBox) {
@@ -177,6 +187,46 @@ class CSGEngine {
                 return;
             }
 
+            const resultMaterial = this.createResultMaterial();
+
+            if (this.useManifoldBackend) {
+                const manifoldOutput = await this.runManifoldCSG(
+                    uniqueIntersectingMeshes
+                );
+
+                if (manifoldOutput?.geometry) {
+                    const resultMesh = new THREE.Mesh(
+                        manifoldOutput.geometry,
+                        resultMaterial
+                    );
+                    resultMesh.castShadow = true;
+                    resultMesh.receiveShadow = true;
+                    resultMesh.userData.manifoldMeta = manifoldOutput.meta;
+
+                    this.replacePartMesh(resultMesh);
+
+                    this.lastCSGSignature = csgSignature;
+                    this.csgActive = true;
+
+                    this.showCSGResult();
+
+                    this.log.info(
+                        `CSG applied via Manifold, processed ${uniqueIntersectingMeshes.length} intersecting bits`
+                    );
+                    this.log.info("CSG Operation End:", {
+                        timestamp: Date.now(),
+                        success: true,
+                        bitsProcessed: uniqueIntersectingMeshes.length,
+                        backend: "manifold",
+                    });
+                    return;
+                }
+
+                this.log.warn(
+                    "Manifold backend failed or returned empty, falling back to BVH CSG"
+                );
+            }
+
             // Prepare base brush
             const panelBrush = new Brush(this.originalPanelGeometry.clone());
             const panelPosition =
@@ -198,6 +248,12 @@ class CSGEngine {
 
             if (this.useUnionBeforeSubtract) {
                 // MODE 1: Union all intersecting bits, then subtract once
+                // DISABLED TEMPORARILY while testing corner cutting methodology
+                this.log.warn(
+                    "BIT UNION MODE DISABLED - bits will be subtracted sequentially"
+                );
+
+                /*
                 this.log.info("Using UNION mode: combining all bits first");
                 let unionBrush = null;
 
@@ -244,6 +300,10 @@ class CSGEngine {
                     unionBrush,
                     SUBTRACTION
                 );
+                */
+
+                // Force SEQUENTIAL mode instead
+                resultBrush = panelBrush;
             } else {
                 // MODE 2: Sequential subtraction (no union)
                 this.log.info(
@@ -293,40 +353,7 @@ class CSGEngine {
                 return;
             }
 
-            // Dispose previous CSG mesh if present
-            if (this.partMesh) {
-                if (this.partMesh.userData.edgeLines) {
-                    this.scene.remove(this.partMesh.userData.edgeLines);
-                    this.partMesh.userData.edgeLines.geometry?.dispose();
-                    this.partMesh.userData.edgeLines.material?.dispose();
-                }
-                this.scene.remove(this.partMesh);
-                this.partMesh.geometry?.dispose();
-                this.partMesh.material?.dispose();
-            }
-
-            // Apply material
-            const materialFactory = this.materialManager.getMaterialFactory(
-                this.materialManager.getCurrentMaterialKey()
-            );
-            const resultMaterial = materialFactory
-                ? materialFactory()
-                : this.originalPanelMaterial?.clone?.() ||
-                  new THREE.MeshStandardMaterial({ color: 0xdeb887 });
-            resultMaterial.wireframe =
-                this.materialManager.isWireframeEnabled();
-
-            resultBrush.material = resultMaterial;
-            resultBrush.castShadow = true;
-            resultBrush.receiveShadow = true;
-
-            this.partMesh = resultBrush;
-            // Update material manager with partMesh reference
-            this.materialManager.partMesh = this.partMesh;
-
-            if (this.materialManager.isEdgesEnabled()) {
-                this.materialManager.addEdgeVisualization(resultBrush);
-            }
+            this.replacePartMesh(resultBrush, resultMaterial);
 
             this.lastCSGSignature = csgSignature;
             this.csgActive = true;
@@ -356,6 +383,68 @@ class CSGEngine {
                 this.applyCSGOperation(queued);
             }
         }
+    }
+
+    async runManifoldCSG(bitMeshes) {
+        try {
+            const panelMatrix = ManifoldCSG.buildMatrix(
+                this.originalPanelPosition,
+                this.originalPanelRotation,
+                this.originalPanelScale
+            );
+
+            return await this.manifoldCSG.subtract({
+                panelGeometry: this.originalPanelGeometry,
+                panelMatrix,
+                cutters: bitMeshes,
+                tolerance: this.manifoldTolerance,
+                cutterTolerance: this.manifoldCutterTolerance, // Pass cutter tolerance
+                simplifyTolerance: this.manifoldSimplifyTolerance,
+            });
+        } catch (err) {
+            this.log.warn("runManifoldCSG error", err);
+            return null;
+        }
+    }
+
+    replacePartMesh(mesh, material) {
+        if (this.partMesh) {
+            if (this.partMesh.userData.edgeLines) {
+                this.scene?.remove(this.partMesh.userData.edgeLines);
+                this.partMesh.userData.edgeLines.geometry?.dispose();
+                this.partMesh.userData.edgeLines.material?.dispose();
+            }
+            this.scene?.remove(this.partMesh);
+            this.partMesh.geometry?.dispose();
+            this.partMesh.material?.dispose();
+        }
+
+        if (mesh) {
+            if (material) {
+                mesh.material = material;
+            }
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+        }
+
+        this.partMesh = mesh;
+        this.materialManager.partMesh = mesh;
+
+        if (mesh && this.materialManager.isEdgesEnabled()) {
+            this.materialManager.addEdgeVisualization(mesh);
+        }
+    }
+
+    createResultMaterial() {
+        const materialFactory = this.materialManager.getMaterialFactory(
+            this.materialManager.getCurrentMaterialKey()
+        );
+        const material =
+            materialFactory?.() ||
+            this.originalPanelMaterial?.clone?.() ||
+            new THREE.MeshStandardMaterial({ color: 0xdeb887 });
+        material.wireframe = this.materialManager.isWireframeEnabled();
+        return material;
     }
 
     /**
@@ -443,12 +532,16 @@ class CSGEngine {
                 this.partMesh.userData.edgeLines.visible = false;
             }
         }
-
         this.bitPathMeshes.forEach((mesh) => {
             mesh.visible = window.bitsVisible !== false;
         });
         this.bitExtrudeMeshes.forEach((mesh) => {
-            mesh.visible = window.bitsVisible !== false;
+            const shouldBeVisible = window.bitsVisible !== false;
+            mesh.visible = shouldBeVisible;
+            // Sync edge visibility with mesh visibility
+            if (mesh.userData.edgeLines) {
+                mesh.userData.edgeLines.visible = shouldBeVisible;
+            }
         });
 
         this.csgVisible = false;
@@ -486,6 +579,10 @@ class CSGEngine {
         });
         this.bitExtrudeMeshes.forEach((mesh) => {
             mesh.visible = false;
+            // Sync edge visibility with mesh visibility
+            if (mesh.userData.edgeLines) {
+                mesh.userData.edgeLines.visible = false;
+            }
         });
 
         this.csgVisible = true;
@@ -499,6 +596,12 @@ class CSGEngine {
         // Invalidate cache to force recalculation
         this.lastCSGSignature = null;
         this.log.info("CSG mode changed to:", enabled ? "Union" : "Sequential");
+    }
+
+    setManifoldEnabled(enabled) {
+        this.useManifoldBackend = enabled;
+        this.lastCSGSignature = null;
+        this.log.info("Manifold backend:", enabled ? "enabled" : "disabled");
     }
 
     /**

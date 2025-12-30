@@ -32,6 +32,7 @@
   },
   "homepage": "https://github.com/SahaSG552/facade_section_editor#readme",
   "dependencies": {
+    "manifold-3d": "^3.3.2",
     "jsdom": "^27.3.0",
     "makerjs": "^0.17.6",
     "three": "^0.182.0",

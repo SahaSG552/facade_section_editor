@@ -541,31 +541,6 @@ export default class ExtrusionBuilder {
                 indexCount: geometry.index ? geometry.index.count : 0,
             });
 
-            // For CSG operations: ensure geometry extends through the entire panel thickness
-            const panelThickness = 19; // Approximate panel thickness - should match panel
-            const zExtension = panelThickness * 2; // Extend Z to ensure it passes through panel
-
-            // Expand Z bounds of the geometry for better CSG intersection
-            const positions = geometry.attributes.position;
-            if (positions) {
-                const posArray = positions.array;
-                for (let i = 2; i < posArray.length; i += 3) {
-                    // Ensure Z coordinates are extended
-                    if (posArray[i] < -zExtension / 2) {
-                        posArray[i] = -zExtension / 2;
-                    }
-                    if (posArray[i] > zExtension / 2) {
-                        posArray[i] = zExtension / 2;
-                    }
-                }
-                positions.needsUpdate = true;
-            }
-            geometry.computeBoundingBox();
-
-            // Recalculate normals after modifying positions
-            geometry.computeVertexNormals();
-            geometry.normalizeNormals();
-
             const material = new THREE.MeshStandardMaterial({
                 color: new THREE.Color(color || "#cccccc"),
                 roughness: 0.5,
@@ -796,17 +771,10 @@ export default class ExtrusionBuilder {
      */
     extrudeAlongPathRound(profile, path, color) {
         try {
-            // 1) Build mitered base extrusion (sharp corners)
-            const baseMesh = this.extrudeAlongPath(profile, path, color);
-            if (!baseMesh) {
-                this.log.warn("Round extrusion: Base mitered extrusion failed");
-                return null;
-            }
-
-            // 2) Get path segments (curves) directly
+            // Get path segments (curves) directly
             if (!path.curves || path.curves.length === 0) {
                 this.log.warn("Round extrusion: No curves in path");
-                return baseMesh;
+                return null;
             }
 
             const segments = path.curves.map((curve) => ({
@@ -825,7 +793,65 @@ export default class ExtrusionBuilder {
                     .normalize()
             );
 
-            const latheDataList = [];
+            // Create array to hold all segment meshes
+            const segmentMeshes = [];
+            const latheMeshes = [];
+
+            // Create individual extrusion for each path segment
+            for (let i = 0; i < segments.length; i++) {
+                const segment = segments[i];
+                const curve = segment.curve;
+
+                // Determine segment detail level
+                let segmentPoints;
+                if (curve instanceof THREE.LineCurve3) {
+                    // Straight line: only 2 points needed
+                    segmentPoints = 1; // getPoints(1) returns 2 points
+                } else {
+                    // Arc/curve: adaptive segmentation based on length
+                    const curveLength = curve.getLength();
+                    segmentPoints = Math.max(8, Math.floor(curveLength / 2));
+                }
+
+                const contourPoints = curve.getPoints(segmentPoints);
+                let contour = contourPoints.map(
+                    (p) => new THREE.Vector3(p.x, p.y, p.z)
+                );
+
+                // Create open-ended extrusion (no caps)
+                const geometry = this.createProfiledContourGeometry(
+                    profile,
+                    contour,
+                    false, // contourClosed = false
+                    true // openEnded = true (no caps)
+                );
+
+                if (!geometry) {
+                    this.log.warn(`Failed to create geometry for segment ${i}`);
+                    continue;
+                }
+
+                geometry.computeVertexNormals();
+                geometry.normalizeNormals();
+
+                const material = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(color || "#cccccc"),
+                    roughness: 0.5,
+                    metalness: 0.2,
+                    side: THREE.DoubleSide, // Double-sided for open-ended extrusions
+                    wireframe: this.materialManager
+                        ? this.materialManager.isWireframeEnabled()
+                        : false,
+                });
+
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                mesh.userData.segmentIndex = i;
+                segmentMeshes.push(mesh);
+            }
+
+// Create lathes at junctions
             if (pathClosed) {
                 for (let i = 0; i < segments.length; i++) {
                     const junctionPoint = segments[i].endPoint;
@@ -839,7 +865,9 @@ export default class ExtrusionBuilder {
                         color,
                         i + 1
                     );
-                    if (data) latheDataList.push(data);
+                    if (data) {
+                        latheMeshes.push(data.mesh);
+                    }
                 }
             } else {
                 for (let i = 0; i < segments.length - 1; i++) {
@@ -854,135 +882,28 @@ export default class ExtrusionBuilder {
                         color,
                         i + 1
                     );
-                    if (data) latheDataList.push(data);
+                    if (data) {
+                        latheMeshes.push(data.mesh);
+                    }
                 }
             }
 
-            if (latheDataList.length === 0) {
-                this.log.info(
-                    "Round extrusion: No lathe junctions created; returning mitered base"
-                );
-                return baseMesh;
+            // Return array of all segment and lathe meshes as separate objects
+            const allMeshes = [...segmentMeshes, ...latheMeshes];
+
+            if (allMeshes.length === 0) {
+                this.log.warn("Round extrusion: No meshes created");
+                return null;
             }
-
-            // 3) Subtract union of wedge geometries from base
-            const evaluator = new Evaluator();
-            evaluator.attributes = ["position", "normal"]; // keep normals
-
-            const baseBrush = new Brush(baseMesh.geometry.clone());
-            baseBrush.position.copy(baseMesh.position);
-            baseBrush.rotation.copy(baseMesh.rotation);
-            baseBrush.scale.copy(baseMesh.scale);
-            baseBrush.updateMatrixWorld(true);
-
-            // Calculate wedge dimensions based on profile size
-            const profilePoints = profile.getPoints();
-            let maxProfileRadius = 0;
-            profilePoints.forEach((p) => {
-                const r = Math.sqrt(p.x * p.x + p.y * p.y);
-                maxProfileRadius = Math.max(maxProfileRadius, r);
-            });
-            const wedgeRadius = maxProfileRadius * 3; // 3x profile radius to ensure coverage
-            const wedgeHeight = 50; // Large enough to pass through extrusion depth
-
-            this.log.debug("Wedge dimensions:", {
-                radius: wedgeRadius,
-                height: wedgeHeight,
-                profileRadius: maxProfileRadius,
-            });
-
-            let wedgeUnionBrush = null;
-            // Debug helpers disabled: wedge geometry should not be visible
-
-            for (const latheData of latheDataList) {
-                const { junctionPoint, phiStart, phiLength, mesh } = latheData;
-                const cornerNumber = latheData.mesh.userData.cornerNumber || 1;
-
-                // Create wedge geometry matching the lathe angle
-                const wedgeGeom = this.createWedgeGeometry(
-                    junctionPoint,
-                    wedgeRadius,
-                    wedgeHeight,
-                    phiStart,
-                    phiLength,
-                    cornerNumber
-                );
-                const wedgeBrush = new Brush(wedgeGeom);
-                wedgeBrush.position.set(0, 0, 0);
-                wedgeBrush.rotation.set(0, 0, 0);
-                wedgeBrush.scale.set(1, 1, 1);
-                wedgeBrush.updateMatrixWorld(true);
-
-                // Debug helper suppressed to hide wedge visualization
-
-                wedgeUnionBrush = wedgeUnionBrush
-                    ? evaluator.evaluate(wedgeUnionBrush, wedgeBrush, ADDITION)
-                    : wedgeBrush;
-            }
-
-            const cutBaseBrush = evaluator.evaluate(
-                baseBrush,
-                wedgeUnionBrush,
-                SUBTRACTION
-            );
-            if (!cutBaseBrush) {
-                this.log.warn(
-                    "Round extrusion: Subtraction of wedge union failed; returning base"
-                );
-                return baseMesh;
-            }
-
-            // 4) Union the lathe bodies back into the cut base
-            let lathesUnionBrush = null;
-            for (const latheData of latheDataList) {
-                const lm = latheData.mesh;
-                const b = new Brush(lm.geometry);
-                b.position.copy(lm.position);
-                b.rotation.copy(lm.rotation);
-                b.scale.copy(lm.scale);
-                b.updateMatrixWorld(true);
-                lathesUnionBrush = lathesUnionBrush
-                    ? evaluator.evaluate(lathesUnionBrush, b, ADDITION)
-                    : b;
-            }
-
-            const finalBrush = evaluator.evaluate(
-                cutBaseBrush,
-                lathesUnionBrush,
-                ADDITION
-            );
-            if (!finalBrush) {
-                this.log.warn(
-                    "Round extrusion: Final union failed; returning base"
-                );
-                return baseMesh;
-            }
-
-            // 5) Build final mesh with material similar to base
-            const material =
-                baseMesh.material?.clone?.() ||
-                new THREE.MeshStandardMaterial({
-                    color: new THREE.Color(color || "#cccccc"),
-                    roughness: 0.5,
-                    metalness: 0.2,
-                    side: THREE.FrontSide,
-                    wireframe: this.materialManager
-                        ? this.materialManager.isWireframeEnabled()
-                        : false,
-                });
-            finalBrush.material = material;
-            finalBrush.castShadow = true;
-            finalBrush.receiveShadow = true;
-            finalBrush.userData.isRoundExtrude = true;
-
-            // 6) Debug helpers are hidden/omitted
 
             this.log.info("Round extrusion built:", {
-                segments: segments.length,
-                lathes: latheDataList.length,
+                segments: segmentMeshes.length,
+                lathes: latheMeshes.length,
+                total: allMeshes.length,
             });
 
-            return finalBrush;
+            // Return as array since we now have multiple separate meshes
+            return allMeshes;
         } catch (error) {
             this.log.error("Error in extrudeAlongPathRound:", error.message);
             return null;
@@ -1307,6 +1228,15 @@ export default class ExtrusionBuilder {
         return mergedGeometry;
     }
 
+    /**
+     * Create a cutting plane for corner trimming in round extrusions
+     * Plane is perpendicular to X axis, rotated around Y based on corner angle
+     * @param {THREE.Vector3} junctionPoint - Center of the plane at junction
+     * @param {number} phiStart - Start angle of the corner (radians)
+     * @param {number} phiLength - Angular extent of the corner (radians)
+     * @param {number} cornerNumber - Corner number for debugging
+     * @returns {THREE.BufferGeometry} Cutting plane geometry
+     */
     /**
      * Create a rectangular side plane for wedge closure
      * @param {number} radius - Wedge radius

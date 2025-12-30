@@ -2392,6 +2392,99 @@ async function updateThreeView() {
         bitsOnCanvas,
         panelAnchor
     );
+
+    // Update debug clipping slider if data is available
+    updateDebugClippingSlider();
+}
+
+// Add visual arrow for clipping normal direction
+function addClippingDebugArrow(origin, direction, cornerIndex) {
+    const threeModule = window.threeModule;
+    if (!threeModule) {
+        console.error("ThreeModule not available");
+        return;
+    }
+
+    try {
+        threeModule.addDebugArrow(origin, direction, cornerIndex);
+        console.log(
+            `[DEBUG ARROWS] Added arrow for corner ${cornerIndex}: origin (${origin.x.toFixed(
+                2
+            )}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(
+                2
+            )}), direction (${direction.x.toFixed(3)}, ${direction.y.toFixed(
+                3
+            )}, ${direction.z.toFixed(3)})`
+        );
+    } catch (error) {
+        console.error("Failed to add debug arrow:", error);
+    }
+}
+
+// Create a simple line arrow when ArrowHelper is not available
+function createSimpleArrowLine(origin, direction, cornerIndex, threeModule) {
+    try {
+        // Create geometry for a simple line from origin to direction endpoint
+        const points = [
+            origin.clone(),
+            origin.clone().addScaledVector(direction, 50),
+        ];
+
+        // We'll just log this for now since we don't have direct THREE access
+        console.log(
+            `[DEBUG LINE] Would draw arrow line from (${origin.x.toFixed(
+                2
+            )}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(
+                2
+            )}) in direction (${direction.x.toFixed(3)}, ${direction.y.toFixed(
+                3
+            )}, ${direction.z.toFixed(3)})`
+        );
+    } catch (error) {
+        console.error("Failed to create simple arrow line:", error);
+    }
+}
+
+// Clear all debug arrows
+function clearClippingDebugHelpers() {
+    const threeModule = window.threeModule;
+    if (!threeModule) return;
+
+    try {
+        threeModule.clearDebugArrows();
+    } catch (error) {
+        console.error("Failed to clear debug arrows:", error);
+    }
+}
+
+// Update debug clipping slider based on available data
+function updateDebugClippingSlider() {
+    const data = window.debugClippingData;
+    const clipSlider = document.getElementById("clip-slider");
+    const clipStepInfo = document.getElementById("clip-step-info");
+    const clipCurrentAction = document.getElementById("clip-current-action");
+
+    if (!data || !clipSlider) return;
+
+    // Update slider max value
+    clipSlider.max = data.maxSteps;
+    clipSlider.value = data.currentStep || 0;
+
+    // Update info text
+    if (clipStepInfo) {
+        clipStepInfo.textContent = `Step: ${data.currentStep || 0} / ${
+            data.maxSteps
+        }`;
+    }
+
+    if (clipCurrentAction) {
+        if (data.currentStep === 0) {
+            clipCurrentAction.textContent =
+                "No cuts applied (original geometries)";
+        } else {
+            clipCurrentAction.textContent = `Ready to debug ${data.cutPlaneDataList.length} corners`;
+        }
+    }
 }
 
 function setupMaterialSelector() {

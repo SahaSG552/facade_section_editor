@@ -82,7 +82,6 @@ class MaterialManager {
                     }),
             },
         };
-
         // Current material and display modes
         this.currentMaterialKey = "shaded";
         this.wireframeMode = false;
@@ -91,6 +90,7 @@ class MaterialManager {
         // References to meshes to update
         this.panelMesh = null;
         this.partMesh = null;
+        this.bitExtrudeMeshes = [];
         this.scene = null;
 
         // Original panel material for restoration
@@ -103,10 +103,11 @@ class MaterialManager {
     /**
      * Initialize with references to meshes and scene
      */
-    initialize(panelMesh, partMesh, scene) {
+    initialize(panelMesh, partMesh, scene, bitExtrudeMeshes = []) {
         this.panelMesh = panelMesh;
         this.partMesh = partMesh;
         this.scene = scene;
+        this.bitExtrudeMeshes = bitExtrudeMeshes;
         this.log.info("MaterialManager initialized");
     }
 
@@ -185,23 +186,37 @@ class MaterialManager {
     setEdgesEnabled(enabled) {
         this.edgesEnabled = enabled;
 
-        // Toggle existing edge overlays
-        if (this.panelMesh && this.panelMesh.userData.edgeLines) {
-            this.panelMesh.userData.edgeLines.visible =
-                enabled && this.panelMesh.visible;
-        }
-        if (this.partMesh && this.partMesh.userData.edgeLines) {
-            this.partMesh.userData.edgeLines.visible =
-                enabled && this.partMesh.visible;
-        }
-
-        // Create overlays on demand if enabled
         if (enabled) {
-            if (this.panelMesh && !this.panelMesh.userData.edgeLines) {
+            // Create fresh edge visualizations when enabled
+            if (this.panelMesh) {
                 this.addEdgeVisualization(this.panelMesh);
             }
-            if (this.partMesh && !this.partMesh.userData.edgeLines) {
+            if (this.partMesh) {
                 this.addEdgeVisualization(this.partMesh);
+            }
+            // Create edge visualization for all bit extrusions
+            if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
+                this.bitExtrudeMeshes.forEach((mesh) => {
+                    if (mesh) {
+                        this.addEdgeVisualization(mesh);
+                    }
+                });
+            }
+        } else {
+            // Remove all edge visualizations when disabled
+            if (this.panelMesh) {
+                this.removeEdgeVisualization(this.panelMesh);
+            }
+            if (this.partMesh) {
+                this.removeEdgeVisualization(this.partMesh);
+            }
+            // Remove edge visualization for all bit extrusions
+            if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
+                this.bitExtrudeMeshes.forEach((mesh) => {
+                    if (mesh) {
+                        this.removeEdgeVisualization(mesh);
+                    }
+                });
             }
         }
 
@@ -209,13 +224,66 @@ class MaterialManager {
     }
 
     /**
+     * Clean up all edge visualizations from all meshes
+     */
+    clearAllEdges() {
+        try {
+            if (this.panelMesh) {
+                this.removeEdgeVisualization(this.panelMesh);
+            }
+            if (this.partMesh) {
+                this.removeEdgeVisualization(this.partMesh);
+            }
+            if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
+                this.bitExtrudeMeshes.forEach((mesh) => {
+                    if (mesh) {
+                        this.removeEdgeVisualization(mesh);
+                    }
+                });
+            }
+            this.log.debug("Cleared all edge visualizations");
+        } catch (error) {
+            this.log.warn("Error clearing edges:", error);
+        }
+    }
+
+    /**
+     * Remove edge visualization from a mesh
+     */
+    removeEdgeVisualization(mesh) {
+        try {
+            if (mesh && mesh.userData && mesh.userData.edgeLines) {
+                if (this.scene) {
+                    this.scene.remove(mesh.userData.edgeLines);
+                }
+                if (mesh.userData.edgeLines.geometry) {
+                    mesh.userData.edgeLines.geometry.dispose();
+                }
+                if (mesh.userData.edgeLines.material) {
+                    mesh.userData.edgeLines.material.dispose();
+                }
+                mesh.userData.edgeLines = null;
+            }
+        } catch (error) {
+            this.log.warn("Error removing edge visualization:", error);
+        }
+    }
+
+    /**
      * Add edge visualization to a mesh (shows wireframe edges with solid color)
+     * Always removes old edges first to avoid duplicates
      */
     addEdgeVisualization(mesh) {
         try {
+            if (!mesh) return;
+
+            // Always remove old edges first to avoid duplicates
+            this.removeEdgeVisualization(mesh);
+
+            // Don't create if edges are disabled
             if (!this.edgesEnabled) return;
 
-            // Create edges from the geometry
+            // Create edges from the current geometry
             const edges = new THREE.EdgesGeometry(mesh.geometry);
             const lineSegments = new THREE.LineSegments(
                 edges,
@@ -238,7 +306,6 @@ class MaterialManager {
             }
             mesh.userData.edgeLines = lineSegments;
 
-            // Keep material properties as-is; edges overlay is independent
             this.log.debug("Added edge visualization to mesh");
         } catch (error) {
             this.log.error("Error adding edge visualization:", error);

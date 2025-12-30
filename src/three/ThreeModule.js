@@ -8,6 +8,7 @@ import MaterialManager from "./MaterialManager.js";
 import CSGEngine from "./CSGEngine.js";
 import SceneManager from "./SceneManager.js";
 import ExtrusionBuilder from "./ExtrusionBuilder.js";
+import STLExporter from "../export/STLExporter.js";
 
 export default class ThreeModule extends BaseModule {
     constructor() {
@@ -22,6 +23,7 @@ export default class ThreeModule extends BaseModule {
         this.materialManager = new MaterialManager();
         this.csgEngine = new CSGEngine();
         this.extrusionBuilder = new ExtrusionBuilder();
+        this.stlExporter = new STLExporter(this.log);
 
         // Panel mesh
         this.panelMesh = null;
@@ -159,14 +161,31 @@ export default class ThreeModule extends BaseModule {
             edLabel.appendChild(ed);
             edLabel.appendChild(edText);
 
+            // Export to STL button
+            const exportBtn = document.createElement("button");
+            exportBtn.textContent = "📥 STL";
+            exportBtn.title = "Export 3D geometry to STL";
+            exportBtn.style.padding = "4px 10px";
+            exportBtn.style.backgroundColor = "#4CAF50";
+            exportBtn.style.color = "white";
+            exportBtn.style.border = "none";
+            exportBtn.style.borderRadius = "4px";
+            exportBtn.style.cursor = "pointer";
+            exportBtn.style.fontSize = "12px";
+            exportBtn.style.fontWeight = "bold";
+            exportBtn.addEventListener("click", () => {
+                this.exportToSTL("facade");
+            });
+
             wrap.appendChild(select);
             wrap.appendChild(wfLabel);
             wrap.appendChild(edLabel);
+            wrap.appendChild(exportBtn);
 
             // Position wrap inside container (over renderer)
             this.container.style.position = "relative";
             this.container.appendChild(wrap);
-            this.materialControls = { wrap, select, wf, ed };
+            this.materialControls = { wrap, select, wf, ed, exportBtn };
         } catch (e) {
             this.log.warn("Failed to init material controls:", e);
         }
@@ -331,6 +350,11 @@ export default class ThreeModule extends BaseModule {
                 bits: bits.length,
             });
 
+            // Clear all edge visualizations before removing meshes
+            if (this.materialManager) {
+                this.materialManager.clearAllEdges();
+            }
+
             // Remove all meshes
             if (this.panelMesh) {
                 this.scene.remove(this.panelMesh);
@@ -341,19 +365,10 @@ export default class ThreeModule extends BaseModule {
                 if (this.panelMesh.material !== this.originalPanelMaterial) {
                     this.panelMesh.material?.dispose();
                 }
-                // Always remove edge visualization
-                if (this.panelMesh.userData.edgeLines) {
-                    this.scene.remove(this.panelMesh.userData.edgeLines);
-                    this.panelMesh.userData.edgeLines.geometry?.dispose();
-                    this.panelMesh.userData.edgeLines.material?.dispose();
-                }
                 this.panelMesh = null;
             }
             if (this.partMesh) {
                 this.partMesh.visible = false;
-                if (this.partMesh.userData.edgeLines) {
-                    this.partMesh.userData.edgeLines.visible = false;
-                }
             }
             this.bitPathMeshes.forEach((mesh) => {
                 this.scene.remove(mesh);
@@ -387,7 +402,8 @@ export default class ThreeModule extends BaseModule {
             this.materialManager.initialize(
                 this.panelMesh,
                 this.partMesh,
-                this.scene
+                this.scene,
+                this.bitExtrudeMeshes
             );
 
             // Save original panel data on first creation (before any CSG)
@@ -646,12 +662,15 @@ export default class ThreeModule extends BaseModule {
                 );
                 if (mesh) extrudeMeshes = [mesh];
             } else {
-                const mesh = this.extrusionBuilder.extrudeAlongPathRound(
+                const meshArray = this.extrusionBuilder.extrudeAlongPathRound(
                     bitProfile,
                     curve3D,
                     bit.color
                 );
-                if (mesh) extrudeMeshes = [mesh];
+                // extrudeAlongPathRound now returns an array of separate meshes
+                if (meshArray) {
+                    extrudeMeshes = Array.isArray(meshArray) ? meshArray : [meshArray];
+                }
             }
 
             if (extrudeMeshes.length > 0) {
@@ -659,6 +678,17 @@ export default class ThreeModule extends BaseModule {
                     mesh.userData.operation = bit.operation || "subtract";
                     mesh.userData.bitIndex = bitIndex;
                     this.bitExtrudeMeshes.push(mesh);
+                    console.log(
+                        `[SCENE] Added mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`
+                    );
+
+                    // Add edge visualization to bit extrusions
+                    if (
+                        this.materialManager &&
+                        this.materialManager.isEdgesEnabled()
+                    ) {
+                        this.materialManager.addEdgeVisualization(mesh);
+                    }
                 });
                 this.log.debug(
                     `Created ${extrudeMeshes.length} extrude mesh(es) for bit ${bitIndex}`
@@ -684,6 +714,10 @@ export default class ThreeModule extends BaseModule {
         });
         this.bitExtrudeMeshes.forEach((mesh) => {
             mesh.visible = visible;
+            // Sync edge visibility with mesh visibility
+            if (mesh.userData.edgeLines) {
+                mesh.userData.edgeLines.visible = visible;
+            }
         });
     }
 
@@ -1421,22 +1455,6 @@ export default class ThreeModule extends BaseModule {
         }
     }
 
-    /**
-     * Toggle visibility of bit meshes
-     */
-    toggleBitMeshesVisibility(visible) {
-        this.log.debug(
-            "toggleBitMeshesVisibility called with visible:",
-            visible
-        );
-        this.bitPathMeshes.forEach((mesh) => {
-            mesh.visible = visible;
-        });
-        this.bitExtrudeMeshes.forEach((mesh) => {
-            mesh.visible = visible;
-        });
-    }
-
     // Compute world-space bounding box for a mesh (or geometry with transform)
     computeWorldBBox(geometry, position, rotation, scale) {
         const bbox = new THREE.Box3();
@@ -1484,6 +1502,40 @@ export default class ThreeModule extends BaseModule {
      */
     showCSGResult() {
         this.csgEngine.showCSGResult();
+    }
+
+    /**
+     * Export 3D geometry to STL
+     * If Part view (CSG active): export partMesh with subtracted bits
+     * If Material view: export panelMesh + all bitExtrudeMeshes
+     * @param {string} filename - Optional filename prefix
+     */
+    exportToSTL(filename = "facade") {
+        const meshesToExport = [];
+
+        if (this.csgEngine.isActive() && this.csgEngine.partMesh) {
+            // Part view: export the result mesh (panel with subtractions)
+            meshesToExport.push(this.csgEngine.partMesh);
+            this.log.info("Exporting Part view (CSG result mesh)");
+        } else {
+            // Material view: export panel + all bit extrusions
+            if (this.panelMesh) {
+                meshesToExport.push(this.panelMesh);
+            }
+            if (this.bitExtrudeMeshes && this.bitExtrudeMeshes.length) {
+                meshesToExport.push(...this.bitExtrudeMeshes);
+                this.log.info(
+                    `Exporting Material view: panel + ${this.bitExtrudeMeshes.length} bits`
+                );
+            }
+        }
+
+        if (meshesToExport.length === 0) {
+            this.log.warn("No meshes to export");
+            return;
+        }
+
+        this.stlExporter.exportToSTL(meshesToExport, filename);
     }
 
     /**
