@@ -125,6 +125,86 @@ export default class ManifoldCSG {
     }
 
     /**
+     * Union a set of meshes and weld edges via Manifold. Returns { geometry } or null on failure.
+     * Useful for edge-matching extrudes before export.
+     */
+    async weldUnion({ meshes = [], tolerance, simplifyTolerance } = {}) {
+        if (!meshes.length) return null;
+
+        const ready = await this.ensureModule();
+        if (!ready) return null;
+
+        const { Manifold } = this;
+
+        const manifolds = [];
+        let union = null;
+        let finalManifold = null;
+        try {
+            meshes.forEach((mesh) => {
+                mesh.updateMatrixWorld?.(true);
+                const cleanTol = tolerance || 1e-3;
+                const cleaned = this.cleanupGeometry(mesh.geometry, cleanTol);
+                const manifold = this.toManifold(
+                    cleaned,
+                    mesh.matrixWorld,
+                    undefined,
+                    cleanTol
+                );
+                cleaned?.dispose?.();
+                if (manifold) {
+                    manifolds.push(manifold);
+                } else {
+                    this.log?.warn?.(
+                        "weldUnion: skipping non-manifold mesh",
+                        mesh.uuid || mesh.id || "unknown"
+                    );
+                }
+            });
+
+            if (!manifolds.length) return null;
+
+            union =
+                manifolds.length === 1
+                    ? manifolds[0]
+                    : Manifold.union(manifolds);
+
+            if (!union) return null;
+
+            finalManifold = union;
+            if (simplifyTolerance && simplifyTolerance > 0) {
+                const simplified = union.setTolerance(simplifyTolerance);
+                if (simplified) {
+                    finalManifold = simplified;
+                    if (simplified !== union) {
+                        union = union; // no-op, keep union for later delete
+                    }
+                }
+            }
+
+            const output = this.fromManifold(finalManifold);
+            return output;
+        } catch (err) {
+            this.log?.warn?.("weldUnion failed", err);
+            return null;
+        } finally {
+            // Dispose all manifolds
+            manifolds.forEach((m) => m?.delete?.());
+
+            if (finalManifold && !manifolds.includes(finalManifold)) {
+                finalManifold.delete();
+            }
+
+            if (
+                union &&
+                union !== finalManifold &&
+                !manifolds.includes(union)
+            ) {
+                union.delete();
+            }
+        }
+    }
+
+    /**
      * Clean up geometry: weld vertices, compute normals, remove extra attributes
      */
     cleanupGeometry(geometry, weldTolerance = 1e-3) {

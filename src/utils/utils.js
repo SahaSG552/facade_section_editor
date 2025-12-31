@@ -1,3 +1,5 @@
+import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+
 /**
  * Converts an angle from degrees to radians.
  *
@@ -27,4 +29,30 @@ export function evaluateMathExpression(value) {
     } catch (e) {
         return value; // if not a valid expression, return as is
     }
+}
+
+// Weld vertices within a tolerance to reduce tiny gaps between meshes
+export function weldGeometry(geometry, tolerance = 1e-3) {
+    if (!geometry?.isBufferGeometry || !geometry.attributes?.position) {
+        return geometry;
+    }
+
+    const cloned = geometry.clone();
+
+    // Drop extra attributes that can block merging
+    Object.keys(cloned.attributes).forEach((key) => {
+        if (key !== "position" && key !== "normal") {
+            cloned.deleteAttribute(key);
+        }
+    });
+
+    const merged = mergeVertices(cloned, tolerance) || cloned;
+
+    if (merged !== cloned) {
+        cloned.dispose();
+    }
+
+    merged.computeVertexNormals();
+
+    return merged;
 }

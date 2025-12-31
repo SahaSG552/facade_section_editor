@@ -1,8 +1,316 @@
 import * as THREE from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import {
+    mergeGeometries,
+    mergeVertices,
+} from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Brush, Evaluator, ADDITION, SUBTRACTION } from "three-bvh-csg";
+import {
+    MeshBVH,
+    acceleratedRaycast,
+    computeBoundsTree,
+    disposeBoundsTree,
+} from "three-mesh-bvh";
 import LoggerFactory from "../core/LoggerFactory.js";
+
+// Add three-mesh-bvh extensions to BufferGeometry
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+
+// Two tested normal variants
+const NORMAL_VARIANTS = {
+    variant1: (angle) =>
+        new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0),
+    variant3: (angle) =>
+        new THREE.Vector3(Math.sin(angle), -Math.cos(angle), 0),
+};
+
+// Auto: even segment -> variant3, odd segment -> variant1 (per user testing)
+let currentNormalVariant = "auto";
+
+const computeNormalFromVariant = (
+    angle,
+    isAtEnd,
+    cornerNumber,
+    segmentIndex
+) => {
+    let variant = currentNormalVariant;
+    if (variant === "auto") {
+        variant = segmentIndex % 2 === 0 ? "variant3" : "variant1";
+    }
+
+    const fn = NORMAL_VARIANTS[variant] || NORMAL_VARIANTS.variant1;
+    return fn(angle).normalize();
+};
+
+// Aligns coincident edges across meshes to avoid tiny gaps before merge
+class MeshEdgeMatcher {
+    constructor(tolerance = 0.001) {
+        this.tolerance = tolerance;
+    }
+
+    matchEdges(sourceMesh, targetMesh) {
+        sourceMesh.updateMatrixWorld(true);
+        targetMesh.updateMatrixWorld(true);
+
+        const sourceVertices = this.getWorldVertices(sourceMesh);
+        const targetVertices = this.getWorldVertices(targetMesh);
+
+        const sourceBoundary = this.getBoundaryVertexIndices(
+            sourceMesh.geometry
+        );
+        const targetBoundary = this.getBoundaryVertexIndices(
+            targetMesh.geometry
+        );
+
+        // Quick reject by bounding boxes
+        const sourceBox = new THREE.Box3().setFromArray(
+            sourceVertices.flatMap((v) => [v.x, v.y, v.z])
+        );
+        const targetBox = new THREE.Box3().setFromArray(
+            targetVertices.flatMap((v) => [v.x, v.y, v.z])
+        );
+        if (
+            !sourceBox.expandByScalar(this.tolerance).intersectsBox(targetBox)
+        ) {
+            return 0;
+        }
+
+        let matches = this.findMatchingPairs(
+            sourceVertices,
+            targetVertices,
+            this.tolerance,
+            sourceBoundary,
+            targetBoundary
+        );
+
+        // Optional coarse pass if nothing snapped
+        if (matches.length === 0) {
+            const coarseTol = this.tolerance * 2;
+            matches = this.findMatchingPairs(
+                sourceVertices,
+                targetVertices,
+                coarseTol,
+                sourceBoundary,
+                targetBoundary
+            );
+        }
+        if (matches.length === 0) {
+            return 0;
+        }
+
+        this.applyVertexCorrections(sourceMesh, matches, true);
+        this.applyVertexCorrections(targetMesh, matches, false);
+
+        return matches.length;
+    }
+
+    matchMultipleMeshes(meshes) {
+        const results = [];
+
+        for (let i = 0; i < meshes.length; i++) {
+            for (let j = i + 1; j < meshes.length; j++) {
+                const matchedVertices = this.matchEdges(meshes[i], meshes[j]);
+                if (matchedVertices > 0) {
+                    results.push({ source: i, target: j, matchedVertices });
+                }
+            }
+        }
+
+        return results;
+    }
+
+    getWorldVertices(mesh) {
+        const worldVertices = [];
+        const position = mesh.geometry.attributes.position;
+
+        for (let i = 0; i < position.count; i++) {
+            const vertex = new THREE.Vector3(
+                position.getX(i),
+                position.getY(i),
+                position.getZ(i)
+            );
+            vertex.applyMatrix4(mesh.matrixWorld);
+            worldVertices.push(vertex);
+        }
+
+        return worldVertices;
+    }
+
+    findMatchingPairs(
+        sourceVertices,
+        targetVertices,
+        tol,
+        boundarySource,
+        boundaryTarget
+    ) {
+        const matches = [];
+
+        // Spatial hash for faster lookup
+        const index = this.buildSpatialIndex(targetVertices, tol);
+
+        for (let i = 0; i < sourceVertices.length; i++) {
+            if (boundarySource && !boundarySource.has(i)) continue;
+            const sourceVertex = sourceVertices[i];
+
+            const neighbors = this.querySpatialIndex(index, sourceVertex);
+            let best = null;
+            let bestDist = tol;
+
+            for (const neighbor of neighbors) {
+                if (boundaryTarget && !boundaryTarget.has(neighbor.index))
+                    continue;
+                const d = sourceVertex.distanceTo(neighbor.pos);
+                if (d < bestDist) {
+                    bestDist = d;
+                    best = neighbor;
+                }
+            }
+
+            if (best) {
+                const averaged = new THREE.Vector3()
+                    .addVectors(sourceVertex, best.pos)
+                    .multiplyScalar(0.5);
+
+                matches.push({
+                    sourceIndex: i,
+                    targetIndex: best.index,
+                    averagedPos: averaged,
+                });
+            }
+        }
+
+        return matches;
+    }
+
+    getBoundaryVertexIndices(geometry) {
+        try {
+            const geom = geometry.index ? geometry : geometry.toNonIndexed();
+            const index = geom.index.array;
+            const edgeCount = new Map();
+            const addEdge = (a, b) => {
+                const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+                edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+            };
+            for (let i = 0; i < index.length; i += 3) {
+                const a = index[i];
+                const b = index[i + 1];
+                const c = index[i + 2];
+                addEdge(a, b);
+                addEdge(b, c);
+                addEdge(c, a);
+            }
+            const boundary = new Set();
+            edgeCount.forEach((count, key) => {
+                if (count === 1) {
+                    const [a, b] = key.split("_").map((v) => parseInt(v, 10));
+                    boundary.add(a);
+                    boundary.add(b);
+                }
+            });
+            return boundary.size ? boundary : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    buildSpatialIndex(vertices, tol) {
+        const grid = new Map();
+        const inv = 1 / tol;
+        const keyOf = (v) =>
+            `${Math.floor(v.x * inv)}|${Math.floor(v.y * inv)}|${Math.floor(
+                v.z * inv
+            )}`;
+
+        vertices.forEach((v, idx) => {
+            const key = keyOf(v);
+            if (!grid.has(key)) grid.set(key, []);
+            grid.get(key).push({ pos: v, index: idx });
+        });
+
+        return { grid, tol };
+    }
+
+    querySpatialIndex(index, point) {
+        const { grid, tol } = index;
+        const inv = 1 / tol;
+        const cx = Math.floor(point.x * inv);
+        const cy = Math.floor(point.y * inv);
+        const cz = Math.floor(point.z * inv);
+
+        const results = [];
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                    const key = `${cx + dx}|${cy + dy}|${cz + dz}`;
+                    const bucket = grid.get(key);
+                    if (bucket) results.push(...bucket);
+                }
+            }
+        }
+        return results;
+    }
+
+    applyVertexCorrections(mesh, matches, useSourceIndex) {
+        const geometry = mesh.geometry;
+        const position = geometry.attributes.position;
+        const inverseMatrix = new THREE.Matrix4()
+            .copy(mesh.matrixWorld)
+            .invert();
+
+        for (const correction of matches) {
+            const vertexIndex = useSourceIndex
+                ? correction.sourceIndex
+                : correction.targetIndex;
+
+            if (vertexIndex === undefined || vertexIndex < 0) continue;
+
+            const localPos = correction.averagedPos
+                .clone()
+                .applyMatrix4(inverseMatrix);
+
+            position.setXYZ(vertexIndex, localPos.x, localPos.y, localPos.z);
+        }
+
+        position.needsUpdate = true;
+        geometry.computeBoundingBox();
+        geometry.computeVertexNormals();
+        geometry.normalizeNormals();
+    }
+}
+
+// Expose control to window
+if (typeof window !== "undefined") {
+    window.clippingControl = {
+        variants: () => [...Object.keys(NORMAL_VARIANTS), "auto"],
+        setVariant: (variantName) => {
+            if (variantName === "auto" || NORMAL_VARIANTS[variantName]) {
+                currentNormalVariant = variantName;
+                console.log(`✓ Switching to ${variantName}`);
+                return true;
+            }
+            console.log(
+                `✗ Unknown variant: ${variantName}. Available: ${[
+                    ...Object.keys(NORMAL_VARIANTS),
+                    "auto",
+                ].join(", ")}`
+            );
+            return false;
+        },
+        getCurrentVariant: () => currentNormalVariant,
+        listVariants: () => {
+            console.log("Available clipping plane normal variants:");
+            [...Object.keys(NORMAL_VARIANTS), "auto"].forEach((v) => {
+                console.log(
+                    `  - ${v}${v === currentNormalVariant ? " (ACTIVE)" : ""}`
+                );
+            });
+        },
+    };
+    console.log(
+        'Use window.clippingControl.setVariant("variant1"|"variant3"|"auto") to switch. Call window.clippingControl.listVariants() to see all.'
+    );
+}
 
 /**
  * ExtrusionBuilder
@@ -16,6 +324,7 @@ export default class ExtrusionBuilder {
     constructor() {
         this.log = LoggerFactory.createLogger("ExtrusionBuilder");
         this.materialManager = null;
+        this.edgeMatcher = new MeshEdgeMatcher(0.001);
         this.log.info("Created");
     }
 
@@ -796,6 +1105,7 @@ export default class ExtrusionBuilder {
             // Create array to hold all segment meshes
             const segmentMeshes = [];
             const latheMeshes = [];
+            const junctionDataArray = [];
 
             // Create individual extrusion for each path segment
             for (let i = 0; i < segments.length; i++) {
@@ -867,6 +1177,7 @@ export default class ExtrusionBuilder {
                     );
                     if (data) {
                         latheMeshes.push(data.mesh);
+                        junctionDataArray.push(data);
                     }
                 }
             } else {
@@ -884,12 +1195,26 @@ export default class ExtrusionBuilder {
                     );
                     if (data) {
                         latheMeshes.push(data.mesh);
+                        junctionDataArray.push(data);
                     }
                 }
             }
 
-            // Return array of all segment and lathe meshes as separate objects
-            const allMeshes = [...segmentMeshes, ...latheMeshes];
+            // Clip extrusion meshes at junctions using BVH
+            this.log.info("Applying corner clipping to extrusions...");
+            const clippingResult = this.clipExtrusionsAtJunctions(
+                segmentMeshes,
+                junctionDataArray
+            );
+            const clippedSegmentMeshes = clippingResult.clippedMeshes;
+            const cuttingPlanes = clippingResult.cuttingPlanes;
+
+            // Return array of all clipped segment, lathe meshes, and cutting planes
+            const allMeshes = [
+                ...clippedSegmentMeshes,
+                ...latheMeshes,
+                ...cuttingPlanes,
+            ];
 
             if (allMeshes.length === 0) {
                 this.log.warn("Round extrusion: No meshes created");
@@ -897,9 +1222,11 @@ export default class ExtrusionBuilder {
             }
 
             this.log.info("Round extrusion built:", {
-                segments: segmentMeshes.length,
+                segments: clippedSegmentMeshes.length,
                 lathes: latheMeshes.length,
+                cuttingPlanes: cuttingPlanes.length,
                 total: allMeshes.length,
+                junctionsProcessed: junctionDataArray.length,
             });
 
             // Return as array since we now have multiple separate meshes
@@ -1444,20 +1771,37 @@ export default class ExtrusionBuilder {
      */
     mergeExtrudeMeshes(meshes) {
         try {
-            if (!meshes || meshes.length === 0) {
+            const meshesToMerge = (meshes || []).filter(Boolean);
+
+            if (meshesToMerge.length === 0) {
                 this.log.warn("No meshes to merge");
                 return null;
             }
 
-            if (meshes.length === 1) {
+            if (meshesToMerge.length === 1) {
                 // Only one mesh, return as-is
                 this.log.debug("Only one mesh, returning directly");
-                return meshes[0];
+                return meshesToMerge[0];
             }
 
+            // Keep transforms in sync before matching/merging
+            meshesToMerge.forEach((mesh) => mesh.updateMatrixWorld(true));
+
+            // Nudge coincident vertices together to avoid naked edges
+            const matchResults =
+                this.edgeMatcher.matchMultipleMeshes(meshesToMerge);
+            const matchedVerticesTotal = matchResults.reduce(
+                (sum, r) => sum + r.matchedVertices,
+                0
+            );
+            this.log.info("Edge alignment before merge:", {
+                pairs: matchResults.length,
+                matchedVertices: matchedVerticesTotal,
+            });
+
             // Log detailed info about each mesh before merging
-            this.log.info("Merging", meshes.length, "meshes:");
-            meshes.forEach((mesh, idx) => {
+            this.log.info("Merging", meshesToMerge.length, "meshes:");
+            meshesToMerge.forEach((mesh, idx) => {
                 const geom = mesh.geometry;
                 const bbox = new THREE.Box3().setFromObject(mesh);
                 this.log.debug(`  Mesh ${idx}:`, {
@@ -1472,12 +1816,13 @@ export default class ExtrusionBuilder {
             });
 
             // Collect all geometries and ensure compatible attributes
-            const geometries = meshes.map((mesh) => mesh.geometry);
+            const geometries = meshesToMerge.map((mesh) => mesh.geometry);
 
             // Normalize all geometries to have consistent attributes
             // Remove UV attributes that may be incompatible
-            const normalizedGeometries = geometries.map((geom) => {
+            const normalizedGeometries = geometries.map((geom, index) => {
                 const normalized = geom.clone();
+                normalized.applyMatrix4(meshesToMerge[index].matrixWorld);
 
                 // Remove UV attribute if it exists (they may be incompatible across geometries)
                 if (normalized.hasAttribute("uv")) {
@@ -1506,9 +1851,22 @@ export default class ExtrusionBuilder {
                 return null;
             }
 
+            // Weld vertices after alignment to remove duplicate verts on shared edges
+            const weldTolerance = this.edgeMatcher?.tolerance || 0.001;
+            const weldedGeometry = mergeVertices(mergedGeometry, weldTolerance);
+            const weldedCountDiff =
+                mergedGeometry.attributes.position.count -
+                weldedGeometry.attributes.position.count;
+            if (weldedCountDiff > 0) {
+                this.log.info("Welded vertices after merge", {
+                    removed: weldedCountDiff,
+                    tolerance: weldTolerance,
+                });
+            }
+
             // Ensure normals are computed correctly
-            mergedGeometry.computeVertexNormals();
-            mergedGeometry.normalizeNormals();
+            weldedGeometry.computeVertexNormals();
+            weldedGeometry.normalizeNormals();
 
             // Create material for merged mesh
             const material = new THREE.MeshStandardMaterial({
@@ -1521,16 +1879,503 @@ export default class ExtrusionBuilder {
                     : false,
             });
 
-            const mergedMesh = new THREE.Mesh(mergedGeometry, material);
+            const mergedMesh = new THREE.Mesh(weldedGeometry, material);
             mergedMesh.castShadow = true;
             mergedMesh.receiveShadow = true;
             mergedMesh.userData.isMergedExtrude = true;
 
-            this.log.info("Successfully merged", meshes.length, "meshes");
+            this.log.info(
+                "Successfully merged",
+                meshesToMerge.length,
+                "meshes",
+                {
+                    matchedVertices: matchedVerticesTotal,
+                }
+            );
             return mergedMesh;
         } catch (error) {
             this.log.error("Error merging extrude meshes:", error.message);
             return null;
+        }
+    }
+
+    /**
+     * Create a cutting plane geometry at a junction point
+     * Plane is perpendicular to X axis and rotated around Y axis
+     * @param {THREE.Vector3} junctionPoint - Junction point position
+     * @param {number} phiStart - Start angle in radians (rotation around Y axis)
+     * @param {number} phiLength - Angular extent in radians
+     * @param {number} size - Size of the plane (default 100)
+     * @returns {THREE.Mesh} Cutting plane mesh
+     */
+    createCuttingPlane(junctionPoint, phiStart, phiLength, size = 100) {
+        try {
+            // Create a plane geometry perpendicular to X axis
+            const planeGeometry = new THREE.PlaneGeometry(size, size);
+
+            // Apply same transformations as LatheGeometry:
+            // 1. Rotate 90 degrees around X to align with lathe (Z becomes up axis)
+            planeGeometry.rotateX(-Math.PI / 2);
+
+            // 2. Rotate around Z by the angle (middle of phiStart to phiStart + phiLength)
+            // This matches the lathe's angular position
+            const rotationAngle = phiStart + phiLength / 2;
+            planeGeometry.rotateZ(rotationAngle);
+
+            // Position at junction point
+            planeGeometry.translate(
+                junctionPoint.x,
+                junctionPoint.y,
+                junctionPoint.z
+            );
+
+            // Create material for visualization (semi-transparent)
+            const material = new THREE.MeshBasicMaterial({
+                color: 0xff0000,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.3,
+                wireframe: false,
+            });
+
+            const planeMesh = new THREE.Mesh(planeGeometry, material);
+            planeMesh.userData.isCuttingPlane = true;
+
+            this.log.debug("Created cutting plane at junction:", {
+                position: junctionPoint,
+                rotation: THREE.MathUtils.radToDeg(rotationAngle),
+                size,
+            });
+
+            return planeMesh;
+        } catch (error) {
+            this.log.error("Error creating cutting plane:", error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Clip geometry using a plane with three-mesh-bvh
+     * @param {THREE.BufferGeometry} geometry - Geometry to clip
+     * @param {THREE.Plane} plane - Clipping plane
+     * @param {boolean} keepAbove - Keep geometry above the plane (default true)
+     * @returns {THREE.BufferGeometry} Clipped geometry
+     */
+    clipGeometryWithPlane(geometry, plane, keepAbove = true) {
+        try {
+            // Build BVH for the geometry if not already built
+            if (!geometry.boundsTree) {
+                geometry.computeBoundsTree();
+            }
+
+            const positions = geometry.attributes.position;
+            const normals = geometry.attributes.normal;
+            const indices = geometry.index ? geometry.index.array : null;
+
+            // Create arrays for new geometry
+            const newPositions = [];
+            const newNormals = [];
+            const newIndices = [];
+
+            // Helper function to interpolate vertex on plane
+            const interpolateOnPlane = (v1, v2, d1, d2) => {
+                const t = d1 / (d1 - d2);
+                return new THREE.Vector3().lerpVectors(v1, v2, t);
+            };
+
+            // Helper function to interpolate normal
+            const interpolateNormal = (n1, n2, t) => {
+                return new THREE.Vector3().lerpVectors(n1, n2, t).normalize();
+            };
+
+            // Process each triangle
+            const triangleCount = indices
+                ? indices.length / 3
+                : positions.count / 3;
+
+            for (let i = 0; i < triangleCount; i++) {
+                const i0 = indices ? indices[i * 3] : i * 3;
+                const i1 = indices ? indices[i * 3 + 1] : i * 3 + 1;
+                const i2 = indices ? indices[i * 3 + 2] : i * 3 + 2;
+
+                const v0 = new THREE.Vector3(
+                    positions.getX(i0),
+                    positions.getY(i0),
+                    positions.getZ(i0)
+                );
+                const v1 = new THREE.Vector3(
+                    positions.getX(i1),
+                    positions.getY(i1),
+                    positions.getZ(i1)
+                );
+                const v2 = new THREE.Vector3(
+                    positions.getX(i2),
+                    positions.getY(i2),
+                    positions.getZ(i2)
+                );
+
+                const n0 = normals
+                    ? new THREE.Vector3(
+                          normals.getX(i0),
+                          normals.getY(i0),
+                          normals.getZ(i0)
+                      )
+                    : new THREE.Vector3(0, 0, 1);
+                const n1 = normals
+                    ? new THREE.Vector3(
+                          normals.getX(i1),
+                          normals.getY(i1),
+                          normals.getZ(i1)
+                      )
+                    : new THREE.Vector3(0, 0, 1);
+                const n2 = normals
+                    ? new THREE.Vector3(
+                          normals.getX(i2),
+                          normals.getY(i2),
+                          normals.getZ(i2)
+                      )
+                    : new THREE.Vector3(0, 0, 1);
+
+                // Check which side of the plane each vertex is on
+                const d0 = plane.distanceToPoint(v0);
+                const d1 = plane.distanceToPoint(v1);
+                const d2 = plane.distanceToPoint(v2);
+
+                const epsilon = 0.0001;
+                const sign = keepAbove ? 1 : -1;
+                const keep0 = d0 * sign >= -epsilon;
+                const keep1 = d1 * sign >= -epsilon;
+                const keep2 = d2 * sign >= -epsilon;
+
+                const keepCount =
+                    (keep0 ? 1 : 0) + (keep1 ? 1 : 0) + (keep2 ? 1 : 0);
+
+                // Helper to add vertex
+                const addVertex = (v, n) => {
+                    const baseIndex = newPositions.length / 3;
+                    newPositions.push(v.x, v.y, v.z);
+                    newNormals.push(n.x, n.y, n.z);
+                    return baseIndex;
+                };
+
+                // All vertices on the keep side
+                if (keepCount === 3) {
+                    const idx0 = addVertex(v0, n0);
+                    const idx1 = addVertex(v1, n1);
+                    const idx2 = addVertex(v2, n2);
+                    newIndices.push(idx0, idx1, idx2);
+                }
+                // Two vertices on keep side - split into two triangles
+                else if (keepCount === 2) {
+                    let keptVerts = [];
+                    let keptNormals = [];
+                    let clippedVert, clippedNormal, clippedDist;
+
+                    if (keep0 && keep1 && !keep2) {
+                        keptVerts = [v0, v1];
+                        keptNormals = [n0, n1];
+                        clippedVert = v2;
+                        clippedNormal = n2;
+                        clippedDist = d2;
+
+                        // Interpolate new vertices on plane
+                        const t0 = d0 / (d0 - d2);
+                        const t1 = d1 / (d1 - d2);
+                        const newV0 = interpolateOnPlane(v0, v2, d0, d2);
+                        const newV1 = interpolateOnPlane(v1, v2, d1, d2);
+                        const newN0 = interpolateNormal(n0, n2, t0);
+                        const newN1 = interpolateNormal(n1, n2, t1);
+
+                        // Create two triangles
+                        const idx0 = addVertex(v0, n0);
+                        const idx1 = addVertex(v1, n1);
+                        const idx2 = addVertex(newV0, newN0);
+                        const idx3 = addVertex(newV1, newN1);
+
+                        newIndices.push(idx0, idx1, idx2);
+                        newIndices.push(idx1, idx3, idx2);
+                    } else if (keep1 && keep2 && !keep0) {
+                        const t1 = d1 / (d1 - d0);
+                        const t2 = d2 / (d2 - d0);
+                        const newV1 = interpolateOnPlane(v1, v0, d1, d0);
+                        const newV2 = interpolateOnPlane(v2, v0, d2, d0);
+                        const newN1 = interpolateNormal(n1, n0, t1);
+                        const newN2 = interpolateNormal(n2, n0, t2);
+
+                        const idx0 = addVertex(v1, n1);
+                        const idx1 = addVertex(v2, n2);
+                        const idx2 = addVertex(newV1, newN1);
+                        const idx3 = addVertex(newV2, newN2);
+
+                        newIndices.push(idx0, idx1, idx2);
+                        newIndices.push(idx1, idx3, idx2);
+                    } else if (keep2 && keep0 && !keep1) {
+                        const t2 = d2 / (d2 - d1);
+                        const t0 = d0 / (d0 - d1);
+                        const newV2 = interpolateOnPlane(v2, v1, d2, d1);
+                        const newV0 = interpolateOnPlane(v0, v1, d0, d1);
+                        const newN2 = interpolateNormal(n2, n1, t2);
+                        const newN0 = interpolateNormal(n0, n1, t0);
+
+                        const idx0 = addVertex(v2, n2);
+                        const idx1 = addVertex(v0, n0);
+                        const idx2 = addVertex(newV2, newN2);
+                        const idx3 = addVertex(newV0, newN0);
+
+                        newIndices.push(idx0, idx1, idx2);
+                        newIndices.push(idx1, idx3, idx2);
+                    }
+                }
+                // One vertex on keep side - create single triangle
+                else if (keepCount === 1) {
+                    if (keep0 && !keep1 && !keep2) {
+                        const t1 = d0 / (d0 - d1);
+                        const t2 = d0 / (d0 - d2);
+                        const newV1 = interpolateOnPlane(v0, v1, d0, d1);
+                        const newV2 = interpolateOnPlane(v0, v2, d0, d2);
+                        const newN1 = interpolateNormal(n0, n1, t1);
+                        const newN2 = interpolateNormal(n0, n2, t2);
+
+                        const idx0 = addVertex(v0, n0);
+                        const idx1 = addVertex(newV1, newN1);
+                        const idx2 = addVertex(newV2, newN2);
+
+                        newIndices.push(idx0, idx1, idx2);
+                    } else if (!keep0 && keep1 && !keep2) {
+                        const t0 = d1 / (d1 - d0);
+                        const t2 = d1 / (d1 - d2);
+                        const newV0 = interpolateOnPlane(v1, v0, d1, d0);
+                        const newV2 = interpolateOnPlane(v1, v2, d1, d2);
+                        const newN0 = interpolateNormal(n1, n0, t0);
+                        const newN2 = interpolateNormal(n1, n2, t2);
+
+                        const idx0 = addVertex(v1, n1);
+                        const idx1 = addVertex(newV0, newN0);
+                        const idx2 = addVertex(newV2, newN2);
+
+                        newIndices.push(idx0, idx1, idx2);
+                    } else if (!keep0 && !keep1 && keep2) {
+                        const t0 = d2 / (d2 - d0);
+                        const t1 = d2 / (d2 - d1);
+                        const newV0 = interpolateOnPlane(v2, v0, d2, d0);
+                        const newV1 = interpolateOnPlane(v2, v1, d2, d1);
+                        const newN0 = interpolateNormal(n2, n0, t0);
+                        const newN1 = interpolateNormal(n2, n1, t1);
+
+                        const idx0 = addVertex(v2, n2);
+                        const idx1 = addVertex(newV0, newN0);
+                        const idx2 = addVertex(newV1, newN1);
+
+                        newIndices.push(idx0, idx1, idx2);
+                    }
+                }
+                // keepCount === 0: discard triangle completely
+            }
+
+            // Create new geometry
+            const clippedGeometry = new THREE.BufferGeometry();
+            clippedGeometry.setAttribute(
+                "position",
+                new THREE.Float32BufferAttribute(newPositions, 3)
+            );
+            clippedGeometry.setAttribute(
+                "normal",
+                new THREE.Float32BufferAttribute(newNormals, 3)
+            );
+            clippedGeometry.setIndex(newIndices);
+
+            // Dispose of BVH from original geometry
+            if (geometry.boundsTree) {
+                geometry.disposeBoundsTree();
+            }
+
+            this.log.debug("Clipped geometry:", {
+                originalTriangles: triangleCount,
+                clippedTriangles: newIndices.length / 3,
+            });
+
+            return clippedGeometry;
+        } catch (error) {
+            this.log.error(
+                "Error clipping geometry with plane:",
+                error.message
+            );
+            return geometry;
+        }
+    }
+
+    /**
+     * Clip extrusion meshes at junction points using cutting planes
+     * @param {Array<THREE.Mesh>} extrusionMeshes - Array of extrusion meshes
+     * @param {Array<Object>} junctionData - Array of junction data with phiStart, phiLength, junctionPoint
+     * @returns {Object} Object with clippedMeshes and cuttingPlanes arrays
+     */
+    clipExtrusionsAtJunctions(extrusionMeshes, junctionData) {
+        try {
+            const clippedMeshes = [];
+            const cuttingPlanes = [];
+
+            this.log.info("Clipping extrusions at junctions:", {
+                meshCount: extrusionMeshes.length,
+                junctionCount: junctionData.length,
+            });
+
+            // Create cutting plane visualizations for each junction
+            for (const junctionInfo of junctionData) {
+                if (!junctionInfo || !junctionInfo.junctionPoint) {
+                    continue;
+                }
+
+                const planeMesh = this.createCuttingPlane(
+                    junctionInfo.junctionPoint,
+                    junctionInfo.phiStart,
+                    junctionInfo.phiLength,
+                    100
+                );
+
+                if (planeMesh) {
+                    cuttingPlanes.push(planeMesh);
+                }
+            }
+
+            for (const mesh of extrusionMeshes) {
+                // Skip lathe meshes
+                if (
+                    mesh.userData.isPartialLathe ||
+                    mesh.userData.isLatheJunction
+                ) {
+                    clippedMeshes.push(mesh);
+                    continue;
+                }
+
+                const segmentIndex = mesh.userData.segmentIndex;
+                if (segmentIndex === undefined) {
+                    this.log.warn(
+                        "Mesh without segmentIndex, skipping clipping"
+                    );
+                    clippedMeshes.push(mesh);
+                    continue;
+                }
+
+                let currentGeometry = mesh.geometry.clone();
+
+                // Apply world matrix to geometry before clipping
+                currentGeometry.applyMatrix4(mesh.matrixWorld);
+
+                // For closed paths: each segment has 2 junctions (at start and end)
+                // For open paths: first segment has 1 junction (at end), last has 1 (at start), middle have 2
+                // segmentIndex corresponds to the segment number
+
+                // Determine which junctions affect this segment
+                const affectingJunctions = [];
+
+                // Junction at the end of this segment (if exists)
+                if (junctionData[segmentIndex]) {
+                    affectingJunctions.push({
+                        data: junctionData[segmentIndex],
+                        isAtEnd: true, // This junction is at END of current segment
+                    });
+                }
+
+                // Junction at the start of this segment (end of previous segment)
+                const prevJunctionIndex = segmentIndex - 1;
+                if (prevJunctionIndex >= 0 && junctionData[prevJunctionIndex]) {
+                    affectingJunctions.push({
+                        data: junctionData[prevJunctionIndex],
+                        isAtEnd: false, // This junction is at START of current segment
+                    });
+                } else if (
+                    prevJunctionIndex < 0 &&
+                    junctionData[junctionData.length - 1]
+                ) {
+                    // For closed path, first segment connects to last junction
+                    affectingJunctions.push({
+                        data: junctionData[junctionData.length - 1],
+                        isAtEnd: false,
+                    });
+                }
+
+                // Clip against affecting junction planes only
+                for (const junctionEntry of affectingJunctions) {
+                    const junctionInfo = junctionEntry.data;
+                    const isAtEnd = junctionEntry.isAtEnd;
+
+                    if (!junctionInfo || !junctionInfo.junctionPoint) {
+                        continue;
+                    }
+
+                    // Create clipping plane from junction data
+                    // Apply same transformation as LatheGeometry: rotateX(-π/2) then rotateZ(angle)
+                    const rotationAngle =
+                        junctionInfo.phiStart + junctionInfo.phiLength / 2;
+
+                    // Calculate normal using current variant (auto chooses by segment parity)
+                    const normal = computeNormalFromVariant(
+                        rotationAngle,
+                        isAtEnd,
+                        junctionInfo.cornerNumber,
+                        segmentIndex
+                    );
+
+                    this.log.debug(
+                        `Clipping segment ${segmentIndex} at junction ${junctionInfo.cornerNumber}:`,
+                        {
+                            angle: THREE.MathUtils.radToDeg(
+                                rotationAngle
+                            ).toFixed(1),
+                            normalX: normal.x.toFixed(4),
+                            normalY: normal.y.toFixed(4),
+                            position: isAtEnd ? "END" : "START",
+                            inverted: !isAtEnd,
+                        }
+                    );
+
+                    // Create plane at junction point
+                    const plane =
+                        new THREE.Plane().setFromNormalAndCoplanarPoint(
+                            normal,
+                            junctionInfo.junctionPoint
+                        );
+
+                    // Clip the geometry - keep the side pointing away from junction
+                    currentGeometry = this.clipGeometryWithPlane(
+                        currentGeometry,
+                        plane,
+                        true
+                    );
+                }
+
+                // Only add clipped geometry if it has vertices
+                if (
+                    currentGeometry.attributes.position &&
+                    currentGeometry.attributes.position.count > 0
+                ) {
+                    // Create new mesh with clipped geometry
+                    const clippedMesh = new THREE.Mesh(
+                        currentGeometry,
+                        mesh.material.clone()
+                    );
+                    clippedMesh.castShadow = mesh.castShadow;
+                    clippedMesh.receiveShadow = mesh.receiveShadow;
+                    clippedMesh.userData = { ...mesh.userData, clipped: true };
+
+                    clippedMeshes.push(clippedMesh);
+                }
+            }
+
+            this.log.info("Clipping complete:", {
+                inputMeshes: extrusionMeshes.length,
+                outputMeshes: clippedMeshes.length,
+                cuttingPlanes: cuttingPlanes.length,
+            });
+
+            return { clippedMeshes, cuttingPlanes };
+        } catch (error) {
+            this.log.error(
+                "Error clipping extrusions at junctions:",
+                error.message
+            );
+            return { clippedMeshes: extrusionMeshes, cuttingPlanes: [] };
         }
     }
 

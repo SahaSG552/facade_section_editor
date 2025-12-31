@@ -31,22 +31,24 @@ class STLExporter {
      * @returns {string} STL content
      */
     generateSTL(meshes) {
-        let stl = `solid Exported3DModel\n`;
+        let stl = "";
 
         meshes.forEach((mesh, meshIdx) => {
-            if (!mesh.geometry) {
+            if (!mesh?.geometry) {
                 this.log?.warn?.(`Mesh ${meshIdx} has no geometry, skipping`);
                 return;
             }
 
             const geometry = mesh.geometry;
             const matrixWorld = mesh.matrixWorld;
+            const solidName = mesh.name || `mesh_${meshIdx}`;
 
-            // Ensure geometry is indexed
-            let indexedGeom = geometry;
-            if (!geometry.index) {
-                indexedGeom = geometry.clone();
-                indexedGeom = indexedGeom.toNonIndexed();
+            // Ensure geometry is indexed and cloned so we never mutate the original
+            let indexedGeom;
+            if (geometry.index) {
+                indexedGeom = geometry; // safe to read; not mutating
+            } else {
+                indexedGeom = geometry.clone().toNonIndexed();
             }
 
             const positions = indexedGeom.attributes.position.array;
@@ -54,8 +56,9 @@ class STLExporter {
                 ? indexedGeom.index.array
                 : Array.from({ length: positions.length / 3 }, (_, i) => i);
 
-            // Process triangles
-            const triangles = [];
+            // Begin solid block per mesh
+            stl += `solid ${solidName}\n`;
+
             for (let i = 0; i < indices.length; i += 3) {
                 const i0 = indices[i] * 3;
                 const i1 = indices[i + 1] * 3;
@@ -65,66 +68,50 @@ class STLExporter {
                     positions[i0],
                     positions[i0 + 1],
                     positions[i0 + 2]
-                );
+                ).applyMatrix4(matrixWorld);
                 const v1 = new THREE.Vector3(
                     positions[i1],
                     positions[i1 + 1],
                     positions[i1 + 2]
-                );
+                ).applyMatrix4(matrixWorld);
                 const v2 = new THREE.Vector3(
                     positions[i2],
                     positions[i2 + 1],
                     positions[i2 + 2]
-                );
+                ).applyMatrix4(matrixWorld);
 
-                // Apply mesh world transform
-                v0.applyMatrix4(matrixWorld);
-                v1.applyMatrix4(matrixWorld);
-                v2.applyMatrix4(matrixWorld);
-
-                // Calculate normal
                 const edge1 = new THREE.Vector3().subVectors(v1, v0);
                 const edge2 = new THREE.Vector3().subVectors(v2, v0);
                 const normal = new THREE.Vector3()
                     .crossVectors(edge1, edge2)
                     .normalize();
 
-                triangles.push({ normal, v0, v1, v2 });
+                stl += `  facet normal ${this.formatNumber(
+                    normal.x
+                )} ${this.formatNumber(normal.y)} ${this.formatNumber(
+                    normal.z
+                )}\n`;
+                stl += "    outer loop\n";
+                stl += `      vertex ${this.formatNumber(
+                    v0.x
+                )} ${this.formatNumber(v0.y)} ${this.formatNumber(v0.z)}\n`;
+                stl += `      vertex ${this.formatNumber(
+                    v1.x
+                )} ${this.formatNumber(v1.y)} ${this.formatNumber(v1.z)}\n`;
+                stl += `      vertex ${this.formatNumber(
+                    v2.x
+                )} ${this.formatNumber(v2.y)} ${this.formatNumber(v2.z)}\n`;
+                stl += "    endloop\n";
+                stl += "  endfacet\n";
             }
 
-            // Write triangles to STL
-            triangles.forEach((tri) => {
-                stl += `  facet normal ${this.formatNumber(
-                    tri.normal.x
-                )} ${this.formatNumber(tri.normal.y)} ${this.formatNumber(
-                    tri.normal.z
-                )}\n`;
-                stl += `    outer loop\n`;
-                stl += `      vertex ${this.formatNumber(
-                    tri.v0.x
-                )} ${this.formatNumber(tri.v0.y)} ${this.formatNumber(
-                    tri.v0.z
-                )}\n`;
-                stl += `      vertex ${this.formatNumber(
-                    tri.v1.x
-                )} ${this.formatNumber(tri.v1.y)} ${this.formatNumber(
-                    tri.v1.z
-                )}\n`;
-                stl += `      vertex ${this.formatNumber(
-                    tri.v2.x
-                )} ${this.formatNumber(tri.v2.y)} ${this.formatNumber(
-                    tri.v2.z
-                )}\n`;
-                stl += `    endloop\n`;
-                stl += `  endfacet\n`;
-            });
+            stl += `endsolid ${solidName}\n`;
 
-            if (geometry !== indexedGeom) {
-                indexedGeom.dispose();
+            if (!geometry.index && indexedGeom) {
+                indexedGeom.dispose?.();
             }
         });
 
-        stl += `endsolid Exported3DModel\n`;
         return stl;
     }
 

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import ManifoldCSG from "./ManifoldCSG.js";
 import { LoggerFactory } from "../core/LoggerFactory.js";
+import { weldGeometry } from "../utils/utils.js";
 
 /**
  * CSGEngine - Manages CSG (Constructive Solid Geometry) boolean operations
@@ -42,7 +43,8 @@ class CSGEngine {
         this.lastCSGSignature = null;
 
         // CSG mode: union first then subtract, or sequential subtraction
-        this.useUnionBeforeSubtract = true;
+        // Default to sequential; union mode is currently disabled for stability
+        this.useUnionBeforeSubtract = false;
 
         // References to other managers
         this.materialManager = null;
@@ -52,7 +54,7 @@ class CSGEngine {
         this.manifoldCSG = new ManifoldCSG(this.log);
         this.useManifoldBackend = true;
         this.manifoldTolerance = 1e-3; // Panel tolerance
-        this.manifoldCutterTolerance = 0.01; // Higher tolerance for cutter cleanup (round extrusions)
+        this.manifoldCutterTolerance = 0.001; // Higher tolerance for cutter cleanup (round extrusions)
         this.manifoldSimplifyTolerance = 0.01;
     }
 
@@ -246,99 +248,41 @@ class CSGEngine {
             let resultBrush;
             let processed = 0;
 
-            if (this.useUnionBeforeSubtract) {
-                // MODE 1: Union all intersecting bits, then subtract once
-                // DISABLED TEMPORARILY while testing corner cutting methodology
-                this.log.warn(
-                    "BIT UNION MODE DISABLED - bits will be subtracted sequentially"
-                );
+            // MODE 2: Sequential subtraction (default/stable path)
+            this.log.info("Using SEQUENTIAL mode: subtracting bits one by one");
+            resultBrush = panelBrush;
 
-                /*
-                this.log.info("Using UNION mode: combining all bits first");
-                let unionBrush = null;
-
-                uniqueIntersectingMeshes.forEach((bitMesh, idx) => {
-                    try {
-                        const bitBrush = new Brush(bitMesh.geometry);
-                        bitBrush.position.copy(bitMesh.position);
-                        bitBrush.rotation.copy(bitMesh.rotation);
-                        bitBrush.scale.copy(bitMesh.scale);
-                        bitBrush.updateMatrixWorld(true);
-
-                        if (!unionBrush) {
-                            unionBrush = bitBrush;
-                        } else {
-                            unionBrush = evaluator.evaluate(
-                                unionBrush,
-                                bitBrush,
-                                ADDITION
-                            );
-                        }
-                        processed++;
-                    } catch (error) {
-                        this.log.warn(
-                            `Error building brush for bit ${idx}:`,
-                            error.message
-                        );
-                    }
-                });
-
-                if (!unionBrush) {
-                    this.log.warn(
-                        "Failed to build union brush, showing base panel"
+            for (const bitMesh of uniqueIntersectingMeshes) {
+                try {
+                    const weldedGeometry = weldGeometry(
+                        bitMesh.geometry,
+                        this.manifoldCutterTolerance
                     );
-                    this.lastCSGSignature = csgSignature;
-                    this.csgActive = false;
-                    this.showBasePanel();
-                    this.csgBusy = false;
-                    return;
-                }
+                    const bitBrush = new Brush(weldedGeometry);
+                    bitBrush.position.copy(bitMesh.position);
+                    bitBrush.rotation.copy(bitMesh.rotation);
+                    bitBrush.scale.copy(bitMesh.scale);
+                    bitBrush.updateMatrixWorld(true);
 
-                // Subtract the union from the panel in a single operation
-                resultBrush = evaluator.evaluate(
-                    panelBrush,
-                    unionBrush,
-                    SUBTRACTION
-                );
-                */
+                    resultBrush = evaluator.evaluate(
+                        resultBrush,
+                        bitBrush,
+                        SUBTRACTION
+                    );
 
-                // Force SEQUENTIAL mode instead
-                resultBrush = panelBrush;
-            } else {
-                // MODE 2: Sequential subtraction (no union)
-                this.log.info(
-                    "Using SEQUENTIAL mode: subtracting bits one by one"
-                );
-                resultBrush = panelBrush;
-
-                for (const bitMesh of uniqueIntersectingMeshes) {
-                    try {
-                        const bitBrush = new Brush(bitMesh.geometry);
-                        bitBrush.position.copy(bitMesh.position);
-                        bitBrush.rotation.copy(bitMesh.rotation);
-                        bitBrush.scale.copy(bitMesh.scale);
-                        bitBrush.updateMatrixWorld(true);
-
-                        resultBrush = evaluator.evaluate(
-                            resultBrush,
-                            bitBrush,
-                            SUBTRACTION
-                        );
-
-                        if (!resultBrush) {
-                            this.log.warn(
-                                `Sequential subtraction failed at bit ${processed}`
-                            );
-                            break;
-                        }
-                        processed++;
-                    } catch (error) {
+                    if (!resultBrush) {
                         this.log.warn(
-                            `Error in sequential subtraction for bit ${processed}:`,
-                            error.message
+                            `Sequential subtraction failed at bit ${processed}`
                         );
                         break;
                     }
+                    processed++;
+                } catch (error) {
+                    this.log.warn(
+                        `Error in sequential subtraction for bit ${processed}:`,
+                        error.message
+                    );
+                    break;
                 }
             }
 

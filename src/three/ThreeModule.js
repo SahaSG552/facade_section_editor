@@ -662,16 +662,21 @@ export default class ThreeModule extends BaseModule {
                 );
                 if (mesh) extrudeMeshes = [mesh];
             } else {
-                const meshArray = this.extrusionBuilder.extrudeAlongPathRound(
+                const result = this.extrusionBuilder.extrudeAlongPathRound(
                     bitProfile,
                     curve3D,
                     bit.color
                 );
-                // extrudeAlongPathRound now returns an array of separate meshes
-                if (meshArray) {
-                    extrudeMeshes = Array.isArray(meshArray)
-                        ? meshArray
-                        : [meshArray];
+
+                if (result) {
+                    // New return shape: { mergedMesh, parts, cuttingPlanes }
+                    if (result.mergedMesh) {
+                        extrudeMeshes = [result.mergedMesh];
+                    } else if (Array.isArray(result)) {
+                        extrudeMeshes = result;
+                    } else if (result.parts && Array.isArray(result.parts)) {
+                        extrudeMeshes = result.parts;
+                    }
                 }
             }
 
@@ -1515,21 +1520,28 @@ export default class ThreeModule extends BaseModule {
     exportToSTL(filename = "facade") {
         const meshesToExport = [];
 
+        // Always export panel mesh when present
+        if (this.panelMesh) {
+            meshesToExport.push(this.panelMesh);
+        }
+
+        // Always export raw extrude pieces (segments + lathes), excluding debug cutting planes
+        if (this.bitExtrudeMeshes && this.bitExtrudeMeshes.length) {
+            const filtered = this.bitExtrudeMeshes.filter(
+                (m) => !m.userData?.isCuttingPlane
+            );
+            meshesToExport.push(...filtered);
+            this.log.info(
+                `Exporting raw extrudes (segments + lathes): ${filtered.length} meshes`
+            );
+        }
+
+        // If CSG is active, also export the final part mesh as a separate body
         if (this.csgEngine.isActive() && this.csgEngine.partMesh) {
-            // Part view: export the result mesh (panel with subtractions)
             meshesToExport.push(this.csgEngine.partMesh);
-            this.log.info("Exporting Part view (CSG result mesh)");
-        } else {
-            // Material view: export panel + all bit extrusions
-            if (this.panelMesh) {
-                meshesToExport.push(this.panelMesh);
-            }
-            if (this.bitExtrudeMeshes && this.bitExtrudeMeshes.length) {
-                meshesToExport.push(...this.bitExtrudeMeshes);
-                this.log.info(
-                    `Exporting Material view: panel + ${this.bitExtrudeMeshes.length} bits`
-                );
-            }
+            this.log.info(
+                "Exporting Part view (CSG result mesh) as separate body"
+            );
         }
 
         if (meshesToExport.length === 0) {
