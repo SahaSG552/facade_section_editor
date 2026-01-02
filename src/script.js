@@ -2285,6 +2285,13 @@ async function initializeModularSystem() {
             await threeModule.init();
             // Make it globally accessible
             window.threeModule = threeModule;
+            // Make ExtrusionBuilder publicly accessible for console adjustments
+            window.extrusionBuilder = threeModule.extrusionBuilder;
+            log.info("ExtrusionBuilder available as window.extrusionBuilder");
+            log.info("Adjust curve segments from console:");
+            log.info("  window.extrusionBuilder.curveSegmentCoefficient = 3");
+            log.info("  window.extrusionBuilder.curveSegmentMin = 20");
+            log.info("  window.extrusionBuilder.curveSegmentMax = 80");
             // Configure centralized CSG scheduler
             csgScheduler.configure((apply) =>
                 threeModule.applyCSGOperation(apply)

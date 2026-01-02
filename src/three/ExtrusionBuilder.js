@@ -327,6 +327,13 @@ export default class ExtrusionBuilder {
         this.materialManager = null;
         this.csgEngine = null;
         this.edgeMatcher = new MeshEdgeMatcher(0.001);
+        
+        // Public configuration for adaptive curve segmentation
+        // Can be changed from console: extrusionBuilder.curveSegmentCoefficient = 3
+        this.curveSegmentCoefficient = 0.2; // segments per mm
+        this.curveSegmentMin = 16;
+        this.curveSegmentMax = 64;
+        
         this.log.info("Created");
     }
 
@@ -790,14 +797,81 @@ export default class ExtrusionBuilder {
     }
 
     /**
+     * Calculate adaptive curveSegments based on profile shape complexity
+     * Uses proportional coefficient for smooth scaling
+     * Public properties can be modified from console
+     * @param {THREE.Shape} shape - Profile shape
+     * @returns {number} Number of segments per curve
+     */
+    calculateAdaptiveCurveSegments(shape) {
+        // Calculate total length of all curves in the shape
+        let totalLength = 0;
+        let curveCount = 0;
+        if (shape.curves && shape.curves.length > 0) {
+            shape.curves.forEach((curve) => {
+                if (curve.getLength) {
+                    totalLength += curve.getLength();
+                    curveCount++;
+                }
+            });
+        }
+
+        // Use public properties for adaptive segmentation
+        const calculated = Math.ceil(totalLength * this.curveSegmentCoefficient);
+        const result = calculated // Math.max(this.curveSegmentMin, Math.min(this.curveSegmentMax, calculated));
+        
+        console.log("✓ Adaptive curveSegments:", {
+            totalCurveLength: totalLength.toFixed(2) + "mm",
+            curveCount,
+            coefficient: this.curveSegmentCoefficient + " seg/mm",
+            calculated,
+            result,
+            minSegments: this.curveSegmentMin,
+            maxSegments: this.curveSegmentMax,
+            tip: "Change coefficient with: extrusionBuilder.curveSegmentCoefficient = 3"
+        });
+        
+        return result;
+    }
+
+    /**
      * Extrude profile along path
      * @param {THREE.Shape} profile - The profile shape to extrude
      * @param {THREE.Curve} curve - The path curve to extrude along
      * @param {string|number} color - Color for the mesh material
-     * @returns {THREE.Mesh} The extruded mesh
+     * @returns {THREE.Mesh} The extruded mesh with profilePoints in userData
      */
     extrudeAlongPath(profile, curve, color) {
         try {
+            // Calculate adaptive curve segments based on profile complexity
+            const curveSegments = this.calculateAdaptiveCurveSegments(profile);
+            const profileGeometry = new THREE.ShapeGeometry(
+                profile,
+                curveSegments
+            );
+
+            // Extract points from geometry for lathe synchronization
+            const posAttr = profileGeometry.attributes.position;
+            const profilePoints = [];
+            for (let i = 0; i < posAttr.count; i++) {
+                profilePoints.push(
+                    new THREE.Vector2(posAttr.getX(i), posAttr.getY(i))
+                );
+            }
+
+            // Log actual vertex count from ShapeGeometry
+            console.log("✓ ShapeGeometry (extrudeAlongPath) result:", {
+                requestedCurveSegments: curveSegments,
+                actualVertexCount: posAttr.count,
+                profilePointsCount: profilePoints.length
+            });
+
+            // Log adaptive segmentation
+            this.log.debug("Adaptive curve segments:", {
+                curveSegments,
+                profilePointsCount: profilePoints.length,
+            });
+
             // Get contour points from the curve
             // For linear segments, use minimal points (just start and end)
             let segments;
@@ -826,7 +900,7 @@ export default class ExtrusionBuilder {
             }
 
             this.log.debug("Extruding with mitered corners:", {
-                profilePoints: profile.getPoints().length,
+                profilePoints: profilePoints.length,
                 contourPoints: contour.length,
                 contourClosed,
                 curveLength: curve.getLength(),
@@ -838,7 +912,8 @@ export default class ExtrusionBuilder {
                 profile,
                 contour,
                 contourClosed,
-                false // openEnded - false means create closed ends
+                false, // openEnded - false means create closed ends
+                curveSegments // Use same curve segments as profile generation
             );
 
             // Check if geometry was created successfully
@@ -868,6 +943,9 @@ export default class ExtrusionBuilder {
             mesh.castShadow = true;
             mesh.receiveShadow = true;
 
+            // Store profile points in userData for lathe synchronization
+            mesh.userData.profilePoints = profilePoints;
+
             return mesh;
         } catch (error) {
             this.log.error("Error extruding along path:", error.message);
@@ -883,26 +961,31 @@ export default class ExtrusionBuilder {
      * @param {Array<THREE.Vector3>} contour - Contour points
      * @param {boolean} contourClosed - Whether contour is closed
      * @param {boolean} openEnded - Whether to leave ends open (default: false = add caps)
+     * @param {number} curveSegments - Number of segments per curve (default: 32)
      */
     createProfiledContourGeometry(
         profileShape,
         contour,
         contourClosed,
-        openEnded
+        openEnded,
+        curveSegments = 32
     ) {
         try {
             contourClosed = contourClosed !== undefined ? contourClosed : true;
             openEnded = openEnded !== undefined ? openEnded : false;
             openEnded = contourClosed === true ? false : openEnded;
 
-            let profileGeometry = new THREE.ShapeGeometry(profileShape);
+            let profileGeometry = new THREE.ShapeGeometry(
+                profileShape,
+                curveSegments
+            );
             profileGeometry.rotateX(-Math.PI * 0.5);
             let profile = profileGeometry.attributes.position;
 
             // Calculate total vertices needed: profile points for each contour
             // (Earcut uses existing vertices, no need for center points)
             const posCount = profile.count * contour.length;
-            let profilePoints = new Float32Array(posCount * 3);
+            let positions = new Float32Array(posCount * 3);
 
             for (let i = 0; i < contour.length; i++) {
                 let v1 = new THREE.Vector2().subVectors(
@@ -991,16 +1074,13 @@ export default class ExtrusionBuilder {
                 cloneProfile.applyMatrix4(rotationMatrix);
                 cloneProfile.applyMatrix4(translationMatrix);
 
-                profilePoints.set(
-                    cloneProfile.array,
-                    cloneProfile.count * i * 3
-                );
+                positions.set(cloneProfile.array, cloneProfile.count * i * 3);
             }
 
             let fullProfileGeometry = new THREE.BufferGeometry();
             fullProfileGeometry.setAttribute(
                 "position",
-                new THREE.BufferAttribute(profilePoints, 3)
+                new THREE.BufferAttribute(positions, 3)
             );
             let index = [];
 
@@ -1081,6 +1161,35 @@ export default class ExtrusionBuilder {
      */
     extrudeAlongPathRound(profile, path, color) {
         try {
+            // Calculate adaptive curve segments based on profile complexity
+            const curveSegments = this.calculateAdaptiveCurveSegments(profile);
+            const profileGeometry = new THREE.ShapeGeometry(
+                profile,
+                curveSegments
+            );
+
+            // Extract points from geometry for lathe synchronization
+            const posAttr = profileGeometry.attributes.position;
+            const profilePoints = [];
+            for (let i = 0; i < posAttr.count; i++) {
+                profilePoints.push(
+                    new THREE.Vector2(posAttr.getX(i), posAttr.getY(i))
+                );
+            }
+
+            // Log actual vertex count from ShapeGeometry
+            console.log("✓ ShapeGeometry (extrudeAlongPathRound) result:", {
+                requestedCurveSegments: curveSegments,
+                actualVertexCount: posAttr.count,
+                profilePointsCount: profilePoints.length
+            });
+
+            // Log adaptive segmentation
+            this.log.debug("Adaptive curve segments:", {
+                curveSegments,
+                profilePointsCount: profilePoints.length,
+            });
+
             // Get path segments (curves) directly
             if (!path.curves || path.curves.length === 0) {
                 this.log.warn("Round extrusion: No curves in path");
@@ -1134,7 +1243,8 @@ export default class ExtrusionBuilder {
                     profile,
                     contour,
                     false, // contourClosed = false
-                    false // openEnded = false (WITH caps)
+                    false, // openEnded = false (WITH caps)
+                    curveSegments // Use same curve segments as profile generation
                 );
 
                 if (!geometry) {
@@ -1176,7 +1286,8 @@ export default class ExtrusionBuilder {
                         nextDir,
                         color,
                         i + 1,
-                        usePartialLathes
+                        usePartialLathes,
+                        profilePoints // Pass same points used in extrusions
                     );
                     if (data) {
                         latheMeshes.push(data.mesh);
@@ -1195,7 +1306,8 @@ export default class ExtrusionBuilder {
                         nextDir,
                         color,
                         i + 1,
-                        usePartialLathes
+                        usePartialLathes,
+                        profilePoints // Pass same points used in extrusions
                     );
                     if (data) {
                         latheMeshes.push(data.mesh);
@@ -1317,6 +1429,7 @@ export default class ExtrusionBuilder {
      * @param {string|number} color - Color for the mesh
      * @param {number} cornerNumber - Corner number for logging (optional)
      * @param {boolean} isPartial - Create partial lathe (true) or full 360° lathe (false). Default: true
+     * @param {Array<THREE.Vector2>} profilePoints - Pre-generated profile points (optional, for synchronization with extrusions)
      * @returns {Object|null} Object with mesh and metadata
      */
     createPartialLatheAtJunction(
@@ -1326,12 +1439,14 @@ export default class ExtrusionBuilder {
         nextDir,
         color,
         cornerNumber = 0,
-        isPartial = true
+        isPartial = true,
+        profilePoints = null
     ) {
         try {
             const lathePoints = this.createLatheHalfProfilePoints(
                 profile,
-                null
+                null,
+                profilePoints // Pass pre-generated points
             );
 
             if (!lathePoints || lathePoints.length < 2) {
@@ -2081,10 +2196,24 @@ export default class ExtrusionBuilder {
      * @param {number} toolRadius - Tool radius hint (unused, kept for compatibility)
      * @returns {Array<THREE.Vector2>}
      */
-    createLatheHalfProfilePoints(profile, toolRadius) {
+    /**
+     * Create half profile points for lathe from existing profile points
+     * This ensures lathe and extrusion use the same points at junctions
+     * @param {THREE.Shape} profile - Profile shape (for fallback)
+     * @param {number} toolRadius - Tool radius (for fallback)
+     * @param {Array<THREE.Vector2>} existingPoints - Optional: use these points instead of generating new ones
+     * @returns {Array<THREE.Vector2>} Half profile points for lathe
+     */
+    createLatheHalfProfilePoints(profile, toolRadius, existingPoints = null) {
         try {
-            // Get all points from the profile shape
-            const fullProfile = profile.getPoints(64);
+            // If existing points provided, use them directly
+            let fullProfile;
+            if (existingPoints && existingPoints.length > 0) {
+                fullProfile = existingPoints;
+            } else {
+                // Get all points from the profile shape
+                fullProfile = profile.getPoints(64);
+            }
 
             // Find center X and bottom Y (reference point is bottom-center)
             let sumX = 0,
@@ -2104,6 +2233,7 @@ export default class ExtrusionBuilder {
                 minY,
                 maxY,
                 points: fullProfile.length,
+                usingExistingPoints: !!existingPoints,
             });
 
             // Filter points on the right side (x >= centerX) and translate to bottom-center origin
