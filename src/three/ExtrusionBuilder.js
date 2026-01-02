@@ -4,6 +4,7 @@ import {
     mergeGeometries,
     mergeVertices,
 } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import Earcut from "earcut";
 import { Brush, Evaluator, ADDITION, SUBTRACTION } from "three-bvh-csg";
 import {
     MeshBVH,
@@ -898,9 +899,9 @@ export default class ExtrusionBuilder {
             profileGeometry.rotateX(-Math.PI * 0.5);
             let profile = profileGeometry.attributes.position;
 
-            // Calculate total vertices needed: profile points for each contour + 2 center points for caps
-            const posCount =
-                profile.count * contour.length + (openEnded ? 0 : 2);
+            // Calculate total vertices needed: profile points for each contour
+            // (Earcut uses existing vertices, no need for center points)
+            const posCount = profile.count * contour.length;
             let profilePoints = new Float32Array(posCount * 3);
 
             for (let i = 0; i < contour.length; i++) {
@@ -1025,40 +1026,37 @@ export default class ExtrusionBuilder {
 
             // Add end caps if not openEnded
             if (!openEnded && !contourClosed) {
-                const baseVertexIndex = profile.count * contour.length;
-
-                // Start cap (at first contour point)
-                const startCenterIdx = baseVertexIndex;
+                // Use Earcut for proper triangulation (handles concave profiles)
+                // Extract 2D profile coordinates
+                const flatCoords = [];
                 for (let j = 0; j < profile.count; j++) {
-                    index.push(
-                        startCenterIdx,
-                        j + 1 < profile.count ? j + 1 : 0,
-                        j
+                    flatCoords.push(
+                        profile.array[j * 3],
+                        profile.array[j * 3 + 1]
                     );
                 }
 
-                // End cap (at last contour point)
-                const endCenterIdx = baseVertexIndex + 1;
+                // Triangulate using Earcut
+                const triangles = Earcut(flatCoords, null, 2);
+
+                // Add start cap triangles (at first contour point)
+                for (let i = 0; i < triangles.length; i += 3) {
+                    const a = triangles[i];
+                    const b = triangles[i + 1];
+                    const c = triangles[i + 2];
+                    // Normal winding for start cap
+                    index.push(a, b, c);
+                }
+
+                // Add end cap triangles (at last contour point)
                 const lastContourOffset = (contour.length - 1) * profile.count;
-                for (let j = 0; j < profile.count; j++) {
-                    const j1 = j + 1 < profile.count ? j + 1 : 0;
-                    index.push(
-                        endCenterIdx,
-                        lastContourOffset + j,
-                        lastContourOffset + j1
-                    );
+                for (let i = 0; i < triangles.length; i += 3) {
+                    const a = lastContourOffset + triangles[i];
+                    const b = lastContourOffset + triangles[i + 1];
+                    const c = lastContourOffset + triangles[i + 2];
+                    // Reversed winding for end cap
+                    index.push(a, c, b);
                 }
-
-                // Add center points for caps
-                profilePoints[startCenterIdx * 3] = contour[0].x;
-                profilePoints[startCenterIdx * 3 + 1] = contour[0].y;
-                profilePoints[startCenterIdx * 3 + 2] = contour[0].z;
-
-                profilePoints[endCenterIdx * 3] = contour[contour.length - 1].x;
-                profilePoints[endCenterIdx * 3 + 1] =
-                    contour[contour.length - 1].y;
-                profilePoints[endCenterIdx * 3 + 2] =
-                    contour[contour.length - 1].z;
             }
 
             fullProfileGeometry.setIndex(index);
@@ -1165,6 +1163,7 @@ export default class ExtrusionBuilder {
             }
 
             // Create lathes at junctions
+            const usePartialLathes = true; // Set to false for full 360° lathes
             if (pathClosed) {
                 for (let i = 0; i < segments.length; i++) {
                     const junctionPoint = segments[i].endPoint;
@@ -1176,7 +1175,8 @@ export default class ExtrusionBuilder {
                         prevDir,
                         nextDir,
                         color,
-                        i + 1
+                        i + 1,
+                        usePartialLathes
                     );
                     if (data) {
                         latheMeshes.push(data.mesh);
@@ -1194,7 +1194,8 @@ export default class ExtrusionBuilder {
                         prevDir,
                         nextDir,
                         color,
-                        i + 1
+                        i + 1,
+                        usePartialLathes
                     );
                     if (data) {
                         latheMeshes.push(data.mesh);
@@ -1308,13 +1309,15 @@ export default class ExtrusionBuilder {
 
     /**
      * Create a partial lathe (revolve) at a junction point based on angle between segments
+     * Uses custom geometry generation with integrated end caps for watertight result
      * @param {THREE.Shape} profile - Profile to revolve
      * @param {THREE.Vector3} point - Junction point in 3D space
      * @param {THREE.Vector3} prevDir - Direction vector of previous segment (normalized)
      * @param {THREE.Vector3} nextDir - Direction vector of next segment (normalized)
      * @param {string|number} color - Color for the mesh
      * @param {number} cornerNumber - Corner number for logging (optional)
-     * @returns {THREE.Mesh|null}
+     * @param {boolean} isPartial - Create partial lathe (true) or full 360° lathe (false). Default: true
+     * @returns {Object|null} Object with mesh and metadata
      */
     createPartialLatheAtJunction(
         profile,
@@ -1322,7 +1325,8 @@ export default class ExtrusionBuilder {
         prevDir,
         nextDir,
         color,
-        cornerNumber = 0
+        cornerNumber = 0,
+        isPartial = true
     ) {
         try {
             const lathePoints = this.createLatheHalfProfilePoints(
@@ -1338,105 +1342,110 @@ export default class ExtrusionBuilder {
             }
 
             // Calculate angle between segments
-            // Use dot product to find angle: cos(θ) = a·b / (|a||b|)
             const dotProduct = prevDir.dot(nextDir);
-            // Clamp to [-1, 1] to avoid NaN from Math.acos
             const clampedDot = Math.max(-1, Math.min(1, dotProduct));
             const angle = Math.acos(clampedDot);
 
             // Determine rotation direction using cross product
-            // Cross product points "up" (positive Z) for CCW turn, "down" for CW turn
             const cross = new THREE.Vector3().crossVectors(prevDir, nextDir);
             const turnDirection = cross.z; // Positive = CCW, Negative = CW
 
-            // Calculate angles in XY plane (before rotateX transformation)
+            // Calculate angles in XY plane
             const prevAngleXY = Math.atan2(prevDir.y, prevDir.x);
             const nextAngleXY = Math.atan2(nextDir.y, nextDir.x);
 
             // Calculate angular difference with proper wrapping
-            // This gives us the signed angle from prevAngleXY to nextAngleXY
             let angleDiff = nextAngleXY - prevAngleXY;
-            // Normalize to [-π, π]
             while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
             while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
 
-            // Store original partial angles for cutting plane visualization
-            let originalPhiStart, originalPhiLength;
+            // Determine geometry parameters
+            let phiStart, phiLength;
 
-            // For CW paths (typical milling outer contour):
-            // - Right turns (cross.z < 0) = interior angles
-            // - Left turns (cross.z > 0) = exterior angles
-
-            if (turnDirection < 0) {
-                // CW turn = interior angle
-                // LatheGeometry always sweeps CCW (positive direction)
-                // For odd-numbered corners, add 180° to prevAngle to correct quadrant
-                // This pattern alternates for closed polygons
-                if (cornerNumber % 2 === 1) {
-                    originalPhiStart = prevAngleXY + Math.PI;
+            if (isPartial) {
+                // PARTIAL LATHE: Create sector based on interior angle
+                if (turnDirection < 0) {
+                    // CW turn = interior angle
+                    if (cornerNumber % 2 === 1) {
+                        phiStart = prevAngleXY + Math.PI;
+                    } else {
+                        phiStart = prevAngleXY;
+                    }
+                    phiLength = Math.abs(angleDiff);
                 } else {
-                    originalPhiStart = prevAngleXY;
+                    // CCW turn = exterior angle
+                    phiStart = nextAngleXY;
+                    phiLength = 2 * Math.PI - Math.abs(angleDiff);
                 }
-                originalPhiLength = Math.abs(angleDiff);
+
+                this.log.info(
+                    `Corner ${cornerNumber} (${color}) | Junction angle: ${THREE.MathUtils.radToDeg(
+                        angle
+                    ).toFixed(1)}° | PARTIAL | Turn: ${
+                        turnDirection < 0 ? "CW" : "CCW"
+                    } | phiStart: ${THREE.MathUtils.radToDeg(phiStart).toFixed(
+                        1
+                    )}° | phiLength: ${THREE.MathUtils.radToDeg(
+                        phiLength
+                    ).toFixed(1)}°`
+                );
             } else {
-                // CCW turn = exterior angle
-                // Start from nextAngle and sweep the exterior
-                originalPhiStart = nextAngleXY;
-                originalPhiLength = 2 * Math.PI - Math.abs(angleDiff);
+                // FULL 360° LATHE
+                phiStart = 0;
+                phiLength = Math.PI * 2;
+
+                this.log.info(
+                    `Corner ${cornerNumber} (${color}) | Junction angle: ${THREE.MathUtils.radToDeg(
+                        angle
+                    ).toFixed(1)}° | FULL 360°`
+                );
             }
 
-            this.log.info(
-                `Corner ${cornerNumber} (${color}) | Junction angle: ${THREE.MathUtils.radToDeg(
-                    angle
-                ).toFixed(1)}° | Turn: ${
-                    turnDirection < 0 ? "CW" : "CCW"
-                } (${cross.z.toFixed(
-                    4
-                )}) | prevAngle: ${THREE.MathUtils.radToDeg(
-                    prevAngleXY
-                ).toFixed(1)}° | nextAngle: ${THREE.MathUtils.radToDeg(
-                    nextAngleXY
-                ).toFixed(1)}° | angleDiff: ${THREE.MathUtils.radToDeg(
-                    angleDiff
-                ).toFixed(1)}° | Creating FULL 360° lathe`
+            // Calculate segments based on the angle
+            const segments = Math.max(
+                8,
+                Math.ceil(32 * (Math.abs(phiLength) / (Math.PI * 2)))
             );
 
-            // Create FULL 360° lathe (closed solid)
-            const latheGeometry = new THREE.LatheGeometry(
+            // Create complete lathe geometry with integrated end caps
+            const finalGeometry = this.createLatheWithEndCaps(
                 lathePoints,
-                32, // Fixed 32 segments for full revolution
-                0, // Start at 0
-                Math.PI * 2 // Full 360 degrees
+                segments,
+                phiStart,
+                phiLength,
+                isPartial
             );
 
-            // Rotate 90 degrees to align with path (Z becomes up axis)
-            latheGeometry.rotateX(-Math.PI / 2);
+            if (!finalGeometry) {
+                this.log.error("Failed to create lathe geometry with end caps");
+                return null;
+            }
 
             // Position at junction point
-            latheGeometry.translate(point.x, point.y, point.z);
+            finalGeometry.translate(point.x, point.y, point.z);
 
             const material = new THREE.MeshStandardMaterial({
                 color: new THREE.Color(color || "#ffaa00"),
                 roughness: 0.6,
                 metalness: 0.1,
-                side: THREE.FrontSide, // Single-sided for closed lathes
+                side: THREE.FrontSide,
                 wireframe: this.materialManager
                     ? this.materialManager.isWireframeEnabled()
                     : false,
             });
 
-            const mesh = new THREE.Mesh(latheGeometry, material);
+            const mesh = new THREE.Mesh(finalGeometry, material);
             mesh.castShadow = true;
             mesh.receiveShadow = true;
             mesh.userData.isPartialLathe = true;
             mesh.userData.angle = angle;
             mesh.userData.cornerNumber = cornerNumber;
 
-            // Return mesh + angle metadata (using original partial angles for cutting plane)
+            // Return mesh + angle metadata
             return {
                 mesh,
-                phiStart: originalPhiStart,
-                phiLength: originalPhiLength,
+                phiStart,
+                phiLength,
                 junctionPoint: point.clone(),
                 angle,
                 cornerNumber,
@@ -1448,9 +1457,355 @@ export default class ExtrusionBuilder {
     }
 
     /**
-     * Create 2D wedge (sector) shape with proper winding
-     * Profile is drawn in XY plane (matching lathe after rotateX)
-     * Uses same angles as LatheGeometry: phiStart and phiLength
+     * Create lathe geometry with end caps all in one geometry (watertight)
+     * Vertices and triangles are generated with matching coordinates for perfect vertex sharing
+     * @param {Array<THREE.Vector2>} profilePoints - Profile points (radius, height)
+     * @param {number} segments - Number of angular segments
+     * @param {number} phiStart - Start angle in radians
+     * @param {number} phiLength - Angular extent in radians
+     * @param {boolean} includeCaps - Whether to add end caps for partial lathes
+     * @returns {THREE.BufferGeometry} Complete lathe geometry with caps
+     */
+    createLatheWithEndCaps(
+        profilePoints,
+        segments,
+        phiStart,
+        phiLength,
+        includeCaps = true
+    ) {
+        try {
+            const vertices = [];
+            const indices = [];
+            const profileCount = profilePoints.length;
+
+            // Step 1: Create shared axis vertices (one per axis point, shared across all segments)
+            const axisVertexIndices = {}; // Maps profile index -> vertex index
+            for (let j = 0; j < profileCount; j++) {
+                if (Math.abs(profilePoints[j].x) < 0.0001) {
+                    const vIdx = vertices.length / 3;
+                    axisVertexIndices[j] = vIdx;
+                    vertices.push(0, profilePoints[j].y, 0);
+                }
+            }
+
+            // Step 2: Create non-axis vertices for each segment
+            const segmentVertexBase = vertices.length / 3;
+            const axisCount = Object.keys(axisVertexIndices).length;
+            const nonAxisCount = profileCount - axisCount;
+
+            for (let i = 0; i <= segments; i++) {
+                const phi = phiStart + (i / segments) * phiLength;
+                const cosPhi = Math.cos(phi);
+                const sinPhi = Math.sin(phi);
+
+                for (let j = 0; j < profileCount; j++) {
+                    if (axisVertexIndices[j] !== undefined) continue; // Skip axis points
+
+                    const p = profilePoints[j];
+                    const x = p.x * sinPhi;
+                    const y = p.y;
+                    const z = p.x * cosPhi;
+                    vertices.push(x, y, z);
+                }
+            }
+
+            // Step 3: Helper to get vertex index for (segment, profile point)
+            const getVertexIndex = (segmentIdx, profileIdx) => {
+                if (axisVertexIndices[profileIdx] !== undefined) {
+                    return axisVertexIndices[profileIdx];
+                }
+                // Count non-axis profile points before this one
+                let nonAxisIdx = 0;
+                for (let j = 0; j < profileIdx; j++) {
+                    if (axisVertexIndices[j] === undefined) nonAxisIdx++;
+                }
+                return (
+                    segmentVertexBase + segmentIdx * nonAxisCount + nonAxisIdx
+                );
+            };
+
+            // Step 4: Create quads connecting consecutive angular rings
+            for (let i = 0; i < segments; i++) {
+                for (let j = 0; j < profileCount - 1; j++) {
+                    const a = getVertexIndex(i, j);
+                    const b = getVertexIndex(i + 1, j);
+                    const c = getVertexIndex(i, j + 1);
+                    const d = getVertexIndex(i + 1, j + 1);
+
+                    // Two triangles per quad
+                    indices.push(a, b, c);
+                    indices.push(b, d, c);
+                }
+            }
+
+            // Step 5: Add end caps if partial lathe
+            if (includeCaps && phiLength < 2 * Math.PI - 0.01) {
+                // Use Earcut for proper triangulation (handles concave profiles)
+                this.addEarcutCapsToLathe(
+                    indices,
+                    profilePoints,
+                    segments,
+                    getVertexIndex
+                );
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute(
+                "position",
+                new THREE.BufferAttribute(new Float32Array(vertices), 3)
+            );
+            geometry.setIndex(indices);
+
+            // Rotate to match lathe orientation (Z becomes height axis)
+            geometry.rotateX(-Math.PI / 2);
+
+            // Compute normals for proper lighting
+            geometry.computeVertexNormals();
+            geometry.normalizeNormals();
+
+            return geometry;
+        } catch (error) {
+            this.log.error(
+                "Error creating lathe with end caps:",
+                error.message
+            );
+            return null;
+        }
+    }
+
+    /**
+     * Add properly triangulated caps using Earcut
+     * Handles both convex and concave profiles correctly
+     * @param {Array<number>} indices - Index array to append to
+     * @param {Array<THREE.Vector2>} profilePoints - Profile points
+     * @param {number} segments - Total number of angular segments
+     * @param {Function} getVertexIndex - Function to get vertex index (segment, profileIdx)
+     */
+    addEarcutCapsToLathe(indices, profilePoints, segments, getVertexIndex) {
+        const profileCount = profilePoints.length;
+
+        // Prepare 2D coordinates for Earcut
+        const flatCoords = [];
+        for (let j = 0; j < profileCount; j++) {
+            flatCoords.push(profilePoints[j].x, profilePoints[j].y);
+        }
+
+        // Triangulate the profile shape
+        const triangles = Earcut(flatCoords, null, 2);
+
+        // Add start cap triangles
+        // Normal should point in -phi direction (backward along rotation)
+        for (let i = 0; i < triangles.length; i += 3) {
+            const a = getVertexIndex(0, triangles[i]);
+            const b = getVertexIndex(0, triangles[i + 1]);
+            const c = getVertexIndex(0, triangles[i + 2]);
+            // Same winding as Earcut output
+            indices.push(a, b, c);
+        }
+
+        // Add end cap triangles
+        // Normal should point in +phi direction (forward along rotation)
+        for (let i = 0; i < triangles.length; i += 3) {
+            const a = getVertexIndex(segments, triangles[i]);
+            const b = getVertexIndex(segments, triangles[i + 1]);
+            const c = getVertexIndex(segments, triangles[i + 2]);
+            // Reversed winding from Earcut output
+            indices.push(a, c, b);
+        }
+    }
+
+    /**
+     * Add end caps using THREE.ShapeGeometry for proper triangulation
+     * @param {Array<number>} vertices - Vertex array
+     * @param {Array<number>} indices - Index array
+     * @param {Array<THREE.Vector2>} profilePoints - Profile points
+     * @param {number} segments - Number of segments
+     * @param {number} phiStart - Start angle
+     * @param {number} phiLength - Angular extent
+     */
+    addShapeGeometryCaps(
+        vertices,
+        indices,
+        profilePoints,
+        segments,
+        phiStart,
+        phiLength
+    ) {
+        const profileCount = profilePoints.length;
+        const startBaseIdx = 0;
+        const endBaseIdx = segments * profileCount;
+
+        // Create shape from profile points
+        const shape = new THREE.Shape();
+        shape.moveTo(profilePoints[0].x, profilePoints[0].y);
+        for (let i = 1; i < profileCount; i++) {
+            shape.lineTo(profilePoints[i].x, profilePoints[i].y);
+        }
+        // Close the shape back to start
+        shape.lineTo(profilePoints[0].x, profilePoints[0].y);
+
+        // Generate triangulation using ShapeGeometry
+        const shapeGeo = new THREE.ShapeGeometry(shape);
+        const shapeIndices = shapeGeo.index.array;
+
+        // Add triangles for start cap (using existing vertices)
+        for (let i = 0; i < shapeIndices.length; i += 3) {
+            const a = startBaseIdx + shapeIndices[i];
+            const b = startBaseIdx + shapeIndices[i + 1];
+            const c = startBaseIdx + shapeIndices[i + 2];
+            indices.push(a, c, b); // Reversed winding
+        }
+
+        // Add triangles for end cap (using existing vertices)
+        for (let i = 0; i < shapeIndices.length; i += 3) {
+            const a = endBaseIdx + shapeIndices[i];
+            const b = endBaseIdx + shapeIndices[i + 1];
+            const c = endBaseIdx + shapeIndices[i + 2];
+            indices.push(a, b, c); // Normal winding
+        }
+
+        shapeGeo.dispose();
+    }
+
+    /**
+     * Add connections along axis between all segments
+     * For each axis point, create triangles connecting it across segments
+     * This closes the "seam" along the axis for partial lathes
+     * @param {Array<number>} indices - Index array to append to
+     * @param {Array<THREE.Vector2>} profilePoints - Profile points
+     * @param {number} segments - Total number of angular segments
+     */
+
+    addAxisConnections(indices, profilePoints, segments) {
+        const profileCount = profilePoints.length;
+
+        // Find all axis points (points where radius ≈ 0)
+        const axisPointIndices = [];
+        for (let j = 0; j < profileCount; j++) {
+            if (Math.abs(profilePoints[j].x) < 0.0001) {
+                axisPointIndices.push(j);
+            }
+        }
+
+        // For each axis point, connect it across all segments
+        for (const axisIdx of axisPointIndices) {
+            // Find the adjacent non-axis point
+            let adjacentIdx = -1;
+            if (axisIdx === 0) {
+                // First point is on axis, next point should be off-axis
+                adjacentIdx = axisIdx + 1;
+            } else if (axisIdx === profileCount - 1) {
+                // Last point is on axis, previous point should be off-axis
+                adjacentIdx = axisIdx - 1;
+            }
+
+            if (adjacentIdx === -1) continue;
+
+            // Create triangles from axis to adjacent point across all segments
+            for (let i = 0; i < segments; i++) {
+                const axisA = i * profileCount + axisIdx;
+                const axisB = (i + 1) * profileCount + axisIdx;
+                const adjA = i * profileCount + adjacentIdx;
+                const adjB = (i + 1) * profileCount + adjacentIdx;
+
+                // Create two triangles to close the quad
+                // Winding depends on whether axis is at start or end
+                if (axisIdx === 0) {
+                    // Bottom axis - normal winding
+                    indices.push(axisA, adjA, axisB);
+                    indices.push(axisB, adjA, adjB);
+                } else {
+                    // Top axis - reversed winding
+                    indices.push(axisA, axisB, adjA);
+                    indices.push(axisB, adjB, adjA);
+                }
+            }
+        }
+    }
+
+    /**
+     * Adds triangulated end caps using Earcut library
+     * Creates proper triangulated faces for the start and end of partial lathe
+     * @param {Array<number>} vertices - Vertex array (already contains all lathe vertices)
+     * @param {Array<number>} indices - Index array to append to
+     * @param {Array<THREE.Vector2>} profilePoints - Profile points
+     * @param {number} segments - Total number of angular segments
+     * @param {number} phiStart - Start angle in radians
+     * @param {number} phiLength - Angular extent in radians
+     */
+    addLatheEndCapsWithEarcut(
+        vertices,
+        indices,
+        profilePoints,
+        segments,
+        phiStart,
+        phiLength
+    ) {
+        const profileCount = profilePoints.length;
+
+        // CAP 1: At phiStart (first segment, indices 0 to profileCount-1)
+        this.addEarcutCap(
+            vertices,
+            indices,
+            profilePoints,
+            0, // baseIndex for first segment
+            phiStart,
+            true // isStart
+        );
+
+        // CAP 2: At phiStart + phiLength (last segment, indices segments*profileCount to (segments+1)*profileCount-1)
+        this.addEarcutCap(
+            vertices,
+            indices,
+            profilePoints,
+            segments * profileCount, // baseIndex for last segment
+            phiStart + phiLength,
+            false // isEnd
+        );
+    }
+
+    /**
+     * Add a single triangulated end cap using Earcut
+     * @param {Array<number>} vertices - Vertex array (contains 3D coordinates)
+     * @param {Array<number>} indices - Index array to append to
+     * @param {Array<THREE.Vector2>} profilePoints - Profile points in 2D
+     * @param {number} baseIndex - Starting index for this segment's vertices
+     * @param {number} phi - Angle for this cap
+     * @param {boolean} isStart - Whether this is the start cap (affects winding)
+     */
+    addEarcutCap(vertices, indices, profilePoints, baseIndex, phi, isStart) {
+        const profileCount = profilePoints.length;
+
+        // Create simple triangle fan from first point (axis) to all others
+        // This closes the cap by creating triangles between consecutive profile points
+        for (let i = 1; i < profileCount - 1; i++) {
+            const a = baseIndex; // First point (on axis)
+            const b = baseIndex + i;
+            const c = baseIndex + i + 1;
+
+            // Wind triangles consistently - opposite for start vs end
+            if (isStart) {
+                indices.push(a, c, b); // Reversed winding for start cap
+            } else {
+                indices.push(a, b, c); // Normal winding for end cap
+            }
+        }
+
+        // Add one more triangle to close the last edge (from first axis point to last axis point)
+        // This triangle uses the first non-axis point
+        const firstAxis = baseIndex; // Point 0
+        const lastAxis = baseIndex + profileCount - 1; // Point 17
+        const firstNonAxis = baseIndex + 1; // Point 1
+
+        if (isStart) {
+            indices.push(firstAxis, firstNonAxis, lastAxis);
+        } else {
+            indices.push(firstAxis, lastAxis, firstNonAxis);
+        }
+    }
+
+    /**
+     * Creates wedge shape for extrusion
      * @param {number} radius - Radius of the wedge
      * @param {number} phiStart - Start angle in radians
      * @param {number} phiLength - Angular extent in radians
@@ -1642,29 +1997,32 @@ export default class ExtrusionBuilder {
     }
 
     /**
-     * Create end caps (top and bottom discs) for LatheGeometry
-     * @param {Array<THREE.Vector2>} latheProfilePoints
-     * @param {number} rotationX - rotation applied to the lathe body (so caps align)
-     * @returns {THREE.BufferGeometry|null}
+     * Analyze and debug boundary edges of a geometry
+     * Shows which vertices form the boundary
+     * @param {THREE.BufferGeometry} geometry - Geometry to analyze
+     * @param {string} label - Label for logging
      */
-    createLatheEndCaps(latheProfilePoints, rotationX = 0) {
-        // End caps merging is complex - skipping for now
-        // LatheGeometry looks fine without caps
-        return null;
-    }
-
-    /**
-     * Check if a BufferGeometry is closed (no boundary edges)
-     */
-    isGeometryClosed(geometry) {
+    debugBoundaryEdges(geometry, label = "Geometry") {
         try {
             const geom = geometry.index ? geometry : geometry.toNonIndexed();
             const index = geom.index.array;
+            const positions = geom.attributes.position.array;
             const edgeCount = new Map();
+            const edges = [];
+
             const addEdge = (a, b) => {
                 const key = a < b ? `${a}_${b}` : `${b}_${a}`;
                 edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+                if (
+                    !edges.find(
+                        (e) =>
+                            (e.a === a && e.b === b) || (e.a === b && e.b === a)
+                    )
+                ) {
+                    edges.push({ a, b });
+                }
             };
+
             for (let i = 0; i < index.length; i += 3) {
                 const a = index[i],
                     b = index[i + 1],
@@ -1673,13 +2031,45 @@ export default class ExtrusionBuilder {
                 addEdge(b, c);
                 addEdge(c, a);
             }
-            for (const [, count] of edgeCount) {
-                if (count === 1) return false; // boundary edge
+
+            const boundaryVertices = new Set();
+            for (const [edge, count] of edgeCount) {
+                if (count === 1) {
+                    const [a, b] = edge.split("_").map(Number);
+                    boundaryVertices.add(a);
+                    boundaryVertices.add(b);
+                }
             }
-            return true;
+
+            this.log.info(`${label} boundary analysis:`, {
+                totalVertices: positions.length / 3,
+                boundaryVertices: boundaryVertices.size,
+                boundaryEdges: edgeCount.size,
+            });
+
+            if (boundaryVertices.size > 0) {
+                const samples = Array.from(boundaryVertices).slice(0, 3);
+                this.log.info(`Sample boundary vertices:`, {
+                    count: boundaryVertices.size,
+                    samples: samples.map((i) => ({
+                        idx: i,
+                        x: positions[i * 3],
+                        y: positions[i * 3 + 1],
+                        z: positions[i * 3 + 2],
+                    })),
+                });
+            }
+
+            return {
+                boundaryVertices: Array.from(boundaryVertices),
+                totalEdges: edgeCount.size,
+                boundaryEdgeCount: Array.from(edgeCount.values()).filter(
+                    (c) => c === 1
+                ).length,
+            };
         } catch (e) {
-            this.log.warn("isGeometryClosed failed:", e);
-            return false;
+            this.log.error("debugBoundaryEdges failed:", e);
+            return null;
         }
     }
 
