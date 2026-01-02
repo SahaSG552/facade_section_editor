@@ -148,18 +148,49 @@ class CSGEngine {
                 this.panelBBox
             );
 
-            // Deduplicate by logical bit identity (bitIndex) to avoid double subtraction
+            // Deduplicate by mesh identity (geometry uuid) to keep all separate bit parts
+            // For multi-part bits (segments + lathes), each part is kept as separate mesh
             const uniqueIntersectingMeshes = [];
-            const seenByBit = new Set();
-            // Iterate from end to prefer latest-created mesh per bit
+            const seenByMesh = new Set();
+
             for (let i = intersectingMeshes.length - 1; i >= 0; i--) {
                 const m = intersectingMeshes[i];
-                const key = m.userData?.bitIndex ?? m.geometry?.uuid ?? m.uuid;
-                if (!seenByBit.has(key)) {
-                    seenByBit.add(key);
+                // Use geometry uuid to ensure each mesh is unique
+                // This allows multiple parts per bit (segments, lathes, etc.)
+                const key = m.geometry?.uuid ?? m.uuid;
+                if (!seenByMesh.has(key)) {
+                    seenByMesh.add(key);
                     uniqueIntersectingMeshes.unshift(m);
                 }
             }
+
+            // Sort meshes: segments first, then lathes
+            // This ensures proper order of CSG subtraction
+            uniqueIntersectingMeshes.sort((a, b) => {
+                const aIsLathe =
+                    a.userData?.isPartialLathe || a.userData?.isLatheJunction;
+                const bIsLathe =
+                    b.userData?.isPartialLathe || b.userData?.isLatheJunction;
+                // Segments (not lathe) come first, lathes come last
+                if (aIsLathe && !bIsLathe) return -1; // a is lathe, b is segment: b comes first
+                if (!aIsLathe && bIsLathe) return 1; // a is segment, b is lathe: a comes first
+                // Both same type, keep original order
+                return 0;
+            });
+
+            this.log.info("CSG subtraction order:", {
+                totalMeshes: uniqueIntersectingMeshes.length,
+                segmentsFirst: uniqueIntersectingMeshes.filter(
+                    (m) =>
+                        !m.userData?.isPartialLathe &&
+                        !m.userData?.isLatheJunction
+                ).length,
+                lathesSecond: uniqueIntersectingMeshes.filter(
+                    (m) =>
+                        m.userData?.isPartialLathe ||
+                        m.userData?.isLatheJunction
+                ).length,
+            });
 
             const csgSignature = this.buildCSGSignature(
                 uniqueIntersectingMeshes
@@ -482,9 +513,10 @@ class CSGEngine {
         this.bitExtrudeMeshes.forEach((mesh) => {
             const shouldBeVisible = window.bitsVisible !== false;
             mesh.visible = shouldBeVisible;
-            // Sync edge visibility with mesh visibility
-            if (mesh.userData.edgeLines) {
-                mesh.userData.edgeLines.visible = shouldBeVisible;
+            // Sync edge visibility with mesh visibility (always visible with mesh if bits are visible)
+            if (mesh.userData && mesh.userData.edgeLines) {
+                mesh.userData.edgeLines.visible =
+                    shouldBeVisible && this.materialManager?.isEdgesEnabled?.();
             }
         });
 
@@ -523,8 +555,8 @@ class CSGEngine {
         });
         this.bitExtrudeMeshes.forEach((mesh) => {
             mesh.visible = false;
-            // Sync edge visibility with mesh visibility
-            if (mesh.userData.edgeLines) {
+            // Hide edges when part view is active (frezas hidden)
+            if (mesh.userData && mesh.userData.edgeLines) {
                 mesh.userData.edgeLines.visible = false;
             }
         });
@@ -579,6 +611,45 @@ class CSGEngine {
             this.partMesh.material?.dispose();
         }
         this.log.info("CSGEngine disposed");
+    }
+
+    /**
+     * Perform CSG union (addition) of two meshes
+     * @param {THREE.Mesh} meshA - First mesh
+     * @param {THREE.Mesh} meshB - Second mesh
+     * @returns {THREE.Mesh|null} - Resulting union mesh
+     */
+    union(meshA, meshB) {
+        try {
+            if (!meshA || !meshB) {
+                this.log.error("Union failed: one or both meshes are null");
+                return null;
+            }
+
+            // Use three-bvh-csg for union operation
+            const evaluator = new Evaluator();
+            const brushA = new Brush(meshA.geometry, meshA.material);
+            const brushB = new Brush(meshB.geometry, meshB.material);
+
+            brushA.updateMatrixWorld();
+            brushB.updateMatrixWorld();
+
+            const result = evaluator.evaluate(brushA, brushB, ADDITION);
+
+            if (!result) {
+                this.log.error("Union operation returned null");
+                return null;
+            }
+
+            const unionMesh = new THREE.Mesh(result, meshA.material);
+            unionMesh.castShadow = true;
+            unionMesh.receiveShadow = true;
+
+            return unionMesh;
+        } catch (error) {
+            this.log.error("Error in union operation:", error.message);
+            return null;
+        }
     }
 }
 

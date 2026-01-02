@@ -188,16 +188,17 @@ class MaterialManager {
 
         if (enabled) {
             // Create fresh edge visualizations when enabled
-            if (this.panelMesh) {
+            if (this.panelMesh && this.panelMesh.visible) {
                 this.addEdgeVisualization(this.panelMesh);
             }
-            if (this.partMesh) {
+            if (this.partMesh && this.partMesh.visible) {
                 this.addEdgeVisualization(this.partMesh);
             }
-            // Create edge visualization for all bit extrusions
+            // Create edge visualization ONLY for visible bit extrusions
+            // In Part mode, bit extrusions are hidden, so don't create edges for them
             if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
                 this.bitExtrudeMeshes.forEach((mesh) => {
-                    if (mesh) {
+                    if (mesh && mesh.visible) {
                         this.addEdgeVisualization(mesh);
                     }
                 });

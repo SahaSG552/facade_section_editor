@@ -324,6 +324,7 @@ export default class ExtrusionBuilder {
     constructor() {
         this.log = LoggerFactory.createLogger("ExtrusionBuilder");
         this.materialManager = null;
+        this.csgEngine = null;
         this.edgeMatcher = new MeshEdgeMatcher(0.001);
         this.log.info("Created");
     }
@@ -332,9 +333,11 @@ export default class ExtrusionBuilder {
      * Initialize with dependencies
      * @param {object} config - Configuration object
      * @param {MaterialManager} config.materialManager - Material manager for wireframe state
+     * @param {CSGEngine} config.csgEngine - CSG engine for boolean operations
      */
     initialize(config) {
         this.materialManager = config.materialManager;
+        this.csgEngine = config.csgEngine;
         this.log.info("Initialized");
     }
 
@@ -1128,12 +1131,12 @@ export default class ExtrusionBuilder {
                     (p) => new THREE.Vector3(p.x, p.y, p.z)
                 );
 
-                // Create open-ended extrusion (no caps)
+                // Create closed extrusion WITH caps at segment ends
                 const geometry = this.createProfiledContourGeometry(
                     profile,
                     contour,
                     false, // contourClosed = false
-                    true // openEnded = true (no caps)
+                    false // openEnded = false (WITH caps)
                 );
 
                 if (!geometry) {
@@ -1148,7 +1151,7 @@ export default class ExtrusionBuilder {
                     color: new THREE.Color(color || "#cccccc"),
                     roughness: 0.5,
                     metalness: 0.2,
-                    side: THREE.DoubleSide, // Double-sided for open-ended extrusions
+                    side: THREE.FrontSide, // Single-sided for closed extrusions
                     wireframe: this.materialManager
                         ? this.materialManager.isWireframeEnabled()
                         : false,
@@ -1200,36 +1203,48 @@ export default class ExtrusionBuilder {
                 }
             }
 
-            // Clip extrusion meshes at junctions using BVH
-            this.log.info("Applying corner clipping to extrusions...");
-            const clippingResult = this.clipExtrusionsAtJunctions(
-                segmentMeshes,
-                junctionDataArray
-            );
-            const clippedSegmentMeshes = clippingResult.clippedMeshes;
-            const cuttingPlanes = clippingResult.cuttingPlanes;
-
-            // Return array of all clipped segment, lathe meshes, and cutting planes
-            const allMeshes = [
-                ...clippedSegmentMeshes,
-                ...latheMeshes,
-                ...cuttingPlanes,
-            ];
+            // Return array of segment and lathe meshes only (solid geometry)
+            const allMeshes = [...segmentMeshes, ...latheMeshes];
 
             if (allMeshes.length === 0) {
                 this.log.warn("Round extrusion: No meshes created");
                 return null;
             }
 
+            // Test if meshes are watertight (closed)
+            this.log.info("Testing mesh closure (watertight)...");
+            segmentMeshes.forEach((mesh, i) => {
+                const isClosed = this.isMeshWatertight(mesh);
+                this.log.info(
+                    `Segment ${i}: ${isClosed ? "CLOSED ✓" : "OPEN ✗"}`
+                );
+            });
+            latheMeshes.forEach((mesh, i) => {
+                const isClosed = this.isMeshWatertight(mesh);
+                this.log.info(
+                    `Lathe ${i}: ${isClosed ? "CLOSED ✓" : "OPEN ✗"}`
+                );
+            });
+
             this.log.info("Round extrusion built:", {
-                segments: clippedSegmentMeshes.length,
+                segments: segmentMeshes.length,
                 lathes: latheMeshes.length,
-                cuttingPlanes: cuttingPlanes.length,
                 total: allMeshes.length,
                 junctionsProcessed: junctionDataArray.length,
             });
 
-            // Return as array since we now have multiple separate meshes
+            // Group all solid meshes as separate bit parts (for CSG subtraction)
+            // Mark them as part of the same bit for proper CSG operation
+            allMeshes.forEach((mesh, index) => {
+                mesh.userData.isBitPart = true;
+                mesh.userData.bitPartIndex = index;
+            });
+
+            this.log.info(
+                `Returning ${allMeshes.length} bit parts (segments + lathes)`
+            );
+
+            // Return all parts separately (NO union)
             return allMeshes;
         } catch (error) {
             this.log.error("Error in extrudeAlongPathRound:", error.message);
@@ -1345,8 +1360,8 @@ export default class ExtrusionBuilder {
             while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
             while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
 
-            // Determine start angle and sweep direction
-            let phiStart, phiLength;
+            // Store original partial angles for cutting plane visualization
+            let originalPhiStart, originalPhiLength;
 
             // For CW paths (typical milling outer contour):
             // - Right turns (cross.z < 0) = interior angles
@@ -1358,16 +1373,16 @@ export default class ExtrusionBuilder {
                 // For odd-numbered corners, add 180° to prevAngle to correct quadrant
                 // This pattern alternates for closed polygons
                 if (cornerNumber % 2 === 1) {
-                    phiStart = prevAngleXY + Math.PI;
+                    originalPhiStart = prevAngleXY + Math.PI;
                 } else {
-                    phiStart = prevAngleXY;
+                    originalPhiStart = prevAngleXY;
                 }
-                phiLength = Math.abs(angleDiff);
+                originalPhiLength = Math.abs(angleDiff);
             } else {
                 // CCW turn = exterior angle
                 // Start from nextAngle and sweep the exterior
-                phiStart = nextAngleXY;
-                phiLength = 2 * Math.PI - Math.abs(angleDiff);
+                originalPhiStart = nextAngleXY;
+                originalPhiLength = 2 * Math.PI - Math.abs(angleDiff);
             }
 
             this.log.info(
@@ -1383,19 +1398,15 @@ export default class ExtrusionBuilder {
                     nextAngleXY
                 ).toFixed(1)}° | angleDiff: ${THREE.MathUtils.radToDeg(
                     angleDiff
-                ).toFixed(1)}° | phiStart: ${THREE.MathUtils.radToDeg(
-                    phiStart
-                ).toFixed(1)}° | phiLength: ${THREE.MathUtils.radToDeg(
-                    phiLength
-                ).toFixed(1)}°`
+                ).toFixed(1)}° | Creating FULL 360° lathe`
             );
 
-            // Create partial lathe with the calculated angle and direction
+            // Create FULL 360° lathe (closed solid)
             const latheGeometry = new THREE.LatheGeometry(
                 lathePoints,
-                Math.max(8, Math.ceil(16 * (Math.abs(phiLength) / Math.PI))), // Adaptive segment count
-                phiStart,
-                phiLength
+                32, // Fixed 32 segments for full revolution
+                0, // Start at 0
+                Math.PI * 2 // Full 360 degrees
             );
 
             // Rotate 90 degrees to align with path (Z becomes up axis)
@@ -1408,7 +1419,7 @@ export default class ExtrusionBuilder {
                 color: new THREE.Color(color || "#ffaa00"),
                 roughness: 0.6,
                 metalness: 0.1,
-                side: THREE.DoubleSide,
+                side: THREE.FrontSide, // Single-sided for closed lathes
                 wireframe: this.materialManager
                     ? this.materialManager.isWireframeEnabled()
                     : false,
@@ -1421,11 +1432,11 @@ export default class ExtrusionBuilder {
             mesh.userData.angle = angle;
             mesh.userData.cornerNumber = cornerNumber;
 
-            // Return mesh + angle metadata for round (wedge) construction
+            // Return mesh + angle metadata (using original partial angles for cutting plane)
             return {
                 mesh,
-                phiStart,
-                phiLength,
+                phiStart: originalPhiStart,
+                phiLength: originalPhiLength,
                 junctionPoint: point.clone(),
                 angle,
                 cornerNumber,
@@ -2377,6 +2388,69 @@ export default class ExtrusionBuilder {
             );
             return { clippedMeshes: extrusionMeshes, cuttingPlanes: [] };
         }
+    }
+
+    /**
+     * Check if a mesh is watertight (closed, no holes)
+     * A mesh is watertight if every edge is shared by exactly 2 triangles
+     * @param {THREE.Mesh} mesh - Mesh to check
+     * @returns {boolean} True if mesh is watertight
+     */
+    isMeshWatertight(mesh) {
+        try {
+            const geometry = mesh.geometry;
+            if (!geometry || !geometry.index) {
+                this.log.warn("Geometry has no index buffer");
+                return false;
+            }
+
+            const indices = geometry.index.array;
+            const edgeMap = new Map();
+
+            // Process each triangle
+            for (let i = 0; i < indices.length; i += 3) {
+                const v0 = indices[i];
+                const v1 = indices[i + 1];
+                const v2 = indices[i + 2];
+
+                // Check all three edges
+                this._addEdge(edgeMap, v0, v1);
+                this._addEdge(edgeMap, v1, v2);
+                this._addEdge(edgeMap, v2, v0);
+            }
+
+            // Check if all edges are shared by exactly 2 triangles
+            let openEdges = 0;
+            let totalEdges = 0;
+            for (const [edge, count] of edgeMap) {
+                totalEdges++;
+                if (count !== 2) {
+                    openEdges++;
+                }
+            }
+
+            const watertight = openEdges === 0;
+            if (!watertight) {
+                this.log.debug(
+                    `Mesh has ${openEdges} open edges out of ${totalEdges} total edges`
+                );
+            }
+
+            return watertight;
+        } catch (error) {
+            this.log.error("Error checking mesh watertight:", error.message);
+            return false;
+        }
+    }
+
+    /**
+     * Helper to add edge to edge map
+     * @private
+     */
+    _addEdge(edgeMap, v1, v2) {
+        // Normalize edge direction (smaller index first)
+        const key = v1 < v2 ? `${v1}-${v2}` : `${v2}-${v1}`;
+        edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
     }
 
     /**

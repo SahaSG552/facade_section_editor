@@ -75,6 +75,7 @@ export default class ThreeModule extends BaseModule {
         // Initialize extrusion builder
         this.extrusionBuilder.initialize({
             materialManager: this.materialManager,
+            csgEngine: this.csgEngine,
         });
 
         // Add minimal on-canvas controls (material + wireframe + edges)
@@ -1520,28 +1521,28 @@ export default class ThreeModule extends BaseModule {
     exportToSTL(filename = "facade") {
         const meshesToExport = [];
 
-        // Always export panel mesh when present
-        if (this.panelMesh) {
-            meshesToExport.push(this.panelMesh);
-        }
-
-        // Always export raw extrude pieces (segments + lathes), excluding debug cutting planes
-        if (this.bitExtrudeMeshes && this.bitExtrudeMeshes.length) {
-            const filtered = this.bitExtrudeMeshes.filter(
-                (m) => !m.userData?.isCuttingPlane
-            );
-            meshesToExport.push(...filtered);
-            this.log.info(
-                `Exporting raw extrudes (segments + lathes): ${filtered.length} meshes`
-            );
-        }
-
-        // If CSG is active, also export the final part mesh as a separate body
+        // If Part mode is active, export ONLY the CSG result mesh
         if (this.csgEngine.isActive() && this.csgEngine.partMesh) {
             meshesToExport.push(this.csgEngine.partMesh);
             this.log.info(
-                "Exporting Part view (CSG result mesh) as separate body"
+                "Part mode active: Exporting ONLY Part view (CSG result mesh)"
             );
+        } else {
+            // Otherwise export panel + raw extrude pieces
+            if (this.panelMesh) {
+                meshesToExport.push(this.panelMesh);
+            }
+
+            // Export raw extrude pieces (segments + lathes), excluding debug cutting planes
+            if (this.bitExtrudeMeshes && this.bitExtrudeMeshes.length) {
+                const filtered = this.bitExtrudeMeshes.filter(
+                    (m) => !m.userData?.isCuttingPlane
+                );
+                meshesToExport.push(...filtered);
+                this.log.info(
+                    `Exporting raw extrudes (segments + lathes): ${filtered.length} meshes`
+                );
+            }
         }
 
         if (meshesToExport.length === 0) {
