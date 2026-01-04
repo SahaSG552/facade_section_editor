@@ -34,6 +34,16 @@ class BitsTableManager {
         this.callbacks = { ...this.callbacks, ...callbacks };
     }
 
+    /**
+     * Generate warnings for bit operation
+     * @param {Object} bit - Bit data (with pre-computed warnings array)
+     * @returns {Array<string>} Array of warning messages
+     */
+    generateWarnings(bit) {
+        // Warnings are now pre-computed in script.js where bitData is available
+        return bit.warnings || [];
+    }
+
     render(bits = [], selectedIndices = []) {
         if (!this.sheetBody) return;
 
@@ -90,7 +100,22 @@ class BitsTableManager {
         row.appendChild(numCell);
 
         const nameCell = document.createElement("td");
-        nameCell.textContent = bit.name;
+
+        const bitNameDiv = document.createElement("div");
+        bitNameDiv.textContent = bit.name;
+        nameCell.appendChild(bitNameDiv);
+
+        // Generate and display warnings
+        const warnings = this.generateWarnings(bit);
+        if (warnings.length > 0) {
+            const warningDiv = document.createElement("div");
+            warningDiv.textContent = warnings.join(", ");
+            warningDiv.style.fontSize = "8px";
+            warningDiv.style.color = "#9f9f9fff";
+            warningDiv.style.marginTop = "2px";
+            nameCell.appendChild(warningDiv);
+        }
+
         row.appendChild(nameCell);
 
         const anchorOffset = this.getAnchorOffset(bit);

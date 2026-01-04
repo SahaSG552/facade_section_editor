@@ -310,13 +310,13 @@ export default class ExtrusionBuilder {
         this.materialManager = null;
         this.csgEngine = null;
         this.edgeMatcher = new MeshEdgeMatcher(0.001);
-        
+
         // Public configuration for adaptive curve segmentation
         // Can be changed from console: extrusionBuilder.curveSegmentCoefficient = 3
         this.curveSegmentCoefficient = 0.2; // segments per mm
         this.curveSegmentMin = 16;
         this.curveSegmentMax = 64;
-        
+
         this.log.info("Created");
     }
 
@@ -485,7 +485,8 @@ export default class ExtrusionBuilder {
         partFrontHeight,
         depth,
         panelThickness,
-        panelAnchor
+        panelAnchor,
+        contourOffset = 0
     ) {
         this.log.debug("Creating curve from curves:", {
             curvesCount: pathCurves.length,
@@ -493,6 +494,7 @@ export default class ExtrusionBuilder {
             depth,
             panelThickness,
             panelAnchor,
+            contourOffset,
         });
 
         // Create 3D versions of curves
@@ -508,7 +510,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     const v2 = this.convertPoint2DTo3D(
                         curve.v2.x,
@@ -519,7 +522,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     return new THREE.LineCurve3(v1, v2);
                 } else if (curve instanceof THREE.CubicBezierCurve3) {
@@ -532,7 +536,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     const v1 = this.convertPoint2DTo3D(
                         curve.v1.x,
@@ -543,7 +548,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     const v2 = this.convertPoint2DTo3D(
                         curve.v2.x,
@@ -554,7 +560,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     const v3 = this.convertPoint2DTo3D(
                         curve.v3.x,
@@ -565,7 +572,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     return new THREE.CubicBezierCurve3(v0, v1, v2, v3);
                 } else if (curve instanceof THREE.QuadraticBezierCurve3) {
@@ -578,7 +586,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     const v1 = this.convertPoint2DTo3D(
                         curve.v1.x,
@@ -589,7 +598,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     const v2 = this.convertPoint2DTo3D(
                         curve.v2.x,
@@ -600,7 +610,8 @@ export default class ExtrusionBuilder {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        contourOffset
                     );
                     return new THREE.QuadraticBezierCurve3(v0, v1, v2);
                 }
@@ -637,15 +648,19 @@ export default class ExtrusionBuilder {
         partFrontHeight,
         depth,
         panelThickness,
-        panelAnchor
+        panelAnchor,
+        contourOffset = 0
     ) {
         // Panel in 3D space:
         // - X=0 is horizontal center
         // - Y=0 is bottom of panel
         // - Z depends on anchor
 
+        // Apply contour offset to x2d (for multiple VC passes)
+        const adjustedX2d = x2d + contourOffset;
+
         // Convert X: subtract partFront left edge, then center
-        const x3d = x2d - partFrontX - partFrontWidth / 2;
+        const x3d = adjustedX2d - partFrontX - partFrontWidth / 2;
 
         // Convert Y: path Y is in canvas space where Y increases downward
         // partFrontY is the top of the front view rectangle
@@ -800,8 +815,10 @@ export default class ExtrusionBuilder {
         }
 
         // Use public properties for adaptive segmentation
-        const calculated = Math.ceil(totalLength * this.curveSegmentCoefficient);
-        const result = calculated // Math.max(this.curveSegmentMin, Math.min(this.curveSegmentMax, calculated));
+        const calculated = Math.ceil(
+            totalLength * this.curveSegmentCoefficient
+        );
+        const result = calculated; // Math.max(this.curveSegmentMin, Math.min(this.curveSegmentMax, calculated));
 
         return result;
     }

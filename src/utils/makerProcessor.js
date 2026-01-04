@@ -60,12 +60,95 @@ function createPathData(obj, options = {}) {
     return model;
 }
 
+// Create extension rectangle above bit if needed
+function createBitExtension(bitObj, materialTopY, materialBottomY) {
+    if (!bitObj.group) return null;
+
+    const element = bitObj.group.querySelector(".bit-shape");
+    if (!element) return null;
+
+    // Get bit position
+    const transform = bitObj.group.getAttribute("transform");
+    let bitX = 0,
+        bitY = 0;
+    if (transform) {
+        const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+        if (match) {
+            bitX = parseFloat(match[1]);
+            bitY = parseFloat(match[2]);
+        }
+    }
+
+    // Get bit bounding box to determine width and top position
+    const bbox = element.getBBox();
+    const bitWidth = bbox.width;
+    const bitTopY = bitY + bbox.y; // Top of the bit in canvas coordinates
+    const bitBottomY = bitY; // Bottom of the bit (tip)
+
+    // Get bit data for shank collision detection
+    // For regular bits from bitsOnCanvas, use bitObj.bitData
+    // For phantom bits, bitData is stored in group.__bitData
+    const bitData = bitObj.bitData || (bitObj.group && bitObj.group.__bitData);
+    let extensionWidth = bitWidth;
+    let hasShankCollision = false;
+
+    // Check if bit top is below material surface
+    if (bitTopY > materialTopY) {
+        // Check for shank collision (if extension is needed and shank is wider than bit)
+        if (bitData && bitData.shankDiameter && bitData.diameter) {
+            const shankDiameter = parseFloat(bitData.shankDiameter);
+            const bitDiameter = parseFloat(bitData.diameter);
+
+            // If shank is wider than bit diameter, it collides with material
+            if (shankDiameter > bitDiameter) {
+                // Scale shank diameter to pixels
+                const scale = bitWidth / bitDiameter;
+                extensionWidth = shankDiameter * scale;
+                hasShankCollision = true;
+            }
+        }
+        // Create rectangle from material top to bit top + 1px extra for safety
+        const rectHeight = bitTopY - materialTopY + 1;
+        // For shank collision, offset by half the width difference to center wider extension
+        const widthOffset = hasShankCollision
+            ? (bitWidth - extensionWidth) / 2
+            : 0;
+        const rectX = bitX + bbox.x + widthOffset;
+        const rectY = materialTopY - 1;
+
+        // Create rectangle as SVG path and convert to maker.js model
+        const rectPath = `M ${rectX} ${rectY} L ${
+            rectX + extensionWidth
+        } ${rectY} L ${rectX + extensionWidth} ${
+            rectY + rectHeight
+        } L ${rectX} ${rectY + rectHeight} Z`;
+        const rectModel = makerjs.importer.fromSVGPathData(rectPath);
+
+        console.log("Created bit extension:", {
+            rectX,
+            rectY,
+            extensionWidth,
+            hasShankCollision,
+            rectHeight,
+            bitTopY,
+            materialTopY,
+        });
+
+        // Return model with collision info
+        rectModel.__hasShankCollision = hasShankCollision;
+        return rectModel;
+    }
+
+    return null;
+}
+
 function makerCalculateResultPolygon(
     panelWidth,
     panelThickness,
     panelX,
     panelY,
-    bitsOnCanvas
+    bitsOnCanvas,
+    phantomBits = []
 ) {
     const panelSection = document.getElementById("panel-section");
     const panelModel = createPathData(panelSection, {
@@ -77,11 +160,43 @@ function makerCalculateResultPolygon(
         console.error("Failed to create panel model");
         return "";
     }
+
+    // Get material top Y position (from panel-section element)
+    const materialTopY = parseFloat(panelSection.getAttribute("y")) || 0;
+
+    // Calculate material bottom Y using section height (in relative coordinates)
+    const sectionHeight = parseFloat(panelSection.getAttribute("height")) || 0;
+    const materialBottomY = materialTopY + sectionHeight;
+
+    // Collect models from both regular bits and phantom bits
     const bitModels = bitsOnCanvas
         .map((bit) => createPathData(bit))
         .filter((m) => m);
 
-    if (bitModels.length === 0) {
+    const phantomModels = phantomBits
+        .map((phantom) => createPathData(phantom))
+        .filter((m) => m);
+
+    // Create extension rectangles for bits that go below material surface
+    const bitExtensions = bitsOnCanvas
+        .map((bit) => createBitExtension(bit, materialTopY, materialBottomY))
+        .filter((m) => m);
+
+    const phantomExtensions = phantomBits
+        .map((phantom) =>
+            createBitExtension(phantom, materialTopY, materialBottomY)
+        )
+        .filter((m) => m);
+
+    // Combine all bit models and extensions
+    const allBitModels = [
+        ...bitModels,
+        ...phantomModels,
+        ...bitExtensions,
+        ...phantomExtensions,
+    ];
+
+    if (allBitModels.length === 0) {
         // No bits, return panel as is
         const svg = makerjs.exporter.toSVG(panelModel);
         const parser = new DOMParser();
@@ -90,9 +205,9 @@ function makerCalculateResultPolygon(
         return path ? path.getAttribute("d") : "";
     }
 
-    let unionBits = bitModels[0];
-    for (let i = 1; i < bitModels.length; i++) {
-        unionBits = makerjs.model.combineUnion(unionBits, bitModels[i]);
+    let unionBits = allBitModels[0];
+    for (let i = 1; i < allBitModels.length; i++) {
+        unionBits = makerjs.model.combineUnion(unionBits, allBitModels[i]);
     }
 
     // Создаём контейнер-модель с origin в [0, 0]

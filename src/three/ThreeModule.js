@@ -569,6 +569,212 @@ export default class ThreeModule extends BaseModule {
                 name: bit.name,
             });
 
+            const isVC = (bit.operation || "").toUpperCase() === "VC";
+
+            // For VC operation with multiple passes, process each pass
+            if (isVC) {
+                // Calculate depths and contour offsets arrays (same as in 2D)
+                const angle = bit.bitData.angle || 90;
+                const bitY = bit.y; // Use bit's Y coordinate
+                const hypotenuse = bit.bitData.diameter || 10;
+                const bitHeight =
+                    (hypotenuse / 2) *
+                    (1 / Math.tan((angle * Math.PI) / 180 / 2));
+                const passes =
+                    bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
+
+                // Calculate partial results (depth values for each pass)
+                const partialResults = [];
+                for (let i = 0; i < passes; i++) {
+                    partialResults.push((bitY * (i + 1)) / passes);
+                }
+
+                // Create depths array (reversed)
+                const depths = [...partialResults].reverse();
+
+                // Create contour offsets array
+                const contourOffsets = [];
+                for (let i = 0; i < passes; i++) {
+                    if (i === 0) {
+                        contourOffsets.push(0); // Main bit: no offset
+                    } else {
+                        const depthDiff = depths[0] - depths[i];
+                        const offset =
+                            depthDiff * Math.tan((angle * Math.PI) / 180 / 2);
+                        contourOffsets.push(-offset); // Negative for outward offset (offsetCalculator logic)
+                    }
+                }
+
+                this.log.debug(
+                    `VC bit ${bitIndex}: ${passes} passes, depths:`,
+                    depths,
+                    "offsets:",
+                    contourOffsets
+                );
+
+                // Get partFront points for offset calculation
+                const partFront = document.getElementById("part-front");
+                if (!partFront) {
+                    this.log.error(
+                        "partFront element not found for offset calculation!"
+                    );
+                    continue;
+                }
+
+                // Get offsetCalculator from window (it's created in updateOffsetContours)
+                const offsetCalculator = window.offsetCalculator;
+                if (!offsetCalculator) {
+                    this.log.error("offsetCalculator not found!");
+                    continue;
+                }
+
+                const partFrontPoints =
+                    offsetCalculator.rectToPoints(partFront);
+                if (!partFrontPoints || partFrontPoints.length === 0) {
+                    this.log.error("Failed to get partFront points");
+                    continue;
+                }
+
+                // Find all contours for this bit
+                const bitContours = offsetContours.filter(
+                    (c) => c.bitIndex === bitIndex
+                );
+                if (bitContours.length === 0) {
+                    this.log.debug(`No contours found for bit ${bitIndex}`);
+                    continue;
+                }
+
+                // Get the topAnchorCoords for calculating offset distances
+                const convertToTopAnchorCoordinates =
+                    window.convertToTopAnchorCoordinates;
+                if (!convertToTopAnchorCoordinates) {
+                    this.log.error("convertToTopAnchorCoordinates not found!");
+                    continue;
+                }
+                const topAnchorCoords = convertToTopAnchorCoordinates(bit);
+
+                // Process each pass
+                for (let passIndex = 0; passIndex < passes; passIndex++) {
+                    const isMainBit = passIndex === 0;
+                    const depth = depths[passIndex];
+                    const contourOffset = contourOffsets[passIndex];
+
+                    this.log.debug(
+                        `Processing VC pass ${passIndex}: depth=${depth}, offset=${contourOffset}`
+                    );
+
+                    // Calculate offset distance for this pass
+                    // For main bit: use topAnchorCoords.x (no offset)
+                    // For phantom bits: add contourOffset to topAnchorCoords.x
+                    const offsetDistance = topAnchorCoords.x + contourOffset;
+
+                    // Calculate offset contour using offsetCalculator
+                    const offsetPoints = offsetCalculator.calculateOffset(
+                        partFrontPoints,
+                        offsetDistance
+                    );
+
+                    if (!offsetPoints || offsetPoints.length === 0) {
+                        this.log.debug(
+                            `No offset points for bit ${bitIndex} pass ${passIndex}`
+                        );
+                        continue;
+                    }
+
+                    // Convert offset points to path data
+                    const pathData =
+                        offsetPoints
+                            .map((point, i) =>
+                                i === 0
+                                    ? `M ${point.x} ${point.y}`
+                                    : `L ${point.x} ${point.y}`
+                            )
+                            .join(" ") + " Z";
+
+                    // Parse path to get curves
+                    const pathCurves =
+                        this.extrusionBuilder.parsePathToCurves(pathData);
+                    if (pathCurves.length === 0) {
+                        this.log.debug(
+                            `No curves found for bit ${bitIndex} pass ${passIndex}`
+                        );
+                        continue;
+                    }
+
+                    // Create 3D curve from path curves with depth (no contourOffset needed anymore)
+                    const curve3D = this.extrusionBuilder.createCurveFromCurves(
+                        pathCurves,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+
+                    // Add path visualization for debugging
+                    const pathColor = isMainBit ? bit.color : "gray";
+                    const pathLine =
+                        this.extrusionBuilder.createPathVisualization(
+                            curve3D,
+                            pathColor
+                        );
+                    if (pathLine) {
+                        pathLine.userData.bitIndex = bitIndex;
+                        pathLine.userData.pass = passIndex;
+                        this.bitPathMeshes.push(pathLine);
+                    }
+
+                    // Create bit profile shape
+                    const bitProfile =
+                        await this.extrusionBuilder.createBitProfile(
+                            bit.bitData
+                        );
+                    if (!bitProfile) {
+                        this.log.debug(
+                            `No bit profile created for bit ${bitIndex} pass ${passIndex}`
+                        );
+                        continue;
+                    }
+
+                    // Extrude profile along curve
+                    const mesh = this.extrusionBuilder.extrudeAlongPath(
+                        bitProfile,
+                        curve3D,
+                        pathColor
+                    );
+
+                    if (mesh) {
+                        mesh.userData.operation = bit.operation || "subtract";
+                        mesh.userData.bitIndex = bitIndex;
+                        mesh.userData.pass = passIndex;
+                        mesh.userData.isPhantom = !isMainBit;
+
+                        // Make phantom bits semi-transparent
+                        if (!isMainBit) {
+                            mesh.material.transparent = true;
+                            mesh.material.opacity = 0.3;
+                        }
+
+                        this.bitExtrudeMeshes.push(mesh);
+                        this.log.debug(
+                            `Added VC pass ${passIndex} mesh for bit ${bitIndex}`
+                        );
+
+                        // Add edge visualization
+                        if (
+                            this.materialManager &&
+                            this.materialManager.isEdgesEnabled()
+                        ) {
+                            this.materialManager.addEdgeVisualization(mesh);
+                        }
+                    }
+                }
+                continue; // Skip normal processing for VC bits
+            }
+
+            // Standard operations: AL, OU, IN
             // Find offset contour for this bit
             const bitContours = offsetContours.filter(
                 (c) => c.bitIndex === bitIndex
@@ -648,36 +854,22 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // Extrude profile along curve - VC uses mitered, others use round
+            // Extrude profile along curve - use round mode for non-VC operations
             let extrudeMeshes = [];
-            const isVC = (bit.operation || "").toUpperCase() === "VC";
-            const mode = isVC ? "mitered" : "round";
-            this.log.info(
-                `Bit ${bitIndex} op=${bit.operation || "unknown"} → ${mode}`
+            const result = this.extrusionBuilder.extrudeAlongPathRound(
+                bitProfile,
+                curve3D,
+                bit.color
             );
-            if (isVC) {
-                const mesh = this.extrusionBuilder.extrudeAlongPath(
-                    bitProfile,
-                    curve3D,
-                    bit.color
-                );
-                if (mesh) extrudeMeshes = [mesh];
-            } else {
-                const result = this.extrusionBuilder.extrudeAlongPathRound(
-                    bitProfile,
-                    curve3D,
-                    bit.color
-                );
 
-                if (result) {
-                    // New return shape: { mergedMesh, parts, cuttingPlanes }
-                    if (result.mergedMesh) {
-                        extrudeMeshes = [result.mergedMesh];
-                    } else if (Array.isArray(result)) {
-                        extrudeMeshes = result;
-                    } else if (result.parts && Array.isArray(result.parts)) {
-                        extrudeMeshes = result.parts;
-                    }
+            if (result) {
+                // New return shape: { mergedMesh, parts, cuttingPlanes }
+                if (result.mergedMesh) {
+                    extrudeMeshes = [result.mergedMesh];
+                } else if (Array.isArray(result)) {
+                    extrudeMeshes = result;
+                } else if (result.parts && Array.isArray(result.parts)) {
+                    extrudeMeshes = result.parts;
                 }
             }
 

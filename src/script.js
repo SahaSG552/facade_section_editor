@@ -661,6 +661,124 @@ function convertToTopAnchorCoordinates(bit) {
     };
 }
 
+// Update bit extensions (rectangles above bits that go below material surface)
+function updateBitExtensions() {
+    const extensionsLayer = mainCanvasManager.getLayer("phantoms"); // Use phantoms layer for now
+
+    // Remove existing extensions
+    const existingExtensions =
+        extensionsLayer.querySelectorAll(".bit-extension");
+    existingExtensions.forEach((ext) => ext.remove());
+
+    // Get material top Y position (from panel-section element)
+    const panelSection = document.getElementById("panel-section");
+    if (!panelSection) return;
+
+    const materialTopY = parseFloat(panelSection.getAttribute("y")) || 0;
+
+    // Clear shank collision flags before checking
+    bitsOnCanvas.forEach((bit) => {
+        bit.hasShankCollision = false;
+    });
+
+    // Process all bits (regular and phantom)
+    const allBits = [...bitsOnCanvas];
+
+    // Also collect phantom bits
+    const phantomsLayer = mainCanvasManager.getLayer("phantoms");
+    const phantomGroups = phantomsLayer.querySelectorAll(".phantom-bit");
+    phantomGroups.forEach((group) => {
+        allBits.push({ group });
+    });
+
+    allBits.forEach((bit) => {
+        if (!bit.group) return;
+
+        const element = bit.group.querySelector(".bit-shape");
+        if (!element) return;
+
+        // Get bit position
+        const transform = bit.group.getAttribute("transform");
+        let bitX = 0,
+            bitY = 0;
+        if (transform) {
+            const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+            if (match) {
+                bitX = parseFloat(match[1]);
+                bitY = parseFloat(match[2]);
+            }
+        }
+
+        // Get bit bounding box
+        const bbox = element.getBBox();
+        const bitWidth = bbox.width;
+        const bitTopY = bitY + bbox.y; // Top of the bit in canvas coordinates
+        const bitBottomY = bitY; // Bottom of the bit (tip)
+
+        // Get bit data for shank collision detection
+        // For regular bits from bitsOnCanvas, use bit.bitData
+        // For phantom bits, bitData is stored in group.__bitData
+        const bitData = bit.bitData || (bit.group && bit.group.__bitData);
+        let extensionWidth = bitWidth;
+        let extensionColor = "red";
+
+        // Check if bit top is below material surface (bit went deeper)
+        if (bitTopY > materialTopY) {
+            // Check for shank collision - if shank is wider than bit, it's a collision
+            if (bitData && bitData.shankDiameter && bitData.diameter) {
+                const shankDiameter = parseFloat(bitData.shankDiameter);
+                const bitDiameter = parseFloat(bitData.diameter);
+
+                if (shankDiameter > bitDiameter) {
+                    // Scale shank diameter to pixels
+                    const scale = bitWidth / bitDiameter;
+                    extensionWidth = shankDiameter * scale;
+                    extensionColor = "darkred";
+
+                    // Mark bit as having shank collision for warnings table
+                    bit.hasShankCollision = true;
+                }
+            }
+
+            // Create rectangle from material top to bit top + 1px
+            const rectHeight = bitTopY - materialTopY + 1;
+            // For shank collision, offset by half the width difference to center wider extension
+            const widthOffset =
+                extensionColor === "darkred"
+                    ? (bitWidth - extensionWidth) / 2
+                    : 0;
+            const rectX = bitX + bbox.x + widthOffset;
+            const rectY = materialTopY - 1;
+
+            // Colors based on collision detection
+            const fillColor =
+                extensionColor === "darkred"
+                    ? "rgba(139, 0, 0, 0.4)"
+                    : "rgba(255, 0, 0, 0.3)";
+            const strokeColor = extensionColor;
+
+            // Create SVG rectangle for visualization
+            const rect = document.createElementNS(
+                "http://www.w3.org/2000/svg",
+                "rect"
+            );
+            rect.setAttribute("x", rectX);
+            rect.setAttribute("y", rectY);
+            rect.setAttribute("width", extensionWidth);
+            rect.setAttribute("height", rectHeight);
+            rect.setAttribute("fill", fillColor);
+            rect.setAttribute("stroke", strokeColor);
+            rect.setAttribute(
+                "stroke-width",
+                getAdaptiveStrokeWidth(mainCanvasManager.zoomLevel)
+            );
+            rect.classList.add("bit-extension");
+
+            extensionsLayer.appendChild(rect);
+        }
+    });
+}
+
 // Update phantom bits for all bits
 function updatePhantomBits() {
     const phantomsLayer = mainCanvasManager.getLayer("phantoms");
@@ -683,25 +801,36 @@ function updatePhantomBits() {
             // Calculate number of passes
             const passes = bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
 
-            // Calculate partial results (depth values)
+            // Calculate partial results (depth values for each pass)
             const partialResults = [];
             for (let i = 0; i < passes; i++) {
                 partialResults.push((bitY * (i + 1)) / passes);
             }
 
-            // Draw phantom bits if passes > 1
+            // Create arrays for depths and contour offsets
+            // Depths array: stores depth for each pass (last is the main bit depth)
+            const depths = [...partialResults].reverse(); // [19, 8] for 2 passes example
+
+            // Contour offsets array: stores x-offset from main bit contour
+            // Main bit has 0 offset, phantom bits have negative offset (outward)
+            const contourOffsets = [];
+            for (let i = 0; i < passes; i++) {
+                if (i === 0) {
+                    // Main bit: no offset from its contour
+                    contourOffsets.push(0);
+                } else {
+                    // Phantom bits: calculate offset outward (negative value)
+                    const depthDiff = depths[0] - depths[i];
+                    const offset = depthDiff * Math.tan(angleToRad(angle / 2));
+                    contourOffsets.push(-offset); // Negative for outward offset
+                }
+            }
+
+            // Draw all bits: main bit first (index 0), then phantom bits
             if (passes > 1) {
-                // Calculate offsets for each pass (same logic as in updateOffsetContours)
-                const offsets = partialResults.map((value) => {
-                    const offsetValue = value * Math.tan(angleToRad(angle / 2));
-                    return topAnchorCoords.x - offsetValue; // Use top anchor X coordinate
-                });
-                offsets.reverse(); // Reverse to start from outermost pass
-
-                offsets.forEach((offsetDistance, passIndex) => {
-                    if (passIndex === passes - 1) return; // skip the last one (real bit)
-
-                    // Create phantom bit at offset position with depth from partial results
+                // Draw phantom bits (skip index 0 which is the main bit)
+                for (let passIndex = 1; passIndex < passes; passIndex++) {
+                    // Create phantom bit at offset position with depth from depths array
                     const phantomBitData = {
                         ...bit.bitData,
                         fillColor: "rgba(128, 128, 128, 0.1)", // Gray with 0.1 opacity
@@ -710,10 +839,8 @@ function updatePhantomBits() {
                     // Position phantom bit using bit's logical coordinates and current anchor
                     // Convert offset back to logical coordinates relative to current anchor
                     const currentAnchorOffset = getpanelAnchorOffset();
-                    const logicalX =
-                        offsets[passIndex + 1] - currentAnchorOffset.x;
-                    const logicalY =
-                        partialResults[passIndex] - currentAnchorOffset.y;
+                    const logicalX = bit.x + contourOffsets[passIndex];
+                    const logicalY = depths[passIndex] - currentAnchorOffset.y;
 
                     // Calculate absolute position from current anchor
                     const phantomAbsX = anchorCoords.x + logicalX;
@@ -740,11 +867,17 @@ function updatePhantomBits() {
                     );
                     phantomShape.classList.add("phantom-bit");
 
+                    // Store bitData in the phantom shape group for later access
+                    phantomShape.__bitData = bit.bitData;
+
                     phantomsLayer.appendChild(phantomShape);
-                });
+                }
             }
         }
     });
+
+    // Update bit extensions after phantom bits are created
+    updateBitExtensions();
 }
 
 // Update offset contours for all bits
@@ -768,6 +901,10 @@ function updateOffsetContours() {
 
     // Create offset calculator instance
     const offsetCalculator = new OffsetCalculator();
+
+    // Make offsetCalculator and helper functions available globally for ThreeModule
+    window.offsetCalculator = offsetCalculator;
+    window.convertToTopAnchorCoordinates = convertToTopAnchorCoordinates;
 
     // Get the original partFront rectangle points
     const partFrontPoints = offsetCalculator.rectToPoints(partFront);
@@ -798,7 +935,13 @@ function updateOffsetContours() {
                 return topAnchorCoords.x - offsetValue; // Use top anchor X coordinate
             });
             offsets.reverse(); // Reverse to start from outermost pass
-
+            console.log(
+                "Bit",
+                index,
+                "V-Carve offsets:",
+                offsets,
+                partialResults
+            );
             // Add base offset at topAnchorCoords.x (black, default layer)
             if (partFrontPoints && partFrontPoints.length > 0) {
                 const baseOffsetPoints = offsetCalculator.calculateOffset(
@@ -1198,8 +1341,51 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
 // Update bits sheet
 function updateBitsSheet() {
     if (bitsTableManager) {
+        // Enrich bits with warnings before rendering
+        const bitsWithWarnings = bitsOnCanvas.map((bit) => {
+            const warnings = [];
+
+            // Check if bit has VC operation
+            if (bit.operation === "VC" && bit.bitData) {
+                // Convert to top anchor coordinates to get depth
+                const topAnchorCoords = convertToTopAnchorCoordinates(bit);
+                const bitY = topAnchorCoords.y; // Depth from top anchor
+
+                const angle = parseFloat(bit.bitData.angle) || 0;
+                const diameter = parseFloat(bit.bitData.diameter) || 0;
+
+                if (angle > 0 && diameter > 0 && bitY > 0) {
+                    // Calculate number of passes
+                    const hypotenuse = diameter;
+                    const bitHeight =
+                        (hypotenuse / 2) *
+                        (1 / Math.tan(angleToRad(angle) / 2));
+                    const passes =
+                        bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
+
+                    if (passes > 1) {
+                        warnings.push(`${passes} passes`);
+                    }
+                }
+            }
+
+            // Check for shank collision (set in updateBitExtensions)
+            if (bit.hasShankCollision) {
+                warnings.push("⚠ Shank collision");
+            }
+
+            // Check if bit cuts through material
+            const topAnchorCoords = convertToTopAnchorCoordinates(bit);
+            const bitDepth = topAnchorCoords.y; // Depth from top anchor
+            if (bitDepth >= panelThickness) {
+                warnings.push("⚠ Cut through");
+            }
+
+            return { ...bit, warnings };
+        });
+
         bitsTableManager.render(
-            bitsOnCanvas,
+            bitsWithWarnings,
             selectionManager.getSelectedIndices()
         );
     }
@@ -1756,12 +1942,24 @@ function updatePartShape() {
     const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
     const panelY =
         (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+
+    // Collect phantom bits for boolean operations
+    const phantomsLayer = mainCanvasManager.getLayer("phantoms");
+    const phantomBits = [];
+    if (phantomsLayer) {
+        const phantomGroups = phantomsLayer.querySelectorAll(".phantom-bit");
+        phantomGroups.forEach((group) => {
+            phantomBits.push({ group });
+        });
+    }
+
     const d = makerCalculateResultPolygon(
         panelWidth,
         panelThickness,
         panelX,
         panelY,
-        bitsOnCanvas
+        bitsOnCanvas,
+        phantomBits
     );
     partPath.setAttribute("d", d);
     partPath.setAttribute("transform", `translate(${panelX}, ${panelY})`);
