@@ -28,6 +28,186 @@ import BitsModule from "./bits/BitsModule.js";
 const svgNS = "http://www.w3.org/2000/svg";
 const log = LoggerFactory.createLogger("Script");
 
+/**
+ * BitData structure helper
+ * Manages structured bit data with nested objects for extensions, shank, phantoms
+ */
+const BitDataHelper = {
+    /**
+     * Initialize or get bitData structure
+     * @param {object} bitData - Existing bitData or base properties
+     * @returns {object} Structured bitData
+     */
+    init(bitData) {
+        return {
+            ...bitData,
+            // Extension info - added when bit goes below material
+            extension: bitData.extension || null,
+            // Shank info - added when shank exists
+            shank: bitData.shank || null,
+            // Phantom bits info - added for VC operations
+            phantoms: bitData.phantoms || null,
+        };
+    },
+
+    /**
+     * Set extension info for a bit
+     * @param {object} bitData - BitData object
+     * @param {object} extensionInfo - Extension information
+     */
+    setExtension(bitData, extensionInfo) {
+        if (!bitData) return;
+        bitData.extension = extensionInfo
+            ? {
+                  // Dimensions
+                  height: extensionInfo.height,
+                  width: extensionInfo.width,
+                  // Position RELATIVE to bit (in bit's local coordinate system)
+                  // These coordinates are relative to the bit's position, not canvas
+                  relativeX: extensionInfo.relativeX || extensionInfo.localX,
+                  relativeY: extensionInfo.relativeY || extensionInfo.localY,
+                  materialTopY: extensionInfo.materialTopY,
+                  distanceBelowMaterial: extensionInfo.distanceBelowMaterial,
+                  // Visual
+                  color: extensionInfo.color,
+                  fillColor: extensionInfo.fillColor,
+                  strokeColor: extensionInfo.strokeColor,
+                  // Metadata
+                  createdAt: extensionInfo.createdAt || Date.now(),
+                  source: extensionInfo.source || "2D",
+              }
+            : null;
+    },
+
+    /**
+     * Set shank info for a bit
+     * @param {object} bitData - BitData object
+     * @param {object} shankInfo - Shank information
+     */
+    setShank(bitData, shankInfo) {
+        if (!bitData) return;
+        bitData.shank = shankInfo
+            ? {
+                  diameter: shankInfo.shankDiameter,
+                  bitDiameter: shankInfo.bitDiameter,
+                  hasCollision: shankInfo.hasCollision || false,
+                  widthDifference: shankInfo.widthDifference,
+                  scale: shankInfo.scale,
+              }
+            : null;
+    },
+
+    /**
+     * Get extension info
+     * @param {object} bitData - BitData object
+     * @returns {object|null} Extension info
+     */
+    getExtension(bitData) {
+        return bitData?.extension || null;
+    },
+
+    /**
+     * Check if bit has extension
+     * @param {object} bitData - BitData object
+     * @returns {boolean}
+     */
+    hasExtension(bitData) {
+        return !!bitData?.extension;
+    },
+
+    /**
+     * Check if bit has shank collision
+     * @param {object} bitData - BitData object
+     * @returns {boolean}
+     */
+    hasShankCollision(bitData) {
+        return bitData?.shank?.hasCollision || false;
+    },
+
+    /**
+     * Initialize phantoms array for VC multi-pass bits
+     * @param {object} bitData - BitData object
+     * @param {number} passCount - Number of passes (including main bit)
+     */
+    initPhantoms(bitData, passCount) {
+        if (!bitData) return;
+        // Initialize array with passCount-1 phantom slots (main bit is pass 0)
+        bitData.phantoms = new Array(passCount - 1).fill(null).map((_, i) => ({
+            passIndex: i + 1,
+            depth: null,
+            extension: null,
+        }));
+    },
+
+    /**
+     * Set phantom pass data (depth and optional extension)
+     * @param {object} bitData - BitData object
+     * @param {number} passIndex - Pass index (1, 2, 3...)
+     * @param {number} depth - Depth for this pass
+     * @param {object} extensionInfo - Optional extension info
+     */
+    setPhantomPass(bitData, passIndex, depth, extensionInfo = null) {
+        if (!bitData || !bitData.phantoms) return;
+        const phantomIndex = passIndex - 1; // Convert passIndex to array index
+        if (phantomIndex >= 0 && phantomIndex < bitData.phantoms.length) {
+            bitData.phantoms[phantomIndex] = {
+                passIndex: passIndex,
+                depth: depth,
+                extension: extensionInfo
+                    ? {
+                          height: extensionInfo.height,
+                          width: extensionInfo.width,
+                          relativeX:
+                              extensionInfo.relativeX || extensionInfo.localX,
+                          relativeY:
+                              extensionInfo.relativeY || extensionInfo.localY,
+                          materialTopY: extensionInfo.materialTopY,
+                          distanceBelowMaterial:
+                              extensionInfo.distanceBelowMaterial,
+                          color: extensionInfo.color,
+                          fillColor: extensionInfo.fillColor,
+                          strokeColor: extensionInfo.strokeColor,
+                          createdAt: extensionInfo.createdAt || Date.now(),
+                          source: extensionInfo.source || "2D",
+                      }
+                    : null,
+            };
+        }
+    },
+
+    /**
+     * Get phantom pass data by index
+     * @param {object} bitData - BitData object
+     * @param {number} passIndex - Pass index (1, 2, 3...)
+     * @returns {object|null} Phantom pass data
+     */
+    getPhantomPass(bitData, passIndex) {
+        if (!bitData?.phantoms) return null;
+        const phantomIndex = passIndex - 1;
+        return bitData.phantoms[phantomIndex] || null;
+    },
+
+    /**
+     * Check if bit has phantoms
+     * @param {object} bitData - BitData object
+     * @returns {boolean}
+     */
+    hasPhantoms(bitData) {
+        return !!(bitData?.phantoms && bitData.phantoms.length > 0);
+    },
+
+    /**
+     * Get phantom extension by pass index
+     * @param {object} bitData - BitData object
+     * @param {number} passIndex - Pass index (1, 2, 3...)
+     * @returns {object|null} Extension info
+     */
+    getPhantomExtension(bitData, passIndex) {
+        const phantom = this.getPhantomPass(bitData, passIndex);
+        return phantom?.extension || null;
+    },
+};
+
 // Get DOM elements
 const canvas = document.getElementById("canvas");
 const panelWidthInput = document.getElementById("panel-width");
@@ -50,6 +230,7 @@ let shankVisible = true; // Track shank visibility state
 window.showPart = showPart;
 window.bitsVisible = bitsVisible;
 window.isDraggingBit = false;
+window.LoggerFactory = LoggerFactory; // Make LoggerFactory available globally
 
 // Canvas manager instance
 let mainCanvasManager;
@@ -339,6 +520,9 @@ function initializeSVG() {
     // Sync panel element references for legacy helpers
     partSection = panelManager.partSection;
     partFront = panelManager.partFront;
+
+    // Update grid anchor position on initialization
+    updateGridAnchor();
 
     // Update canvas bit with new parameters (for real-time editing)
     function updateCanvasBitWithParams(bitId, newParams, groupName) {
@@ -663,18 +847,14 @@ function convertToTopAnchorCoordinates(bit) {
 
 // Update bit extensions (rectangles above bits that go below material surface)
 function updateBitExtensions() {
-    const extensionsLayer = mainCanvasManager.getLayer("phantoms"); // Use phantoms layer for now
-
-    // Remove existing extensions
-    const existingExtensions =
-        extensionsLayer.querySelectorAll(".bit-extension");
-    existingExtensions.forEach((ext) => ext.remove());
-
     // Get material top Y position (from panel-section element)
     const panelSection = document.getElementById("panel-section");
     if (!panelSection) return;
 
     const materialTopY = parseFloat(panelSection.getAttribute("y")) || 0;
+
+    // Get bit logger for tracking extension updates
+    const bitLogger = window.LoggerFactory?.getBitLogger();
 
     // Clear shank collision flags before checking
     bitsOnCanvas.forEach((bit) => {
@@ -691,13 +871,22 @@ function updateBitExtensions() {
         allBits.push({ group });
     });
 
-    allBits.forEach((bit) => {
+    allBits.forEach((bit, index) => {
         if (!bit.group) return;
+
+        const isPhantom = !bit.bitData;
+        const bitIdentifier = isPhantom
+            ? `phantom (bitIndex=${bit.group.__bitIndex}, pass=${bit.group.__passIndex})`
+            : `bit ${index}`;
+
+        // Remove existing extensions from this bit group
+        const existingExtensions = bit.group.querySelectorAll(".bit-extension");
+        existingExtensions.forEach((ext) => ext.remove());
 
         const element = bit.group.querySelector(".bit-shape");
         if (!element) return;
 
-        // Get bit position
+        // Get bit position from transform
         const transform = bit.group.getAttribute("transform");
         let bitX = 0,
             bitY = 0;
@@ -709,11 +898,10 @@ function updateBitExtensions() {
             }
         }
 
-        // Get bit bounding box
+        // Get bit bounding box in local coordinates
         const bbox = element.getBBox();
         const bitWidth = bbox.width;
-        const bitTopY = bitY + bbox.y; // Top of the bit in canvas coordinates
-        const bitBottomY = bitY; // Bottom of the bit (tip)
+        const bitTopY = bitY + bbox.y; // Top of the bit in canvas coordinates (for comparison with materialTopY)
 
         // Get bit data for shank collision detection
         // For regular bits from bitsOnCanvas, use bit.bitData
@@ -721,6 +909,7 @@ function updateBitExtensions() {
         const bitData = bit.bitData || (bit.group && bit.group.__bitData);
         let extensionWidth = bitWidth;
         let extensionColor = "red";
+        let hasShankCollision = false;
 
         // Check if bit top is below material surface (bit went deeper)
         if (bitTopY > materialTopY) {
@@ -734,21 +923,31 @@ function updateBitExtensions() {
                     const scale = bitWidth / bitDiameter;
                     extensionWidth = shankDiameter * scale;
                     extensionColor = "darkred";
+                    hasShankCollision = true;
 
                     // Mark bit as having shank collision for warnings table
                     bit.hasShankCollision = true;
+
+                    // Log shank collision
+                    if (bitLogger) {
+                        bitLogger.shankCollision(index, {
+                            shankDiameter,
+                            bitDiameter,
+                            scale,
+                            extensionWidth,
+                        });
+                    }
                 }
             }
 
-            // Create rectangle from material top to bit top + 1px
-            const rectHeight = bitTopY - materialTopY + 1;
-            // For shank collision, offset by half the width difference to center wider extension
-            const widthOffset =
-                extensionColor === "darkred"
-                    ? (bitWidth - extensionWidth) / 2
-                    : 0;
-            const rectX = bitX + bbox.x + widthOffset;
-            const rectY = materialTopY - 1;
+            // Calculate extension rectangle in LOCAL coordinates (relative to bit group)
+            // materialTopY is in absolute canvas coordinates, we need to convert to local
+            // Add 0.1 to height for better boolean operations
+            const rectHeight = bitTopY - materialTopY + 1.1;
+
+            // Center the extension on the bit in local coordinates
+            const rectX = bbox.x + (bitWidth - extensionWidth) / 2;
+            const rectY = materialTopY - bitY - 1 + 0.001; // Convert to local coordinates, extend 0.1 up
 
             // Colors based on collision detection
             const fillColor =
@@ -774,7 +973,109 @@ function updateBitExtensions() {
             );
             rect.classList.add("bit-extension");
 
-            extensionsLayer.appendChild(rect);
+            // Add extension to bit group instead of global layer
+            bit.group.appendChild(rect);
+
+            // Create comprehensive extension info structure
+            const extensionInfo = {
+                height: rectHeight,
+                width: extensionWidth,
+                // Relative position from bit (in bit's local coordinate system)
+                // rectX, rectY are already relative to bit's group transform
+                relativeX: rectX,
+                relativeY: rectY,
+                materialTopY: materialTopY,
+                distanceBelowMaterial: bitTopY - materialTopY,
+                color: extensionColor,
+                fillColor: fillColor,
+                strokeColor: strokeColor,
+                createdAt: Date.now(),
+                source: "2D",
+            };
+
+            // Create shank info if collision detected
+            const shankInfo = hasShankCollision
+                ? {
+                      shankDiameter: bitData.shankDiameter,
+                      bitDiameter: bitData.diameter,
+                      hasCollision: true,
+                      widthDifference: extensionWidth - bitWidth,
+                      scale: extensionWidth / bitWidth,
+                  }
+                : null;
+
+            // Store extension and shank data using structured approach
+            if (bit.bitData) {
+                // Regular bit - use BitDataHelper
+                BitDataHelper.setExtension(bit.bitData, extensionInfo);
+                if (shankInfo) {
+                    BitDataHelper.setShank(bit.bitData, shankInfo);
+                }
+                // Keep old format for backward compatibility
+                bit.extension = extensionInfo;
+                // Log full bitData structure
+                console.log(
+                    `[BIT DATA] Bit #${index} updated:`,
+                    JSON.parse(JSON.stringify(bit.bitData))
+                );
+            } else if (bit.group) {
+                // Phantom bit - store extension in main bit's phantoms array
+                const __bitIndex = bit.group.__bitIndex;
+                const __passIndex = bit.group.__passIndex;
+
+                if (__bitIndex !== undefined && __passIndex !== undefined) {
+                    const mainBit = bitsOnCanvas[__bitIndex];
+                    if (mainBit && mainBit.bitData) {
+                        // Get current depth for this phantom pass
+                        const depth = BitDataHelper.getPhantomPass(
+                            mainBit.bitData,
+                            __passIndex
+                        )?.depth;
+                        // Set phantom pass with extension info
+                        BitDataHelper.setPhantomPass(
+                            mainBit.bitData,
+                            __passIndex,
+                            depth,
+                            extensionInfo
+                        );
+                        // Log full bitData structure of main bit after phantom update
+                        console.log(
+                            `[BIT DATA] Bit #${__bitIndex} updated (phantom pass ${__passIndex}):`,
+                            JSON.parse(JSON.stringify(mainBit.bitData))
+                        );
+                    }
+                }
+
+                // Also keep on group for backward compatibility
+                bit.group.__extension = extensionInfo;
+                if (bitData) {
+                    bit.group.__bitData = bitData;
+                }
+            }
+
+            // Log extension update (only for changed bit)
+            if (bitLogger) {
+                const isPhantom = !bit.bitData;
+                const passIndex =
+                    isPhantom && bit.group ? bit.group.__passIndex : null;
+                bitLogger.extensionUpdated(
+                    index,
+                    extensionInfo,
+                    isPhantom,
+                    passIndex
+                );
+            }
+        } else {
+            // Clear extension if bit top is not below material surface
+            if (bit.bitData) {
+                BitDataHelper.setExtension(bit.bitData, null);
+                bit.extension = null;
+            } else if (bit.group) {
+                bit.group.__extension = null;
+                if (bitData) {
+                    BitDataHelper.setExtension(bitData, null);
+                }
+            }
         }
     });
 }
@@ -828,6 +1129,18 @@ function updatePhantomBits() {
 
             // Draw all bits: main bit first (index 0), then phantom bits
             if (passes > 1) {
+                // Initialize phantoms array in main bit's bitData
+                BitDataHelper.initPhantoms(bit.bitData, passes);
+
+                // Store depths for each phantom pass
+                for (let passIndex = 1; passIndex < passes; passIndex++) {
+                    BitDataHelper.setPhantomPass(
+                        bit.bitData,
+                        passIndex,
+                        depths[passIndex]
+                    );
+                }
+
                 // Draw phantom bits (skip index 0 which is the main bit)
                 for (let passIndex = 1; passIndex < passes; passIndex++) {
                     // Create phantom bit at offset position with depth from depths array
@@ -867,8 +1180,11 @@ function updatePhantomBits() {
                     );
                     phantomShape.classList.add("phantom-bit");
 
-                    // Store bitData in the phantom shape group for later access
+                    // Store bitData and passIndex in the phantom shape group for later access
                     phantomShape.__bitData = bit.bitData;
+                    phantomShape.__bitIndex = index; // Store bit index to link phantom to main bit
+                    phantomShape.__passIndex = passIndex; // Store pass index for logging
+                    phantomShape.__depth = depths[passIndex]; // Store depth for extension calculation
 
                     phantomsLayer.appendChild(phantomShape);
                 }
@@ -935,13 +1251,7 @@ function updateOffsetContours() {
                 return topAnchorCoords.x - offsetValue; // Use top anchor X coordinate
             });
             offsets.reverse(); // Reverse to start from outermost pass
-            console.log(
-                "Bit",
-                index,
-                "V-Carve offsets:",
-                offsets,
-                partialResults
-            );
+
             // Add base offset at topAnchorCoords.x (black, default layer)
             if (partFrontPoints && partFrontPoints.length > 0) {
                 const baseOffsetPoints = offsetCalculator.calculateOffset(
@@ -1711,11 +2021,17 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
     bitsOnCanvas.forEach((bit) => {
         const shape = bit.group?.querySelector(".bit-shape");
         const shankShape = bit.group?.querySelector(".shank-shape");
+        const extensionShapes = bit.group?.querySelectorAll(".bit-extension");
         if (shape) {
             shape.setAttribute("stroke-width", thickness);
         }
         if (shankShape) {
             shankShape.setAttribute("stroke-width", thickness);
+        }
+        if (extensionShapes) {
+            extensionShapes.forEach((ext) => {
+                ext.setAttribute("stroke-width", thickness);
+            });
         }
     });
     // Update offset contour stroke widths
@@ -1732,6 +2048,14 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
         );
         phantomShapes.forEach((shape) => {
             shape.setAttribute("stroke-width", thickness);
+        });
+
+        // Update extension shapes in phantom bits
+        const phantomExtensions = phantomsLayer.querySelectorAll(
+            ".phantom-bit .bit-extension"
+        );
+        phantomExtensions.forEach((ext) => {
+            ext.setAttribute("stroke-width", thickness);
         });
     }
 }
@@ -2720,6 +3044,37 @@ function setupMaterialSelector() {
         }
     });
 }
+
+// Expose BitLogger helper functions to console for debugging
+window.getBitLogs = () => {
+    const bitLogger = LoggerFactory.getBitLogger();
+    return {
+        all: () => bitLogger.logs,
+        bitEvents: () => bitLogger.bitEvents,
+        forBit: (bitIndex) => bitLogger.getBitEvents(bitIndex),
+        byType: (eventType) => bitLogger.getEventsByType(eventType),
+        extensions: () => bitLogger.getEventsByType("EXTENSION_UPDATED"),
+        collisions: () => bitLogger.getEventsByType("SHANK_COLLISION"),
+        extrusions: () => bitLogger.getEventsByType("EXTRUSION_CREATED"),
+        export: () => bitLogger.exportBitEvents(),
+        clear: () => bitLogger.clearBitEvents(),
+    };
+};
+
+console.log(
+    "%c[Bit Logger] Helper functions available:",
+    "color: #4CAF50; font-weight: bold;"
+);
+console.log("  window.getBitLogs().all() - Get all logs");
+console.log("  window.getBitLogs().bitEvents() - Get all bit events");
+console.log(
+    "  window.getBitLogs().forBit(index) - Get events for specific bit"
+);
+console.log("  window.getBitLogs().extensions() - Get all extension events");
+console.log("  window.getBitLogs().collisions() - Get all collision events");
+console.log("  window.getBitLogs().extrusions() - Get all 3D extrusion events");
+console.log("  window.getBitLogs().export() - Export events as JSON");
+console.log("  window.getBitLogs().clear() - Clear all bit events");
 
 // Call initialize function when the page loads
 window.addEventListener("load", initializeModularSystem);

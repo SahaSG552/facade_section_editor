@@ -17,9 +17,12 @@ class GridRenderer {
             this.defs.removeChild(existingPattern);
         }
 
-        // Calculate offset - grid start from 0 to cover entire canvas
-        let xOffset = 0;
-        let yOffset = 0;
+        // Calculate offset - grid starts from anchor point to ensure consistency
+        // If anchor is null, default to 0
+        let xOffset =
+            this.config.gridAnchorX !== null ? this.config.gridAnchorX : 0;
+        let yOffset =
+            this.config.gridAnchorY !== null ? this.config.gridAnchorY : 0;
 
         // Create pattern
         const pattern = document.createElementNS(this.svgNS, "pattern");
@@ -124,9 +127,18 @@ class CanvasManager {
         this.canvas.setAttribute("width", "100%");
         this.canvas.setAttribute("height", "100%");
 
-        // Установка начального pan в центре канваса
-        this.panX = this.canvasParameters.width / 2;
-        this.panY = this.canvasParameters.height / 2;
+        // Set pan center to anchor point if defined, otherwise use center
+        if (
+            this.config.gridAnchorX !== null &&
+            this.config.gridAnchorY !== null
+        ) {
+            this.panX = this.config.gridAnchorX;
+            this.panY = this.config.gridAnchorY;
+        } else {
+            // Fallback to center if anchor not defined
+            this.panX = this.canvasParameters.width / 2;
+            this.panY = this.canvasParameters.height / 2;
+        }
 
         // Установка viewBox
         this.canvas.setAttribute(
@@ -288,8 +300,8 @@ class CanvasManager {
             size: this.config.gridSize,
             color: "#e0e0e0",
             thickness: thickness,
-            anchorX: this.config.gridAnchorX - this.config.gridSize / 2,
-            anchorY: this.config.gridAnchorY - this.config.gridSize / 2,
+            gridAnchorX: this.config.gridAnchorX - this.config.gridSize / 2,
+            gridAnchorY: this.config.gridAnchorY - this.config.gridSize / 2,
             panX: this.panX,
             panY: this.panY,
             x: viewBoxX,
@@ -310,8 +322,8 @@ class CanvasManager {
             size: auxGridSize,
             color: "#5f5959ff",
             thickness: thickness * 2,
-            anchorX: this.config.gridAnchorX - this.config.gridSize / 2,
-            anchorY: this.config.gridAnchorY - this.config.gridSize / 2,
+            gridAnchorX: this.config.gridAnchorX - this.config.gridSize / 2,
+            gridAnchorY: this.config.gridAnchorY - this.config.gridSize / 2,
             panX: this.panX,
             panY: this.panY,
             x: viewBoxX,

@@ -97,8 +97,162 @@ class ModuleLogger {
     }
 }
 
+/**
+ * BitLogger - Specialized logger for bit operations
+ * Tracks bit creation, modifications, extensions, collisions, etc.
+ */
+class BitLogger extends ModuleLogger {
+    constructor() {
+        super("Bits", LogLevels.DEBUG);
+        this.bitEvents = [];
+        this.maxBitEvents = 5000;
+    }
+
+    /**
+     * Log bit creation event
+     * @param {number} bitIndex - Index of the bit
+     * @param {object} bitData - Bit data object
+     * @param {string} context - Context (e.g., '2D', '3D', 'phantom')
+     */
+    bitCreated(bitIndex, bitData, context = "2D") {
+        const event = {
+            type: "CREATED",
+            timestamp: Date.now(),
+            bitIndex,
+            context,
+            diameter: bitData?.diameter,
+            operation: bitData?.operation,
+            depth: bitData?.depth,
+        };
+        this._storeBitEvent(event);
+        this.debug(`Bit ${bitIndex} created in ${context}`, bitData);
+    }
+
+    /**
+     * Log extension creation/update
+     * @param {number} bitIndex - Index of the bit
+     * @param {object} extensionInfo - Extension information
+     * @param {boolean} isPhantom - Whether this is a phantom bit
+     * @param {number} passIndex - Pass index for multi-pass operations
+     */
+    extensionUpdated(
+        bitIndex,
+        extensionInfo,
+        isPhantom = false,
+        passIndex = null
+    ) {
+        const event = {
+            type: "EXTENSION_UPDATED",
+            timestamp: Date.now(),
+            bitIndex,
+            isPhantom,
+            passIndex,
+            extension: { ...extensionInfo },
+        };
+        this._storeBitEvent(event);
+        // Log condensed info
+        this.info(
+            `Extension ${isPhantom ? "phantom " : ""}bit #${bitIndex}${
+                passIndex !== null ? ` pass ${passIndex}` : ""
+            }: ` +
+                `${extensionInfo.height.toFixed(
+                    2
+                )}mm height, ${extensionInfo.width.toFixed(2)}mm width`
+        );
+    }
+
+    /**
+     * Log shank collision detection
+     * @param {number} bitIndex - Index of the bit
+     * @param {object} collisionInfo - Collision information
+     */
+    shankCollision(bitIndex, collisionInfo) {
+        const event = {
+            type: "SHANK_COLLISION",
+            timestamp: Date.now(),
+            bitIndex,
+            collision: { ...collisionInfo },
+        };
+        this._storeBitEvent(event);
+        this.warn(
+            `Shank collision detected for bit ${bitIndex}`,
+            collisionInfo
+        );
+    }
+
+    /**
+     * Log bit position/depth update
+     * @param {number} bitIndex - Index of the bit
+     * @param {object} positionInfo - Position information
+     */
+    positionUpdated(bitIndex, positionInfo) {
+        const event = {
+            type: "POSITION_UPDATED",
+            timestamp: Date.now(),
+            bitIndex,
+            position: { ...positionInfo },
+        };
+        this._storeBitEvent(event);
+        this.debug(`Position updated for bit ${bitIndex}`, positionInfo);
+    }
+
+    /**
+     * Log 3D extrusion creation
+     * @param {number} bitIndex - Index of the bit
+     * @param {object} extrusionInfo - Extrusion information
+     */
+    extrusionCreated(bitIndex, extrusionInfo) {
+        const event = {
+            type: "EXTRUSION_CREATED",
+            timestamp: Date.now(),
+            bitIndex,
+            extrusion: { ...extrusionInfo },
+        };
+        this._storeBitEvent(event);
+        this.debug(`3D extrusion created for bit ${bitIndex}`, extrusionInfo);
+    }
+
+    _storeBitEvent(event) {
+        this.bitEvents.push(event);
+        if (this.bitEvents.length > this.maxBitEvents) {
+            this.bitEvents.shift();
+        }
+    }
+
+    /**
+     * Get all events for a specific bit
+     * @param {number} bitIndex - Index of the bit
+     * @returns {Array} Array of events for the bit
+     */
+    getBitEvents(bitIndex) {
+        return this.bitEvents.filter((e) => e.bitIndex === bitIndex);
+    }
+
+    /**
+     * Get events by type
+     * @param {string} eventType - Event type to filter
+     * @returns {Array} Filtered events
+     */
+    getEventsByType(eventType) {
+        return this.bitEvents.filter((e) => e.type === eventType);
+    }
+
+    /**
+     * Export bit events as JSON
+     * @returns {string} JSON string of all bit events
+     */
+    exportBitEvents() {
+        return JSON.stringify(this.bitEvents, null, 2);
+    }
+
+    clearBitEvents() {
+        this.bitEvents = [];
+    }
+}
+
 class LoggerFactory {
     static loggers = new Map();
+    static bitLogger = null;
 
     static createLogger(moduleName, logLevel = LogLevels.INFO) {
         if (!this.loggers.has(moduleName)) {
@@ -112,6 +266,17 @@ class LoggerFactory {
 
     static getLogger(moduleName) {
         return this.loggers.get(moduleName) || this.createLogger(moduleName);
+    }
+
+    /**
+     * Get the specialized BitLogger instance
+     * @returns {BitLogger} The bit logger instance
+     */
+    static getBitLogger() {
+        if (!this.bitLogger) {
+            this.bitLogger = new BitLogger();
+        }
+        return this.bitLogger;
     }
 
     static getAllLogs() {
@@ -132,4 +297,4 @@ class LoggerFactory {
 }
 
 export default LoggerFactory;
-export { LoggerFactory, ModuleLogger, LogLevels };
+export { LoggerFactory, ModuleLogger, BitLogger, LogLevels };

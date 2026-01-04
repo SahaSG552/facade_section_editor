@@ -663,6 +663,46 @@ export default class ThreeModule extends BaseModule {
                         `Processing VC pass ${passIndex}: depth=${depth}, offset=${contourOffset}`
                     );
 
+                    // Get extension info for this specific pass
+                    // For main bit (passIndex=0): use bit.bitData.extension
+                    // For phantom bits (passIndex>0): find phantom from 2D by bitIndex + passIndex
+                    let passExtensionInfo = null;
+                    if (isMainBit) {
+                        // Use structured bitData.extension
+                        passExtensionInfo = bit.bitData?.extension;
+                        if (!passExtensionInfo) {
+                            // Fallback to old format
+                            passExtensionInfo = bit.extension;
+                        }
+                        // Main bit extension found
+                    } else {
+                        // Phantom bit (passIndex > 0): read extension from main bit's phantoms array
+                        if (bit.bitData && bit.bitData.phantoms) {
+                            const phantom = bit.bitData.phantoms[passIndex - 1]; // passIndex 1 -> array index 0
+                            if (phantom && phantom.passIndex === passIndex) {
+                                passExtensionInfo = phantom.extension;
+                                if (passExtensionInfo) {
+                                    this.log.debug(
+                                        `Found phantom extension for bit ${bitIndex} pass ${passIndex}:`,
+                                        passExtensionInfo
+                                    );
+                                }
+                            }
+                        }
+
+                        if (!passExtensionInfo) {
+                            this.log.debug(
+                                `No phantom extension found for bit ${bitIndex} pass ${passIndex}`
+                            );
+                        }
+                    }
+
+                    this.log.debug(
+                        `Pass ${passIndex} extension info:`,
+                        passExtensionInfo ? "found" : "not found",
+                        passExtensionInfo
+                    );
+
                     // Calculate offset distance for this pass
                     // For main bit: use topAnchorCoords.x (no offset)
                     // For phantom bits: add contourOffset to topAnchorCoords.x
@@ -768,6 +808,33 @@ export default class ThreeModule extends BaseModule {
                             this.materialManager.isEdgesEnabled()
                         ) {
                             this.materialManager.addEdgeVisualization(mesh);
+                        }
+
+                        // Create extension extrusion if bit has extension data
+                        // Use passExtensionInfo which was determined above (from 2D data)
+                        this.log.debug(
+                            `Checking extension for bit ${bitIndex} pass ${passIndex}: ` +
+                                `passExtensionInfo=${!!passExtensionInfo}`
+                        );
+
+                        if (passExtensionInfo) {
+                            // Extension exists for this pass (from 2D)
+                            this.log.debug(
+                                `Creating extension from 2D data for bit ${bitIndex} pass ${passIndex}:`,
+                                passExtensionInfo
+                            );
+                            await this.createExtensionExtrusion(
+                                bit,
+                                bitIndex,
+                                curve3D,
+                                depth,
+                                passExtensionInfo.width,
+                                passExtensionInfo.height,
+                                bit.operation || "VC",
+                                panelThickness,
+                                panelAnchor,
+                                passIndex
+                            );
                         }
                     }
                 }
@@ -893,11 +960,256 @@ export default class ThreeModule extends BaseModule {
                 this.log.debug(
                     `Created ${extrudeMeshes.length} extrude mesh(es) for bit ${bitIndex}`
                 );
+
+                // Create extension extrusion if bit has extension data
+                // Use structured bitData.extension or fallback to old format
+                const extensionData =
+                    bit.bitData?.extension ||
+                    bit.extension ||
+                    (bit.group && bit.group.__extension);
+                if (extensionData) {
+                    await this.createExtensionExtrusion(
+                        bit,
+                        bitIndex,
+                        curve3D,
+                        bit.y,
+                        extensionData.width,
+                        extensionData.height,
+                        bit.operation || "AL",
+                        panelThickness,
+                        panelAnchor
+                    );
+                }
             } else {
                 this.log.debug(
                     `Failed to create extrude mesh for bit ${bitIndex}`
                 );
             }
+        }
+    }
+
+    /**
+     * Create extrusion for bit extension (material above bit)
+     * @param {object} bit - Bit object with extension data
+     * @param {number} bitIndex - Index of the bit
+     * @param {THREE.Curve} curve3D - 3D path curve
+     * @param {number} depth - Depth of the bit
+     * @param {number} extensionWidth - Width of the extension (pixels/mm)
+     * @param {number} extensionHeight - Height of the extension (pixels/mm)
+     * @param {string} operation - Operation type (VC, AL, OU, IN) to determine extrude method
+     * @param {number} panelThickness - Panel thickness
+     * @param {string} panelAnchor - Panel anchor position
+     * @param {number} passIndex - Optional pass index for VC operations
+     */
+    async createExtensionExtrusion(
+        bit,
+        bitIndex,
+        curve3D,
+        depth,
+        extensionWidth,
+        extensionHeight,
+        operation,
+        panelThickness,
+        panelAnchor,
+        passIndex = null
+    ) {
+        // Get bit logger
+        const bitLogger = window.LoggerFactory?.getBitLogger();
+
+        // Get extension data from bit using structured format or fallback
+        const extensionData =
+            bit.bitData?.extension ||
+            bit.extension ||
+            (bit.group && bit.group.__extension);
+        if (!extensionData) {
+            this.log.debug(
+                `No extension data for bit ${bitIndex}${
+                    passIndex !== null ? ` pass ${passIndex}` : ""
+                }`
+            );
+            return;
+        }
+
+        this.log.debug(
+            `createExtensionExtrusion for bit ${bitIndex}${
+                passIndex !== null ? ` pass ${passIndex}` : ""
+            }: ` +
+                `width=${extensionWidth}, height=${extensionHeight}, operation=${operation}`
+        );
+
+        try {
+            // Create rectangular profile for the extension with proper dimensions
+            const extensionProfile =
+                this.extrusionBuilder.createExtensionProfile(
+                    extensionWidth,
+                    extensionHeight
+                );
+
+            if (!extensionProfile) {
+                this.log.debug(
+                    `Failed to create extension profile for bit ${bitIndex}`
+                );
+                return;
+            }
+
+            // Choose extrusion method based on operation type
+            // VC uses mitered (like main bit), others use round
+            let result;
+            const isVC = (operation || "").toUpperCase() === "VC";
+
+            this.log.debug(
+                `Creating ${
+                    isVC ? "mitered" : "round"
+                } extension extrusion for bit ${bitIndex}`
+            );
+
+            if (isVC) {
+                // Use mitered extrusion for VC operations (same as main bit)
+                console.log(
+                    `[EXTENSION] Creating MITERED extension for bit ${bitIndex} pass ${passIndex}:`,
+                    {
+                        extensionWidth,
+                        extensionHeight,
+                        operation,
+                        curvePoints: curve3D.getPoints(10).length,
+                    }
+                );
+                result = this.extrusionBuilder.extrudeAlongPath(
+                    extensionProfile,
+                    curve3D,
+                    bit.color || "#cccccc"
+                );
+                console.log(`[EXTENSION] MITERED result:`, result);
+                this.log.debug(`Mitered extrusion result:`, result);
+            } else {
+                // Use round extrusion for other operations (AL, OU, IN)
+                result = this.extrusionBuilder.extrudeAlongPathRound(
+                    extensionProfile,
+                    curve3D,
+                    bit.color || "#cccccc"
+                );
+                this.log.debug(`Round extrusion result:`, result);
+            }
+
+            if (result) {
+                let extensionMeshes = [];
+                if (result.mergedMesh) {
+                    extensionMeshes = [result.mergedMesh];
+                    this.log.debug(`Got mergedMesh from result`);
+                } else if (Array.isArray(result)) {
+                    extensionMeshes = result;
+                    this.log.debug(
+                        `Got array of ${result.length} meshes from result`
+                    );
+                } else if (result.parts && Array.isArray(result.parts)) {
+                    extensionMeshes = result.parts;
+                    this.log.debug(
+                        `Got parts array of ${result.parts.length} meshes from result`
+                    );
+                } else if (result.isMesh) {
+                    // Single mesh from mitered extrusion
+                    extensionMeshes = [result];
+                    this.log.debug(`Got single mesh (isMesh=true) from result`);
+                } else {
+                    this.log.warn(
+                        `Unknown result format for bit ${bitIndex}${
+                            passIndex !== null ? ` pass ${passIndex}` : ""
+                        }: `,
+                        result
+                    );
+                }
+
+                this.log.debug(
+                    `Processing ${
+                        extensionMeshes.length
+                    } extension meshes for bit ${bitIndex}${
+                        passIndex !== null ? ` pass ${passIndex}` : ""
+                    }`
+                );
+
+                if (extensionMeshes.length > 0) {
+                    extensionMeshes.forEach((mesh) => {
+                        // Mark as extension
+                        mesh.userData.operation = "extension";
+                        mesh.userData.bitIndex = bitIndex;
+                        mesh.userData.isExtension = true;
+                        mesh.userData.extensionDepth = depth;
+                        if (passIndex !== null) {
+                            mesh.userData.pass = passIndex;
+                        }
+
+                        // Set color based on shank collision (like in 2D)
+                        const hasShankCollision =
+                            extensionData.hasShankCollision || false;
+                        const extensionColor = hasShankCollision
+                            ? "#8B0000"
+                            : "#FF0000"; // darkred : red
+
+                        // Make extension semi-transparent with proper color
+                        mesh.material.transparent = true;
+                        mesh.material.opacity = 0.4;
+                        mesh.material.color.set(extensionColor);
+
+                        // Position extension ABOVE material surface
+                        // Extension should be positioned so its bottom aligns with material top
+                        if (mesh.position) {
+                            // Position mesh so bottom of extension is at top of material
+                            // depth is where bit tip is, extensionHeight is how much bit went below material
+                            // So extension should be from (depth - extensionHeight) to depth
+                            // In 3D: extension goes from -depth+extensionHeight to -depth+2*extensionHeight
+                            mesh.position.z = -depth + extensionHeight - 1;
+                        }
+
+                        this.bitExtrudeMeshes.push(mesh);
+                        this.log.debug(
+                            `Added extension extrusion for bit ${bitIndex}${
+                                passIndex !== null ? ` pass ${passIndex}` : ""
+                            } (${
+                                isVC ? "mitered" : "round"
+                            }, color: ${extensionColor}, height: ${extensionHeight}, z: ${
+                                mesh.position.z
+                            })`
+                        );
+
+                        // Log extrusion creation
+                        if (bitLogger) {
+                            bitLogger.extrusionCreated(bitIndex, {
+                                type: "extension",
+                                operation: isVC
+                                    ? "VC-mitered"
+                                    : operation + "-round",
+                                depth,
+                                extensionHeight,
+                                extensionWidth,
+                                hasShankCollision,
+                                passIndex,
+                                position: { z: mesh.position.z },
+                                color: extensionColor,
+                                meshInfo: {
+                                    vertices:
+                                        mesh.geometry.attributes.position.count,
+                                    faces: mesh.geometry.index
+                                        ? mesh.geometry.index.count / 3
+                                        : 0,
+                                },
+                            });
+                        }
+
+                        // Add edge visualization if enabled
+                        if (
+                            this.materialManager &&
+                            this.materialManager.isEdgesEnabled()
+                        ) {
+                            this.materialManager.addEdgeVisualization(mesh);
+                        }
+                    });
+                }
+            }
+        } catch (error) {
+            this.log.error(
+                `Error creating extension extrusion for bit ${bitIndex}:`,
+                error
+            );
         }
     }
 

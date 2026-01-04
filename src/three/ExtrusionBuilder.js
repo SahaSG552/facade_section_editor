@@ -795,6 +795,27 @@ export default class ExtrusionBuilder {
     }
 
     /**
+     * Create rectangular profile for bit extension (material above bit)
+     * @param {number} width - Width of the rectangle (in pixels/mm)
+     * @param {number} height - Height of the rectangle (in pixels/mm)
+     * @returns {THREE.Shape} Rectangular shape centered at origin (bottom-center reference)
+     */
+    createExtensionProfile(width, height = 1) {
+        const halfWidth = width / 2;
+
+        // Create shape with bottom-center at origin (like bit profiles)
+        // Extend slightly below (0.1) for better boolean operations
+        const shape = new THREE.Shape();
+        shape.moveTo(-halfWidth, -0.001);
+        shape.lineTo(halfWidth, -0.001);
+        shape.lineTo(halfWidth, height);
+        shape.lineTo(-halfWidth, height);
+        shape.lineTo(-halfWidth, -0.001);
+
+        return shape;
+    }
+
+    /**
      * Calculate adaptive curveSegments based on profile shape complexity
      * Uses proportional coefficient for smooth scaling
      * Public properties can be modified from console
