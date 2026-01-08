@@ -257,13 +257,13 @@ class PanelManager {
         const archHeight = archRadius; // Высота арки = радиус (полукруг)
 
         const pathData = [
-            `M ${frontX} ${frontY + archHeight}`, // Начало слева на уровне арки
-            `L ${frontX} ${frontY + frontHeight}`, // Вниз к низу
-            `L ${frontX + frontWidth} ${frontY + frontHeight}`, // Вправо по низу
-            `L ${frontX + frontWidth} ${frontY + archHeight}`, // Вверх справа
+            `M ${frontX + frontWidth} ${frontY + frontHeight}`, // Вправо по низу
+            `L ${frontX + frontWidth} ${frontY + archHeight + 150}`, // Вверх справа
             `A ${archRadius} ${archRadius} 0 0 0 ${frontX} ${
-                frontY + archHeight
+                frontY + archHeight - 150
             }`, // Арка(полукруг влево)
+            `L ${frontX} ${frontY + archHeight}`, // Начало слева на уровне арки
+            `L ${frontX} ${frontY + frontHeight}`, // Вниз к низу
             `Z`, // Замыкаем путь
         ].join(" ");
 

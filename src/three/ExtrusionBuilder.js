@@ -273,7 +273,7 @@ export default class ExtrusionBuilder {
 
         // Public configuration for adaptive curve segmentation
         // Can be changed from console: extrusionBuilder.curveSegmentCoefficient = 3
-        this.curveSegmentCoefficient = 0.2; // segments per mm
+        this.curveSegmentCoefficient = 0.5; // segments per mm
         this.curveSegmentMin = 16;
         this.curveSegmentMax = 64;
 
@@ -1624,7 +1624,7 @@ export default class ExtrusionBuilder {
         // Create shape with bottom-center at origin (like bit profiles)
         // Extend slightly below (0.1) for better boolean operations
         const shape = new THREE.Shape();
-        shape.moveTo(0, -0.001);
+        shape.moveTo(halfWidth, -0.001);
         shape.lineTo(halfWidth, -0.001);
         shape.lineTo(halfWidth, height);
         shape.lineTo(-halfWidth, height);
@@ -2462,7 +2462,7 @@ export default class ExtrusionBuilder {
                         color,
                         i,
                         true,
-                        null,
+                        profilePoints,
                         contourIsClockwise
                     );
                     if (latheResult && latheResult.mesh) {
@@ -2591,35 +2591,59 @@ export default class ExtrusionBuilder {
                 );
                 return null;
             }
-
             // 2D cross/dot to get signed angle between segments (robust for any polyline)
             const cross2d = prevDir.x * nextDir.y - prevDir.y * nextDir.x; // z-component
             const dot2d = prevDir.x * nextDir.x + prevDir.y * nextDir.y;
             const angleDiffRaw = Math.atan2(cross2d, dot2d); // signed in [-π, π]
             const angle = Math.abs(angleDiffRaw);
 
-            // Map directions from XY plane into XZ plane used by lathe (y->z)
-            const prevAngleXZ = Math.atan2(prevDir.x, prevDir.y); // atan2(x, y) => angle in XZ
+            // Map directions from XY plane into rotation angle
+            // For a direction vector (dx, dy), the angle is atan2(-dy, dx)
+            // (negative Y because lathe coordinates are mirrored)
+            const prevAngleXZ = Math.atan2(-prevDir.y, prevDir.x);
+            const nextAngleXZ = Math.atan2(-nextDir.y, nextDir.x);
+
+            // Signed angle from previous direction to next direction
+            let angleDiff = nextAngleXZ - prevAngleXZ;
+
+            // Normalize to [-π, π] range to get shortest arc
+            if (angleDiff > Math.PI) {
+                angleDiff -= 2 * Math.PI;
+            } else if (angleDiff < -Math.PI) {
+                angleDiff += 2 * Math.PI;
+            }
+
             // Determine geometry parameters
             let phiStart, phiLength;
 
-            // Normalize sweep to positive to keep normals consistent; shift start if needed
-            let angleDiff = angleDiffRaw;
+            // Add small angular overlap to prevent gaps (about 0.5 degrees on each side)
+            const angularOverlap = THREE.MathUtils.degToRad(0.5);
+
+            // Always use the shortest arc (no long-path logic)
             if (angleDiff < 0) {
-                phiLength = -angleDiff;
-                phiStart = prevAngleXZ + angleDiff; // shift to preserve arc placement
+                // Negative angle: sweep backward on the short path, but rotate 180° to opposite quadrant
+                phiStart = nextAngleXZ + Math.PI - angularOverlap;
+                phiLength = -angleDiff + 2 * angularOverlap;
             } else {
-                phiLength = angleDiff;
-                phiStart = prevAngleXZ;
+                // Positive angle: sweep forward on the short path
+                phiStart = prevAngleXZ - angularOverlap;
+                phiLength = angleDiff + 2 * angularOverlap;
             }
 
             if (isPartial) {
                 // PARTIAL LATHE: Corner rounding using signed angle
                 this.log.info(
                     `Corner ${cornerNumber} (${color}) | ` +
-                        `prevAngleXZ: ${THREE.MathUtils.radToDeg(
-                            prevAngleXZ
-                        ).toFixed(1)}° | ` +
+                        `prevDir: (${prevDir.x.toFixed(2)}, ${prevDir.y.toFixed(
+                            2
+                        )}) → ${THREE.MathUtils.radToDeg(prevAngleXZ).toFixed(
+                            1
+                        )}° | ` +
+                        `nextDir: (${nextDir.x.toFixed(2)}, ${nextDir.y.toFixed(
+                            2
+                        )}) → ${THREE.MathUtils.radToDeg(nextAngleXZ).toFixed(
+                            1
+                        )}° | ` +
                         `angleDiff: ${THREE.MathUtils.radToDeg(
                             angleDiff
                         ).toFixed(1)}° | ` +
