@@ -219,6 +219,74 @@ export class OffsetCalculator {
             { x: x, y: y }, // Close the polygon
         ];
     }
+
+    /**
+     * Convert SVG path to polygon points (approximation)
+     * ВНИМАНИЕ: Преобразует кривые Безье в прямые линии (полилинии)
+     * @param {SVGPathElement} path - SVG path элемент
+     * @param {number} segmentLength - Длина сегмента для аппроксимации (по умолчанию 1)
+     * @returns {Array} Массив {x, y} точек
+     */
+    pathToPoints(path, segmentLength = 1) {
+        if (!path || path.tagName !== "path") {
+            console.error("pathToPoints: not a path element");
+            return [];
+        }
+
+        const points = [];
+        const totalLength = path.getTotalLength();
+
+        // Получаем точки вдоль path с заданным шагом
+        for (let i = 0; i <= totalLength; i += segmentLength) {
+            const point = path.getPointAtLength(i);
+            points.push({ x: point.x, y: point.y });
+        }
+
+        // Добавляем последнюю точку
+        const lastPoint = path.getPointAtLength(totalLength);
+        points.push({ x: lastPoint.x, y: lastPoint.y });
+
+        // Замыкаем контур если нужно
+        if (points.length > 0) {
+            const first = points[0];
+            const last = points[points.length - 1];
+            const distance = Math.sqrt(
+                Math.pow(last.x - first.x, 2) + Math.pow(last.y - first.y, 2)
+            );
+
+            // Если контур не замкнут, замыкаем
+            if (distance > this.EPSILON) {
+                points.push({ x: first.x, y: first.y });
+            }
+        }
+
+        return points;
+    }
+
+    /**
+     * Универсальный метод для конвертации SVG элемента в точки
+     * Поддерживает rect и path
+     * @param {SVGElement} svgElement - SVG элемент (rect или path)
+     * @returns {Array} Массив {x, y} точек
+     */
+    svgToPoints(svgElement) {
+        if (!svgElement) {
+            console.error("svgToPoints: no element provided");
+            return [];
+        }
+
+        if (svgElement.tagName === "rect") {
+            return this.rectToPoints(svgElement);
+        } else if (svgElement.tagName === "path") {
+            return this.pathToPoints(svgElement);
+        } else {
+            console.error(
+                "svgToPoints: unsupported element type:",
+                svgElement.tagName
+            );
+            return [];
+        }
+    }
 }
 
 export default OffsetCalculator;

@@ -46,9 +46,16 @@
                     <button
                         id="view-2d"
                         class="view-toggle-btn active"
-                        title="2D View"
+                        title="2D View (SVG)"
                     >
                         2D
+                    </button>
+                    <button
+                        id="view-2dp"
+                        class="view-toggle-btn"
+                        title="2D Paper.js View"
+                    >
+                        2Dp
                     </button>
                     <button
                         id="view-3d"
@@ -58,11 +65,18 @@
                         3D
                     </button>
                     <button
+                        id="view-2d-2dp"
+                        class="view-toggle-btn"
+                        title="2D + 2Dp Views"
+                    >
+                        2D/2Dp
+                    </button>
+                    <button
                         id="view-both"
                         class="view-toggle-btn"
-                        title="Both Views"
+                        title="2D + 3D Views"
                     >
-                        Both
+                        2D/3D
                     </button>
                 </div>
                 <button id="theme-toggle" title="Toggle Theme">
@@ -150,6 +164,13 @@
                     <button id="export-dxf-btn" title="Export to DXF">
                         DXF
                     </button>
+                    <button
+                        id="boolean-engine-btn"
+                        title="Toggle Boolean Engine (maker.js ⇄ Paper.js)"
+                        style="background: #4caf50; color: white"
+                    >
+                        mkr
+                    </button>
                     <label
                         for="grid-scale"
                         style="font-size: 12px; margin: auto"
@@ -168,6 +189,9 @@
                         Grid
                     </button>
                 </div>
+            </div>
+            <div id="paper-canvas-container">
+                <canvas id="paper-canvas" resize></canvas>
             </div>
             <div id="three-canvas-container">
                 <!-- Three.js canvas will be inserted here -->

@@ -25,6 +25,11 @@ export default class ThreeModule extends BaseModule {
         this.extrusionBuilder = new ExtrusionBuilder();
         this.stlExporter = new STLExporter(this.log);
 
+        // Arc approximation control for panel shape
+        // arcDivisionCoefficient: segments = arcLength / coefficient
+        // Lower value = more segments = smoother curves
+        this.arcDivisionCoefficient = 5; // Default: 1 segment per 2mm
+
         // Panel mesh
         this.panelMesh = null;
 
@@ -94,10 +99,50 @@ export default class ThreeModule extends BaseModule {
             typeof window !== "undefined" && window.Stats ? window.Stats : null
         );
 
+        // Setup observer for partFront changes to trigger 3D updates
+        this.setupPartFrontObserver();
+
         // Start animation loop
         this.animate();
 
         this.log.info("Initialized successfully");
+    }
+
+    setupPartFrontObserver() {
+        const partFront = document.getElementById("part-front");
+        if (!partFront) {
+            this.log.warn("partFront element not found for observer");
+            return;
+        }
+
+        // Create MutationObserver to watch for partFront changes
+        this.partFrontObserver = new MutationObserver(() => {
+            this.log.debug("partFront changed, triggering 3D update");
+            // Trigger updatePanel with current panel parameters
+            if (
+                window.panelWidth &&
+                window.panelHeight &&
+                window.panelThickness
+            ) {
+                this.updatePanel(
+                    window.panelWidth,
+                    window.panelHeight,
+                    window.panelThickness,
+                    window.bitsOnCanvas || [],
+                    window.panelAnchor || "top-left"
+                );
+            }
+        });
+
+        // Observe attributes (d for path) and child nodes
+        this.partFrontObserver.observe(partFront, {
+            attributes: true,
+            attributeFilter: ["d", "width", "height", "x", "y"],
+            childList: false,
+            subtree: false,
+        });
+
+        this.log.info("partFront observer setup complete");
     }
 
     initMaterialControls() {
@@ -388,15 +433,202 @@ export default class ThreeModule extends BaseModule {
             this.csgVisible = false;
             this.panelBBox = null;
 
-            // Create panel geometry
-            const geometry = new THREE.BoxGeometry(width, height, thickness);
+            // Create panel geometry from partFront shape using SVGLoader
+            const partFront = document.getElementById("part-front");
+            let geometry;
+
+            // Check if shape was manually edited (has data attribute or flag)
+            // For now, always try to get bbox to ensure 3D matches actual shape
+            if (partFront) {
+                try {
+                    const bbox = partFront.getBBox();
+                    // Always use bbox dimensions for 3D to match visual appearance
+                    // Even if shape wasn't manually edited, bbox reflects the actual rendered shape
+                    width = bbox.width;
+                    height = bbox.height;
+                    this.log.debug(
+                        "Using bbox dimensions for 3D:",
+                        width,
+                        "x",
+                        height
+                    );
+                } catch (error) {
+                    this.log.warn(
+                        "Could not get partFront bbox, using parameters:",
+                        error
+                    );
+                }
+            }
+
+            this.log.info("Creating panel geometry:", {
+                partFrontFound: !!partFront,
+                svgLoaderAvailable: typeof SVGLoader !== "undefined",
+                partFrontTagName: partFront?.tagName,
+                width,
+                height,
+            });
+
+            if (partFront && typeof SVGLoader !== "undefined") {
+                try {
+                    // Get SVG data
+                    const svgData = new XMLSerializer().serializeToString(
+                        partFront
+                    );
+                    this.log.debug(
+                        "SVG data (first 200 chars):",
+                        svgData.substring(0, 200)
+                    );
+
+                    const loader = new SVGLoader();
+                    const svgDoc = loader.parse(svgData);
+
+                    this.log.debug("SVGLoader result:", {
+                        hasDoc: !!svgDoc,
+                        hasPaths: !!svgDoc?.paths,
+                        pathsCount: svgDoc?.paths?.length,
+                        arcDivisionCoefficient: this.arcDivisionCoefficient,
+                    });
+
+                    if (svgDoc && svgDoc.paths && svgDoc.paths.length > 0) {
+                        // Get first path (partFront shape)
+                        const path = svgDoc.paths[0];
+
+                        if (path.toShapes) {
+                            const shapes = path.toShapes(true);
+
+                            if (shapes && shapes.length > 0) {
+                                // Get partFront bbox to center and scale
+                                const partFrontBBox = partFront.getBBox();
+                                const centerX =
+                                    partFrontBBox.x + partFrontBBox.width / 2;
+                                const centerY =
+                                    partFrontBBox.y + partFrontBBox.height / 2;
+
+                                // Use real dimensions from bbox (source of truth)
+                                const realWidth = partFrontBBox.width;
+                                const realHeight = partFrontBBox.height;
+
+                                // Use first shape
+                                const shape = shapes[0];
+
+                                // Calculate curveSegments based on total arc length
+                                let totalArcLength = 0;
+                                if (shape.curves) {
+                                    shape.curves.forEach((curve) => {
+                                        if (
+                                            curve.type === "EllipseCurve" ||
+                                            curve.isEllipseCurve
+                                        ) {
+                                            totalArcLength += curve.getLength();
+                                        }
+                                    });
+                                }
+
+                                // curveSegments controls divisions for all curves in ExtrudeGeometry
+                                const curveSegments =
+                                    totalArcLength > 0
+                                        ? Math.max(
+                                              12,
+                                              Math.ceil(
+                                                  totalArcLength /
+                                                      this
+                                                          .arcDivisionCoefficient
+                                              )
+                                          )
+                                        : 12;
+
+                                this.log.info("Panel arc approximation:", {
+                                    totalArcLength,
+                                    coefficient: this.arcDivisionCoefficient,
+                                    curveSegments,
+                                });
+
+                                // Extrude shape to create 3D panel
+                                const extrudeSettings = {
+                                    depth: thickness,
+                                    bevelEnabled: false,
+                                    curveSegments: curveSegments, // This controls arc smoothness
+                                };
+                                geometry = new THREE.ExtrudeGeometry(
+                                    shape,
+                                    extrudeSettings
+                                );
+
+                                // Transform to correct position and orientation
+                                // SVGLoader creates shape in XY plane with Y down
+                                // We need: X=width (left-right), Y=height (up-down), Z=thickness (depth)
+
+                                // 1. Translate to origin (center)
+                                geometry.translate(-centerX, -centerY, 0);
+
+                                // 2. Rotate 180° around X to flip Y (SVG Y down -> Three.js Y up)
+                                geometry.rotateX(Math.PI);
+
+                                // 3. Center vertically at Y = realHeight/2 (using bbox height, not parameter)
+                                geometry.translate(0, realHeight / 2, 0);
+
+                                this.log.info(
+                                    "Created panel from SVGLoader with",
+                                    shapes.length,
+                                    "shape(s), real dimensions:",
+                                    realWidth,
+                                    "x",
+                                    realHeight
+                                );
+                            } else {
+                                this.log.warn(
+                                    "No shapes from SVGLoader, using box geometry"
+                                );
+                                geometry = new THREE.BoxGeometry(
+                                    width,
+                                    height,
+                                    thickness
+                                );
+                            }
+                        } else {
+                            this.log.warn(
+                                "Path has no toShapes method, using box geometry"
+                            );
+                            geometry = new THREE.BoxGeometry(
+                                width,
+                                height,
+                                thickness
+                            );
+                        }
+                    } else {
+                        this.log.warn(
+                            "No paths from SVGLoader, using box geometry"
+                        );
+                        geometry = new THREE.BoxGeometry(
+                            width,
+                            height,
+                            thickness
+                        );
+                    }
+                } catch (error) {
+                    this.log.error("Error using SVGLoader:", error);
+                    geometry = new THREE.BoxGeometry(width, height, thickness);
+                }
+            } else {
+                if (!partFront) {
+                    this.log.warn(
+                        "partFront element not found, using box geometry"
+                    );
+                } else {
+                    this.log.warn(
+                        "SVGLoader not available, using box geometry"
+                    );
+                }
+                geometry = new THREE.BoxGeometry(width, height, thickness);
+            }
+
             const material = this.materialManager.createMaterial(
                 this.materialManager.getCurrentMaterialKey()
             );
             this.panelMesh = new THREE.Mesh(geometry, material);
             this.panelMesh.castShadow = true;
             this.panelMesh.receiveShadow = true;
-            this.panelMesh.position.set(0, height / 2, 0);
+            this.panelMesh.position.set(0, 0, thickness / 2);
             this.basePanelMesh = this.panelMesh;
 
             // Initialize material manager with mesh references
@@ -548,11 +780,32 @@ export default class ThreeModule extends BaseModule {
             return;
         }
 
-        // Get partFront position and size
-        const partFrontX = parseFloat(partFront.getAttribute("x"));
-        const partFrontY = parseFloat(partFront.getAttribute("y"));
-        const partFrontWidth = parseFloat(partFront.getAttribute("width"));
-        const partFrontHeight = parseFloat(partFront.getAttribute("height"));
+        // Get partFront bounding box (works for any SVG shape, including path)
+        const partFrontBBox = partFront.getBBox();
+        const partFrontX = partFrontBBox.x;
+        const partFrontY = partFrontBBox.y;
+        const partFrontWidth = partFrontBBox.width;
+        const partFrontHeight = partFrontBBox.height;
+
+        // Validate partFront bounding box
+        if (
+            isNaN(partFrontX) ||
+            isNaN(partFrontY) ||
+            isNaN(partFrontWidth) ||
+            isNaN(partFrontHeight)
+        ) {
+            this.log.error("partFront has invalid bounding box!", {
+                element: partFront,
+                bbox: partFrontBBox,
+                parsed: {
+                    x: partFrontX,
+                    y: partFrontY,
+                    width: partFrontWidth,
+                    height: partFrontHeight,
+                },
+            });
+            return;
+        }
 
         this.log.debug("partFront info:", {
             x: partFrontX,
@@ -562,17 +815,26 @@ export default class ThreeModule extends BaseModule {
         });
 
         for (const [bitIndex, bit] of uniqueBits.entries()) {
-            this.log.debug(`Processing bit ${bitIndex}:`, {
+            this.log.info(`Processing bit ${bitIndex}:`, {
                 x: bit.x,
                 y: bit.y,
                 operation: bit.operation,
                 name: bit.name,
+                bitData: bit.bitData,
             });
 
             const isVC = (bit.operation || "").toUpperCase() === "VC";
 
+            this.log.info(`Bit ${bitIndex} operation check:`, {
+                operation: bit.operation,
+                upperCase: (bit.operation || "").toUpperCase(),
+                isVC: isVC,
+            });
+
             // For VC operation with multiple passes, process each pass
             if (isVC) {
+                this.log.info(`VC bit ${bitIndex}: Starting VC processing`);
+
                 // Calculate depths and contour offsets arrays (same as in 2D)
                 const angle = bit.bitData.angle || 90;
                 const bitY = bit.y; // Use bit's Y coordinate
@@ -582,6 +844,16 @@ export default class ThreeModule extends BaseModule {
                     (1 / Math.tan((angle * Math.PI) / 180 / 2));
                 const passes =
                     bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
+
+                this.log.info(
+                    `VC bit ${bitIndex}: calculated ${passes} passes`,
+                    {
+                        angle,
+                        bitY,
+                        hypotenuse,
+                        bitHeight,
+                    }
+                );
 
                 // Calculate partial results (depth values for each pass)
                 const partialResults = [];
@@ -601,7 +873,7 @@ export default class ThreeModule extends BaseModule {
                         const depthDiff = depths[0] - depths[i];
                         const offset =
                             depthDiff * Math.tan((angle * Math.PI) / 180 / 2);
-                        contourOffsets.push(-offset); // Negative for outward offset (offsetCalculator logic)
+                        contourOffsets.push(offset); // Negative for outward offset (offsetCalculator logic)
                     }
                 }
 
@@ -621,15 +893,28 @@ export default class ThreeModule extends BaseModule {
                     continue;
                 }
 
-                // Get offsetCalculator from window (it's created in updateOffsetContours)
-                const offsetCalculator = window.offsetCalculator;
-                if (!offsetCalculator) {
-                    this.log.error("offsetCalculator not found!");
+                // Get exportModule from dependencyContainer for SVG parsing
+                const dependencyContainer =
+                    window.dependencyContainer || window.app?.container;
+
+                if (!dependencyContainer) {
+                    this.log.error("DependencyContainer not found in window!");
                     continue;
                 }
 
+                const exportModule = dependencyContainer.get("export");
+
+                if (!exportModule) {
+                    this.log.error("ExportModule not found in container!");
+                    continue;
+                }
+
+                // Use universal SVG parser to get partFront points
                 const partFrontPoints =
-                    offsetCalculator.rectToPoints(partFront);
+                    this.extrusionBuilder.parseSVGElementToPoints(
+                        partFront,
+                        exportModule
+                    );
                 if (!partFrontPoints || partFrontPoints.length === 0) {
                     this.log.error("Failed to get partFront points");
                     continue;
@@ -639,8 +924,19 @@ export default class ThreeModule extends BaseModule {
                 const bitContours = offsetContours.filter(
                     (c) => c.bitIndex === bitIndex
                 );
+
+                this.log.info(
+                    `VC bit ${bitIndex}: found ${bitContours.length} contours`,
+                    {
+                        bitContours: bitContours.map((c) => ({
+                            passIndex: c.passIndex,
+                            hasPathData: !!c.pathData,
+                        })),
+                    }
+                );
+
                 if (bitContours.length === 0) {
-                    this.log.debug(`No contours found for bit ${bitIndex}`);
+                    this.log.warn(`No contours found for VC bit ${bitIndex}`);
                     continue;
                 }
 
@@ -654,13 +950,17 @@ export default class ThreeModule extends BaseModule {
                 const topAnchorCoords = convertToTopAnchorCoordinates(bit);
 
                 // Process each pass
+                this.log.info(
+                    `VC bit ${bitIndex}: Starting pass loop for ${passes} passes`
+                );
+
                 for (let passIndex = 0; passIndex < passes; passIndex++) {
                     const isMainBit = passIndex === 0;
                     const depth = depths[passIndex];
                     const contourOffset = contourOffsets[passIndex];
 
-                    this.log.debug(
-                        `Processing VC pass ${passIndex}: depth=${depth}, offset=${contourOffset}`
+                    this.log.info(
+                        `VC bit ${bitIndex} pass ${passIndex}: Starting (depth=${depth}, offset=${contourOffset})`
                     );
 
                     // Get extension info for this specific pass
@@ -703,45 +1003,54 @@ export default class ThreeModule extends BaseModule {
                         passExtensionInfo
                     );
 
-                    // Calculate offset distance for this pass
-                    // For main bit: use topAnchorCoords.x (no offset)
-                    // For phantom bits: add contourOffset to topAnchorCoords.x
-                    const offsetDistance = topAnchorCoords.x + contourOffset;
+                    // Find pre-computed contour for this pass
+                    const passContour = bitContours.find((c) => {
+                        if (typeof c.passIndex === "number") {
+                            return c.passIndex === passIndex;
+                        }
+                        if (typeof c.pass === "number") {
+                            return c.pass === passIndex;
+                        }
+                        return passIndex === 0;
+                    });
 
-                    // Calculate offset contour using offsetCalculator
-                    const offsetPoints = offsetCalculator.calculateOffset(
-                        partFrontPoints,
-                        offsetDistance
+                    const contourPathData =
+                        passContour?.pathData ||
+                        (typeof passContour?.element?.getAttribute ===
+                        "function"
+                            ? passContour.element.getAttribute("d")
+                            : null);
+
+                    this.log.info(
+                        `VC bit ${bitIndex} pass ${passIndex}: passContour found=${!!passContour}, hasPathData=${!!contourPathData}`
                     );
 
-                    if (!offsetPoints || offsetPoints.length === 0) {
-                        this.log.debug(
-                            `No offset points for bit ${bitIndex} pass ${passIndex}`
+                    if (!passContour || !contourPathData) {
+                        this.log.warn(
+                            `No contour data for VC bit ${bitIndex} pass ${passIndex}`
                         );
                         continue;
                     }
 
-                    // Convert offset points to path data
-                    const pathData =
-                        offsetPoints
-                            .map((point, i) =>
-                                i === 0
-                                    ? `M ${point.x} ${point.y}`
-                                    : `L ${point.x} ${point.y}`
-                            )
-                            .join(" ") + " Z";
+                    // Get path data from pre-computed contour
+                    const pathData = contourPathData;
 
                     // Parse path to get curves
                     const pathCurves =
                         this.extrusionBuilder.parsePathToCurves(pathData);
+
+                    this.log.info(
+                        `VC bit ${bitIndex} pass ${passIndex}: parsed ${pathCurves.length} curves`
+                    );
+
                     if (pathCurves.length === 0) {
-                        this.log.debug(
-                            `No curves found for bit ${bitIndex} pass ${passIndex}`
+                        this.log.warn(
+                            `No curves found for VC bit ${bitIndex} pass ${passIndex}`
                         );
                         continue;
                     }
 
-                    // Create 3D curve from path curves with depth (no contourOffset needed anymore)
+                    // Create 3D curve from path curves with depth
                     const curve3D = this.extrusionBuilder.createCurveFromCurves(
                         pathCurves,
                         partFrontX,
@@ -751,6 +1060,12 @@ export default class ThreeModule extends BaseModule {
                         depth,
                         panelThickness,
                         panelAnchor
+                    );
+
+                    this.log.info(
+                        `VC bit ${bitIndex} pass ${passIndex}: created 3D curve with ${
+                            curve3D.curves?.length || 0
+                        } segments`
                     );
 
                     // Add path visualization for debugging
@@ -771,44 +1086,79 @@ export default class ThreeModule extends BaseModule {
                         await this.extrusionBuilder.createBitProfile(
                             bit.bitData
                         );
+
+                    this.log.info(
+                        `VC bit ${bitIndex} pass ${passIndex}: profile created=${!!bitProfile}, curves=${
+                            bitProfile?.curves?.length || 0
+                        }`
+                    );
+
                     if (!bitProfile) {
-                        this.log.debug(
-                            `No bit profile created for bit ${bitIndex} pass ${passIndex}`
+                        this.log.warn(
+                            `No bit profile created for VC bit ${bitIndex} pass ${passIndex}`
                         );
                         continue;
                     }
 
-                    // Extrude profile along curve
-                    const mesh = this.extrusionBuilder.extrudeAlongPath(
+                    // VC uses MITERED extrusion (sharp corners), not round
+                    this.log.info(
+                        `Extruding VC bit ${bitIndex} pass ${passIndex} with MITERED mode`,
+                        {
+                            profileType: typeof bitProfile,
+                            profileIsShape: bitProfile instanceof THREE.Shape,
+                            curveType: typeof curve3D,
+                            curveLength: curve3D?.getLength?.() || 0,
+                            curvesCount: curve3D?.curves?.length || 0,
+                        }
+                    );
+
+                    const meshes = this.extrusionBuilder.extrudeAlongPath(
                         bitProfile,
                         curve3D,
                         pathColor
                     );
 
-                    if (mesh) {
-                        mesh.userData.operation = bit.operation || "subtract";
-                        mesh.userData.bitIndex = bitIndex;
-                        mesh.userData.pass = passIndex;
-                        mesh.userData.isPhantom = !isMainBit;
-
-                        // Make phantom bits semi-transparent
-                        if (!isMainBit) {
-                            mesh.material.transparent = true;
-                            mesh.material.opacity = 0.3;
+                    this.log.info(
+                        `VC bit ${bitIndex} pass ${passIndex} extrusion result:`,
+                        {
+                            hasMeshes: !!meshes,
+                            isArray: Array.isArray(meshes),
+                            meshCount: meshes?.length || 0,
+                            firstMeshVertices:
+                                meshes?.[0]?.geometry?.attributes?.position
+                                    ?.count || 0,
                         }
+                    );
 
-                        this.bitExtrudeMeshes.push(mesh);
+                    if (meshes && meshes.length > 0) {
+                        // Process all mesh parts from round extrusion
+                        meshes.forEach((mesh) => {
+                            mesh.userData.operation =
+                                bit.operation || "subtract";
+                            mesh.userData.bitIndex = bitIndex;
+                            mesh.userData.pass = passIndex;
+                            mesh.userData.isPhantom = !isMainBit;
+
+                            // Make phantom bits semi-transparent
+                            if (!isMainBit) {
+                                mesh.material.transparent = true;
+                                mesh.material.opacity = 0.3;
+                            }
+
+                            this.bitExtrudeMeshes.push(mesh);
+
+                            // Add edge visualization
+                            if (
+                                this.materialManager &&
+                                this.materialManager.isEdgesEnabled()
+                            ) {
+                                this.materialManager.addEdgeVisualization(mesh);
+                            }
+                        });
+
                         this.log.debug(
-                            `Added VC pass ${passIndex} mesh for bit ${bitIndex}`
+                            `Added VC pass ${passIndex}: ${meshes.length} mesh parts for bit ${bitIndex}`
                         );
-
-                        // Add edge visualization
-                        if (
-                            this.materialManager &&
-                            this.materialManager.isEdgesEnabled()
-                        ) {
-                            this.materialManager.addEdgeVisualization(mesh);
-                        }
 
                         // Create extension extrusion if bit has extension data
                         // Use passExtensionInfo which was determined above (from 2D data)
@@ -826,14 +1176,15 @@ export default class ThreeModule extends BaseModule {
                             await this.createExtensionExtrusion(
                                 bit,
                                 bitIndex,
-                                curve3D,
+                                curve3D, // For VC: pass curve3D
                                 depth,
                                 passExtensionInfo.width,
                                 passExtensionInfo.height,
                                 bit.operation || "VC",
                                 panelThickness,
                                 panelAnchor,
-                                passIndex
+                                passIndex,
+                                null // No transformParams needed for VC (uses curve3D directly)
                             );
                         }
                     }
@@ -873,44 +1224,6 @@ export default class ThreeModule extends BaseModule {
                 pathData.substring(0, 100) + "..."
             );
 
-            // Parse path to get curves instead of points
-            const pathCurves =
-                this.extrusionBuilder.parsePathToCurves(pathData);
-            if (pathCurves.length === 0) {
-                this.log.debug(
-                    `No curves found for bit ${bitIndex}:`,
-                    pathData
-                );
-                continue;
-            }
-
-            this.log.debug(
-                `Parsed ${pathCurves.length} curves for bit ${bitIndex}`
-            );
-
-            // Create 3D curve from path curves
-            const curve3D = this.extrusionBuilder.createCurveFromCurves(
-                pathCurves,
-                partFrontX,
-                partFrontY,
-                partFrontWidth,
-                partFrontHeight,
-                bit.y,
-                panelThickness,
-                panelAnchor
-            );
-
-            // Add path visualization for debugging (thick colored line)
-            const pathLine = this.extrusionBuilder.createPathVisualization(
-                curve3D,
-                bit.color
-            );
-            if (pathLine) {
-                pathLine.userData.bitIndex = bitIndex;
-                this.bitPathMeshes.push(pathLine);
-                this.log.debug(`Added path visualization for bit ${bitIndex}`);
-            }
-
             // Create bit profile shape
             const bitProfile = await this.extrusionBuilder.createBitProfile(
                 bit.bitData
@@ -921,12 +1234,23 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // Extrude profile along curve - use round mode for non-VC operations
+            // Extrude profile along path - pass SVG path string directly
+            // extrudeAlongPathRound will parse it and create 3D curve with proper segmentType flags
             let extrudeMeshes = [];
             const result = this.extrusionBuilder.extrudeAlongPathRound(
                 bitProfile,
-                curve3D,
-                bit.color
+                pathData, // ← SVG path string (уже с аппроксимированными дугами)
+                bit.color,
+                {
+                    // Coordinate transformation parameters for createCurveFromCurves
+                    partFrontX,
+                    partFrontY,
+                    partFrontWidth,
+                    partFrontHeight,
+                    depth: bit.y,
+                    panelThickness,
+                    panelAnchor,
+                }
             );
 
             if (result) {
@@ -971,13 +1295,21 @@ export default class ThreeModule extends BaseModule {
                     await this.createExtensionExtrusion(
                         bit,
                         bitIndex,
-                        curve3D,
+                        pathData, // Pass pathData instead of curve3D
                         bit.y,
                         extensionData.width,
                         extensionData.height,
                         bit.operation || "AL",
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
+                        null, // passIndex for VC
+                        // Transformation parameters for round extrusion
+                        {
+                            partFrontX,
+                            partFrontY,
+                            partFrontWidth,
+                            partFrontHeight,
+                        }
                     );
                 }
             } else {
@@ -992,7 +1324,7 @@ export default class ThreeModule extends BaseModule {
      * Create extrusion for bit extension (material above bit)
      * @param {object} bit - Bit object with extension data
      * @param {number} bitIndex - Index of the bit
-     * @param {THREE.Curve} curve3D - 3D path curve
+     * @param {string|THREE.Curve} pathDataOrCurve - SVG path data string (for non-VC) or 3D curve (for VC)
      * @param {number} depth - Depth of the bit
      * @param {number} extensionWidth - Width of the extension (pixels/mm)
      * @param {number} extensionHeight - Height of the extension (pixels/mm)
@@ -1000,18 +1332,20 @@ export default class ThreeModule extends BaseModule {
      * @param {number} panelThickness - Panel thickness
      * @param {string} panelAnchor - Panel anchor position
      * @param {number} passIndex - Optional pass index for VC operations
+     * @param {object} transformParams - Transformation parameters for round extrusion (partFrontX, etc.)
      */
     async createExtensionExtrusion(
         bit,
         bitIndex,
-        curve3D,
+        pathDataOrCurve,
         depth,
         extensionWidth,
         extensionHeight,
         operation,
         panelThickness,
         panelAnchor,
-        passIndex = null
+        passIndex = null,
+        transformParams = null
     ) {
         // Get bit logger
         const bitLogger = window.LoggerFactory?.getBitLogger();
@@ -1065,28 +1399,38 @@ export default class ThreeModule extends BaseModule {
 
             if (isVC) {
                 // Use mitered extrusion for VC operations (same as main bit)
+                // pathDataOrCurve is a THREE.Curve for VC
                 console.log(
                     `[EXTENSION] Creating MITERED extension for bit ${bitIndex} pass ${passIndex}:`,
                     {
                         extensionWidth,
                         extensionHeight,
                         operation,
-                        curvePoints: curve3D.getPoints(10).length,
+                        curvePoints: pathDataOrCurve.getPoints(10).length,
                     }
                 );
                 result = this.extrusionBuilder.extrudeAlongPath(
                     extensionProfile,
-                    curve3D,
+                    pathDataOrCurve,
                     bit.color || "#cccccc"
                 );
                 console.log(`[EXTENSION] MITERED result:`, result);
                 this.log.debug(`Mitered extrusion result:`, result);
             } else {
                 // Use round extrusion for other operations (AL, OU, IN)
+                // pathDataOrCurve is SVG path data string for non-VC
                 result = this.extrusionBuilder.extrudeAlongPathRound(
                     extensionProfile,
-                    curve3D,
-                    bit.color || "#cccccc"
+                    pathDataOrCurve, // SVG path data string
+                    bit.color || "#cccccc",
+                    transformParams
+                        ? {
+                              ...transformParams,
+                              depth: depth,
+                              panelThickness: panelThickness,
+                              panelAnchor: panelAnchor,
+                          }
+                        : undefined
                 );
                 this.log.debug(`Round extrusion result:`, result);
             }
@@ -1546,6 +1890,39 @@ export default class ThreeModule extends BaseModule {
         panelThickness,
         panelAnchor
     ) {
+        // Validate all inputs to identify NaN source
+        if (isNaN(x2d) || isNaN(y2d)) {
+            this.log.error(
+                "convertPoint2DTo3D: Input 2D coordinates contain NaN:",
+                { x2d, y2d }
+            );
+        }
+        if (
+            isNaN(partFrontX) ||
+            isNaN(partFrontY) ||
+            isNaN(partFrontWidth) ||
+            isNaN(partFrontHeight)
+        ) {
+            this.log.error(
+                "convertPoint2DTo3D: partFront parameters contain NaN:",
+                {
+                    partFrontX,
+                    partFrontY,
+                    partFrontWidth,
+                    partFrontHeight,
+                }
+            );
+        }
+        if (isNaN(depth) || isNaN(panelThickness)) {
+            this.log.error(
+                "convertPoint2DTo3D: depth/thickness parameters contain NaN:",
+                {
+                    depth,
+                    panelThickness,
+                }
+            );
+        }
+
         // Panel in 3D space:
         // - X=0 is horizontal center
         // - Y=0 is bottom of panel
@@ -1554,16 +1931,15 @@ export default class ThreeModule extends BaseModule {
         // Convert X: subtract partFront left edge, then center
         const x3d = x2d - partFrontX - partFrontWidth / 2;
 
-        // Convert Y: path Y is in canvas space where Y increases downward
-        // partFrontY is the top of the front view rectangle
-        // In 3D, Y=0 is bottom and increases upward
-        // Adjust based on panel anchor
+        // Convert Y: Paper.js Y increases downward, Three.js Y increases upward
+        // Invert Y relative to partFront center
+        const partFrontCenterY = partFrontY + partFrontHeight / 2;
         const partFrontBottom = partFrontY + partFrontHeight;
-        let y3d = partFrontBottom - y2d;
+        let y3d = partFrontCenterY - y2d; // Simple inversion: center - y
 
-        // For bottom-left anchor, invert Y (material bottom becomes Y=0)
+        // For bottom-left anchor, additional adjustment
         if (panelAnchor === "bottom-left") {
-            y3d = y2d - partFrontY;
+            y3d = y3d + partFrontHeight / 2;
         }
 
         // Z: For CSG operations, extrudes should pass completely through the panel
@@ -1803,7 +2179,12 @@ export default class ThreeModule extends BaseModule {
             mesh.castShadow = true;
             mesh.receiveShadow = true;
 
-            return mesh;
+            this.log.debug("Mitered extrusion created:", {
+                vertices: geometry.attributes.position.count,
+                boundingBox: geometry.boundingBox,
+            });
+
+            return [mesh]; // Return array for consistency
         } catch (error) {
             this.log.error("Error extruding along path:", error.message);
             this.log.error("Error stack:", error.stack);
@@ -1811,7 +2192,7 @@ export default class ThreeModule extends BaseModule {
                 "ProfiledContourGeometry function:",
                 this.ProfiledContourGeometry.toString().substring(0, 200)
             );
-            return null;
+            return [];
         }
     }
 

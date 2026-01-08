@@ -11,6 +11,10 @@ class App {
         this.eventBus = eventBus;
         this.modules = [];
         this.initialized = false;
+
+        // Expose container globally for cross-module access
+        window.dependencyContainer = this.container;
+        window.app = this;
     }
 
     /**

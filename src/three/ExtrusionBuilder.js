@@ -12,37 +12,13 @@ import {
     computeBoundsTree,
     disposeBoundsTree,
 } from "three-mesh-bvh";
+
 import LoggerFactory from "../core/LoggerFactory.js";
+import { approximatePath } from "../utils/arcApproximation.js";
 
 // Add three-mesh-bvh extensions to BufferGeometry
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
-
-// Two tested normal variants
-const NORMAL_VARIANTS = {
-    variant1: (angle) =>
-        new THREE.Vector3(-Math.sin(angle), Math.cos(angle), 0),
-    variant3: (angle) =>
-        new THREE.Vector3(Math.sin(angle), -Math.cos(angle), 0),
-};
-
-// Auto: even segment -> variant3, odd segment -> variant1 (per user testing)
-let currentNormalVariant = "auto";
-
-const computeNormalFromVariant = (
-    angle,
-    isAtEnd,
-    cornerNumber,
-    segmentIndex
-) => {
-    let variant = currentNormalVariant;
-    if (variant === "auto") {
-        variant = segmentIndex % 2 === 0 ? "variant3" : "variant1";
-    }
-
-    const fn = NORMAL_VARIANTS[variant] || NORMAL_VARIANTS.variant1;
-    return fn(angle).normalize();
-};
 
 // Aligns coincident edges across meshes to avoid tiny gaps before merge
 class MeshEdgeMatcher {
@@ -280,22 +256,6 @@ class MeshEdgeMatcher {
     }
 }
 
-// Expose control to window
-if (typeof window !== "undefined") {
-    window.clippingControl = {
-        variants: () => [...Object.keys(NORMAL_VARIANTS), "auto"],
-        setVariant: (variantName) => {
-            if (variantName === "auto" || NORMAL_VARIANTS[variantName]) {
-                currentNormalVariant = variantName;
-                return true;
-            }
-            return false;
-        },
-        getCurrentVariant: () => currentNormalVariant,
-        listVariants: () => [...Object.keys(NORMAL_VARIANTS), "auto"],
-    };
-}
-
 /**
  * ExtrusionBuilder
  * Handles all extrusion-related geometry creation:
@@ -317,7 +277,256 @@ export default class ExtrusionBuilder {
         this.curveSegmentMin = 16;
         this.curveSegmentMax = 64;
 
+        // Arc approximation coefficient: samples = arcLength / coefficient
+        // Same as ThreeModule.arcDivisionCoefficient for consistency
+        // Can be changed from console: extrusionBuilder.arcDivisionCoefficient = 5
+        this.arcDivisionCoefficient = 5; // 1 sample point per 5mm of arc length
+
         this.log.info("Created");
+    }
+
+    /**
+     * Log detailed diagnostics for grouped curves: segment types, lengths, sample points, degenerate detection.
+     * Shared between mitered and round extrusions.
+     * @param {Array} curveGroups - Array of {type, groupName, curves}
+     * @param {Array} originalCurves - Original ungrouped curves (for before/after comparison)
+     * @param {string} extrusionType - "MITERED" or "ROUND" for context
+     */
+    logCurveGroupDiagnostics(
+        curveGroups,
+        originalCurves,
+        extrusionType = "UNKNOWN"
+    ) {
+        this.log.info(`=== ${extrusionType} EXTRUSION DIAGNOSTICS ===`);
+        this.log.info(
+            `Original curves: ${originalCurves.length}, After grouping: ${curveGroups.length} groups`
+        );
+
+        // Summary of segment types before grouping
+        const typeCountsBefore = {};
+        originalCurves.forEach((curve) => {
+            const type = curve.segmentType || "UNKNOWN";
+            typeCountsBefore[type] = (typeCountsBefore[type] || 0) + 1;
+        });
+        this.log.info("Segment types (before grouping):", typeCountsBefore);
+
+        // Detailed log for each group
+        curveGroups.forEach((group, idx) => {
+            let estimatedPoints = 0;
+            let totalLength = 0;
+            group.curves.forEach((curve) => {
+                const len = curve.getLength();
+                totalLength += len;
+                if (group.type === "LINE") {
+                    estimatedPoints += 1; // LINE: just 2 points (1 segment)
+                } else {
+                    // ARC or BEZIER: use arcDivisionCoefficient
+                    estimatedPoints += Math.max(
+                        2,
+                        Math.ceil(len / this.arcDivisionCoefficient)
+                    );
+                }
+            });
+
+            this.log.info(
+                `Group #${idx + 1} [${group.groupName}] - ${
+                    group.curves.length
+                } curves, ~${estimatedPoints} sample points (length=${totalLength.toFixed(
+                    1
+                )}mm)`
+            );
+
+            // Log each curve in the group
+            group.curves.forEach((curve, cidx) => {
+                const start = curve.getPoint(0);
+                const end = curve.getPoint(1);
+                const len = curve.getLength();
+                const degenerate = len < 1e-6;
+                this.log.info(
+                    `  Curve ${cidx + 1}: start=(${start.x.toFixed(
+                        4
+                    )},${start.y.toFixed(4)}) end=(${end.x.toFixed(
+                        4
+                    )},${end.y.toFixed(4)}) length=${len.toFixed(6)}${
+                        degenerate ? " [DEGENERATE]" : ""
+                    }`
+                );
+                if (degenerate) {
+                    this.log.warn(
+                        `    [DEGENERATE SEGMENT] Group ${idx + 1} Curve ${
+                            cidx + 1
+                        } is zero-length and may cause artifacts.`
+                    );
+                }
+            });
+        });
+
+        // Check path closure and winding
+        if (originalCurves.length > 0) {
+            const firstCurve = originalCurves[0];
+            const lastCurve = originalCurves[originalCurves.length - 1];
+            const firstPoint = firstCurve.getPoint(0);
+            const lastPoint = lastCurve.getPoint(1);
+            const closureGap = firstPoint.distanceTo(lastPoint);
+            const isClosedPath = closureGap < 0.01;
+
+            this.log.info("Path closure:", {
+                isClosedPath,
+                closureGap: closureGap.toFixed(6),
+                firstPoint: {
+                    x: firstPoint.x.toFixed(4),
+                    y: firstPoint.y.toFixed(4),
+                    z: firstPoint.z.toFixed(4),
+                },
+                lastPoint: {
+                    x: lastPoint.x.toFixed(4),
+                    y: lastPoint.y.toFixed(4),
+                    z: lastPoint.z.toFixed(4),
+                },
+            });
+
+            if (isClosedPath) {
+                let signedArea = 0;
+                for (const curve of originalCurves) {
+                    const p1 = curve.getPoint(0);
+                    const p2 = curve.getPoint(1);
+                    signedArea += (p2.x - p1.x) * (p2.y + p1.y);
+                }
+                const contourIsClockwise = signedArea > 0;
+                this.log.info(
+                    "Winding direction:",
+                    contourIsClockwise ? "CLOCKWISE" : "COUNTER-CLOCKWISE"
+                );
+            }
+        }
+
+        this.log.info(`=== END ${extrusionType} DIAGNOSTICS ===`);
+    }
+
+    /**
+     * Group consecutive curves by segment type and filter degenerate ones.
+     * Lines are isolated into their own groups; consecutive arcs/beziers are grouped.
+     * Closed paths with matching first/last curve types are merged.
+     * Returns an array of groups: { type, groupName, curves }.
+     */
+    groupCurves(pathCurves) {
+        // Helper: group name by segment type
+        const getGroupName = (segmentType) => {
+            const typeMap = {
+                ARC: "ARC_GROUP",
+                CUBIC_BEZIER: "CUBIC_BEZIER_GROUP",
+                QUADRATIC_BEZIER: "QUADRATIC_BEZIER_GROUP",
+                LINE: "LINE_GROUP",
+            };
+            return typeMap[segmentType] || "UNKNOWN_GROUP";
+        };
+
+        // Remove degenerate (zero-length) segments
+        const DEGENERATE_THRESHOLD = 0.001; // 1 micron
+        const filtered = (pathCurves || []).filter((curve) => {
+            try {
+                const length = curve.getLength();
+                if (length < DEGENERATE_THRESHOLD) {
+                    this.log &&
+                        this.log.debug &&
+                        this.log.debug(
+                            `Filtered out degenerate curve: length=${length.toFixed(
+                                6
+                            )}mm`
+                        );
+                    return false;
+                }
+                return true;
+            } catch (e) {
+                this.log &&
+                    this.log.warn &&
+                    this.log.warn("Curve without getLength skipped", curve);
+                return false;
+            }
+        });
+
+        const groups = [];
+        let currentGroup = [];
+        let currentSegmentType = null;
+
+        for (let i = 0; i < filtered.length; i++) {
+            const curve = filtered[i];
+            const segmentType = curve.segmentType || "LINE";
+
+            if (segmentType === "LINE") {
+                if (currentGroup.length > 0) {
+                    groups.push({
+                        type: currentSegmentType,
+                        groupName: getGroupName(currentSegmentType),
+                        curves: currentGroup,
+                    });
+                    currentGroup = [];
+                }
+                groups.push({
+                    type: "LINE",
+                    groupName: "LINE_GROUP",
+                    curves: [curve],
+                });
+                currentSegmentType = null;
+            } else {
+                if (currentSegmentType === segmentType) {
+                    currentGroup.push(curve);
+                } else {
+                    if (currentGroup.length > 0) {
+                        groups.push({
+                            type: currentSegmentType,
+                            groupName: getGroupName(currentSegmentType),
+                            curves: currentGroup,
+                        });
+                    }
+                    currentGroup = [curve];
+                    currentSegmentType = segmentType;
+                }
+            }
+        }
+
+        if (currentGroup.length > 0) {
+            groups.push({
+                type: currentSegmentType,
+                groupName: getGroupName(currentSegmentType),
+                curves: currentGroup,
+            });
+        }
+
+        // Remove degenerate groups (total length < threshold)
+        const MIN_GROUP_LENGTH = 0.01; // 10 microns
+        const validGroups = groups.filter((group) => {
+            const totalLength = group.curves.reduce(
+                (sum, curve) => sum + curve.getLength(),
+                0
+            );
+            if (totalLength < MIN_GROUP_LENGTH) {
+                this.log &&
+                    this.log.debug &&
+                    this.log.debug(
+                        `Filtered out degenerate group [${group.groupName}]: ${
+                            group.curves.length
+                        } curves, length=${totalLength.toFixed(6)}mm`
+                    );
+                return false;
+            }
+            return true;
+        });
+
+        // Merge first/last groups if closed path and both non-LINE and same type
+        if (
+            validGroups.length > 1 &&
+            validGroups[0].type !== "LINE" &&
+            validGroups[validGroups.length - 1].type !== "LINE" &&
+            validGroups[0].type === validGroups[validGroups.length - 1].type
+        ) {
+            validGroups[0].curves = validGroups[
+                validGroups.length - 1
+            ].curves.concat(validGroups[0].curves);
+            validGroups.pop();
+        }
+
+        return validGroups;
     }
 
     /**
@@ -330,6 +539,286 @@ export default class ExtrusionBuilder {
         this.materialManager = config.materialManager;
         this.csgEngine = config.csgEngine;
         this.log.info("Initialized");
+        this.log.info("Arc approximation settings:", {
+            arcDivisionCoefficient: this.arcDivisionCoefficient,
+            description: "samples = arcLength / coefficient",
+            example: `100mm arc → ${Math.ceil(
+                100 / this.arcDivisionCoefficient
+            )} sample points`,
+            console:
+                "To change: window.extrusionBuilder.arcDivisionCoefficient = 5",
+        });
+    }
+
+    /**
+     * Get current arc approximation quality info (useful for console debugging)
+     * Usage: window.extrusionBuilder.getArcQualityInfo()
+     */
+    getArcQualityInfo() {
+        const coefficient = this.arcDivisionCoefficient;
+        return {
+            arcDivisionCoefficient: coefficient,
+            description: "Samples = arcLength / coefficient",
+            examples: {
+                "50mm arc": Math.ceil(50 / coefficient),
+                "100mm arc": Math.ceil(100 / coefficient),
+                "200mm arc": Math.ceil(200 / coefficient),
+                "500mm arc": Math.ceil(500 / coefficient),
+            },
+            command: `window.extrusionBuilder.arcDivisionCoefficient = ${coefficient}`,
+        };
+    }
+
+    /**
+     * Set arc approximation quality by coefficient
+     * Lower value = more samples = smoother curves but slower
+     * Usage: window.extrusionBuilder.setArcQuality(5)
+     */
+    setArcQuality(coefficient) {
+        if (coefficient <= 0) {
+            this.log.warn("arcDivisionCoefficient must be positive");
+            return;
+        }
+        this.arcDivisionCoefficient = coefficient;
+        this.log.info(
+            `Arc quality changed to ${coefficient} (${Math.ceil(
+                100 / coefficient
+            )} samples per 100mm)`
+        );
+    }
+
+    /**
+     * Convert segments from ExportModule parser to THREE.js curves
+     * @param {Array} segments - Array of segments from parseSVGElement
+     * @param {number} offsetX - X offset for positioning
+     * @param {number} offsetY - Y offset for positioning
+     * @param {function} transformY - Optional Y coordinate transform function
+     * @returns {Array<THREE.Curve>} Array of THREE.js curve objects
+     */
+    segmentsToCurves(segments, offsetX = 0, offsetY = 0, transformY = null) {
+        const curves = [];
+
+        // Helper to get point coordinates
+        const getPoint = (pt) => {
+            if (!pt) return new THREE.Vector3(0, 0, 0);
+            const x = (pt.x || pt.X || 0) + offsetX;
+            const y = transformY
+                ? transformY((pt.y || pt.Y || 0) + offsetY)
+                : (pt.y || pt.Y || 0) + offsetY;
+            return new THREE.Vector3(x, y, 0);
+        };
+
+        for (const segment of segments) {
+            if (segment.type === "arc") {
+                // Всегда аппроксимируем дугу через точки (polyline), чтобы не было линий вместо дуг
+                const start = getPoint(segment.start);
+                const end = getPoint(segment.end);
+                let arcPoints = [];
+                // Если есть параметры центра и радиуса — строим дугу по окружности
+                if (segment.arc && (segment.arc.radius || segment.arc.rx)) {
+                    const arc = segment.arc;
+                    const centerX = (arc.cx || arc.centerX || 0) + offsetX;
+                    const centerY = transformY
+                        ? transformY((arc.cy || arc.centerY || 0) + offsetY)
+                        : (arc.cy || arc.centerY || 0) + offsetY;
+                    const radius = arc.radius || arc.rx;
+                    // Определяем углы
+                    const startAngle = Math.atan2(
+                        start.y - centerY,
+                        start.x - centerX
+                    );
+                    const endAngle = Math.atan2(
+                        end.y - centerY,
+                        end.x - centerX
+                    );
+                    // sweepFlag: 1 = по часовой, 0 = против
+                    let sweep = arc.sweepFlag !== undefined ? arc.sweepFlag : 1;
+                    // largeArcFlag: 1 = >180°, 0 = <180°
+                    let largeArc =
+                        arc.largeArcFlag !== undefined ? arc.largeArcFlag : 0;
+                    // Вычисляем угол дуги
+                    let delta = endAngle - startAngle;
+                    if (sweep === 1 && delta < 0) delta += Math.PI * 2;
+                    if (sweep === 0 && delta > 0) delta -= Math.PI * 2;
+                    if (!largeArc && Math.abs(delta) > Math.PI) {
+                        delta += delta > 0 ? -Math.PI * 2 : Math.PI * 2;
+                    }
+                    if (largeArc && Math.abs(delta) < Math.PI) {
+                        delta += delta > 0 ? Math.PI * 2 : -Math.PI * 2;
+                    }
+                    // Сэмплируем дугу через точки
+                    const numPoints = Math.max(
+                        16,
+                        Math.ceil((Math.abs(delta) * radius) / 2)
+                    );
+                    for (let i = 0; i <= numPoints; i++) {
+                        const t = i / numPoints;
+                        const angle = startAngle + delta * t;
+                        arcPoints.push(
+                            new THREE.Vector3(
+                                centerX + radius * Math.cos(angle),
+                                centerY + radius * Math.sin(angle),
+                                0
+                            )
+                        );
+                    }
+                } else {
+                    // Если нет центра/радиуса — просто линейная аппроксимация
+                    arcPoints = [start, end];
+                }
+                // Добавляем polyline как набор LineCurve3
+                for (let i = 1; i < arcPoints.length; i++) {
+                    curves.push(
+                        new THREE.LineCurve3(arcPoints[i - 1], arcPoints[i])
+                    );
+                }
+            } else if (segment.type === "bezier") {
+                const start = getPoint(segment.start);
+                const cp1 = getPoint(segment.cp1);
+                const cp2 = getPoint(segment.cp2);
+                const end = getPoint(segment.end);
+
+                if (
+                    !isNaN(start.x) &&
+                    !isNaN(start.y) &&
+                    !isNaN(cp1.x) &&
+                    !isNaN(cp1.y) &&
+                    !isNaN(cp2.x) &&
+                    !isNaN(cp2.y) &&
+                    !isNaN(end.x) &&
+                    !isNaN(end.y)
+                ) {
+                    curves.push(
+                        new THREE.CubicBezierCurve3(start, cp1, cp2, end)
+                    );
+                } else {
+                    this.log.warn("Skipping bezier with NaN coordinates:", {
+                        start,
+                        cp1,
+                        cp2,
+                        end,
+                    });
+                }
+            } else {
+                // Default: treat as line
+                const start = getPoint(segment.start);
+                const end = getPoint(segment.end);
+                if (
+                    !isNaN(start.x) &&
+                    !isNaN(start.y) &&
+                    !isNaN(end.x) &&
+                    !isNaN(end.y)
+                ) {
+                    curves.push(new THREE.LineCurve3(start, end));
+                } else {
+                    this.log.warn("Skipping line with NaN coordinates:", {
+                        start,
+                        end,
+                    });
+                }
+            }
+        }
+
+        this.log.debug(
+            `Converted ${segments.length} segments to ${curves.length} THREE.js curves`
+        );
+        return curves;
+    }
+
+    /**
+     * Parse SVG element to polygon points using ExportModule's universal parser
+     * @param {SVGElement} svgElement - SVG element (rect, circle, polygon, path)
+     * @param {Object} exportModule - ExportModule instance for parsing
+     * @returns {Array} Array of {x, y} points
+     */
+    parseSVGElementToPoints(svgElement, exportModule) {
+        const logger = this.log || console;
+
+        if (!svgElement || !exportModule) {
+            logger?.error?.(
+                "parseSVGElementToPoints: missing svgElement or exportModule"
+            );
+            return [];
+        }
+
+        // Use ExportModule's universal parser to get segments
+        const segments = exportModule.parseSVGElement(svgElement, 0, 0, null);
+        if (!segments || segments.length === 0) {
+            logger?.error?.("parseSVGElementToPoints: no segments parsed");
+            return [];
+        }
+
+        logger?.debug?.(
+            `parseSVGElementToPoints: Got ${segments.length} segments from ${svgElement.tagName}`
+        );
+
+        // Convert segments to polygon points
+        // For curves (arcs, beziers), sample multiple points
+        const points = [];
+
+        for (let i = 0; i < segments.length; i++) {
+            const segment = segments[i];
+
+            // Add start point
+            if (segment.start) {
+                const x = Array.isArray(segment.start)
+                    ? segment.start[0]
+                    : segment.start.x;
+                const y = Array.isArray(segment.start)
+                    ? segment.start[1]
+                    : segment.start.y;
+
+                if (
+                    x !== undefined &&
+                    y !== undefined &&
+                    !isNaN(x) &&
+                    !isNaN(y)
+                ) {
+                    points.push({ x, y });
+                } else {
+                    logger?.warn?.(
+                        "parseSVGElementToPoints: invalid start point",
+                        segment.start
+                    );
+                }
+            }
+
+            // For ARC segments, add intermediate points to approximate curve
+            if (segment.type === "ARC" && segment.center && segment.radius) {
+                const numSamples = 16; // Points per arc
+                const startAngle = segment.startAngle || 0;
+                const endAngle = segment.endAngle || Math.PI * 2;
+                const cx = segment.center[0];
+                const cy = segment.center[1];
+                const r = segment.radius;
+
+                for (let j = 1; j <= numSamples; j++) {
+                    const t = j / numSamples;
+                    const angle = startAngle + (endAngle - startAngle) * t;
+                    const px = cx + r * Math.cos(angle);
+                    const py = cy + r * Math.sin(angle);
+                    points.push({ x: px, y: py });
+                }
+            }
+        }
+
+        // Close polygon if needed
+        if (points.length > 0) {
+            const first = points[0];
+            const last = points[points.length - 1];
+            const tolerance = 0.001;
+            if (
+                Math.abs(first.x - last.x) > tolerance ||
+                Math.abs(first.y - last.y) > tolerance
+            ) {
+                points.push({ x: first.x, y: first.y });
+            }
+        }
+
+        logger?.debug?.(
+            `Parsed ${svgElement.tagName} to ${points.length} points`
+        );
+        return points;
     }
 
     /**
@@ -346,8 +835,28 @@ export default class ExtrusionBuilder {
         let startX = 0;
         let startY = 0;
 
+        // Log initial pathData for debugging
+        if (!pathData || typeof pathData !== "string") {
+            this.log.error("Invalid pathData type:", typeof pathData, pathData);
+            return new THREE.CurvePath();
+        }
+
+        if (pathData.includes("NaN") || pathData.includes("undefined")) {
+            this.log.error(
+                "PathData contains NaN or undefined:",
+                pathData.substring(0, 100)
+            );
+            return new THREE.CurvePath();
+        }
+
+        let commandIndex = 0;
+        let gapsDetected = [];
+
         commands?.forEach((cmd) => {
             const type = cmd[0].toUpperCase();
+            const isRelative =
+                cmd[0] === cmd[0].toLowerCase() &&
+                cmd[0] !== cmd[0].toUpperCase(); // lowercase = relative
             const params = cmd
                 .slice(1)
                 .trim()
@@ -358,115 +867,314 @@ export default class ExtrusionBuilder {
             switch (type) {
                 case "M": // Move to
                     if (params.length >= 2) {
-                        currentX = params[0];
-                        currentY = params[1];
+                        currentX = isRelative
+                            ? currentX + params[0]
+                            : params[0];
+                        currentY = isRelative
+                            ? currentY + params[1]
+                            : params[1];
                         startX = currentX;
                         startY = currentY;
                     }
                     break;
                 case "L": // Line to
                     if (params.length >= 2) {
-                        const x = params[0];
-                        const y = params[1];
-                        curves.push(
-                            new THREE.LineCurve3(
+                        const x = isRelative ? currentX + params[0] : params[0];
+                        const y = isRelative ? currentY + params[1] : params[1];
+                        // Validate coordinates
+                        if (
+                            !isNaN(x) &&
+                            !isNaN(y) &&
+                            !isNaN(currentX) &&
+                            !isNaN(currentY)
+                        ) {
+                            const lineCurve = new THREE.LineCurve3(
                                 new THREE.Vector3(currentX, currentY, 0),
                                 new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
+                            );
+                            lineCurve.segmentType = "LINE";
+                            curves.push(lineCurve);
+                            currentX = x;
+                            currentY = y;
+                        }
                     }
                     break;
                 case "H": // Horizontal line
                     if (params.length >= 1) {
-                        const x = params[0];
-                        curves.push(
-                            new THREE.LineCurve3(
+                        const x = isRelative ? currentX + params[0] : params[0];
+                        if (!isNaN(x) && !isNaN(currentX) && !isNaN(currentY)) {
+                            const lineCurve = new THREE.LineCurve3(
                                 new THREE.Vector3(currentX, currentY, 0),
                                 new THREE.Vector3(x, currentY, 0)
-                            )
-                        );
-                        currentX = x;
+                            );
+                            lineCurve.segmentType = "LINE";
+                            curves.push(lineCurve);
+                            currentX = x;
+                        }
                     }
                     break;
                 case "V": // Vertical line
                     if (params.length >= 1) {
-                        const y = params[0];
-                        curves.push(
-                            new THREE.LineCurve3(
+                        const y = isRelative ? currentY + params[0] : params[0];
+                        if (!isNaN(y) && !isNaN(currentX) && !isNaN(currentY)) {
+                            const lineCurve = new THREE.LineCurve3(
                                 new THREE.Vector3(currentX, currentY, 0),
                                 new THREE.Vector3(currentX, y, 0)
-                            )
-                        );
-                        currentY = y;
+                            );
+                            lineCurve.segmentType = "LINE";
+                            curves.push(lineCurve);
+                            currentY = y;
+                        }
                     }
                     break;
                 case "C": // Cubic Bézier curve
                     if (params.length >= 6) {
-                        const cp1x = params[0];
-                        const cp1y = params[1];
-                        const cp2x = params[2];
-                        const cp2y = params[3];
-                        const x = params[4];
-                        const y = params[5];
-                        curves.push(
-                            new THREE.CubicBezierCurve3(
+                        const cp1x = isRelative
+                            ? currentX + params[0]
+                            : params[0];
+                        const cp1y = isRelative
+                            ? currentY + params[1]
+                            : params[1];
+                        const cp2x = isRelative
+                            ? currentX + params[2]
+                            : params[2];
+                        const cp2y = isRelative
+                            ? currentY + params[3]
+                            : params[3];
+                        const x = isRelative ? currentX + params[4] : params[4];
+                        const y = isRelative ? currentY + params[5] : params[5];
+                        if (
+                            !isNaN(cp1x) &&
+                            !isNaN(cp1y) &&
+                            !isNaN(cp2x) &&
+                            !isNaN(cp2y) &&
+                            !isNaN(x) &&
+                            !isNaN(y) &&
+                            !isNaN(currentX) &&
+                            !isNaN(currentY)
+                        ) {
+                            const curve = new THREE.CubicBezierCurve3(
                                 new THREE.Vector3(currentX, currentY, 0),
                                 new THREE.Vector3(cp1x, cp1y, 0),
                                 new THREE.Vector3(cp2x, cp2y, 0),
                                 new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
+                            );
+                            curve.segmentType = "CUBIC_BEZIER";
+
+                            // Check continuity with previous curve
+                            if (curves.length > 0) {
+                                const prevCurve = curves[curves.length - 1];
+                                const prevEnd = prevCurve.getPoint(1);
+                                const curStart = curve.getPoint(0);
+                                const gap = prevEnd.distanceTo(curStart);
+                                if (gap > 0.0001) {
+                                    this.log.warn(
+                                        `Gap detected at command ${commandIndex}: ${gap.toFixed(
+                                            6
+                                        )}mm`,
+                                        {
+                                            prevEnd: {
+                                                x: prevEnd.x,
+                                                y: prevEnd.y,
+                                            },
+                                            curStart: {
+                                                x: curStart.x,
+                                                y: curStart.y,
+                                            },
+                                            currentPos: {
+                                                x: currentX,
+                                                y: currentY,
+                                            },
+                                        }
+                                    );
+                                }
+                            }
+
+                            curves.push(curve);
+                            currentX = x;
+                            currentY = y;
+                        }
                     }
+                    commandIndex++;
                     break;
                 case "Q": // Quadratic Bézier curve
                     if (params.length >= 4) {
-                        const cpx = params[0];
-                        const cpy = params[1];
-                        const x = params[2];
-                        const y = params[3];
-                        curves.push(
-                            new THREE.QuadraticBezierCurve3(
+                        const cpx = isRelative
+                            ? currentX + params[0]
+                            : params[0];
+                        const cpy = isRelative
+                            ? currentY + params[1]
+                            : params[1];
+                        const x = isRelative ? currentX + params[2] : params[2];
+                        const y = isRelative ? currentY + params[3] : params[3];
+                        if (
+                            !isNaN(cpx) &&
+                            !isNaN(cpy) &&
+                            !isNaN(x) &&
+                            !isNaN(y) &&
+                            !isNaN(currentX) &&
+                            !isNaN(currentY)
+                        ) {
+                            const curve = new THREE.QuadraticBezierCurve3(
                                 new THREE.Vector3(currentX, currentY, 0),
                                 new THREE.Vector3(cpx, cpy, 0),
                                 new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
+                            );
+                            curve.segmentType = "QUADRATIC_BEZIER";
+                            curves.push(curve);
+                            currentX = x;
+                            currentY = y;
+                        }
                     }
                     break;
-                case "A": // Arc (approximated as line for simplicity)
+                case "A": // Arc (approximate as polyline)
                     if (params.length >= 7) {
-                        const x = params[5];
-                        const y = params[6];
-                        curves.push(
-                            new THREE.LineCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
+                        const rx = params[0];
+                        const ry = params[1];
+                        const xAxisRotation = params[2] * (Math.PI / 180);
+                        const largeArcFlag = params[3];
+                        const sweepFlag = params[4];
+                        const x = isRelative ? currentX + params[5] : params[5];
+                        const y = isRelative ? currentY + params[6] : params[6];
+                        if (
+                            !isNaN(rx) &&
+                            !isNaN(ry) &&
+                            !isNaN(x) &&
+                            !isNaN(y) &&
+                            !isNaN(currentX) &&
+                            !isNaN(currentY)
+                        ) {
+                            // Arc center/angles calculation (SVG spec)
+                            // Adapted from https://github.com/fontello/svgpath/blob/master/lib/a2c.js
+                            let px = currentX,
+                                py = currentY;
+                            let cx = x,
+                                cy = y;
+                            let dx2 = (px - cx) / 2.0;
+                            let dy2 = (py - cy) / 2.0;
+                            let cosPhi = Math.cos(xAxisRotation);
+                            let sinPhi = Math.sin(xAxisRotation);
+                            // Step 1: Compute (x1', y1')
+                            let x1p = cosPhi * dx2 + sinPhi * dy2;
+                            let y1p = -sinPhi * dx2 + cosPhi * dy2;
+                            // Ensure radii are large enough
+                            let rxAbs = Math.abs(rx);
+                            let ryAbs = Math.abs(ry);
+                            let rSquareFix =
+                                (x1p * x1p) / (rxAbs * rxAbs) +
+                                (y1p * y1p) / (ryAbs * ryAbs);
+                            if (rSquareFix > 1) {
+                                rxAbs *= Math.sqrt(rSquareFix);
+                                ryAbs *= Math.sqrt(rSquareFix);
+                            }
+                            // Step 2: Compute (cx', cy')
+                            let sign = largeArcFlag !== sweepFlag ? 1 : -1;
+                            let sq =
+                                (rxAbs * rxAbs * (ryAbs * ryAbs) -
+                                    rxAbs * rxAbs * (y1p * y1p) -
+                                    ryAbs * ryAbs * (x1p * x1p)) /
+                                (rxAbs * rxAbs * (y1p * y1p) +
+                                    ryAbs * ryAbs * (x1p * x1p));
+                            sq = sq < 0 ? 0 : sq;
+                            let coef = sign * Math.sqrt(sq);
+                            let cxp = coef * ((rxAbs * y1p) / ryAbs);
+                            let cyp = coef * (-(ryAbs * x1p) / rxAbs);
+                            // Step 3: Compute (cx, cy) from (cx', cy')
+                            let centerX =
+                                cosPhi * cxp - sinPhi * cyp + (px + cx) / 2;
+                            let centerY =
+                                sinPhi * cxp + cosPhi * cyp + (py + cy) / 2;
+                            // Step 4: Compute angles
+                            function vectorAngle(ux, uy, vx, vy) {
+                                let dot = ux * vx + uy * vy;
+                                let len =
+                                    Math.sqrt(ux * ux + uy * uy) *
+                                    Math.sqrt(vx * vx + vy * vy);
+                                let ang = Math.acos(
+                                    Math.max(-1, Math.min(1, dot / len))
+                                );
+                                if (ux * vy - uy * vx < 0) ang = -ang;
+                                return ang;
+                            }
+                            let v1x = (x1p - cxp) / rxAbs;
+                            let v1y = (y1p - cyp) / ryAbs;
+                            let v2x = (-x1p - cxp) / rxAbs;
+                            let v2y = (-y1p - cyp) / ryAbs;
+                            let startAngle = vectorAngle(1, 0, v1x, v1y);
+                            let deltaAngle = vectorAngle(v1x, v1y, v2x, v2y);
+                            if (!sweepFlag && deltaAngle > 0)
+                                deltaAngle -= 2 * Math.PI;
+                            if (sweepFlag && deltaAngle < 0)
+                                deltaAngle += 2 * Math.PI;
+                            deltaAngle = deltaAngle % (2 * Math.PI);
+                            // Step 5: Sample arc as polyline
+                            const arcLen = Math.abs(
+                                deltaAngle * ((rxAbs + ryAbs) / 2)
+                            );
+                            const numPoints = Math.max(
+                                16,
+                                Math.ceil(arcLen / this.arcDivisionCoefficient)
+                            );
+                            let prevPoint = new THREE.Vector3(px, py, 0);
+                            for (let i = 1; i <= numPoints; i++) {
+                                const t = i / numPoints;
+                                const angle = startAngle + deltaAngle * t;
+                                const cosA = Math.cos(angle),
+                                    sinA = Math.sin(angle);
+                                let xVal =
+                                    cosPhi * rxAbs * cosA -
+                                    sinPhi * ryAbs * sinA +
+                                    centerX;
+                                let yVal =
+                                    sinPhi * rxAbs * cosA +
+                                    cosPhi * ryAbs * sinA +
+                                    centerY;
+                                let nextPoint = new THREE.Vector3(
+                                    xVal,
+                                    yVal,
+                                    0
+                                );
+                                const arcLine = new THREE.LineCurve3(
+                                    prevPoint,
+                                    nextPoint
+                                );
+                                arcLine.segmentType = "ARC";
+                                curves.push(arcLine);
+                                prevPoint = nextPoint;
+                            }
+                            currentX = x;
+                            currentY = y;
+                        }
                     }
                     break;
                 case "Z": // Close path
                     if (curves.length > 0) {
-                        curves.push(
-                            new THREE.LineCurve3(
+                        if (
+                            !isNaN(currentX) &&
+                            !isNaN(currentY) &&
+                            !isNaN(startX) &&
+                            !isNaN(startY)
+                        ) {
+                            const closeLine = new THREE.LineCurve3(
                                 new THREE.Vector3(currentX, currentY, 0),
                                 new THREE.Vector3(startX, startY, 0)
-                            )
-                        );
+                            );
+                            closeLine.segmentType = "LINE";
+                            curves.push(closeLine);
+                        }
                     }
                     currentX = startX;
                     currentY = startY;
                     break;
             }
+            commandIndex++;
         });
+
+        this.log.debug(
+            `parsePathToCurves: Created ${curves.length} curves from ${
+                commands?.length || 0
+            } commands`
+        );
 
         return curves;
     }
@@ -491,6 +1199,12 @@ export default class ExtrusionBuilder {
         this.log.debug("Creating curve from curves:", {
             curvesCount: pathCurves.length,
             firstCurve: pathCurves[0],
+            partFront: {
+                x: partFrontX,
+                y: partFrontY,
+                width: partFrontWidth,
+                height: partFrontHeight,
+            },
             depth,
             panelThickness,
             panelAnchor,
@@ -500,6 +1214,8 @@ export default class ExtrusionBuilder {
         // Create 3D versions of curves
         const curves3D = pathCurves
             .map((curve) => {
+                let curve3D = null;
+
                 if (curve instanceof THREE.LineCurve3) {
                     const v1 = this.convertPoint2DTo3D(
                         curve.v1.x,
@@ -525,7 +1241,7 @@ export default class ExtrusionBuilder {
                         panelAnchor,
                         contourOffset
                     );
-                    return new THREE.LineCurve3(v1, v2);
+                    curve3D = new THREE.LineCurve3(v1, v2);
                 } else if (curve instanceof THREE.CubicBezierCurve3) {
                     const v0 = this.convertPoint2DTo3D(
                         curve.v0.x,
@@ -575,7 +1291,7 @@ export default class ExtrusionBuilder {
                         panelAnchor,
                         contourOffset
                     );
-                    return new THREE.CubicBezierCurve3(v0, v1, v2, v3);
+                    curve3D = new THREE.CubicBezierCurve3(v0, v1, v2, v3);
                 } else if (curve instanceof THREE.QuadraticBezierCurve3) {
                     const v0 = this.convertPoint2DTo3D(
                         curve.v0.x,
@@ -613,10 +1329,15 @@ export default class ExtrusionBuilder {
                         panelAnchor,
                         contourOffset
                     );
-                    return new THREE.QuadraticBezierCurve3(v0, v1, v2);
+                    curve3D = new THREE.QuadraticBezierCurve3(v0, v1, v2);
                 }
-                // For unsupported curves, approximate with line
-                return null;
+
+                // Transfer segmentType from 2D to 3D curve
+                if (curve3D && curve.segmentType) {
+                    curve3D.segmentType = curve.segmentType;
+                }
+
+                return curve3D;
             })
             .filter((c) => c !== null);
 
@@ -626,11 +1347,105 @@ export default class ExtrusionBuilder {
             last: curves3D[curves3D.length - 1],
         });
 
+        // Verify continuity of input 2D curves before 3D conversion
+        for (let i = 1; i < pathCurves.length; i++) {
+            const prevCurve = pathCurves[i - 1];
+            const curCurve = pathCurves[i];
+
+            let prevEnd, curStart;
+            if (prevCurve instanceof THREE.LineCurve3) {
+                prevEnd = prevCurve.v2;
+            } else if (prevCurve instanceof THREE.CubicBezierCurve3) {
+                prevEnd = prevCurve.v3;
+            } else if (prevCurve instanceof THREE.QuadraticBezierCurve3) {
+                prevEnd = prevCurve.v2;
+            }
+
+            if (curCurve instanceof THREE.LineCurve3) {
+                curStart = curCurve.v1;
+            } else if (curCurve instanceof THREE.CubicBezierCurve3) {
+                curStart = curCurve.v0;
+            } else if (curCurve instanceof THREE.QuadraticBezierCurve3) {
+                curStart = curCurve.v0;
+            }
+
+            if (prevEnd && curStart) {
+                const gap2D = prevEnd.distanceTo(curStart);
+                if (gap2D > 0.01) {
+                    this.log.warn(
+                        `2D curve gap detected between curves ${
+                            i - 1
+                        } and ${i}: ${gap2D.toFixed(6)}`,
+                        {
+                            prevEnd: { x: prevEnd.x, y: prevEnd.y },
+                            curStart: { x: curStart.x, y: curStart.y },
+                        }
+                    );
+                }
+            }
+        }
+
         // Create exact path using the curves
+        // Connect endpoints to avoid gaps - critical for mitered extrusions
         const path = new THREE.CurvePath();
-        curves3D.forEach((curve) => {
+        const gapTolerance = 0.001; // 0.001mm = 1 micron tolerance
+        let totalGapsFixed = 0;
+
+        for (let i = 0; i < curves3D.length; i++) {
+            const curve = curves3D[i];
+
+            // If not first curve, check if we need to connect to previous curve's end
+            if (i > 0) {
+                const prevCurve = curves3D[i - 1];
+                const prevEnd = prevCurve.getPoint(1);
+                const curStart = curve.getPoint(0);
+                const gap = prevEnd.distanceTo(curStart);
+
+                // Add connecting line for ANY gap, even tiny ones
+                // This ensures continuous path for mitered extrusions
+                if (gap > gapTolerance) {
+                    this.log.debug(
+                        `Adding connector between curves ${
+                            i - 1
+                        } and ${i}, gap: ${gap.toFixed(6)}mm`
+                    );
+                    path.add(new THREE.LineCurve3(prevEnd, curStart));
+                    totalGapsFixed++;
+                } else if (gap > 0) {
+                    // Tiny gap: snap points together by adjusting curve start point
+                    if (curve instanceof THREE.LineCurve3) {
+                        curve.v1.copy(prevEnd);
+                    } else if (curve instanceof THREE.CubicBezierCurve3) {
+                        curve.v0.copy(prevEnd);
+                    } else if (curve instanceof THREE.QuadraticBezierCurve3) {
+                        curve.v0.copy(prevEnd);
+                    }
+                }
+            }
+
             path.add(curve);
-        });
+        }
+
+        // Check if path is closed and close it if needed
+        if (curves3D.length > 0) {
+            const firstPoint = curves3D[0].getPoint(0);
+            const lastPoint = curves3D[curves3D.length - 1].getPoint(1);
+            const closureGap = firstPoint.distanceTo(lastPoint);
+
+            if (closureGap > gapTolerance) {
+                this.log.debug(
+                    `Closing path with connector, gap: ${closureGap.toFixed(
+                        6
+                    )}mm`
+                );
+                path.add(new THREE.LineCurve3(lastPoint, firstPoint));
+                totalGapsFixed++;
+            }
+        }
+
+        if (totalGapsFixed > 0) {
+            this.log.info(`Fixed ${totalGapsFixed} gaps in curve path`);
+        }
 
         return path;
     }
@@ -662,16 +1477,19 @@ export default class ExtrusionBuilder {
         // Convert X: subtract partFront left edge, then center
         const x3d = adjustedX2d - partFrontX - partFrontWidth / 2;
 
-        // Convert Y: path Y is in canvas space where Y increases downward
-        // partFrontY is the top of the front view rectangle
-        // In 3D, Y=0 is bottom and increases upward
-        // Adjust based on panel anchor
-        const partFrontBottom = partFrontY + partFrontHeight;
-        let y3d = partFrontBottom - y2d;
+        // Convert Y: Make coordinates RELATIVE to partFront
+        // y2d is absolute canvas coordinate, partFrontY can be negative
+        // We need Y relative to partFront top edge (0 = top of partFront)
+        const relativeY = y2d - partFrontY; // Y relative to partFront top
 
-        // For bottom-left anchor, invert Y (material bottom becomes Y=0)
+        // Now invert to 3D space (Y up)
+        // In 3D: Y=0 is panel bottom, Y increases upward
+        // partFrontHeight is the full height we need to map to 3D panel height
+        let y3d = partFrontHeight - relativeY;
+
+        // For bottom-left anchor, adjust origin
         if (panelAnchor === "bottom-left") {
-            y3d = y2d - partFrontY;
+            y3d = relativeY;
         }
 
         // Z: depth into material from the anchor surface
@@ -806,7 +1624,7 @@ export default class ExtrusionBuilder {
         // Create shape with bottom-center at origin (like bit profiles)
         // Extend slightly below (0.1) for better boolean operations
         const shape = new THREE.Shape();
-        shape.moveTo(-halfWidth, -0.001);
+        shape.moveTo(0, -0.001);
         shape.lineTo(halfWidth, -0.001);
         shape.lineTo(halfWidth, height);
         shape.lineTo(-halfWidth, height);
@@ -875,21 +1693,133 @@ export default class ExtrusionBuilder {
                 profilePointsCount: profilePoints.length,
             });
 
-            // Get contour points from the curve
-            // For linear segments, use minimal points (just start and end)
-            let segments;
-            if (curve instanceof THREE.LineCurve3) {
-                segments = 1; // Only 2 points needed for a straight line
-            } else {
-                // For curves, use adaptive segmentation
-                segments = Math.max(50, Math.floor(curve.getLength() / 5));
+            // Build grouped path like round extrusion, then merge all groups into one continuous path
+            let samplingPath = curve;
+            let curveGroups = [];
+            if (curve && curve.curves && Array.isArray(curve.curves)) {
+                curveGroups = this.groupCurves(curve.curves);
+                // Log detailed diagnostics for mitered extrusion
+                this.logCurveGroupDiagnostics(
+                    curveGroups,
+                    curve.curves,
+                    "MITERED"
+                );
+
+                const mergedPath = new THREE.CurvePath();
+                for (const g of curveGroups) {
+                    for (const c of g.curves) {
+                        mergedPath.add(c);
+                    }
+                }
+                samplingPath = mergedPath;
             }
-            const contourPoints = curve.getPoints(segments);
+
+            // Get contour points from the merged path
+            // For LineCurve3: minimal points; otherwise dense sampling
+            let segments;
+            if (samplingPath instanceof THREE.LineCurve3) {
+                segments = 1;
+            } else {
+                const curveLength = samplingPath.getLength();
+                segments = Math.max(200, Math.ceil(curveLength / 0.5));
+            }
+            const contourPoints = samplingPath.getPoints(segments);
+
+            this.log.debug("Contour sampling:", {
+                curveLength: samplingPath.getLength
+                    ? samplingPath.getLength()
+                    : "N/A",
+                segments,
+                contourPointsCount: contourPoints.length,
+            });
 
             // Convert Vector3 to Vector2 for ProfiledContourGeometry
             let contour = contourPoints.map(
                 (p) => new THREE.Vector3(p.x, p.y, p.z)
             );
+
+            // Check for any corrupted points in contour
+            let corruptedCount = 0;
+            for (let i = 0; i < contour.length; i++) {
+                const p = contour[i];
+                if (!isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) {
+                    corruptedCount++;
+                    if (corruptedCount <= 3) {
+                        this.log.warn(
+                            `  Corrupted contour point at index ${i}: (${p.x}, ${p.y}, ${p.z})`
+                        );
+                    }
+                }
+            }
+            if (corruptedCount > 0) {
+                this.log.warn(
+                    `  Total corrupted points: ${corruptedCount} / ${contour.length}`
+                );
+            }
+
+            // Check continuity of contour points (detect breaks in mitered extrusion)
+            let contourGaps = [];
+            let maxGap = 0;
+            let avgGap = 0;
+            let gapSum = 0;
+            for (let i = 1; i < contour.length; i++) {
+                const prevPoint = contour[i - 1];
+                const curPoint = contour[i];
+                const gap = prevPoint.distanceTo(curPoint);
+                gapSum += gap;
+                if (gap > maxGap) maxGap = gap;
+                // Large jumps indicate a break in the path
+                if (gap > 0.1) {
+                    // > 0.1mm is suspicious
+                    contourGaps.push({
+                        index: i,
+                        gap: gap,
+                        from: {
+                            x: prevPoint.x,
+                            y: prevPoint.y,
+                            z: prevPoint.z,
+                        },
+                        to: { x: curPoint.x, y: curPoint.y, z: curPoint.z },
+                    });
+                }
+            }
+            avgGap = gapSum / Math.max(1, contour.length - 1);
+
+            if (contourGaps.length > 0) {
+                this.log.warn(
+                    `Mitered extrusion: Detected ${
+                        contourGaps.length
+                    } gaps in contour path (max=${maxGap.toFixed(
+                        6
+                    )}mm, avg=${avgGap.toFixed(6)}mm)`
+                );
+                contourGaps.slice(0, 3).forEach((gap) => {
+                    this.log.warn(
+                        `  At point ${gap.index}: gap=${gap.gap.toFixed(
+                            6
+                        )}mm from (${gap.from.x.toFixed(
+                            2
+                        )}, ${gap.from.y.toFixed(2)}, ${gap.from.z.toFixed(
+                            2
+                        )}) to (${gap.to.x.toFixed(2)}, ${gap.to.y.toFixed(
+                            2
+                        )}, ${gap.to.z.toFixed(2)})`
+                    );
+                    // Check for NaN or Infinity
+                    const hasNaN =
+                        isNaN(gap.to.x) || isNaN(gap.to.y) || isNaN(gap.to.z);
+                    const hasInfinity =
+                        !isFinite(gap.to.x) ||
+                        !isFinite(gap.to.y) ||
+                        !isFinite(gap.to.z);
+                    if (hasNaN || hasInfinity) {
+                        this.log.warn(`    ^ Contains NaN or Infinity!`);
+                    }
+                });
+                this.log.warn(
+                    `  Total contour length: ${contour.length} points`
+                );
+            }
 
             // Determine if the path is closed
             // Check if first and last points are close enough
@@ -906,7 +1836,7 @@ export default class ExtrusionBuilder {
                 profilePoints: profilePoints.length,
                 contourPoints: contour.length,
                 contourClosed,
-                curveLength: curve.getLength(),
+                curveLength: samplingPath.getLength(),
             });
 
             // Use ProfiledContourGeometry for mitered corners
@@ -949,11 +1879,20 @@ export default class ExtrusionBuilder {
             // Store profile points in userData for lathe synchronization
             mesh.userData.profilePoints = profilePoints;
 
-            return mesh;
+            this.log.debug("Mitered extrusion mesh created:", {
+                vertices: mesh.geometry.attributes.position.count,
+                triangles: mesh.geometry.index
+                    ? mesh.geometry.index.count / 3
+                    : 0,
+                boundingBox: mesh.geometry.boundingBox,
+                profilePoints: profilePoints.length,
+            });
+
+            return [mesh]; // Return array for consistency with extrudeAlongPathRound
         } catch (error) {
             this.log.error("Error extruding along path:", error.message);
             this.log.error("Error stack:", error.stack);
-            return null;
+            return [];
         }
     }
 
@@ -978,12 +1917,23 @@ export default class ExtrusionBuilder {
             openEnded = openEnded !== undefined ? openEnded : false;
             openEnded = contourClosed === true ? false : openEnded;
 
+            this.log.debug("createProfiledContourGeometry starting:", {
+                contourPoints: contour.length,
+                contourClosed,
+                openEnded,
+                curveSegments,
+            });
+
             let profileGeometry = new THREE.ShapeGeometry(
                 profileShape,
                 curveSegments
             );
             profileGeometry.rotateX(-Math.PI * 0.5);
             let profile = profileGeometry.attributes.position;
+
+            this.log.debug("Profile geometry created:", {
+                profilePoints: profile.count,
+            });
 
             // Calculate total vertices needed: profile points for each contour
             // (Earcut uses existing vertices, no need for center points)
@@ -1162,8 +2112,76 @@ export default class ExtrusionBuilder {
      * @param {string|number} color
      * @returns {THREE.Mesh|null}
      */
-    extrudeAlongPathRound(profile, path, color) {
+    /**
+     * Extrude with round (revolved) corners: mitered base extrusion minus lathe bounding boxes, then union with lathes
+     * Returns a single merged mesh suitable for downstream CSG operations
+     * @param {THREE.Shape} profile
+     * @param {string|THREE.CurvePath} pathOrString - SVG path string (after arc approximation) OR Three.js CurvePath
+     * @param {string|number} color
+     * @param {object} [options] - Optional params: { partFrontX, partFrontY, partFrontWidth, partFrontHeight, depth, panelThickness, panelAnchor }
+     * @returns {THREE.Mesh|null}
+     */
+    extrudeAlongPathRound(profile, pathOrString, color, options = {}) {
         try {
+            let path;
+
+            // Check if pathOrString is a string (SVG path data)
+            if (typeof pathOrString === "string") {
+                this.log.info("=== SVG PATH PARSING FOR ROUND EXTRUSION ===");
+                this.log.info(`Path data length: ${pathOrString.length} chars`);
+
+                // Parse SVG path to curves (with segmentType flags: LINE, ARC, CUBIC_BEZIER, etc.)
+                const pathCurves = this.parsePathToCurves(pathOrString);
+
+                if (pathCurves.length === 0) {
+                    this.log.warn("No curves parsed from SVG path");
+                    return null;
+                }
+
+                this.log.info(`Parsed ${pathCurves.length} curves from SVG`);
+
+                // DIAGNOSTIC: Check segmentType flags
+                const segmentTypeCounts = {};
+                pathCurves.forEach((curve) => {
+                    const type = curve.segmentType || "UNKNOWN";
+                    segmentTypeCounts[type] =
+                        (segmentTypeCounts[type] || 0) + 1;
+                });
+                this.log.info("Segment types:", segmentTypeCounts);
+
+                // Create 3D curve from 2D curves using coordinate transformation
+                const {
+                    partFrontX = 0,
+                    partFrontY = 0,
+                    partFrontWidth = 100,
+                    partFrontHeight = 100,
+                    depth = 0,
+                    panelThickness = 19,
+                    panelAnchor = { x: 0, y: 0 },
+                } = options;
+
+                path = this.createCurveFromCurves(
+                    pathCurves,
+                    partFrontX,
+                    partFrontY,
+                    partFrontWidth,
+                    partFrontHeight,
+                    depth,
+                    panelThickness,
+                    panelAnchor
+                );
+
+                this.log.info(
+                    `Created 3D curve with ${path.curves.length} curves`
+                );
+            } else {
+                // pathOrString is already a CurvePath
+                path = pathOrString;
+                this.log.info(
+                    `Using provided CurvePath with ${path.curves.length} curves`
+                );
+            }
+
             // Calculate adaptive curve segments based on profile complexity
             const curveSegments = this.calculateAdaptiveCurveSegments(profile);
             const profileGeometry = new THREE.ShapeGeometry(
@@ -1192,59 +2210,189 @@ export default class ExtrusionBuilder {
                 return null;
             }
 
-            const segments = path.curves.map((curve) => ({
-                curve,
-                startPoint: curve.getPointAt(0),
-                endPoint: curve.getPointAt(1),
-            }));
+            // DIAGNOSTIC LOG: Check segmentType flags on curves
+            this.log.info("=== SVG SEGMENTS DIAGNOSTIC ===");
+            this.log.info(`Total curves: ${path.curves.length}`);
+            const segmentTypeCounts = {};
+            path.curves.forEach((curve, idx) => {
+                const type = curve.segmentType || "UNKNOWN";
+                segmentTypeCounts[type] = (segmentTypeCounts[type] || 0) + 1;
+                if (idx < 5 || idx > path.curves.length - 3) {
+                    // Log first 5 and last 3 curves
+                    this.log.info(
+                        `  Curve ${idx}: type=${
+                            curve.constructor.name
+                        }, segmentType=${
+                            curve.segmentType || "NOT_SET"
+                        }, length=${curve.getLength().toFixed(2)}`
+                    );
+                }
+            });
+            this.log.info(`Segment type distribution:`, segmentTypeCounts);
+            this.log.info("=== END DIAGNOSTIC ===");
 
-            const firstPoint = segments[0].startPoint;
-            const lastPoint = segments[segments.length - 1].endPoint;
-            const pathClosed = firstPoint.distanceTo(lastPoint) < 0.01;
+            // Group curves using shared logic
+            const curveGroups = this.groupCurves(path.curves);
 
-            const directions = segments.map((seg) =>
-                new THREE.Vector3()
-                    .subVectors(seg.endPoint, seg.startPoint)
-                    .normalize()
-            );
+            // Log detailed diagnostics for round extrusion
+            this.logCurveGroupDiagnostics(curveGroups, path.curves, "ROUND");
 
-            // Create array to hold all segment meshes
-            const segmentMeshes = [];
-            const latheMeshes = [];
-            const junctionDataArray = [];
+            // Check if path is closed (first and last points are close)
+            let isClosedPath = false;
+            let contourIsClockwise = false; // Determine contour winding direction
 
-            // Create individual extrusion for each path segment
-            for (let i = 0; i < segments.length; i++) {
-                const segment = segments[i];
-                const curve = segment.curve;
+            if (path.curves.length > 0) {
+                const firstCurve = path.curves[0];
+                const lastCurve = path.curves[path.curves.length - 1];
+                const firstPoint = firstCurve.getPoint(0);
+                const lastPoint = lastCurve.getPoint(1);
+                const closureGap = firstPoint.distanceTo(lastPoint);
+                isClosedPath = closureGap < 0.01; // Consider closed if gap < 0.01mm
 
-                // Determine segment detail level
-                let segmentPoints;
-                if (curve instanceof THREE.LineCurve3) {
-                    // Straight line: only 2 points needed
-                    segmentPoints = 1; // getPoints(1) returns 2 points
-                } else {
-                    // Arc/curve: adaptive segmentation based on length
+                // Determine winding direction using signed area (shoelace formula)
+                if (isClosedPath) {
+                    let signedArea = 0;
+                    for (const curve of path.curves) {
+                        const p1 = curve.getPoint(0);
+                        const p2 = curve.getPoint(1);
+                        signedArea += (p2.x - p1.x) * (p2.y + p1.y);
+                    }
+                    contourIsClockwise = signedArea > 0;
+                }
+            }
+
+            // Create meshes for each group
+            const allMeshes = [];
+            const junctionPoints = [];
+
+            // Для junctions: lathe всегда на стыке между группами (после каждой группы, кроме последней, и между последней и первой если контур замкнут)
+            for (
+                let groupIndex = 0;
+                groupIndex < curveGroups.length;
+                groupIndex++
+            ) {
+                const group = curveGroups[groupIndex];
+                // Sample curves in this group
+                const contourPoints = [];
+                for (const curve of group.curves) {
                     const curveLength = curve.getLength();
-                    segmentPoints = Math.max(8, Math.floor(curveLength / 2));
+                    let samples = 1;
+
+                    const points = curve.getPoints(samples);
+                    if (contourPoints.length === 0) {
+                        contourPoints.push(...points);
+                    } else {
+                        const lastPoint =
+                            contourPoints[contourPoints.length - 1];
+                        if (lastPoint.distanceTo(points[0]) < 0.01) {
+                            contourPoints.push(...points.slice(1));
+                        } else {
+                            contourPoints.push(...points);
+                        }
+                    }
                 }
 
-                const contourPoints = curve.getPoints(segmentPoints);
-                let contour = contourPoints.map(
-                    (p) => new THREE.Vector3(p.x, p.y, p.z)
-                );
+                // Добавить junction после каждой группы (кроме последней), и между последней и первой если контур замкнут
+                if (groupIndex < curveGroups.length - 1) {
+                    junctionPoints.push({
+                        point: contourPoints[contourPoints.length - 1].clone(),
+                        groupIndex: groupIndex,
+                    });
+                } else if (isClosedPath && curveGroups.length > 1) {
+                    // Последний стык — между последней и первой группой
+                    junctionPoints.push({
+                        point: contourPoints[contourPoints.length - 1].clone(),
+                        groupIndex: groupIndex,
+                        closesContour: true,
+                    });
+                }
 
-                // Create closed extrusion WITH caps at segment ends
+                // Detect gaps between groups
+                if (groupIndex > 0 && contourPoints.length > 0) {
+                    const prevGroup = curveGroups[groupIndex - 1];
+                    const allPrevGroupPoints = [];
+                    for (const curve of prevGroup.curves) {
+                        const curveLength = curve.getLength();
+                        let samples;
+                        if (prevGroup.type === "LINE") {
+                            samples = 1;
+                        } else if (prevGroup.type === "ARC") {
+                            samples = Math.max(
+                                2,
+                                Math.ceil(
+                                    curveLength / this.arcDivisionCoefficient
+                                )
+                            );
+                        } else {
+                            samples = Math.max(
+                                2,
+                                Math.ceil(
+                                    curveLength / this.arcDivisionCoefficient
+                                )
+                            );
+                        }
+                        const points = curve.getPoints(samples);
+                        if (allPrevGroupPoints.length === 0) {
+                            allPrevGroupPoints.push(...points);
+                        } else {
+                            const lastPoint =
+                                allPrevGroupPoints[
+                                    allPrevGroupPoints.length - 1
+                                ];
+                            if (lastPoint.distanceTo(points[0]) < 0.01) {
+                                allPrevGroupPoints.push(...points.slice(1));
+                            } else {
+                                allPrevGroupPoints.push(...points);
+                            }
+                        }
+                    }
+
+                    if (allPrevGroupPoints.length > 0) {
+                        const prevLastPoint =
+                            allPrevGroupPoints[allPrevGroupPoints.length - 1];
+                        const curFirstPoint = contourPoints[0];
+                        const groupGap =
+                            prevLastPoint.distanceTo(curFirstPoint);
+                        if (groupGap > 0.01) {
+                            this.log.warn(
+                                `Round extrusion: Gap between group ${
+                                    groupIndex - 1
+                                } and ${groupIndex}: ${groupGap.toFixed(6)}mm`,
+                                {
+                                    prevPoint: {
+                                        x: prevLastPoint.x,
+                                        y: prevLastPoint.y,
+                                        z: prevLastPoint.z,
+                                    },
+                                    curPoint: {
+                                        x: curFirstPoint.x,
+                                        y: curFirstPoint.y,
+                                        z: curFirstPoint.z,
+                                    },
+                                }
+                            );
+                        }
+                    }
+                }
+
+                // Check if this group forms a closed path
+                const firstPoint = contourPoints[0];
+                const lastPoint = contourPoints[contourPoints.length - 1];
+                const groupClosed = firstPoint.distanceTo(lastPoint) < 0.01;
+
+                // Create geometry for this group
                 const geometry = this.createProfiledContourGeometry(
                     profile,
-                    contour,
-                    false, // contourClosed = false
+                    contourPoints,
+                    groupClosed,
                     false, // openEnded = false (WITH caps)
-                    curveSegments // Use same curve segments as profile generation
+                    curveSegments
                 );
 
                 if (!geometry) {
-                    this.log.warn(`Failed to create geometry for segment ${i}`);
+                    this.log.warn(
+                        `Failed to create geometry for group ${groupIndex}`
+                    );
                     continue;
                 }
 
@@ -1255,7 +2403,7 @@ export default class ExtrusionBuilder {
                     color: new THREE.Color(color || "#cccccc"),
                     roughness: 0.5,
                     metalness: 0.2,
-                    side: THREE.FrontSide, // Single-sided for closed extrusions
+                    side: THREE.FrontSide,
                     wireframe: this.materialManager
                         ? this.materialManager.isWireframeEnabled()
                         : false,
@@ -1264,96 +2412,86 @@ export default class ExtrusionBuilder {
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
-                mesh.userData.segmentIndex = i;
-                segmentMeshes.push(mesh);
+                mesh.userData.isBitPart = true;
+                mesh.userData.groupIndex = groupIndex;
+                mesh.userData.groupType = group.type;
+
+                allMeshes.push(mesh);
             }
 
-            // Create lathes at junctions
-            const usePartialLathes = true; // Set to false for full 360° lathes
-            if (pathClosed) {
-                for (let i = 0; i < segments.length; i++) {
-                    const junctionPoint = segments[i].endPoint;
-                    const prevDir = directions[i];
-                    const nextDir = directions[(i + 1) % segments.length];
-                    const data = this.createPartialLatheAtJunction(
+            // Partial lathe at every junction
+            if (junctionPoints.length > 0) {
+                this.log.debug(
+                    "Creating partial lathe corners at junctions:",
+                    junctionPoints.length
+                );
+                for (let i = 0; i < junctionPoints.length; i++) {
+                    const junction = junctionPoints[i];
+                    const groupIndex = junction.groupIndex;
+                    let currentGroup, nextGroup;
+                    if (junction.closesContour) {
+                        currentGroup = curveGroups[groupIndex];
+                        nextGroup = curveGroups[0];
+                    } else {
+                        currentGroup = curveGroups[groupIndex];
+                        nextGroup = curveGroups[groupIndex + 1];
+                    }
+                    if (!currentGroup || !nextGroup) continue;
+                    // last curve of current group
+                    const lastCurve =
+                        currentGroup.curves[currentGroup.curves.length - 1];
+                    // first curve of next group
+                    const firstCurve = nextGroup.curves[0];
+                    // directions
+                    const t1 = 0.9;
+                    const t2 = 0.1;
+                    const prevPoint = lastCurve.getPoint(t1);
+                    const nextPoint = firstCurve.getPoint(t2);
+                    const prevDir = new THREE.Vector3()
+                        .subVectors(junction.point, prevPoint)
+                        .normalize();
+                    const nextDir = new THREE.Vector3()
+                        .subVectors(nextPoint, junction.point)
+                        .normalize();
+                    // Partial lathe
+                    const latheResult = this.createPartialLatheAtJunction(
                         profile,
-                        junctionPoint,
+                        junction.point,
                         prevDir,
                         nextDir,
                         color,
-                        i + 1,
-                        usePartialLathes,
-                        profilePoints // Pass same points used in extrusions
+                        i,
+                        true,
+                        null,
+                        contourIsClockwise
                     );
-                    if (data) {
-                        latheMeshes.push(data.mesh);
-                        junctionDataArray.push(data);
-                    }
-                }
-            } else {
-                for (let i = 0; i < segments.length - 1; i++) {
-                    const junctionPoint = segments[i].endPoint;
-                    const prevDir = directions[i];
-                    const nextDir = directions[i + 1];
-                    const data = this.createPartialLatheAtJunction(
-                        profile,
-                        junctionPoint,
-                        prevDir,
-                        nextDir,
-                        color,
-                        i + 1,
-                        usePartialLathes,
-                        profilePoints // Pass same points used in extrusions
-                    );
-                    if (data) {
-                        latheMeshes.push(data.mesh);
-                        junctionDataArray.push(data);
+                    if (latheResult && latheResult.mesh) {
+                        const latheMesh = latheResult.mesh;
+                        latheMesh.userData.isBitPart = true;
+                        latheMesh.userData.isLatheCorner = true;
+                        latheMesh.userData.isPartialLathe = true;
+                        latheMesh.userData.junctionAfterGroup =
+                            junction.groupIndex;
+                        allMeshes.push(latheMesh);
                     }
                 }
             }
-
-            // Return array of segment and lathe meshes only (solid geometry)
-            const allMeshes = [...segmentMeshes, ...latheMeshes];
 
             if (allMeshes.length === 0) {
-                this.log.warn("Round extrusion: No meshes created");
+                this.log.warn("No meshes created from curve groups");
                 return null;
             }
 
-            // Test if meshes are watertight (closed)
-            this.log.info("Testing mesh closure (watertight)...");
-            segmentMeshes.forEach((mesh, i) => {
-                const isClosed = this.isMeshWatertight(mesh);
-                this.log.info(
-                    `Segment ${i}: ${isClosed ? "CLOSED ✓" : "OPEN ✗"}`
-                );
-            });
-            latheMeshes.forEach((mesh, i) => {
-                const isClosed = this.isMeshWatertight(mesh);
-                this.log.info(
-                    `Lathe ${i}: ${isClosed ? "CLOSED ✓" : "OPEN ✗"}`
-                );
+            this.log.info("Grouped extrusion built:", {
+                groups: curveGroups.length,
+                meshes: allMeshes.length,
+                totalVertices: allMeshes.reduce(
+                    (sum, m) => sum + m.geometry.attributes.position.count,
+                    0
+                ),
             });
 
-            this.log.info("Round extrusion built:", {
-                segments: segmentMeshes.length,
-                lathes: latheMeshes.length,
-                total: allMeshes.length,
-                junctionsProcessed: junctionDataArray.length,
-            });
-
-            // Group all solid meshes as separate bit parts (for CSG subtraction)
-            // Mark them as part of the same bit for proper CSG operation
-            allMeshes.forEach((mesh, index) => {
-                mesh.userData.isBitPart = true;
-                mesh.userData.bitPartIndex = index;
-            });
-
-            this.log.info(
-                `Returning ${allMeshes.length} bit parts (segments + lathes)`
-            );
-
-            // Return all parts separately (NO union)
+            // Return array of meshes
             return allMeshes;
         } catch (error) {
             this.log.error("Error in extrudeAlongPathRound:", error.message);
@@ -1426,6 +2564,7 @@ export default class ExtrusionBuilder {
      * @param {number} cornerNumber - Corner number for logging (optional)
      * @param {boolean} isPartial - Create partial lathe (true) or full 360° lathe (false). Default: true
      * @param {Array<THREE.Vector2>} profilePoints - Pre-generated profile points (optional, for synchronization with extrusions)
+     * @param {boolean} contourIsClockwise - Contour winding direction (true = clockwise, false = counter-clockwise)
      * @returns {Object|null} Object with mesh and metadata
      */
     createPartialLatheAtJunction(
@@ -1436,7 +2575,8 @@ export default class ExtrusionBuilder {
         color,
         cornerNumber = 0,
         isPartial = true,
-        profilePoints = null
+        profilePoints = null,
+        contourIsClockwise = false
     ) {
         try {
             const lathePoints = this.createLatheHalfProfilePoints(
@@ -1452,53 +2592,43 @@ export default class ExtrusionBuilder {
                 return null;
             }
 
-            // Calculate angle between segments
-            const dotProduct = prevDir.dot(nextDir);
-            const clampedDot = Math.max(-1, Math.min(1, dotProduct));
-            const angle = Math.acos(clampedDot);
+            // 2D cross/dot to get signed angle between segments (robust for any polyline)
+            const cross2d = prevDir.x * nextDir.y - prevDir.y * nextDir.x; // z-component
+            const dot2d = prevDir.x * nextDir.x + prevDir.y * nextDir.y;
+            const angleDiffRaw = Math.atan2(cross2d, dot2d); // signed in [-π, π]
+            const angle = Math.abs(angleDiffRaw);
 
-            // Determine rotation direction using cross product
-            const cross = new THREE.Vector3().crossVectors(prevDir, nextDir);
-            const turnDirection = cross.z; // Positive = CCW, Negative = CW
-
-            // Calculate angles in XY plane
-            const prevAngleXY = Math.atan2(prevDir.y, prevDir.x);
-            const nextAngleXY = Math.atan2(nextDir.y, nextDir.x);
-
-            // Calculate angular difference with proper wrapping
-            let angleDiff = nextAngleXY - prevAngleXY;
-            while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-            while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-
+            // Map directions from XY plane into XZ plane used by lathe (y->z)
+            const prevAngleXZ = Math.atan2(prevDir.x, prevDir.y); // atan2(x, y) => angle in XZ
             // Determine geometry parameters
             let phiStart, phiLength;
 
-            if (isPartial) {
-                // PARTIAL LATHE: Create sector based on interior angle
-                if (turnDirection < 0) {
-                    // CW turn = interior angle
-                    if (cornerNumber % 2 === 1) {
-                        phiStart = prevAngleXY + Math.PI;
-                    } else {
-                        phiStart = prevAngleXY;
-                    }
-                    phiLength = Math.abs(angleDiff);
-                } else {
-                    // CCW turn = exterior angle
-                    phiStart = nextAngleXY;
-                    phiLength = 2 * Math.PI - Math.abs(angleDiff);
-                }
+            // Normalize sweep to positive to keep normals consistent; shift start if needed
+            let angleDiff = angleDiffRaw;
+            if (angleDiff < 0) {
+                phiLength = -angleDiff;
+                phiStart = prevAngleXZ + angleDiff; // shift to preserve arc placement
+            } else {
+                phiLength = angleDiff;
+                phiStart = prevAngleXZ;
+            }
 
+            if (isPartial) {
+                // PARTIAL LATHE: Corner rounding using signed angle
                 this.log.info(
-                    `Corner ${cornerNumber} (${color}) | Junction angle: ${THREE.MathUtils.radToDeg(
-                        angle
-                    ).toFixed(1)}° | PARTIAL | Turn: ${
-                        turnDirection < 0 ? "CW" : "CCW"
-                    } | phiStart: ${THREE.MathUtils.radToDeg(phiStart).toFixed(
-                        1
-                    )}° | phiLength: ${THREE.MathUtils.radToDeg(
-                        phiLength
-                    ).toFixed(1)}°`
+                    `Corner ${cornerNumber} (${color}) | ` +
+                        `prevAngleXZ: ${THREE.MathUtils.radToDeg(
+                            prevAngleXZ
+                        ).toFixed(1)}° | ` +
+                        `angleDiff: ${THREE.MathUtils.radToDeg(
+                            angleDiff
+                        ).toFixed(1)}° | ` +
+                        `phiStart: ${THREE.MathUtils.radToDeg(phiStart).toFixed(
+                            1
+                        )}° | ` +
+                        `phiLength: ${THREE.MathUtils.radToDeg(
+                            phiLength
+                        ).toFixed(1)}°`
                 );
             } else {
                 // FULL 360° LATHE

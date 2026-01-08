@@ -1307,9 +1307,9 @@ class DXFExporter {
         const isClosed =
             vertices.length > 2 &&
             Math.abs(vertices[vertices.length - 1].x - vertices[0].x) <
-                tolerance &&
+            tolerance &&
             Math.abs(vertices[vertices.length - 1].y - vertices[0].y) <
-                tolerance;
+            tolerance;
 
         // For closed paths, remove the duplicate closing vertex since DXF handles closure via flag
         if (isClosed) {

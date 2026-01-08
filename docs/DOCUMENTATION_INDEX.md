@@ -100,6 +100,55 @@ Complete summary of what was delivered, code statistics, testing status, and ach
 
 ---
 
+### 🎨 [PAPER_JS_MIGRATION_GUIDE.md](./PAPER_JS_MIGRATION_GUIDE.md) 🆕
+**For**: Paper.js migration strategy and implementation
+- Current SVG/maker.js usage analysis
+- Paper.js capabilities and advantages
+- Migration plan by phases (4 phases)
+- API reference and examples
+- Testing strategies
+- Q&A section
+
+**Read this if**:
+- You want to understand the Paper.js migration
+- You need to implement Phase 1-4 tasks
+- You're looking for Paper.js examples
+- You want to compare SVG vs Paper.js approaches
+
+---
+
+### 📋 [PAPER_JS_IMPLEMENTATION_SUMMARY.md](./PAPER_JS_IMPLEMENTATION_SUMMARY.md) 🆕
+**For**: Quick overview of Paper.js integration status
+- What was implemented (Phase 0)
+- How to use new view modes (2Dp, 2D/2Dp)
+- PaperCanvasManager features
+- Next steps and priorities
+- Metrics and success criteria
+
+**Read this if**:
+- You want a quick status update
+- You need to test Paper.js features
+- You're starting Phase 1 work
+- You want to see the architecture diagram
+
+---
+
+### ✅ [TODO.md](./TODO.md) 🆕
+**For**: Paper.js migration task tracking
+- Phase-by-phase task breakdown
+- Priorities and dependencies
+- Testing tasks
+- Documentation tasks
+- Future enhancements
+
+**Read this if**:
+- You need to pick the next task
+- You want to track progress
+- You're planning the migration timeline
+- You need to see blockers
+
+---
+
 ## Reference Documentation
 
 ### Legacy/Implementation Details

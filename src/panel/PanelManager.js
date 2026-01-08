@@ -25,6 +25,9 @@ class PanelManager {
         this.partSection = null;
         this.partFront = null;
 
+        // Flag to track if partFront shape was manually edited
+        this.partFrontManuallyEdited = false;
+
         // DOM inputs
         this.panelWidthInput = document.getElementById("panel-width");
         this.panelHeightInput = document.getElementById("panel-height");
@@ -48,7 +51,8 @@ class PanelManager {
      */
     initializeSVGElements() {
         this.partSection = document.createElementNS(svgNS, "rect");
-        this.partFront = document.createElementNS(svgNS, "rect");
+        // Изменяем partFront с rect на path для арки
+        this.partFront = document.createElementNS(svgNS, "path");
 
         // Add to panel layer if available
         const panelLayer = this.canvasManager.getLayer("panel");
@@ -233,6 +237,7 @@ class PanelManager {
 
     /**
      * Update part front view
+     * Прямоугольник с полукруглой аркой сверху для теста paperjs-offset с кривыми Безье
      */
     updatePartFront() {
         const panelX =
@@ -241,16 +246,38 @@ class PanelManager {
             (this.canvasManager.canvasParameters.height - this.panelThickness) /
             2;
 
-        this.partFront.setAttribute("x", panelX);
-        this.partFront.setAttribute("y", panelY - this.panelHeight - 100);
-        this.partFront.setAttribute("width", this.panelWidth);
-        this.partFront.setAttribute("height", this.panelHeight);
+        const frontX = panelX;
+        const frontY = panelY - this.panelHeight - 100;
+        const frontWidth = this.panelWidth;
+        const frontHeight = this.panelHeight;
+
+        // Создаём path: прямоугольник с полукруглой аркой сверху
+        // M = move to, L = line to, A = arc (rx ry x-axis-rotation large-arc-flag sweep-flag x y), Z = close
+        const archRadius = frontWidth / 2; // Радиус арки = половина ширины
+        const archHeight = archRadius; // Высота арки = радиус (полукруг)
+
+        const pathData = [
+            `M ${frontX} ${frontY + archHeight}`, // Начало слева на уровне арки
+            `L ${frontX} ${frontY + frontHeight}`, // Вниз к низу
+            `L ${frontX + frontWidth} ${frontY + frontHeight}`, // Вправо по низу
+            `L ${frontX + frontWidth} ${frontY + archHeight}`, // Вверх справа
+            `A ${archRadius} ${archRadius} 0 0 0 ${frontX} ${
+                frontY + archHeight
+            }`, // Арка(полукруг влево)
+            `Z`, // Замыкаем путь
+        ].join(" ");
+
+        this.partFront.setAttribute("d", pathData);
         this.partFront.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
         this.partFront.setAttribute("stroke", "black");
         this.partFront.setAttribute(
             "stroke-width",
             this.getAdaptiveStrokeWidth()
         );
+
+        // Note: Do NOT sync params here during initialization
+        // Parameters are the source for creating the shape
+        // Only sync when shape is manually edited (partFrontManuallyEdited = true)
     }
 
     /**
@@ -327,14 +354,19 @@ class PanelManager {
 
     /**
      * Update panel parameters from UI inputs
+     * Parameters are source for creating the shape during initialization
      */
     updatePanelParams() {
+        // Read values from UI inputs
         this.panelWidth =
             parseInt(this.panelWidthInput.value) || this.panelWidth;
         this.panelHeight =
             parseInt(this.panelHeightInput.value) || this.panelHeight;
         this.panelThickness =
             parseInt(this.panelThicknessInput.value) || this.panelThickness;
+
+        // Reset manual edit flag when parameters are changed
+        this.partFrontManuallyEdited = false;
 
         this.updatePanelShape();
         this.updateGridAnchor();
@@ -348,13 +380,81 @@ class PanelManager {
     }
 
     /**
+     * Mark partFront as manually edited
+     * Call this when shape is modified by external editor
+     */
+    markPartFrontAsEdited() {
+        this.partFrontManuallyEdited = true;
+        this.syncParamsFromPartFront();
+        log.info("partFront marked as manually edited");
+    }
+
+    /**
+     * Get real dimensions from partFront SVG bbox
+     * This is the source of truth for panel dimensions
+     */
+    getPartFrontDimensions() {
+        if (!this.partFront) {
+            log.warn("partFront not initialized");
+            return { width: this.panelWidth, height: this.panelHeight };
+        }
+
+        try {
+            const bbox = this.partFront.getBBox();
+            return {
+                width: bbox.width,
+                height: bbox.height,
+                x: bbox.x,
+                y: bbox.y,
+            };
+        } catch (error) {
+            log.error("Error getting partFront bbox:", error);
+            return { width: this.panelWidth, height: this.panelHeight };
+        }
+    }
+
+    /**
+     * Sync panel parameters from partFront bbox
+     * This ensures parameters reflect the actual SVG shape
+     */
+    syncParamsFromPartFront() {
+        const dimensions = this.getPartFrontDimensions();
+
+        // Update internal values
+        this.panelWidth = Math.round(dimensions.width);
+        this.panelHeight = Math.round(dimensions.height);
+
+        // Update UI inputs without triggering events
+        if (this.panelWidthInput) {
+            this.panelWidthInput.value = this.panelWidth;
+        }
+        if (this.panelHeightInput) {
+            this.panelHeightInput.value = this.panelHeight;
+        }
+
+        log.debug(
+            `Synced params from partFront: ${this.panelWidth}x${this.panelHeight}`
+        );
+    }
+
+    /**
      * Getters for panel dimensions
+     * If shape was manually edited, returns bbox dimensions (source of truth)
+     * Otherwise returns parameters (for initialization and programmatic updates)
      */
     getWidth() {
+        if (this.partFrontManuallyEdited) {
+            const dimensions = this.getPartFrontDimensions();
+            return Math.round(dimensions.width);
+        }
         return this.panelWidth;
     }
 
     getHeight() {
+        if (this.partFrontManuallyEdited) {
+            const dimensions = this.getPartFrontDimensions();
+            return Math.round(dimensions.height);
+        }
         return this.panelHeight;
     }
 

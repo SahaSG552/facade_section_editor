@@ -11,14 +11,17 @@ import BitsTableManager from "./panel/BitsTableManager.js";
 import SelectionManager from "./selection/SelectionManager.js";
 import ExportModule from "./export/ExportModule.js";
 import { OffsetCalculator } from "./utils/offsetCalculator.js";
+import { PaperOffsetCalculator } from "./operations/PaperOffsetProcessor.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
 import { makerCalculateResultPolygon } from "./utils/makerProcessor.js";
+import { paperCalculateResultPolygon } from "./operations/PaperBooleanProcessor.js";
 import LoggerFactory from "./core/LoggerFactory.js";
 import eventBus from "./core/eventBus.js";
 import appState from "./state/AppState.js";
 import csgScheduler from "./scheduling/CSGScheduler.js";
 import InteractionManager from "./interaction/InteractionManager.js";
 import PanelManager from "./panel/PanelManager.js";
+import { PaperCanvasManager } from "./canvas/PaperCanvasManager.js";
 
 // Import new modular system
 import { app } from "./app/main.js";
@@ -225,6 +228,8 @@ let showPart = false;
 let partPath;
 let bitsVisible = true; // Track bits visibility state
 let shankVisible = true; // Track shank visibility state
+let usePaperJsBoolean = true; // Toggle between maker.js (false) and Paper.js (true)
+let usePaperJsOffset = true; // Toggle between OffsetCalculator (false) and Paper.js (true)
 
 // Make these available to other modules via window
 window.showPart = showPart;
@@ -234,6 +239,7 @@ window.LoggerFactory = LoggerFactory; // Make LoggerFactory available globally
 
 // Canvas manager instance
 let mainCanvasManager;
+let paperCanvasManager; // Paper.js canvas manager
 let bitsManager; // Bits manager instance
 let bitsTableManager; // Bits table manager instance
 let interactionManager; // Interaction manager instance
@@ -321,6 +327,20 @@ function initializeSVG() {
         resizeObserver.observe(canvas);
     }
 
+    // Initialize Paper.js canvas manager
+    if (!paperCanvasManager) {
+        try {
+            paperCanvasManager = new PaperCanvasManager("paper-canvas");
+            window.paperCanvasManager = paperCanvasManager;
+            console.log("Paper.js canvas initialized");
+
+            // Run demo to show capabilities
+            // paperCanvasManager.demo(); // Uncomment to run demo
+        } catch (error) {
+            console.error("Failed to initialize Paper.js canvas:", error);
+        }
+    }
+
     // Get layer references
     const panelLayer = mainCanvasManager.getLayer("panel");
     bitsLayer = mainCanvasManager.getLayer("bits");
@@ -396,6 +416,37 @@ function initializeSVG() {
     document
         .getElementById("export-dxf-btn")
         .addEventListener("click", exportToDXF);
+
+    // Setup boolean engine toggle button
+    const booleanEngineBtn = document.getElementById("boolean-engine-btn");
+    booleanEngineBtn.addEventListener("click", toggleBooleanEngine);
+
+    function toggleBooleanEngine() {
+        usePaperJsBoolean = !usePaperJsBoolean;
+        usePaperJsOffset = !usePaperJsOffset; // Переключаем оба engine одновременно
+
+        if (usePaperJsBoolean) {
+            booleanEngineBtn.textContent = "ppr";
+            booleanEngineBtn.style.background = "#2196F3"; // Blue for Paper.js
+            booleanEngineBtn.title =
+                "Using Paper.js Boolean & Offset (click to switch to legacy)";
+            console.log("Switched to Paper.js engines (Boolean + Offset)");
+        } else {
+            booleanEngineBtn.textContent = "mkr";
+            booleanEngineBtn.style.background = "#4CAF50"; // Green for maker.js
+            booleanEngineBtn.title =
+                "Using legacy engines: maker.js + OffsetCalculator (click to switch to Paper.js)";
+            console.log(
+                "Switched to legacy engines (maker.js + OffsetCalculator)"
+            );
+        }
+
+        // Re-calculate part shape and offset contours with new engines
+        if (showPart) {
+            updatePartShape();
+        }
+        updateOffsetContours();
+    }
 
     // Setup operations toolbar buttons
     document
@@ -732,6 +783,12 @@ function updateBitsForNewAnchor() {
 function updatepartFront() {
     if (panelManager) {
         panelManager.updatePartFront();
+
+        // Update global variables from panelManager
+        // If shape was manually edited, getWidth/getHeight return bbox
+        // Otherwise they return parameters
+        panelWidth = panelManager.getWidth();
+        panelHeight = panelManager.getHeight();
     }
 }
 
@@ -1215,15 +1272,26 @@ function updateOffsetContours() {
     const anchorX = panelX + anchorOffset.x;
     const anchorY = panelY + anchorOffset.y;
 
-    // Create offset calculator instance
-    const offsetCalculator = new OffsetCalculator();
+    // Get ExportModule for arc approximation
+    const exportModule = app.getModule("export");
+
+    // Create offset calculator instance (Paper.js or legacy)
+    // With arc approximation enabled for consistency with DXF export
+    const offsetCalculator = usePaperJsOffset
+        ? new PaperOffsetCalculator({
+              useArcApproximation: true, // Enable Bezier → Arc approximation
+              arcTolerance: 0.15, // RMS tolerance 0.15mm (same as DXF export)
+              exportModule: exportModule, // For parseSVGPathSegments and optimizeSegmentsToArcs
+          })
+        : new OffsetCalculator();
 
     // Make offsetCalculator and helper functions available globally for ThreeModule
     window.offsetCalculator = offsetCalculator;
     window.convertToTopAnchorCoordinates = convertToTopAnchorCoordinates;
 
-    // Get the original partFront rectangle points
-    const partFrontPoints = offsetCalculator.rectToPoints(partFront);
+    // Get the original partFront element (может быть rect или path с кривыми!)
+    // Используем новый метод для сохранения кривых Безье
+    const useDirectSVGImport = usePaperJsOffset && partFront.tagName === "path";
 
     bitsOnCanvas.forEach((bit, index) => {
         if (bit.operation === "VC") {
@@ -1252,81 +1320,100 @@ function updateOffsetContours() {
             });
             offsets.reverse(); // Reverse to start from outermost pass
 
-            // Add base offset at topAnchorCoords.x (black, default layer)
-            if (partFrontPoints && partFrontPoints.length > 0) {
-                const baseOffsetPoints = offsetCalculator.calculateOffset(
-                    partFrontPoints,
-                    topAnchorCoords.x
-                );
-                if (baseOffsetPoints && baseOffsetPoints.length > 0) {
-                    const pathData =
-                        baseOffsetPoints
-                            .map((point, i) =>
-                                i === 0
-                                    ? `M ${point.x} ${point.y}`
-                                    : `L ${point.x} ${point.y}`
-                            )
-                            .join(" ") + " Z";
+            // Create contours for ALL passes (not just 0 and 1!)
+            // This ensures phantom bits (pass 2+) have contours for 3D rendering
+            for (let passIndex = 0; passIndex < passes; passIndex++) {
+                // Calculate offset distance for this pass
+                // Use reverse indexing to go from innermost to outermost (right to left)
+                const offsetDistance =
+                    passIndex === 0
+                        ? topAnchorCoords.x // Pass 0: base offset
+                        : offsets[offsets.length - passIndex]; // Pass 1+: reverse order
 
-                    const baseContour = document.createElementNS(svgNS, "path");
-                    baseContour.setAttribute("d", pathData);
-                    baseContour.setAttribute("fill", "none");
-                    baseContour.setAttribute("stroke", "black"); // Black for base
-                    baseContour.setAttribute(
-                        "stroke-width",
-                        getAdaptiveStrokeWidth()
+                // Calculate offset contour
+                let offsetData;
+                if (useDirectSVGImport) {
+                    // Paper.js: возвращает SVG path data с кривыми!
+                    offsetData = offsetCalculator.calculateOffsetFromSVG(
+                        partFront,
+                        offsetDistance
                     );
-                    baseContour.setAttribute("stroke-dasharray", "5,5");
-                    baseContour.classList.add("offset-contour");
-                    offsetsLayer.appendChild(baseContour);
+                } else {
+                    // Legacy: конвертируем в точки, потом в path data
+                    const partFrontPoints =
+                        offsetCalculator.svgToPoints(partFront);
+                    const offsetPoints = offsetCalculator.calculateOffset(
+                        partFrontPoints,
+                        offsetDistance
+                    );
+                    if (offsetPoints && offsetPoints.length > 0) {
+                        offsetData =
+                            offsetPoints
+                                .map((point, i) =>
+                                    i === 0
+                                        ? `M ${point.x} ${point.y}`
+                                        : `L ${point.x} ${point.y}`
+                                )
+                                .join(" ") + " Z";
+                    }
+                }
 
+                if (offsetData) {
+                    const pathData =
+                        typeof offsetData === "string" ? offsetData : "";
+
+                    const offsetContour = document.createElementNS(
+                        svgNS,
+                        "path"
+                    );
+                    offsetContour.setAttribute("d", pathData);
+                    offsetContour.setAttribute("fill", "none");
+
+                    // Only display pass 0 (black) and pass 1 (colored) in 2D
+                    // Pass 2+ exist for 3D but are hidden
+                    if (passIndex === 0) {
+                        offsetContour.setAttribute("stroke", "black");
+                        offsetContour.setAttribute(
+                            "stroke-width",
+                            getAdaptiveStrokeWidth()
+                        );
+                        offsetContour.setAttribute("stroke-dasharray", "5,5");
+                        offsetContour.classList.add("offset-contour");
+                        offsetsLayer.appendChild(offsetContour);
+                    } else if (passIndex === 1) {
+                        offsetContour.setAttribute(
+                            "stroke",
+                            bit.color || "#cccccc"
+                        );
+                        offsetContour.setAttribute(
+                            "stroke-width",
+                            getAdaptiveStrokeWidth()
+                        );
+                        offsetContour.setAttribute("stroke-dasharray", "5,5");
+                        offsetContour.classList.add("offset-contour");
+                        offsetsLayer.appendChild(offsetContour);
+                    }
+                    // Pass 2+ not added to DOM (not displayed in 2D)
+
+                    // Store in offsetContours for 3D (all passes!)
                     offsetContours.push({
-                        element: baseContour,
+                        element: offsetContour,
                         bitIndex: index,
-                        offsetDistance: topAnchorCoords.x,
+                        offsetDistance: offsetDistance,
                         operation: "VC",
-                        pass: 0,
+                        pass: passIndex,
+                        passIndex: passIndex, // Add passIndex for compatibility
+                        pathData: pathData, // Store pathData for 3D
+                        depth:
+                            passIndex === passes - 1 ? topAnchorCoords.y : null,
                     });
                 }
             }
 
-            // V-Carve offset
-            const offsetPoints = offsetCalculator.calculateOffset(
-                partFrontPoints,
-                offsets[0]
+            // Log contour creation summary
+            console.log(
+                `[VC] Created ${passes} contours for bit ${index} (displayed: pass 0 & 1, hidden: pass 2+)`
             );
-
-            if (offsetPoints && offsetPoints.length > 0) {
-                const pathData =
-                    offsetPoints
-                        .map((point, i) =>
-                            i === 0
-                                ? `M ${point.x} ${point.y}`
-                                : `L ${point.x} ${point.y}`
-                        )
-                        .join(" ") + " Z";
-
-                const offsetContour = document.createElementNS(svgNS, "path");
-                offsetContour.setAttribute("d", pathData);
-                offsetContour.setAttribute("fill", "none");
-                offsetContour.setAttribute("stroke", bit.color || "#cccccc");
-                offsetContour.setAttribute(
-                    "stroke-width",
-                    getAdaptiveStrokeWidth()
-                );
-                offsetContour.setAttribute("stroke-dasharray", "5,5");
-                offsetContour.classList.add("offset-contour");
-                offsetsLayer.appendChild(offsetContour);
-
-                offsetContours.push({
-                    element: offsetContour,
-                    bitIndex: index,
-                    offsetDistance: offsets[0],
-                    operation: "VC",
-                    pass: 1,
-                    depth: topAnchorCoords.y, // Save depth for DXF export (use top anchor coordinates)
-                });
-            }
         } else {
             // Standard operations: AL, OU, IN
             let offsetDistance = bit.x;
@@ -1337,20 +1424,35 @@ function updateOffsetContours() {
             }
             // AL uses bit.x as is
 
-            const offsetPoints = offsetCalculator.calculateOffset(
-                partFrontPoints,
-                offsetDistance
-            );
+            let offsetData;
+            if (useDirectSVGImport) {
+                // Paper.js: возвращает SVG path data с кривыми!
+                offsetData = offsetCalculator.calculateOffsetFromSVG(
+                    partFront,
+                    offsetDistance
+                );
+            } else {
+                // Legacy: конвертируем в точки, потом в path data
+                const partFrontPoints = offsetCalculator.svgToPoints(partFront);
+                const offsetPoints = offsetCalculator.calculateOffset(
+                    partFrontPoints,
+                    offsetDistance
+                );
+                if (offsetPoints && offsetPoints.length > 0) {
+                    offsetData =
+                        offsetPoints
+                            .map((point, i) =>
+                                i === 0
+                                    ? `M ${point.x} ${point.y}`
+                                    : `L ${point.x} ${point.y}`
+                            )
+                            .join(" ") + " Z";
+                }
+            }
 
-            if (offsetPoints && offsetPoints.length > 0) {
+            if (offsetData) {
                 const pathData =
-                    offsetPoints
-                        .map((point, i) =>
-                            i === 0
-                                ? `M ${point.x} ${point.y}`
-                                : `L ${point.x} ${point.y}`
-                        )
-                        .join(" ") + " Z";
+                    typeof offsetData === "string" ? offsetData : "";
 
                 const offsetContour = document.createElementNS(svgNS, "path");
                 offsetContour.setAttribute("d", pathData);
@@ -2277,16 +2379,41 @@ function updatePartShape() {
         });
     }
 
-    const d = makerCalculateResultPolygon(
-        panelWidth,
-        panelThickness,
-        panelX,
-        panelY,
-        bitsOnCanvas,
-        phantomBits
-    );
+    // Get panel section element
+    const panelSection = document.getElementById("panel-section");
+
+    let d;
+    if (usePaperJsBoolean) {
+        // Use Paper.js boolean processor
+        console.log("[Boolean] Using Paper.js");
+        d = paperCalculateResultPolygon(
+            panelSection,
+            bitsOnCanvas,
+            phantomBits
+        );
+    } else {
+        // Use maker.js boolean processor (legacy)
+        console.log("[Boolean] Using maker.js");
+        d = makerCalculateResultPolygon(
+            panelWidth,
+            panelThickness,
+            panelX,
+            panelY,
+            bitsOnCanvas,
+            phantomBits
+        );
+    }
+
     partPath.setAttribute("d", d);
-    partPath.setAttribute("transform", `translate(${panelX}, ${panelY})`);
+
+    // maker.js возвращает path в origin (0,0) и нужен translate
+    // Paper.js возвращает path в правильных координатах
+    if (!usePaperJsBoolean) {
+        partPath.setAttribute("transform", `translate(${panelX}, ${panelY})`);
+    } else {
+        partPath.removeAttribute("transform");
+    }
+
     return partPath;
 }
 
@@ -2814,6 +2941,14 @@ async function initializeModularSystem() {
             log.info("  window.extrusionBuilder.curveSegmentCoefficient = 3");
             log.info("  window.extrusionBuilder.curveSegmentMin = 20");
             log.info("  window.extrusionBuilder.curveSegmentMax = 80");
+            log.info("");
+            log.info("Arc approximation quality (same as panel):");
+            log.info("  window.extrusionBuilder.arcDivisionCoefficient = 5");
+            log.info(
+                "  (Lower value = smoother, more samples. 100mm arc with coef=5 → 20 points)"
+            );
+            log.info("  window.extrusionBuilder.getArcQualityInfo()");
+            log.info("  window.extrusionBuilder.setArcQuality(3) // to change");
             // Configure centralized CSG scheduler
             csgScheduler.configure((apply) =>
                 threeModule.applyCSGOperation(apply)
@@ -2836,10 +2971,12 @@ async function initializeModularSystem() {
     }
 }
 
-// Setup view toggle buttons (2D/3D/Both)
+// Setup view toggle buttons (2D/2Dp/3D/2D-2Dp/Both)
 function setupViewToggle(threeModule) {
     const view2DBtn = document.getElementById("view-2d");
+    const view2DpBtn = document.getElementById("view-2dp");
     const view3DBtn = document.getElementById("view-3d");
+    const view2D2DpBtn = document.getElementById("view-2d-2dp");
     const viewBothBtn = document.getElementById("view-both");
     const appContainer = document.getElementById("app");
 
@@ -2847,9 +2984,11 @@ function setupViewToggle(threeModule) {
 
     // Function to update active button state
     function updateActiveButton(activeBtn) {
-        [view2DBtn, view3DBtn, viewBothBtn].forEach((btn) => {
-            btn.classList.remove("active");
-        });
+        [view2DBtn, view2DpBtn, view3DBtn, view2D2DpBtn, viewBothBtn].forEach(
+            (btn) => {
+                btn.classList.remove("active");
+            }
+        );
         activeBtn.classList.add("active");
     }
 
@@ -2858,7 +2997,13 @@ function setupViewToggle(threeModule) {
         currentView = view;
 
         // Remove all view classes
-        appContainer.classList.remove("view-2d", "view-3d", "view-both");
+        appContainer.classList.remove(
+            "view-2d",
+            "view-2dp",
+            "view-3d",
+            "view-2d-2dp",
+            "view-both"
+        );
 
         // Add current view class
         appContainer.classList.add(`view-${view}`);
@@ -2866,6 +3011,12 @@ function setupViewToggle(threeModule) {
         // Update 3D view with current data if switching to 3D or both
         if (threeModule && (view === "3d" || view === "both")) {
             updateThreeView();
+        }
+
+        // Update Paper.js view if switching to 2dp or 2d-2dp
+        if (paperCanvasManager && (view === "2dp" || view === "2d-2dp")) {
+            // Синхронизируем данные из SVG в Paper.js
+            syncSVGtoPaper();
         }
 
         // Handle resize for canvas managers
@@ -2884,12 +3035,27 @@ function setupViewToggle(threeModule) {
                 threeModule.onWindowResize();
             }, 100);
         }
+
+        // Handle Paper.js resize
+        if (paperCanvasManager && (view === "2dp" || view === "2d-2dp")) {
+            setTimeout(() => {
+                if (paperCanvasManager.view) {
+                    paperCanvasManager.view.update();
+                }
+            }, 100);
+        }
     }
 
-    // 2D view button
+    // 2D view button (SVG)
     view2DBtn.addEventListener("click", () => {
         switchView("2d");
         updateActiveButton(view2DBtn);
+    });
+
+    // 2Dp view button (Paper.js)
+    view2DpBtn.addEventListener("click", () => {
+        switchView("2dp");
+        updateActiveButton(view2DpBtn);
     });
 
     // 3D view button
@@ -2898,7 +3064,13 @@ function setupViewToggle(threeModule) {
         updateActiveButton(view3DBtn);
     });
 
-    // Both views button
+    // 2D + 2Dp views button
+    view2D2DpBtn.addEventListener("click", () => {
+        switchView("2d-2dp");
+        updateActiveButton(view2D2DpBtn);
+    });
+
+    // Both views button (2D + 3D)
     viewBothBtn.addEventListener("click", () => {
         switchView("both");
         updateActiveButton(viewBothBtn);
@@ -2914,105 +3086,61 @@ async function updateThreeView() {
     const threeModule = window.threeModule;
     if (!threeModule) return;
 
+    // Get real dimensions from partFront bbox (source of truth)
+    const realWidth = panelManager.getWidth();
+    const realHeight = panelManager.getHeight();
+
     await threeModule.updatePanel(
-        panelWidth,
-        panelHeight,
+        realWidth,
+        realHeight,
         panelThickness,
         bitsOnCanvas,
         panelAnchor
     );
-
-    // Update debug clipping slider if data is available
-    updateDebugClippingSlider();
 }
 
-// Add visual arrow for clipping normal direction
-function addClippingDebugArrow(origin, direction, cornerIndex) {
-    const threeModule = window.threeModule;
-    if (!threeModule) {
-        console.error("ThreeModule not available");
-        return;
-    }
+// Function to sync SVG data to Paper.js canvas
+function syncSVGtoPaper() {
+    if (!paperCanvasManager) return;
+
+    console.log("Syncing SVG → Paper.js...");
 
     try {
-        threeModule.addDebugArrow(origin, direction, cornerIndex);
-        console.log(
-            `[DEBUG ARROWS] Added arrow for corner ${cornerIndex}: origin (${origin.x.toFixed(
-                2
-            )}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(
-                2
-            )}), direction (${direction.x.toFixed(3)}, ${direction.y.toFixed(
-                3
-            )}, ${direction.z.toFixed(3)})`
-        );
-    } catch (error) {
-        console.error("Failed to add debug arrow:", error);
-    }
-}
+        // Clear existing Paper.js content
+        paperCanvasManager.clear();
 
-// Create a simple line arrow when ArrowHelper is not available
-function createSimpleArrowLine(origin, direction, cornerIndex, threeModule) {
-    try {
-        // Create geometry for a simple line from origin to direction endpoint
-        const points = [
-            origin.clone(),
-            origin.clone().addScaledVector(direction, 50),
-        ];
-
-        // We'll just log this for now since we don't have direct THREE access
-        console.log(
-            `[DEBUG LINE] Would draw arrow line from (${origin.x.toFixed(
-                2
-            )}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(
-                2
-            )}) in direction (${direction.x.toFixed(3)}, ${direction.y.toFixed(
-                3
-            )}, ${direction.z.toFixed(3)})`
-        );
-    } catch (error) {
-        console.error("Failed to create simple arrow line:", error);
-    }
-}
-
-// Clear all debug arrows
-function clearClippingDebugHelpers() {
-    const threeModule = window.threeModule;
-    if (!threeModule) return;
-
-    try {
-        threeModule.clearDebugArrows();
-    } catch (error) {
-        console.error("Failed to clear debug arrows:", error);
-    }
-}
-
-// Update debug clipping slider based on available data
-function updateDebugClippingSlider() {
-    const data = window.debugClippingData;
-    const clipSlider = document.getElementById("clip-slider");
-    const clipStepInfo = document.getElementById("clip-step-info");
-    const clipCurrentAction = document.getElementById("clip-current-action");
-
-    if (!data || !clipSlider) return;
-
-    // Update slider max value
-    clipSlider.max = data.maxSteps;
-    clipSlider.value = data.currentStep || 0;
-
-    // Update info text
-    if (clipStepInfo) {
-        clipStepInfo.textContent = `Step: ${data.currentStep || 0} / ${
-            data.maxSteps
-        }`;
-    }
-
-    if (clipCurrentAction) {
-        if (data.currentStep === 0) {
-            clipCurrentAction.textContent =
-                "No cuts applied (original geometries)";
-        } else {
-            clipCurrentAction.textContent = `Ready to debug ${data.cutPlaneDataList.length} corners`;
+        // 1. Create panel in Paper.js
+        if (panelWidth && panelThickness) {
+            paperCanvasManager.createPanel(panelWidth, 0, panelThickness);
         }
+
+        // 2. Add bits to Paper.js
+        if (bitsOnCanvas && bitsOnCanvas.length > 0) {
+            bitsOnCanvas.forEach((bit) => {
+                paperCanvasManager.addBit({
+                    id: bit.id,
+                    x: bit.x,
+                    y: bit.y,
+                    diameter: bit.diameter || bit.width || 10,
+                });
+            });
+        }
+
+        // 3. Create offset contours (если они есть в SVG)
+        if (paperCanvasManager.panelPath) {
+            // Примеры offset для демонстрации
+            paperCanvasManager.createOffset(paperCanvasManager.panelPath, -2);
+            paperCanvasManager.createOffset(paperCanvasManager.panelPath, 2);
+        }
+
+        // 4. Fit to view
+        setTimeout(() => {
+            paperCanvasManager.fitToView();
+        }, 100);
+
+        console.log("SVG → Paper.js sync complete");
+    } catch (error) {
+        console.error("Failed to sync SVG to Paper.js:", error);
     }
 }
 

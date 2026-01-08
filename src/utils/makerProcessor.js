@@ -168,35 +168,51 @@ function makerCalculateResultPolygon(
     const sectionHeight = parseFloat(panelSection.getAttribute("height")) || 0;
     const materialBottomY = materialTopY + sectionHeight;
 
-    // Collect models from both regular bits and phantom bits
-    const bitModels = bitsOnCanvas
-        .map((bit) => createPathData(bit))
-        .filter((m) => m);
+    // Collect bit models and unite each bit with its extension
+    const bitModelsWithExtensions = [];
 
-    const phantomModels = phantomBits
-        .map((phantom) => createPathData(phantom))
-        .filter((m) => m);
+    // Regular bits
+    for (const bit of bitsOnCanvas) {
+        const bitModel = createPathData(bit);
+        if (!bitModel) continue;
 
-    // Create extension rectangles for bits that go below material surface
-    const bitExtensions = bitsOnCanvas
-        .map((bit) => createBitExtension(bit, materialTopY, materialBottomY))
-        .filter((m) => m);
+        const extension = createBitExtension(
+            bit,
+            materialTopY,
+            materialBottomY
+        );
+        if (extension) {
+            // Объединяем бит с его extension чтобы убрать линию
+            const combined = makerjs.model.combineUnion(bitModel, extension);
+            bitModelsWithExtensions.push(combined);
+        } else {
+            bitModelsWithExtensions.push(bitModel);
+        }
+    }
 
-    const phantomExtensions = phantomBits
-        .map((phantom) =>
-            createBitExtension(phantom, materialTopY, materialBottomY)
-        )
-        .filter((m) => m);
+    // Phantom bits
+    for (const phantom of phantomBits) {
+        const phantomModel = createPathData(phantom);
+        if (!phantomModel) continue;
 
-    // Combine all bit models and extensions
-    const allBitModels = [
-        ...bitModels,
-        ...phantomModels,
-        ...bitExtensions,
-        ...phantomExtensions,
-    ];
+        const extension = createBitExtension(
+            phantom,
+            materialTopY,
+            materialBottomY
+        );
+        if (extension) {
+            // Объединяем phantom с его extension
+            const combined = makerjs.model.combineUnion(
+                phantomModel,
+                extension
+            );
+            bitModelsWithExtensions.push(combined);
+        } else {
+            bitModelsWithExtensions.push(phantomModel);
+        }
+    }
 
-    if (allBitModels.length === 0) {
+    if (bitModelsWithExtensions.length === 0) {
         // No bits, return panel as is
         const svg = makerjs.exporter.toSVG(panelModel);
         const parser = new DOMParser();
@@ -205,9 +221,12 @@ function makerCalculateResultPolygon(
         return path ? path.getAttribute("d") : "";
     }
 
-    let unionBits = allBitModels[0];
-    for (let i = 1; i < allBitModels.length; i++) {
-        unionBits = makerjs.model.combineUnion(unionBits, allBitModels[i]);
+    let unionBits = bitModelsWithExtensions[0];
+    for (let i = 1; i < bitModelsWithExtensions.length; i++) {
+        unionBits = makerjs.model.combineUnion(
+            unionBits,
+            bitModelsWithExtensions[i]
+        );
     }
 
     // Создаём контейнер-модель с origin в [0, 0]
