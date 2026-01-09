@@ -162,7 +162,7 @@ export default class SceneManager {
         const distance = maxDim * 2;
 
         // Position camera to look at the front face of the panel
-        this.camera.position.set(distance * 0.8, distance * 0.6, -distance);
+        this.camera.position.set(distance * 0.8, distance * 0.6, distance);
         this.camera.lookAt(0, height / 2, thickness / 2);
         this.controls.target.set(0, height / 2, thickness / 2);
         this.controls.update();

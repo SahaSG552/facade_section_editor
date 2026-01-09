@@ -59,6 +59,9 @@ export default class ThreeModule extends BaseModule {
         // Track last panel/bits signature to skip redundant rebuilds
         this.lastPanelUpdateSignature = null;
 
+        // Panel side for bit operations: 'top' (front face) or 'bottom' (back face)
+        this.panelSide = "top";
+
         // Extrude mode is selected automatically per bit operation (VC → mitered, others → round)
     }
 
@@ -91,6 +94,9 @@ export default class ThreeModule extends BaseModule {
 
         // Add CSG mode toggle
         this.addCSGModeToggle();
+
+        // Add panel side toggle
+        this.addPanelSideToggle();
 
         // Removed test UI: extrude version selector and compare toggle
 
@@ -301,6 +307,69 @@ export default class ThreeModule extends BaseModule {
         container.appendChild(label);
         this.container.appendChild(container);
         this.csgModeToggle = container;
+    }
+
+    addPanelSideToggle() {
+        const container = document.createElement("div");
+        container.style.position = "absolute";
+        container.style.top = "90px";
+        container.style.right = "10px";
+        container.style.padding = "8px";
+        container.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
+        container.style.border = "1px solid #ccc";
+        container.style.borderRadius = "4px";
+        container.style.zIndex = "100";
+        container.style.fontSize = "12px";
+        container.style.display = "flex";
+        container.style.alignItems = "center";
+        container.style.gap = "6px";
+
+        const label = document.createElement("label");
+        label.textContent = "Panel Side:";
+        label.style.userSelect = "none";
+
+        const select = document.createElement("select");
+        select.id = "panel-side-select";
+        select.style.cursor = "pointer";
+        select.style.padding = "2px 4px";
+        select.style.fontSize = "12px";
+
+        const optionTop = document.createElement("option");
+        optionTop.value = "top";
+        optionTop.textContent = "Top (Front)";
+
+        const optionBottom = document.createElement("option");
+        optionBottom.value = "bottom";
+        optionBottom.textContent = "Bottom (Back)";
+
+        select.appendChild(optionTop);
+        select.appendChild(optionBottom);
+        select.value = this.panelSide;
+
+        select.addEventListener("change", () => {
+            this.panelSide = select.value;
+            this.log.info(`Panel side changed to: ${this.panelSide}`);
+
+            // Trigger panel rebuild with new side
+            if (
+                window.panelWidth &&
+                window.panelHeight &&
+                window.panelThickness
+            ) {
+                this.updatePanel(
+                    window.panelWidth,
+                    window.panelHeight,
+                    window.panelThickness,
+                    window.bitsOnCanvas || [],
+                    window.panelAnchor || "top-left"
+                );
+            }
+        });
+
+        container.appendChild(label);
+        container.appendChild(select);
+        this.container.appendChild(container);
+        this.panelSideToggle = container;
     }
 
     // addExtrudeVersionToggle removed: mode is selected automatically per operation
@@ -1073,7 +1142,8 @@ export default class ThreeModule extends BaseModule {
                     const pathLine =
                         this.extrusionBuilder.createPathVisualization(
                             curve3D,
-                            pathColor
+                            pathColor,
+                            this.panelSide
                         );
                     if (pathLine) {
                         pathLine.userData.bitIndex = bitIndex;
@@ -1112,27 +1182,67 @@ export default class ThreeModule extends BaseModule {
                         }
                     );
 
-                    const meshes = this.extrusionBuilder.extrudeAlongPath(
+                    // Create bit using unified constructor
+                    const bitMeshes = this.extrusionBuilder.extrudeAlongPath(
                         bitProfile,
                         curve3D,
-                        pathColor
+                        pathColor,
+                        0, // zOffset = 0 for main bit
+                        "mitered", // Sharp corners
+                        this.panelSide // Panel side: 'top' or 'bottom'
                     );
+
+                    // Create extension if needed
+                    let extensionMeshes = [];
+                    if (
+                        passExtensionInfo &&
+                        passExtensionInfo.width &&
+                        passExtensionInfo.height
+                    ) {
+                        const extensionProfile =
+                            this.extrusionBuilder.createExtensionProfile(
+                                passExtensionInfo.width,
+                                passExtensionInfo.height
+                            );
+
+                        // Use depth variable from outer scope (already defined for this pass)
+                        const bitDepth = depth || 0;
+
+                        extensionMeshes =
+                            this.extrusionBuilder.extrudeAlongPath(
+                                extensionProfile,
+                                curve3D,
+                                "#FF0000", // Red color for extensions
+                                bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
+                                "mitered",
+                                this.panelSide // Panel side: 'top' or 'bottom'
+                            );
+
+                        // Style extension meshes
+                        extensionMeshes.forEach((mesh) => {
+                            mesh.userData.isExtension = true;
+                            mesh.material = mesh.material.clone();
+                            mesh.material.transparent = true;
+                            mesh.material.opacity = 0.4;
+                            mesh.material.color.set(
+                                passExtensionInfo.hasShankCollision
+                                    ? "#8B0000"
+                                    : "#FF0000"
+                            );
+                        });
+                    }
 
                     this.log.info(
                         `VC bit ${bitIndex} pass ${passIndex} extrusion result:`,
                         {
-                            hasMeshes: !!meshes,
-                            isArray: Array.isArray(meshes),
-                            meshCount: meshes?.length || 0,
-                            firstMeshVertices:
-                                meshes?.[0]?.geometry?.attributes?.position
-                                    ?.count || 0,
+                            bitMeshes: bitMeshes.length,
+                            extensionMeshes: extensionMeshes.length,
                         }
                     );
 
-                    if (meshes && meshes.length > 0) {
-                        // Process all mesh parts from round extrusion
-                        meshes.forEach((mesh) => {
+                    // Add bit meshes
+                    if (bitMeshes && bitMeshes.length > 0) {
+                        bitMeshes.forEach((mesh) => {
                             mesh.userData.operation =
                                 bit.operation || "subtract";
                             mesh.userData.bitIndex = bitIndex;
@@ -1157,36 +1267,30 @@ export default class ThreeModule extends BaseModule {
                         });
 
                         this.log.debug(
-                            `Added VC pass ${passIndex}: ${meshes.length} mesh parts for bit ${bitIndex}`
+                            `Added VC pass ${passIndex}: ${bitMeshes.length} mesh parts for bit ${bitIndex}`
                         );
+                    }
 
-                        // Create extension extrusion if bit has extension data
-                        // Use passExtensionInfo which was determined above (from 2D data)
+                    // Add extension meshes
+                    if (extensionMeshes && extensionMeshes.length > 0) {
+                        extensionMeshes.forEach((mesh) => {
+                            mesh.userData.operation = "extension";
+                            mesh.userData.bitIndex = bitIndex;
+                            mesh.userData.pass = passIndex;
+                            this.bitExtrudeMeshes.push(mesh);
+
+                            // Add edge visualization
+                            if (
+                                this.materialManager &&
+                                this.materialManager.isEdgesEnabled()
+                            ) {
+                                this.materialManager.addEdgeVisualization(mesh);
+                            }
+                        });
+
                         this.log.debug(
-                            `Checking extension for bit ${bitIndex} pass ${passIndex}: ` +
-                                `passExtensionInfo=${!!passExtensionInfo}`
+                            `Added VC pass ${passIndex} extension: ${extensionMeshes.length} meshes for bit ${bitIndex}`
                         );
-
-                        if (passExtensionInfo) {
-                            // Extension exists for this pass (from 2D)
-                            this.log.debug(
-                                `Creating extension from 2D data for bit ${bitIndex} pass ${passIndex}:`,
-                                passExtensionInfo
-                            );
-                            await this.createExtensionExtrusion(
-                                bit,
-                                bitIndex,
-                                curve3D, // For VC: pass curve3D
-                                depth,
-                                passExtensionInfo.width,
-                                passExtensionInfo.height,
-                                bit.operation || "VC",
-                                panelThickness,
-                                panelAnchor,
-                                passIndex,
-                                null // No transformParams needed for VC (uses curve3D directly)
-                            );
-                        }
                     }
                 }
                 continue; // Skip normal processing for VC bits
@@ -1224,6 +1328,37 @@ export default class ThreeModule extends BaseModule {
                 pathData.substring(0, 100) + "..."
             );
 
+            // Get bit depth for z offset (needed for path visualization)
+            const bitDepth = bit.y || 0;
+
+            // Parse path to curves for visualization
+            const pathCurves =
+                this.extrusionBuilder.parsePathToCurves(pathData);
+            if (pathCurves.length > 0) {
+                // Create 3D curve for path visualization
+                const pathCurve3D = this.extrusionBuilder.createCurveFromCurves(
+                    pathCurves,
+                    partFrontX,
+                    partFrontY,
+                    partFrontWidth,
+                    partFrontHeight,
+                    bitDepth,
+                    panelThickness,
+                    panelAnchor
+                );
+
+                // Add path visualization
+                const pathLine = this.extrusionBuilder.createPathVisualization(
+                    pathCurve3D,
+                    bit.color,
+                    this.panelSide
+                );
+                if (pathLine) {
+                    pathLine.userData.bitIndex = bitIndex;
+                    this.bitPathMeshes.push(pathLine);
+                }
+            }
+
             // Create bit profile shape
             const bitProfile = await this.extrusionBuilder.createBitProfile(
                 bit.bitData
@@ -1234,38 +1369,74 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // Extrude profile along path - pass SVG path string directly
-            // extrudeAlongPathRound will parse it and create 3D curve with proper segmentType flags
-            let extrudeMeshes = [];
-            const result = this.extrusionBuilder.extrudeAlongPathRound(
+            // Use structured bitData.extension or fallback to old format
+            const passExtensionInfo =
+                bit.bitData?.extension ||
+                bit.extension ||
+                (bit.group && bit.group.__extension);
+
+            // Transformation options for coordinate conversion
+            const transformOptions = {
+                partFrontX,
+                partFrontY,
+                partFrontWidth,
+                partFrontHeight,
+                depth: bitDepth,
+                panelThickness,
+                panelAnchor,
+            };
+
+            // Create bit using unified constructor
+            const bitMeshes = this.extrusionBuilder.extrudeAlongPath(
                 bitProfile,
-                pathData, // ← SVG path string (уже с аппроксимированными дугами)
+                pathData, // SVG path string (already with approximated arcs)
                 bit.color,
-                {
-                    // Coordinate transformation parameters for createCurveFromCurves
-                    partFrontX,
-                    partFrontY,
-                    partFrontWidth,
-                    partFrontHeight,
-                    depth: bit.y,
-                    panelThickness,
-                    panelAnchor,
-                }
+                0, // zOffset = 0 for main bit
+                "round", // Lathe-filled corners
+                this.panelSide, // Panel side: 'top' or 'bottom'
+                transformOptions
             );
 
-            if (result) {
-                // New return shape: { mergedMesh, parts, cuttingPlanes }
-                if (result.mergedMesh) {
-                    extrudeMeshes = [result.mergedMesh];
-                } else if (Array.isArray(result)) {
-                    extrudeMeshes = result;
-                } else if (result.parts && Array.isArray(result.parts)) {
-                    extrudeMeshes = result.parts;
-                }
+            // Create extension if needed
+            let extensionMeshes = [];
+            if (
+                passExtensionInfo &&
+                passExtensionInfo.width &&
+                passExtensionInfo.height
+            ) {
+                const extensionProfile =
+                    this.extrusionBuilder.createExtensionProfile(
+                        passExtensionInfo.width,
+                        passExtensionInfo.height
+                    );
+
+                extensionMeshes = this.extrusionBuilder.extrudeAlongPath(
+                    extensionProfile,
+                    pathData,
+                    "#FF0000", // Red color for extensions
+                    bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
+                    "round",
+                    this.panelSide, // Panel side: 'top' or 'bottom'
+                    transformOptions
+                );
+
+                // Style extension meshes
+                extensionMeshes.forEach((mesh) => {
+                    mesh.userData.isExtension = true;
+                    mesh.material = mesh.material.clone();
+                    mesh.material.transparent = true;
+                    mesh.material.opacity = 0.4;
+                    mesh.material.color.set(
+                        passExtensionInfo.hasShankCollision
+                            ? "#8B0000"
+                            : "#FF0000"
+                    );
+                });
             }
 
-            if (extrudeMeshes.length > 0) {
-                extrudeMeshes.forEach((mesh) => {
+            // Process bit meshes
+            if (bitMeshes && bitMeshes.length > 0) {
+                bitMeshes.forEach((mesh) => {
                     mesh.userData.operation = bit.operation || "subtract";
                     mesh.userData.bitIndex = bitIndex;
                     this.bitExtrudeMeshes.push(mesh);
@@ -1282,34 +1453,29 @@ export default class ThreeModule extends BaseModule {
                     }
                 });
                 this.log.debug(
-                    `Created ${extrudeMeshes.length} extrude mesh(es) for bit ${bitIndex}`
+                    `Created ${bitMeshes.length} extrude mesh(es) for bit ${bitIndex}`
                 );
 
-                // Create extension extrusion if bit has extension data
-                // Use structured bitData.extension or fallback to old format
-                const extensionData =
-                    bit.bitData?.extension ||
-                    bit.extension ||
-                    (bit.group && bit.group.__extension);
-                if (extensionData) {
-                    await this.createExtensionExtrusion(
-                        bit,
-                        bitIndex,
-                        pathData, // Pass pathData instead of curve3D
-                        bit.y,
-                        extensionData.width,
-                        extensionData.height,
-                        bit.operation || "AL",
-                        panelThickness,
-                        panelAnchor,
-                        null, // passIndex for VC
-                        // Transformation parameters for round extrusion
-                        {
-                            partFrontX,
-                            partFrontY,
-                            partFrontWidth,
-                            partFrontHeight,
+                // Process extension meshes (if any)
+                if (extensionMeshes && extensionMeshes.length > 0) {
+                    extensionMeshes.forEach((mesh) => {
+                        mesh.userData.operation = "extension";
+                        mesh.userData.bitIndex = bitIndex;
+                        this.bitExtrudeMeshes.push(mesh);
+                        console.log(
+                            `[SCENE] Added extension mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`
+                        );
+
+                        // Add edge visualization to extensions
+                        if (
+                            this.materialManager &&
+                            this.materialManager.isEdgesEnabled()
+                        ) {
+                            this.materialManager.addEdgeVisualization(mesh);
                         }
+                    });
+                    this.log.debug(
+                        `Created ${extensionMeshes.length} extension mesh(es) for bit ${bitIndex}`
                     );
                 }
             } else {
@@ -1334,229 +1500,6 @@ export default class ThreeModule extends BaseModule {
      * @param {number} passIndex - Optional pass index for VC operations
      * @param {object} transformParams - Transformation parameters for round extrusion (partFrontX, etc.)
      */
-    async createExtensionExtrusion(
-        bit,
-        bitIndex,
-        pathDataOrCurve,
-        depth,
-        extensionWidth,
-        extensionHeight,
-        operation,
-        panelThickness,
-        panelAnchor,
-        passIndex = null,
-        transformParams = null
-    ) {
-        // Get bit logger
-        const bitLogger = window.LoggerFactory?.getBitLogger();
-
-        // Get extension data from bit using structured format or fallback
-        const extensionData =
-            bit.bitData?.extension ||
-            bit.extension ||
-            (bit.group && bit.group.__extension);
-        if (!extensionData) {
-            this.log.debug(
-                `No extension data for bit ${bitIndex}${
-                    passIndex !== null ? ` pass ${passIndex}` : ""
-                }`
-            );
-            return;
-        }
-
-        this.log.debug(
-            `createExtensionExtrusion for bit ${bitIndex}${
-                passIndex !== null ? ` pass ${passIndex}` : ""
-            }: ` +
-                `width=${extensionWidth}, height=${extensionHeight}, operation=${operation}`
-        );
-
-        try {
-            // Create rectangular profile for the extension with proper dimensions
-            const extensionProfile =
-                this.extrusionBuilder.createExtensionProfile(
-                    extensionWidth,
-                    extensionHeight
-                );
-
-            if (!extensionProfile) {
-                this.log.debug(
-                    `Failed to create extension profile for bit ${bitIndex}`
-                );
-                return;
-            }
-
-            // Choose extrusion method based on operation type
-            // VC uses mitered (like main bit), others use round
-            let result;
-            const isVC = (operation || "").toUpperCase() === "VC";
-
-            this.log.debug(
-                `Creating ${
-                    isVC ? "mitered" : "round"
-                } extension extrusion for bit ${bitIndex}`
-            );
-
-            if (isVC) {
-                // Use mitered extrusion for VC operations (same as main bit)
-                // pathDataOrCurve is a THREE.Curve for VC
-                console.log(
-                    `[EXTENSION] Creating MITERED extension for bit ${bitIndex} pass ${passIndex}:`,
-                    {
-                        extensionWidth,
-                        extensionHeight,
-                        operation,
-                        curvePoints: pathDataOrCurve.getPoints(10).length,
-                    }
-                );
-                result = this.extrusionBuilder.extrudeAlongPath(
-                    extensionProfile,
-                    pathDataOrCurve,
-                    bit.color || "#cccccc"
-                );
-                console.log(`[EXTENSION] MITERED result:`, result);
-                this.log.debug(`Mitered extrusion result:`, result);
-            } else {
-                // Use round extrusion for other operations (AL, OU, IN)
-                // pathDataOrCurve is SVG path data string for non-VC
-                result = this.extrusionBuilder.extrudeAlongPathRound(
-                    extensionProfile,
-                    pathDataOrCurve, // SVG path data string
-                    bit.color || "#cccccc",
-                    transformParams
-                        ? {
-                              ...transformParams,
-                              depth: depth,
-                              panelThickness: panelThickness,
-                              panelAnchor: panelAnchor,
-                          }
-                        : undefined
-                );
-                this.log.debug(`Round extrusion result:`, result);
-            }
-
-            if (result) {
-                let extensionMeshes = [];
-                if (result.mergedMesh) {
-                    extensionMeshes = [result.mergedMesh];
-                    this.log.debug(`Got mergedMesh from result`);
-                } else if (Array.isArray(result)) {
-                    extensionMeshes = result;
-                    this.log.debug(
-                        `Got array of ${result.length} meshes from result`
-                    );
-                } else if (result.parts && Array.isArray(result.parts)) {
-                    extensionMeshes = result.parts;
-                    this.log.debug(
-                        `Got parts array of ${result.parts.length} meshes from result`
-                    );
-                } else if (result.isMesh) {
-                    // Single mesh from mitered extrusion
-                    extensionMeshes = [result];
-                    this.log.debug(`Got single mesh (isMesh=true) from result`);
-                } else {
-                    this.log.warn(
-                        `Unknown result format for bit ${bitIndex}${
-                            passIndex !== null ? ` pass ${passIndex}` : ""
-                        }: `,
-                        result
-                    );
-                }
-
-                this.log.debug(
-                    `Processing ${
-                        extensionMeshes.length
-                    } extension meshes for bit ${bitIndex}${
-                        passIndex !== null ? ` pass ${passIndex}` : ""
-                    }`
-                );
-
-                if (extensionMeshes.length > 0) {
-                    extensionMeshes.forEach((mesh) => {
-                        // Mark as extension
-                        mesh.userData.operation = "extension";
-                        mesh.userData.bitIndex = bitIndex;
-                        mesh.userData.isExtension = true;
-                        mesh.userData.extensionDepth = depth;
-                        if (passIndex !== null) {
-                            mesh.userData.pass = passIndex;
-                        }
-
-                        // Set color based on shank collision (like in 2D)
-                        const hasShankCollision =
-                            extensionData.hasShankCollision || false;
-                        const extensionColor = hasShankCollision
-                            ? "#8B0000"
-                            : "#FF0000"; // darkred : red
-
-                        // Make extension semi-transparent with proper color
-                        mesh.material.transparent = true;
-                        mesh.material.opacity = 0.4;
-                        mesh.material.color.set(extensionColor);
-
-                        // Position extension ABOVE material surface
-                        // Extension should be positioned so its bottom aligns with material top
-                        if (mesh.position) {
-                            // Position mesh so bottom of extension is at top of material
-                            // depth is where bit tip is, extensionHeight is how much bit went below material
-                            // So extension should be from (depth - extensionHeight) to depth
-                            // In 3D: extension goes from -depth+extensionHeight to -depth+2*extensionHeight
-                            mesh.position.z = -depth + extensionHeight - 1;
-                        }
-
-                        this.bitExtrudeMeshes.push(mesh);
-                        this.log.debug(
-                            `Added extension extrusion for bit ${bitIndex}${
-                                passIndex !== null ? ` pass ${passIndex}` : ""
-                            } (${
-                                isVC ? "mitered" : "round"
-                            }, color: ${extensionColor}, height: ${extensionHeight}, z: ${
-                                mesh.position.z
-                            })`
-                        );
-
-                        // Log extrusion creation
-                        if (bitLogger) {
-                            bitLogger.extrusionCreated(bitIndex, {
-                                type: "extension",
-                                operation: isVC
-                                    ? "VC-mitered"
-                                    : operation + "-round",
-                                depth,
-                                extensionHeight,
-                                extensionWidth,
-                                hasShankCollision,
-                                passIndex,
-                                position: { z: mesh.position.z },
-                                color: extensionColor,
-                                meshInfo: {
-                                    vertices:
-                                        mesh.geometry.attributes.position.count,
-                                    faces: mesh.geometry.index
-                                        ? mesh.geometry.index.count / 3
-                                        : 0,
-                                },
-                            });
-                        }
-
-                        // Add edge visualization if enabled
-                        if (
-                            this.materialManager &&
-                            this.materialManager.isEdgesEnabled()
-                        ) {
-                            this.materialManager.addEdgeVisualization(mesh);
-                        }
-                    });
-                }
-            }
-        } catch (error) {
-            this.log.error(
-                `Error creating extension extrusion for bit ${bitIndex}:`,
-                error
-            );
-        }
-    }
-
     /**
      * Toggle visibility of bit meshes
      */
@@ -1577,778 +1520,10 @@ export default class ThreeModule extends BaseModule {
         });
     }
 
-    // Compute world-space bounding box for a mesh (or geometry with transform)
-    computeWorldBBox(geometry, position, rotation, scale) {
-        const bbox = new THREE.Box3();
-        geometry.computeBoundingBox();
-        bbox.copy(geometry.boundingBox);
-        const matrix = new THREE.Matrix4();
-        const pos = position || new THREE.Vector3();
-        const rot = rotation || new THREE.Euler();
-        const scl = scale || new THREE.Vector3(1, 1, 1);
-        matrix.compose(pos, new THREE.Quaternion().setFromEuler(rot), scl);
-        bbox.applyMatrix4(matrix);
-        return bbox;
-    }
-
-    animate() {
-        let currentX = 0;
-        let currentY = 0;
-        let startX = 0;
-        let startY = 0;
-
-        commands?.forEach((cmd) => {
-            const type = cmd[0].toUpperCase();
-            const params = cmd
-                .slice(1)
-                .trim()
-                .split(/[\s,]+/)
-                .map(Number)
-                .filter((n) => !isNaN(n));
-
-            switch (type) {
-                case "M": // Move to
-                    if (params.length >= 2) {
-                        currentX = params[0];
-                        currentY = params[1];
-                        startX = currentX;
-                        startY = currentY;
-                    }
-                    break;
-                case "L": // Line to
-                    if (params.length >= 2) {
-                        const x = params[0];
-                        const y = params[1];
-                        curves.push(
-                            new THREE.LineCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
-                    }
-                    break;
-                case "H": // Horizontal line
-                    if (params.length >= 1) {
-                        const x = params[0];
-                        curves.push(
-                            new THREE.LineCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(x, currentY, 0)
-                            )
-                        );
-                        currentX = x;
-                    }
-                    break;
-                case "V": // Vertical line
-                    if (params.length >= 1) {
-                        const y = params[0];
-                        curves.push(
-                            new THREE.LineCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(currentX, y, 0)
-                            )
-                        );
-                        currentY = y;
-                    }
-                    break;
-                case "C": // Cubic Bézier curve
-                    if (params.length >= 6) {
-                        const cp1x = params[0];
-                        const cp1y = params[1];
-                        const cp2x = params[2];
-                        const cp2y = params[3];
-                        const x = params[4];
-                        const y = params[5];
-                        curves.push(
-                            new THREE.CubicBezierCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(cp1x, cp1y, 0),
-                                new THREE.Vector3(cp2x, cp2y, 0),
-                                new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
-                    }
-                    break;
-                case "Q": // Quadratic Bézier curve
-                    if (params.length >= 4) {
-                        const cpx = params[0];
-                        const cpy = params[1];
-                        const x = params[2];
-                        const y = params[3];
-                        curves.push(
-                            new THREE.QuadraticBezierCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(cpx, cpy, 0),
-                                new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
-                    }
-                    break;
-                case "A": // Arc (approximated as line for simplicity)
-                    if (params.length >= 7) {
-                        const x = params[5];
-                        const y = params[6];
-                        curves.push(
-                            new THREE.LineCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(x, y, 0)
-                            )
-                        );
-                        currentX = x;
-                        currentY = y;
-                    }
-                    break;
-                case "Z": // Close path
-                    if (curves.length > 0) {
-                        curves.push(
-                            new THREE.LineCurve3(
-                                new THREE.Vector3(currentX, currentY, 0),
-                                new THREE.Vector3(startX, startY, 0)
-                            )
-                        );
-                    }
-                    currentX = startX;
-                    currentY = startY;
-                    break;
-            }
-        });
-
-        return curves;
-    }
-
     /**
-     * Create 3D curve from 2D path curves
-     * Curves are in 2D canvas coordinates (from SVG offsetContour)
-     * partFront defines the position and size of the front view in canvas space
-     * Panel in 3D is positioned at (0, 0, 0) with front face at z=thickness/2
+     * Compute world-space bounding box for a mesh (or geometry with transform)
+     * Used by CSGEngine for panel bounds calculation
      */
-    createCurveFromCurves(
-        pathCurves,
-        partFrontX,
-        partFrontY,
-        partFrontWidth,
-        partFrontHeight,
-        depth,
-        panelThickness,
-        panelAnchor
-    ) {
-        this.log.debug("Creating curve from curves:", {
-            curvesCount: pathCurves.length,
-            firstCurve: pathCurves[0],
-            depth,
-            panelThickness,
-            panelAnchor,
-        });
-
-        // Create 3D versions of curves
-        const curves3D = pathCurves
-            .map((curve) => {
-                if (curve instanceof THREE.LineCurve3) {
-                    const v1 = this.convertPoint2DTo3D(
-                        curve.v1.x,
-                        curve.v1.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    const v2 = this.convertPoint2DTo3D(
-                        curve.v2.x,
-                        curve.v2.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    return new THREE.LineCurve3(v1, v2);
-                } else if (curve instanceof THREE.CubicBezierCurve3) {
-                    const v0 = this.convertPoint2DTo3D(
-                        curve.v0.x,
-                        curve.v0.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    const v1 = this.convertPoint2DTo3D(
-                        curve.v1.x,
-                        curve.v1.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    const v2 = this.convertPoint2DTo3D(
-                        curve.v2.x,
-                        curve.v2.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    const v3 = this.convertPoint2DTo3D(
-                        curve.v3.x,
-                        curve.v3.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    return new THREE.CubicBezierCurve3(v0, v1, v2, v3);
-                } else if (curve instanceof THREE.QuadraticBezierCurve3) {
-                    const v0 = this.convertPoint2DTo3D(
-                        curve.v0.x,
-                        curve.v0.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    const v1 = this.convertPoint2DTo3D(
-                        curve.v1.x,
-                        curve.v1.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    const v2 = this.convertPoint2DTo3D(
-                        curve.v2.x,
-                        curve.v2.y,
-                        partFrontX,
-                        partFrontY,
-                        partFrontWidth,
-                        partFrontHeight,
-                        depth,
-                        panelThickness,
-                        panelAnchor
-                    );
-                    return new THREE.QuadraticBezierCurve3(v0, v1, v2);
-                }
-                // For unsupported curves, approximate with line
-                return null;
-            })
-            .filter((c) => c !== null);
-
-        this.log.debug("Sample 3D curves:", {
-            first: curves3D[0],
-            middle: curves3D[Math.floor(curves3D.length / 2)],
-            last: curves3D[curves3D.length - 1],
-        });
-
-        // Create exact path using the curves
-        const path = new THREE.CurvePath();
-        curves3D.forEach((curve) => {
-            path.add(curve);
-        });
-
-        return path;
-    }
-
-    /**
-     * Convert 2D point to 3D coordinates
-     * For CSG operations, extrudes need to pass completely through the panel
-     */
-    convertPoint2DTo3D(
-        x2d,
-        y2d,
-        partFrontX,
-        partFrontY,
-        partFrontWidth,
-        partFrontHeight,
-        depth,
-        panelThickness,
-        panelAnchor
-    ) {
-        // Validate all inputs to identify NaN source
-        if (isNaN(x2d) || isNaN(y2d)) {
-            this.log.error(
-                "convertPoint2DTo3D: Input 2D coordinates contain NaN:",
-                { x2d, y2d }
-            );
-        }
-        if (
-            isNaN(partFrontX) ||
-            isNaN(partFrontY) ||
-            isNaN(partFrontWidth) ||
-            isNaN(partFrontHeight)
-        ) {
-            this.log.error(
-                "convertPoint2DTo3D: partFront parameters contain NaN:",
-                {
-                    partFrontX,
-                    partFrontY,
-                    partFrontWidth,
-                    partFrontHeight,
-                }
-            );
-        }
-        if (isNaN(depth) || isNaN(panelThickness)) {
-            this.log.error(
-                "convertPoint2DTo3D: depth/thickness parameters contain NaN:",
-                {
-                    depth,
-                    panelThickness,
-                }
-            );
-        }
-
-        // Panel in 3D space:
-        // - X=0 is horizontal center
-        // - Y=0 is bottom of panel
-        // - Z depends on anchor
-
-        // Convert X: subtract partFront left edge, then center
-        const x3d = x2d - partFrontX - partFrontWidth / 2;
-
-        // Convert Y: Paper.js Y increases downward, Three.js Y increases upward
-        // Invert Y relative to partFront center
-        const partFrontCenterY = partFrontY + partFrontHeight / 2;
-        const partFrontBottom = partFrontY + partFrontHeight;
-        let y3d = partFrontCenterY - y2d; // Simple inversion: center - y
-
-        // For bottom-left anchor, additional adjustment
-        if (panelAnchor === "bottom-left") {
-            y3d = y3d + partFrontHeight / 2;
-        }
-
-        // Z: For CSG operations, extrudes should pass completely through the panel
-        // Panel Z ranges from -panelThickness/2 to +panelThickness/2
-        // So we make extrude go from -panelThickness to +panelThickness to ensure it crosses the whole panel
-        //let z3d = 0; // center at panel center by default
-        // Z: depth into material from the anchor surface
-        let z3d;
-        if (panelAnchor === "top-left") {
-            // From front surface inward
-            z3d = depth - panelThickness / 2;
-        } else if (panelAnchor === "bottom-left") {
-            // From back surface inward
-            z3d = depth + panelThickness / 2;
-        } else {
-            // Default to front
-            z3d = -depth;
-        }
-
-        // For proper CSG subtraction, the extrude needs to extend well beyond the panel
-        // This will be handled by the ProfiledContourGeometry which creates the 3D shape
-        // The actual depth positioning will depend on the bit profile height
-
-        return new THREE.Vector3(x3d, y3d, z3d);
-    }
-
-    /**
-     * Create path visualization for debugging
-     * Shows the exact path as a colored line
-     */
-    createPathVisualization(curve, color) {
-        try {
-            // Get points from the curve
-            const points = curve.getPoints(200); // Get 200 points along the path
-
-            // Create line geometry
-            const geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-            // Create line material (thick colored line)
-            const material = new THREE.LineBasicMaterial({
-                color: new THREE.Color(color || "#ff0000"),
-                linewidth: 3, // Note: linewidth > 1 may not work on all platforms
-                opacity: 0.8,
-                transparent: true,
-            });
-
-            // Create line object
-            const line = new THREE.Line(geometry, material);
-
-            this.log.debug(
-                "Created path visualization with",
-                points.length,
-                "points"
-            );
-
-            return line;
-        } catch (error) {
-            this.log.error("Error creating path visualization:", error);
-            return null;
-        }
-    }
-
-    /**
-     * Create bit profile shape based on bit type
-     */
-    async createBitProfile(bitData) {
-        // If bitData has a profilePath (SVG path), use SVGLoader
-        if (bitData.profilePath) {
-            try {
-                const svgString = `<svg xmlns="http://www.w3.org/2000/svg"><path d="${bitData.profilePath}"/></svg>`;
-                const dataUrl = "data:image/svg+xml;base64," + btoa(svgString);
-                const loader = new SVGLoader();
-
-                return new Promise((resolve, reject) => {
-                    loader.load(
-                        dataUrl,
-                        (data) => {
-                            const shapes = SVGLoader.createShapes(
-                                data.paths[0]
-                            );
-                            if (shapes.length > 0) {
-                                let shape = shapes[0];
-                                // No rotation needed here, rotation is done in ProfiledContourGeometry
-                                resolve(shape);
-                            } else {
-                                resolve(this.createFallbackShape(bitData));
-                            }
-                        },
-                        undefined,
-                        (error) => {
-                            this.log.error("Error loading SVG:", error);
-                            resolve(this.createFallbackShape(bitData));
-                        }
-                    );
-                });
-            } catch (error) {
-                this.log.error("Error parsing SVG profile:", error);
-                return this.createFallbackShape(bitData);
-            }
-        }
-
-        // Fallback to circular profile
-        return this.createFallbackShape(bitData);
-    }
-
-    /**
-     * Create fallback circular shape
-     */
-    createFallbackShape(bitData) {
-        const diameter = bitData.diameter || 10;
-        const radius = diameter / 2;
-
-        const shape = new THREE.Shape();
-        const segments = 32;
-
-        for (let i = 0; i <= segments; i++) {
-            const angle = (i / segments) * Math.PI * 2;
-            const x = Math.cos(angle) * radius;
-            const y = Math.sin(angle) * radius;
-
-            if (i === 0) {
-                shape.moveTo(x, y);
-            } else {
-                shape.lineTo(x, y);
-            }
-        }
-
-        return shape;
-    }
-
-    /**
-     * Rotate a Shape by the given angle
-     */
-    rotateShape(shape, angle) {
-        const points = shape.getPoints(200); // Get points along the shape
-        const rotatedPoints = points.map((point) => {
-            const x = point.x;
-            const y = point.y;
-            // Rotate 90 degrees: x' = y, y' = -x
-            const newX = y;
-            const newY = -x;
-            return new THREE.Vector2(newX, newY);
-        });
-
-        const newShape = new THREE.Shape();
-        newShape.setFromPoints(rotatedPoints);
-        return newShape;
-    }
-
-    /**
-     * Extrude profile along path using TubeGeometry
-     */
-    extrudeAlongPath(profile, curve, color) {
-        try {
-            // Get contour points from the curve
-            const segments = Math.max(50, Math.floor(curve.getLength() / 5));
-            const contourPoints = curve.getPoints(segments);
-
-            // Convert Vector3 to Vector2 for ProfiledContourGeometry
-            let contour = contourPoints.map(
-                (p) => new THREE.Vector3(p.x, p.y, p.z)
-            );
-
-            // Determine if the path is closed
-            // Check if first and last points are close enough
-            const firstPoint = contour[0];
-            const lastPoint = contour[contour.length - 1];
-            const contourClosed = firstPoint.distanceTo(lastPoint) < 0.01;
-
-            // For closed contours, remove the duplicate last point
-            if (contourClosed && contour.length > 1) {
-                contour = contour.slice(0, -1);
-            }
-
-            this.log.debug("Extruding with mitered corners:", {
-                profilePoints: profile.getPoints().length,
-                contourPoints: contour.length,
-                contourClosed,
-                curveLength: curve.getLength(),
-            });
-
-            // Use ProfiledContourGeometry for mitered corners
-            const geometry = this.ProfiledContourGeometry(
-                profile,
-                contour,
-                contourClosed
-            );
-
-            // Check if geometry was created successfully
-            if (!geometry) {
-                throw new Error("Failed to create ProfiledContourGeometry");
-            }
-
-            // Log geometry info before modifications
-            this.log.debug("ProfiledContourGeometry created:", {
-                vertices: geometry.attributes.position.count,
-                hasNormals: !!geometry.attributes.normal,
-                hasUV: !!geometry.attributes.uv,
-                indexCount: geometry.index ? geometry.index.count : 0,
-            });
-
-            // For CSG operations: ensure geometry extends through the entire panel thickness
-            const panelThickness = 19; // Approximate panel thickness - should match panel
-            const zExtension = panelThickness * 2; // Extend Z to ensure it passes through panel
-
-            // Expand Z bounds of the geometry for better CSG intersection
-            const positions = geometry.attributes.position;
-            if (positions) {
-                const posArray = positions.array;
-                for (let i = 2; i < posArray.length; i += 3) {
-                    // Ensure Z coordinates are extended
-                    if (posArray[i] < -zExtension / 2) {
-                        posArray[i] = -zExtension / 2;
-                    }
-                    if (posArray[i] > zExtension / 2) {
-                        posArray[i] = zExtension / 2;
-                    }
-                }
-                positions.needsUpdate = true;
-            }
-            geometry.computeBoundingBox();
-
-            // Recalculate normals after modifying positions
-            // This ensures faces are properly oriented
-            geometry.computeVertexNormals();
-            geometry.normalizeNormals();
-
-            const material = new THREE.MeshStandardMaterial({
-                color: new THREE.Color(color || "#cccccc"),
-                roughness: 0.5,
-                metalness: 0.2,
-                side: THREE.FrontSide, // Only render front faces for proper shading
-                wireframe: this.materialManager.isWireframeEnabled(),
-            });
-
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-
-            this.log.debug("Mitered extrusion created:", {
-                vertices: geometry.attributes.position.count,
-                boundingBox: geometry.boundingBox,
-            });
-
-            return [mesh]; // Return array for consistency
-        } catch (error) {
-            this.log.error("Error extruding along path:", error.message);
-            this.log.error("Error stack:", error.stack);
-            this.log.error(
-                "ProfiledContourGeometry function:",
-                this.ProfiledContourGeometry.toString().substring(0, 200)
-            );
-            return [];
-        }
-    }
-
-    /**
-     * Create profiled contour geometry with mitered corners
-     * Based on https://jsfiddle.net/prisoner849/bygy1xkt/
-     */
-    ProfiledContourGeometry(profileShape, contour, contourClosed) {
-        try {
-            contourClosed = contourClosed !== undefined ? contourClosed : true;
-
-            let profileGeometry = new THREE.ShapeGeometry(profileShape);
-            profileGeometry.rotateX(-Math.PI * 0.5);
-            let profile = profileGeometry.attributes.position;
-
-            let profilePoints = new Float32Array(
-                profile.count * contour.length * 3
-            );
-
-            for (let i = 0; i < contour.length; i++) {
-                let v1 = new THREE.Vector2().subVectors(
-                    contour[i - 1 < 0 ? contour.length - 1 : i - 1],
-                    contour[i]
-                );
-                let v2 = new THREE.Vector2().subVectors(
-                    contour[i + 1 == contour.length ? 0 : i + 1],
-                    contour[i]
-                );
-                let angle = v2.angle() - v1.angle();
-                let halfAngle = angle * 0.5;
-
-                let hA = halfAngle;
-                let tA = v2.angle() + Math.PI * 0.5;
-                if (!contourClosed) {
-                    if (i == 0 || i == contour.length - 1) {
-                        hA = Math.PI * 0.5;
-                    }
-                    if (i == contour.length - 1) {
-                        tA = v1.angle() - Math.PI * 0.5;
-                    }
-                }
-
-                let shift = Math.tan(hA - Math.PI * 0.5);
-                let shiftMatrix = new THREE.Matrix4().set(
-                    1,
-                    0,
-                    0,
-                    0,
-                    -shift,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1
-                );
-
-                let tempAngle = tA;
-                let rotationMatrix = new THREE.Matrix4().set(
-                    Math.cos(tempAngle),
-                    -Math.sin(tempAngle),
-                    0,
-                    0,
-                    Math.sin(tempAngle),
-                    Math.cos(tempAngle),
-                    0,
-                    0,
-                    0,
-                    0,
-                    1,
-                    0,
-                    0,
-                    0,
-                    0,
-                    1
-                );
-
-                let translationMatrix = new THREE.Matrix4().set(
-                    1,
-                    0,
-                    0,
-                    contour[i].x,
-                    0,
-                    1,
-                    0,
-                    contour[i].y,
-                    0,
-                    0,
-                    1,
-                    contour[i].z,
-                    0,
-                    0,
-                    0,
-                    1
-                );
-
-                let cloneProfile = profile.clone();
-                cloneProfile.applyMatrix4(shiftMatrix);
-                cloneProfile.applyMatrix4(rotationMatrix);
-                cloneProfile.applyMatrix4(translationMatrix);
-
-                profilePoints.set(
-                    cloneProfile.array,
-                    cloneProfile.count * i * 3
-                );
-            }
-
-            let fullProfileGeometry = new THREE.BufferGeometry();
-            fullProfileGeometry.setAttribute(
-                "position",
-                new THREE.BufferAttribute(profilePoints, 3)
-            );
-            let index = [];
-
-            let lastCorner =
-                contourClosed == false ? contour.length - 1 : contour.length;
-            for (let i = 0; i < lastCorner; i++) {
-                for (let j = 0; j < profile.count; j++) {
-                    let currCorner = i;
-                    let nextCorner = i + 1 == contour.length ? 0 : i + 1;
-                    let currPoint = j;
-                    let nextPoint = j + 1 == profile.count ? 0 : j + 1;
-
-                    let a = nextPoint + profile.count * currCorner;
-                    let b = currPoint + profile.count * currCorner;
-                    let c = currPoint + profile.count * nextCorner;
-                    let d = nextPoint + profile.count * nextCorner;
-
-                    // Ensure consistent winding order for normals pointing outward
-                    // Counter-clockwise when viewed from outside
-                    index.push(a, d, b);
-                    index.push(b, d, c);
-                }
-            }
-
-            fullProfileGeometry.setIndex(index);
-            fullProfileGeometry.computeVertexNormals();
-
-            // Ensure normals point outward for proper shading
-            // This is crucial for CSG operations and visibility
-            fullProfileGeometry.normalizeNormals();
-
-            return fullProfileGeometry;
-        } catch (error) {
-            this.log.error("Error in ProfiledContourGeometry:", error);
-            // Fallback to simple box geometry
-            return new THREE.BoxGeometry(1, 1, 1);
-        }
-    }
-
-    // Compute world-space bounding box for a mesh (or geometry with transform)
     computeWorldBBox(geometry, position, rotation, scale) {
         const bbox = new THREE.Box3();
         geometry.computeBoundingBox();
