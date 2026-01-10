@@ -423,11 +423,25 @@ html {
   color: hsl(var(--card-foreground));
 }
 
+.part-params-grid {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.param-item {
+  flex: 0 0 50px;
+  min-width: 70px;
+  display: flex;
+  flex-direction: column;
+}
+
 #part-params label {
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
   font-size: 12px;
   color: hsl(var(--muted-foreground));
+  white-space: nowrap;
 }
 
 #part-params input {
@@ -438,6 +452,15 @@ html {
   color: hsl(var(--foreground));
   border-radius: var(--radius);
   padding: 8px;
+}
+
+#panel-anchor-btn {
+  background-color: hsl(var(--input)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: var(--radius) !important;
+  padding: 8px !important;
+  height: 38px;
+  width: 70px;
 }
 
 /* ===== BITS DATABASE (Left panel) ===== */
