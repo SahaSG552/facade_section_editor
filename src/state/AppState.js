@@ -18,8 +18,12 @@ class AppState {
             shankVisible: true,
             gridSize: 1,
             isDraggingBit: false,
+            viewMode: "both", // "2d" | "3d" | "both"
             ...initial,
         };
+        if (LoggerFactory.setModeLevels) {
+            LoggerFactory.setModeLevels(this.state.viewMode);
+        }
         this.log.info("Initialized", this.state);
     }
 
@@ -68,6 +72,29 @@ class AppState {
 
     setDraggingBit(isDragging) {
         this.set("isDraggingBit", isDragging);
+    }
+
+    setViewMode(mode) {
+        const allowed = ["2d", "3d", "both"];
+        if (!allowed.includes(mode)) {
+            this.log.warn("Invalid viewMode", mode);
+            return;
+        }
+        if (this.state.viewMode === mode) return;
+        this.state.viewMode = mode;
+        eventBus.emit("mode:changed", mode);
+        this.log.info(`viewMode changed: ${mode}`);
+        if (LoggerFactory.setModeLevels) {
+            LoggerFactory.setModeLevels(mode);
+        }
+    }
+
+    is2DActive() {
+        return this.state.viewMode === "2d" || this.state.viewMode === "both";
+    }
+
+    is3DActive() {
+        return this.state.viewMode === "3d" || this.state.viewMode === "both";
     }
 }
 

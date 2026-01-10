@@ -1,3 +1,43 @@
+/**
+ * BitWarningsBuilder - Строит массив предупреждений для бита
+ */
+class BitWarningsBuilder {
+    constructor() {
+        this.warnings = [];
+    }
+
+    /**
+     * Добавить предупреждение
+     * @param {string} message - Текст предупреждения
+     * @returns {BitWarningsBuilder} Для цепочки вызовов
+     */
+    add(message) {
+        this.warnings.push(message);
+        return this;
+    }
+
+    /**
+     * Добавить предупреждение только если условие истинно
+     * @param {boolean} condition - Условие
+     * @param {string} message - Текст предупреждения
+     * @returns {BitWarningsBuilder} Для цепочки вызовов
+     */
+    addIf(condition, message) {
+        if (condition) {
+            this.warnings.push(message);
+        }
+        return this;
+    }
+
+    /**
+     * Получить массив предупреждений
+     * @returns {Array<string>}
+     */
+    build() {
+        return this.warnings;
+    }
+}
+
 class BitsTableManager {
     constructor(config) {
         this.sheetBody = document.getElementById("bits-sheet-body");
@@ -9,6 +49,10 @@ class BitsTableManager {
         this.evaluateMathExpression = config.evaluateMathExpression;
         this.createAlignmentButton = config.createAlignmentButton;
         this.getOperationsForGroup = config.getOperationsForGroup;
+        this.convertToTopAnchorCoordinates =
+            config.convertToTopAnchorCoordinates;
+        this.getPanelThickness = config.getPanelThickness;
+        this.angleToRad = config.angleToRad || ((deg) => (deg * Math.PI) / 180);
 
         this.callbacks = {
             onSelectBit: () => {},
@@ -36,12 +80,55 @@ class BitsTableManager {
 
     /**
      * Generate warnings for bit operation
-     * @param {Object} bit - Bit data (with pre-computed warnings array)
+     * @param {Object} bit - Bit data
      * @returns {Array<string>} Array of warning messages
      */
     generateWarnings(bit) {
-        // Warnings are now pre-computed in script.js where bitData is available
-        return bit.warnings || [];
+        const builder = new BitWarningsBuilder();
+
+        // Check if bit has VC operation
+        if (bit.operation === "VC" && bit.bitData) {
+            // Convert to top anchor coordinates to get depth
+            const topAnchorCoords = this.convertToTopAnchorCoordinates(bit);
+            const bitY = topAnchorCoords.y; // Depth from top anchor
+
+            const angle = parseFloat(bit.bitData.angle) || 0;
+            const diameter = parseFloat(bit.bitData.diameter) || 0;
+
+            if (angle > 0 && diameter > 0 && bitY > 0) {
+                // Calculate number of passes
+                const hypotenuse = diameter;
+                const bitHeight =
+                    (hypotenuse / 2) *
+                    (1 / Math.tan(this.angleToRad(angle) / 2));
+                const passes =
+                    bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
+
+                builder.addIf(passes > 1, `${passes} passes`);
+
+                // Calculate and display work offset distance
+                const workOffsetValue =
+                    bitY * Math.tan(this.angleToRad(angle / 2));
+                const workOffsetDistance = topAnchorCoords.x - workOffsetValue;
+                const workOffsetRounded = parseFloat(
+                    workOffsetDistance.toFixed(2)
+                );
+                builder.add(`Work offset: ${workOffsetRounded}mm`);
+            }
+        }
+
+        // Check for shank collision (set in updateBitExtensions)
+        builder.addIf(bit.hasShankCollision, "⚠ Shank collision");
+
+        // Check if bit cuts through material
+        if (this.convertToTopAnchorCoordinates && this.getPanelThickness) {
+            const topAnchorCoords = this.convertToTopAnchorCoordinates(bit);
+            const bitDepth = topAnchorCoords.y; // Depth from top anchor
+            const panelThickness = this.getPanelThickness();
+            builder.addIf(bitDepth >= panelThickness, "⚠ Cut through");
+        }
+
+        return builder.build();
     }
 
     render(bits = [], selectedIndices = []) {

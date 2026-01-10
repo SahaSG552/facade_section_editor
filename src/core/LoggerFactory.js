@@ -13,8 +13,9 @@ const LogLevels = {
 };
 
 class ModuleLogger {
-    constructor(moduleName, logLevel = LogLevels.INFO) {
+    constructor(moduleName, logLevel = LogLevels.INFO, category = null) {
         this.moduleName = moduleName;
+        this.category = category;
         this.logLevel = logLevel;
         this.logs = [];
         this.maxLogs = 1000;
@@ -253,13 +254,44 @@ class BitLogger extends ModuleLogger {
 class LoggerFactory {
     static loggers = new Map();
     static bitLogger = null;
+    static categoryLevels = new Map();
 
-    static createLogger(moduleName, logLevel = LogLevels.INFO) {
+    // Map known modules to categories for mode-aware log muting
+    static moduleCategories = {
+        ThreeModule: "ThreeD",
+        CSGEngine: "ThreeD",
+        ExtrusionBuilder: "ThreeD",
+        STLExporter: "ThreeD",
+        SceneManager: "ThreeD",
+        MaterialManager: "ThreeD",
+        CanvasManager: "TwoD",
+        Script: "TwoD",
+        PanelManager: "TwoD",
+        PaperOffsetProcessor: "TwoD",
+        BooleanOperationStrategy: "TwoD",
+        BitsManager: "TwoD",
+        BitsTableManager: "TwoD",
+        SelectionManager: "TwoD",
+        PaperCanvasManager: "TwoD",
+        CSGScheduler: "CSG",
+    };
+
+    static createLogger(
+        moduleName,
+        logLevel = LogLevels.INFO,
+        category = null
+    ) {
         if (!this.loggers.has(moduleName)) {
-            this.loggers.set(
+            const resolvedCategory =
+                category || this.moduleCategories[moduleName] || null;
+            const resolvedLevel = this.categoryLevels.get(resolvedCategory);
+            const effectiveLevel = resolvedLevel || logLevel;
+            const logger = new ModuleLogger(
                 moduleName,
-                new ModuleLogger(moduleName, logLevel)
+                effectiveLevel,
+                resolvedCategory
             );
+            this.loggers.set(moduleName, logger);
         }
         return this.loggers.get(moduleName);
     }
@@ -285,6 +317,44 @@ class LoggerFactory {
             allLogs[name] = logger.getLogs();
         });
         return allLogs;
+    }
+
+    /**
+     * Set log level for a specific category (e.g., "TwoD", "ThreeD", "CSG")
+     * and remember it for future loggers created in that category.
+     */
+    static setCategoryLevel(category, level) {
+        if (!category || !LogLevels[level]) return;
+        this.categoryLevels.set(category, level);
+        this.loggers.forEach((logger) => {
+            if (logger.category === category) {
+                logger.setLogLevel(level);
+            }
+        });
+    }
+
+    /**
+     * Adjust category log levels based on active view mode.
+     * mode: "2d" | "3d" | "both"
+     */
+    static setModeLevels(mode) {
+        const high = LogLevels.INFO;
+        const low = LogLevels.WARN;
+
+        if (mode === "2d") {
+            this.setCategoryLevel("TwoD", high);
+            this.setCategoryLevel("ThreeD", low);
+            this.setCategoryLevel("CSG", low);
+        } else if (mode === "3d") {
+            this.setCategoryLevel("TwoD", low);
+            this.setCategoryLevel("ThreeD", high);
+            this.setCategoryLevel("CSG", high);
+        } else {
+            // both or fallback
+            this.setCategoryLevel("TwoD", high);
+            this.setCategoryLevel("ThreeD", high);
+            this.setCategoryLevel("CSG", high);
+        }
     }
 
     static setGlobalLogLevel(level) {

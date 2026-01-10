@@ -17,6 +17,7 @@
 
 import paper from "paper";
 import { PaperOffset } from "paperjs-offset";
+import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { approximatePath } from "../utils/arcApproximation.js";
 /**
  * Импортировать SVG элемент в Paper.js path
@@ -60,7 +61,7 @@ function importSVGtoPaper(svgElement) {
  *   - cap: 'butt', 'round' (default 'butt')
  *   - limit: miter limit (default 10)
  *   - useArcApproximation: если true, применяет аппроксимацию Безье → Арки
- *   - arcTolerance: RMS tolerance для аппроксимации в мм (default 0.15)
+ *   - arcTolerance: RMS tolerance для аппроксимации в мм (default ARC_APPROX_TOLERANCE)
  *   - exportModule: экземпляр ExportModule для аппроксимации
  * @returns {string} SVG path data (с кривыми Безье или аппроксимированными дугами)
  */
@@ -124,7 +125,7 @@ export function calculateOffsetFromSVG(svgElement, offset, options = {}) {
 
         // Применяем аппроксимацию Безье → Арки если включена опция
         if (options.useArcApproximation && options.exportModule) {
-            const tolerance = options.arcTolerance || 0.15; // default 0.15mm RMS tolerance
+            const tolerance = options.arcTolerance || ARC_APPROX_TOLERANCE; // RMS tolerance
             pathData = approximatePath(
                 pathData,
                 options.exportModule,

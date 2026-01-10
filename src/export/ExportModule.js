@@ -3,6 +3,11 @@
  * Handles export functionality for the application
  */
 import BaseModule from "../core/BaseModule.js";
+import LoggerFactory from "../core/LoggerFactory.js";
+import {
+    ARC_APPROX_TOLERANCE,
+    ARC_RADIUS_TOLERANCE,
+} from "../config/constants.js";
 
 /**
  * Export Module - Handles all export operations including DXF
@@ -15,7 +20,8 @@ class ExportModule extends BaseModule {
 
     initialize() {
         super.initialize();
-        console.log("ExportModule initialized");
+        this.log = LoggerFactory.createLogger("ExportModule");
+        this.log.info("ExportModule initialized");
         return Promise.resolve();
     }
 
@@ -74,6 +80,7 @@ class DXFExporter {
     constructor() {
         this.dxfContent = [];
         this.handleCounter = 0x100; // Start handles from 256
+        this.log = LoggerFactory.createLogger("DXFExporter");
     }
 
     /**
@@ -663,10 +670,12 @@ class DXFExporter {
                 if (bit) {
                     // Use depth from offset if available (for VC multi-pass), otherwise use bit.y
                     let depthValue =
-                        offset.depth !== undefined ? offset.depth : bit.y;
+                        offset.depth !== undefined && offset.depth !== null
+                            ? offset.depth
+                            : bit.y;
 
                     // Format depth value: if fractional, add extra _ before value, replace decimal with _
-                    let yValue = depthValue.toString();
+                    let yValue = depthValue?.toString() || "0";
                     if (depthValue % 1 !== 0) {
                         // It's fractional, add extra _
                         yValue = `_${yValue.replace(".", "_")}`;
@@ -1866,7 +1875,7 @@ class DXFExporter {
         } else if (partFront.tagName === "path") {
             this.writeSVGPath(partFront, 0, 0, layerName, convertY);
         } else {
-            console.warn(
+            this.log.warn(
                 "writePartFront: unsupported element type:",
                 partFront.tagName
             );
@@ -1883,10 +1892,13 @@ class DXFExporter {
         if (!bit) return;
 
         // Use depth from offset if available (for VC multi-pass), otherwise use bit.y
-        let depthValue = offset.depth !== undefined ? offset.depth : bit.y;
+        let depthValue =
+            offset.depth !== undefined && offset.depth !== null
+                ? offset.depth
+                : bit.y;
 
         // Format depth value: if fractional, add extra _ before value, replace decimal with _
-        let yValue = depthValue.toString();
+        let yValue = depthValue?.toString() || "0";
         if (depthValue % 1 !== 0) {
             // It's fractional, add extra _
             yValue = `_${yValue.replace(".", "_")}`;
@@ -1918,7 +1930,7 @@ class DXFExporter {
      */
     parseSVGElement(svgElement, offsetX, offsetY, convertY) {
         if (!svgElement) {
-            console.warn("parseSVGElement: no element provided");
+            this.log.warn("parseSVGElement: no element provided");
             return [];
         }
 
@@ -1939,7 +1951,7 @@ class DXFExporter {
             case "path":
                 return this.parsePath(svgElement, offsetX, offsetY, convertY);
             default:
-                console.warn(
+                this.log.warn(
                     "parseSVGElement: unsupported element type:",
                     tagName
                 );
@@ -2140,7 +2152,7 @@ class DXFExporter {
                 );
                 break;
             default:
-                console.warn(`Unsupported SVG element type: ${tagName}`);
+                this.log.warn(`Unsupported SVG element type: ${tagName}`);
         }
     }
 
@@ -2261,7 +2273,7 @@ class DXFExporter {
     writeSVGPath(svgElement, offsetX, offsetY, layerName, convertY) {
         const d = svgElement.getAttribute("d") || "";
 
-        console.log(
+        this.log.debug(
             "SVG Path data:",
             d.substring(0, 200) + (d.length > 200 ? "..." : "")
         );
@@ -2269,7 +2281,9 @@ class DXFExporter {
         // Split path into separate closed contours (handles compound paths from boolean operations)
         const contourPaths = this.splitPathIntoContours(d);
 
-        console.log(`Found ${contourPaths.length} closed contour(s) in path`);
+        this.log.debug(
+            `Found ${contourPaths.length} closed contour(s) in path`
+        );
 
         // Process each contour separately
         contourPaths.forEach((contourPath, index) => {
@@ -2286,7 +2300,10 @@ class DXFExporter {
                 const originalBezierCount = segments.filter(
                     (s) => s.type === "bezier"
                 ).length;
-                segments = this.optimizeSegmentsToArcs(segments, 0.15); // RMS tolerance 0.15mm for ultra-high precision
+                segments = this.optimizeSegmentsToArcs(
+                    segments,
+                    ARC_APPROX_TOLERANCE
+                ); // RMS tolerance for ultra-high precision
                 const optimizedBezierCount = segments.filter(
                     (s) => s.type === "bezier"
                 ).length;
@@ -2294,7 +2311,7 @@ class DXFExporter {
                     originalBezierCount - optimizedBezierCount;
 
                 if (originalBezierCount > 0) {
-                    console.log(
+                    this.log.debug(
                         `Contour ${
                             index + 1
                         }: Bezier → Arc: converted ${convertedCount}/${originalBezierCount} (${(
@@ -3056,14 +3073,39 @@ class DXFExporter {
                     const arcStartY = currentY;
                     let arcEndX, arcEndY;
 
+                    this.log.debug(`[Arc Parse] Processing A command:`);
+                    this.log.debug(
+                        `  Current position: (${currentX.toFixed(
+                            2
+                        )}, ${currentY.toFixed(2)})`
+                    );
+                    this.log.debug(
+                        `  Command params: rx=${command.rx} ry=${command.ry} rot=${command.xAxisRotation} large=${command.largeArcFlag} sweep=${command.sweepFlag} x=${command.x} y=${command.y}`
+                    );
+                    this.log.debug(`  isRelative: ${command.isRelative}`);
+
                     if (command.isRelative) {
                         arcEndX = currentX + command.x;
                         arcEndY = invertRelativeY
                             ? currentY - command.y
                             : currentY + command.y;
+                        this.log.debug(
+                            `  Relative: adding (${command.x}, ${
+                                command.y
+                            }) → end (${arcEndX.toFixed(2)}, ${arcEndY.toFixed(
+                                2
+                            )})`
+                        );
                     } else {
                         arcEndX = command.x + offsetX;
                         arcEndY = convertY(command.y + offsetY);
+                        this.log.debug(
+                            `  Absolute: x=${command.x}+${offsetX}, y=${
+                                command.y
+                            }+${offsetY} → convertY → end (${arcEndX.toFixed(
+                                2
+                            )}, ${arcEndY.toFixed(2)})`
+                        );
                     }
 
                     // Calculate arc center and angles
@@ -3080,11 +3122,28 @@ class DXFExporter {
                     );
 
                     if (arc) {
+                        this.log.debug(
+                            `  Arc converted: center=(${arc.centerX.toFixed(
+                                2
+                            )}, ${arc.centerY.toFixed(
+                                2
+                            )}) radius=${arc.radius.toFixed(2)}`
+                        );
                         segments.push({
                             type: "arc",
                             start: { x: arcStartX, y: arcStartY },
                             end: { x: arcEndX, y: arcEndY },
                             arc: arc,
+                        });
+                    } else {
+                        this.log.warn(
+                            `  Arc conversion FAILED - using LINE instead to preserve contour`
+                        );
+                        // Fallback: use line to preserve contour continuity
+                        segments.push({
+                            type: "line",
+                            start: { x: arcStartX, y: arcStartY },
+                            end: { x: arcEndX, y: arcEndY },
                         });
                     }
 
@@ -3094,7 +3153,7 @@ class DXFExporter {
                 case "Z": // Close path
                     // If we're not at the start point, draw a line to close
                     // Use tolerance to avoid adding zero-length lines
-                    const tolerance = 0.01;
+                    const tolerance = ARC_RADIUS_TOLERANCE;
                     const distX = Math.abs(currentX - startX);
                     const distY = Math.abs(currentY - startY);
 
@@ -3272,20 +3331,58 @@ class DXFExporter {
         largeArcFlag,
         sweepFlag
     ) {
+        this.log.debug(`[Arc Conversion] svgArcToDXFArc called:`);
+        this.log.debug(`  Start: (${x1.toFixed(2)}, ${y1.toFixed(2)})`);
+        this.log.debug(`  End: (${x2.toFixed(2)}, ${y2.toFixed(2)})`);
+        this.log.debug(
+            `  rx=${rx} ry=${ry} rotation=${xAxisRotation}° large=${largeArcFlag} sweep=${sweepFlag}`
+        );
+
         // Only support circular arcs without rotation
         if (Math.abs(rx - ry) > 0.001 || Math.abs(xAxisRotation) > 0.001) {
+            this.log.warn(`  REJECTED: elliptical (rx≠ry) or rotated arc`);
             return null;
         }
 
-        const radius = rx;
+        let radius = rx; // Use 'let' to allow auto-correction
         const dx = x2 - x1;
         const dy = y2 - y1;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        if (distance === 0 || radius === 0) return null;
+        this.log.debug(
+            `  Chord: dx=${dx.toFixed(2)} dy=${dy.toFixed(
+                2
+            )} distance=${distance.toFixed(2)}`
+        );
+
+        if (distance === 0 || radius === 0) {
+            this.log.warn(`  REJECTED: zero distance or radius`);
+            return null;
+        }
 
         const halfDistance = distance / 2;
-        const height = Math.sqrt(radius * radius - halfDistance * halfDistance);
+        let radiusSquared = radius * radius;
+        const halfDistanceSquared = halfDistance * halfDistance;
+
+        // Add tolerance for semicircle case (radius ≈ chord/2) to handle floating point precision
+        const tolerance = ARC_RADIUS_TOLERANCE; // mm tolerance for rounding errors
+        if (radiusSquared < halfDistanceSquared - tolerance) {
+            // Auto-correct radius like SVG does (scale to minimum required)
+            const correctedRadius = halfDistance;
+            this.log.warn(
+                `  AUTO-CORRECTING radius: ${radius.toFixed(
+                    2
+                )}mm → ${correctedRadius.toFixed(
+                    2
+                )}mm (chord requires min ${halfDistance.toFixed(2)}mm)`
+            );
+            radius = correctedRadius;
+            radiusSquared = radius * radius;
+        }
+
+        const height = Math.sqrt(
+            Math.max(0, radiusSquared - halfDistanceSquared)
+        );
 
         const midX = (x1 + x2) / 2;
         const midY = (y1 + y2) / 2;
@@ -3297,6 +3394,17 @@ class DXFExporter {
         const centerX = midX + perpX * centerOffset;
         const centerY = midY + perpY * centerOffset;
 
+        this.log.debug(`  Mid: (${midX.toFixed(2)}, ${midY.toFixed(2)})`);
+        this.log.debug(`  Perp: (${perpX.toFixed(3)}, ${perpY.toFixed(3)})`);
+        this.log.debug(
+            `  Height: ${height.toFixed(
+                2
+            )} centerOffset: ${centerOffset.toFixed(2)}`
+        );
+        this.log.debug(
+            `  Center: (${centerX.toFixed(2)}, ${centerY.toFixed(2)})`
+        );
+
         let startAngle =
             Math.atan2(y1 - centerY, x1 - centerX) * (180 / Math.PI);
         let endAngle = Math.atan2(y2 - centerY, x2 - centerX) * (180 / Math.PI);
@@ -3305,6 +3413,13 @@ class DXFExporter {
         const normalizeAngle = (angle) => ((angle % 360) + 360) % 360;
         startAngle = normalizeAngle(startAngle);
         endAngle = normalizeAngle(endAngle);
+
+        this.log.debug(
+            `  Angles: start=${startAngle.toFixed(2)}° end=${endAngle.toFixed(
+                2
+            )}°`
+        );
+        this.log.debug(`  ✓ SUCCESS`);
 
         return { centerX, centerY, radius, startAngle, endAngle, sweepFlag };
     }
@@ -3322,7 +3437,17 @@ class DXFExporter {
      * @param {number} tolerance - Maximum distance error (default: 0.01)
      * @returns {Object|null} Arc parameters {cx, cy, radius, startAngle, endAngle, sweepFlag} or null if not circular enough
      */
-    bezierToArc(x0, y0, x1, y1, x2, y2, x3, y3, tolerance = 0.01) {
+    bezierToArc(
+        x0,
+        y0,
+        x1,
+        y1,
+        x2,
+        y2,
+        x3,
+        y3,
+        tolerance = ARC_RADIUS_TOLERANCE
+    ) {
         // Key approach: keep start and end points FIXED, find circle through them + midpoint
         // This ensures arc endpoints match Bezier endpoints exactly
 
@@ -3340,7 +3465,7 @@ class DXFExporter {
         // This ensures the arc will pass through these exact points
         const circle = this.fitCircleToPoints([startPoint, midPoint, endPoint]);
         if (!circle) {
-            console.log(
+            this.log.debug(
                 `  Bezier→Arc FAILED: circle fit through key points failed`
             );
             return null;
@@ -3369,7 +3494,7 @@ class DXFExporter {
         }
 
         if (maxError > tolerance) {
-            console.log(
+            this.log.debug(
                 `  Bezier→Arc FAILED: maxError=${maxError.toFixed(
                     3
                 )}mm > tolerance=${tolerance}mm`
@@ -3421,7 +3546,7 @@ class DXFExporter {
             Math.abs(endDist - circle.radius)
         );
 
-        console.log(
+        this.log.debug(
             `  ✓ Bezier→Arc: center=(${circle.cx.toFixed(
                 1
             )}, ${circle.cy.toFixed(1)}) r=${circle.radius.toFixed(
@@ -3472,12 +3597,28 @@ class DXFExporter {
             );
 
             if (result) {
+                // Success - log the result
+                const levelText =
+                    level > 0
+                        ? ` (tolerance level ${
+                              level + 1
+                          }: ${currentTolerance.toFixed(2)}mm)`
+                        : "";
+                this.log.debug(
+                    `  ✓ Bezier→Arc GROUP: ${
+                        result.segmentCount
+                    } segments → center=(${result.cx.toFixed(
+                        1
+                    )}, ${result.cy.toFixed(1)}) r=${result.radius.toFixed(
+                        1
+                    )} rmsError=${result.rmsError.toFixed(3)}mm${levelText}`
+                );
                 return result;
             }
         }
 
         // All tolerance levels failed
-        console.log(
+        this.log.debug(
             `  Bezier→Arc GROUP FAILED: all tolerance levels exhausted (tried up to ${toleranceLevels[
                 toleranceLevels.length - 1
             ].toFixed(2)}mm)`
@@ -3565,7 +3706,7 @@ class DXFExporter {
         );
 
         if (endpointError > 0.0001) {
-            console.log(
+            this.log.debug(
                 `  Bezier→Arc GROUP WARNING: endpoint error ${endpointError.toFixed(
                     4
                 )}mm (should be nearly 0)`
@@ -3923,6 +4064,19 @@ class DXFExporter {
             }
         }
 
+        if (convertedCount > 0) {
+            this.log.debug(
+                `  ✓ Bezier→Arc: converted ${convertedCount} bezier segments in ${
+                    groups.filter((g) => g.type === "bezier-group").length
+                } group(s)`
+            );
+        }
+        if (failedCount > 0 && failedCount <= 5) {
+            this.log.debug(
+                `  Note: ${failedCount} beziers could not be converted (RMS error > ${tolerance}mm tolerance)`
+            );
+        }
+
         return optimized;
     }
 
@@ -4021,13 +4175,13 @@ class DXFExporter {
     writePathAsPolyline(segments, layerName) {
         if (segments.length === 0) return;
 
-        console.log("Exporting", segments.length, "segments to", layerName);
+        this.log.debug("Exporting", segments.length, "segments to", layerName);
 
         // Детальное логирование сегментов
-        console.log("Segments details:");
+        this.log.debug("Segments details:");
         segments.forEach((seg, idx) => {
             if (seg.type === "bezier") {
-                console.log(
+                this.log.debug(
                     `  ${idx}: BEZIER start:(${seg.start.x.toFixed(
                         2
                     )}, ${seg.start.y.toFixed(2)}) end:(${seg.end.x.toFixed(
@@ -4035,7 +4189,7 @@ class DXFExporter {
                     )}, ${seg.end.y.toFixed(2)})`
                 );
             } else if (seg.type === "line") {
-                console.log(
+                this.log.debug(
                     `  ${idx}: LINE start:(${seg.start.x.toFixed(
                         2
                     )}, ${seg.start.y.toFixed(2)}) end:(${seg.end.x.toFixed(
@@ -4043,7 +4197,7 @@ class DXFExporter {
                     )}, ${seg.end.y.toFixed(2)})`
                 );
             } else if (seg.type === "arc") {
-                console.log(
+                this.log.debug(
                     `  ${idx}: ARC start:(${seg.start.x.toFixed(
                         2
                     )}, ${seg.start.y.toFixed(2)}) end:(${seg.end.x.toFixed(
@@ -4058,13 +4212,13 @@ class DXFExporter {
 
         if (!hasBezier) {
             // Only lines and arcs - use LWPOLYLINE with bulge (closed contour)
-            console.log(
+            this.log.debug(
                 "Path has no bezier curves - using LWPOLYLINE with bulge"
             );
             this.writePolylineWithBulge(segments, layerName);
         } else {
             // Has Bezier - group consecutive beziers and export
-            console.log(
+            this.log.debug(
                 "Path has bezier curves - grouping consecutive beziers"
             );
             this.writeGroupedBeziers(segments, layerName);
@@ -4143,7 +4297,7 @@ class DXFExporter {
         }
         knots.push(n, n, n, n);
 
-        console.log(
+        this.log.debug(
             `Writing multi-segment SPLINE with ${bezierSegments.length} beziers, ${controlPoints.length} control points, ${knots.length} knots`
         );
 
@@ -4201,16 +4355,62 @@ class DXFExporter {
     writePolylineWithBulge(segments, layerName) {
         if (segments.length === 0) return;
 
+        this.log.debug(
+            `[Polyline] Writing LWPOLYLINE with ${segments.length} segments to layer ${layerName}`
+        );
+
+        // Filter out degenerate segments (zero-length lines)
+        const tolerance = 0.001;
+        const validSegments = segments.filter((seg, idx) => {
+            if (seg.type === "line") {
+                const dx = seg.end.x - seg.start.x;
+                const dy = seg.end.y - seg.start.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                if (length < tolerance) {
+                    this.log.warn(
+                        `[Polyline] Skipping degenerate line segment ${idx}: length=${length.toFixed(
+                            4
+                        )} < ${tolerance}`
+                    );
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        if (validSegments.length !== segments.length) {
+            this.log.debug(
+                `[Polyline] Filtered ${
+                    segments.length - validSegments.length
+                } degenerate segments, now ${validSegments.length} segments`
+            );
+        }
+
         const vertices = [];
         const bulges = [];
 
         // Начинаем с первой точки
-        let firstPoint = segments[0].start;
+        let firstPoint = validSegments[0].start;
+        this.log.debug(
+            `[Polyline] First vertex: (${firstPoint.x.toFixed(
+                2
+            )}, ${firstPoint.y.toFixed(2)})`
+        );
         vertices.push(firstPoint);
         bulges.push(0);
 
-        for (const segment of segments) {
+        for (let i = 0; i < validSegments.length; i++) {
+            const segment = validSegments[i];
+            this.log.debug(
+                `[Polyline] Processing segment ${i}: ${segment.type}`
+            );
+
             if (segment.type === "line") {
+                this.log.debug(
+                    `  LINE end: (${segment.end.x.toFixed(
+                        2
+                    )}, ${segment.end.y.toFixed(2)})`
+                );
                 vertices.push(segment.end);
                 bulges.push(0);
             } else if (segment.type === "arc") {
@@ -4218,6 +4418,20 @@ class DXFExporter {
                 const arc = segment.arc;
                 const bulge = this.calculateBulge(arc);
                 bulges[bulges.length - 1] = bulge;
+
+                this.log.debug(`  ARC bulge: ${bulge.toFixed(4)}`);
+                this.log.debug(
+                    `  ARC center: (${arc.centerX.toFixed(
+                        2
+                    )}, ${arc.centerY.toFixed(2)}) radius: ${arc.radius.toFixed(
+                        2
+                    )}`
+                );
+                this.log.debug(
+                    `  ARC angles: ${arc.startAngle.toFixed(
+                        2
+                    )}° → ${arc.endAngle.toFixed(2)}°`
+                );
 
                 // Добавляем конечную точку дуги
                 const endPoint = {
@@ -4228,23 +4442,51 @@ class DXFExporter {
                         arc.centerY +
                         arc.radius * Math.sin((arc.endAngle * Math.PI) / 180),
                 };
+                this.log.debug(
+                    `  ARC calculated end: (${endPoint.x.toFixed(
+                        2
+                    )}, ${endPoint.y.toFixed(2)})`
+                );
+                this.log.debug(
+                    `  ARC segment end:    (${segment.end.x.toFixed(
+                        2
+                    )}, ${segment.end.y.toFixed(2)})`
+                );
+
                 vertices.push(endPoint);
                 bulges.push(0);
             }
         }
 
         // Проверяем замкнутость
-        const tolerance = 0.01;
+        const closeTolerance = ARC_RADIUS_TOLERANCE;
         const isClosed =
             vertices.length > 2 &&
             Math.abs(vertices[vertices.length - 1].x - vertices[0].x) <
-                tolerance &&
+                closeTolerance &&
             Math.abs(vertices[vertices.length - 1].y - vertices[0].y) <
-                tolerance;
+                closeTolerance;
+
+        this.log.debug(
+            `[Polyline] Closed: ${isClosed} (${vertices.length} vertices before cleanup)`
+        );
+        this.log.debug(
+            `[Polyline] First: (${vertices[0].x.toFixed(
+                2
+            )}, ${vertices[0].y.toFixed(2)})`
+        );
+        this.log.debug(
+            `[Polyline] Last:  (${vertices[vertices.length - 1].x.toFixed(
+                2
+            )}, ${vertices[vertices.length - 1].y.toFixed(2)})`
+        );
 
         if (isClosed && vertices.length > 1) {
             vertices.pop();
             bulges.pop();
+            this.log.debug(
+                `[Polyline] Removed closing vertex, now ${vertices.length} vertices`
+            );
         }
 
         // Экспортируем LWPOLYLINE
@@ -4279,8 +4521,23 @@ class DXFExporter {
             if (bulges[i] !== 0) {
                 this.dxfContent.push("42");
                 this.dxfContent.push(bulges[i].toString());
+                this.log.debug(
+                    `[Polyline] Vertex ${i}: (${vertices[i].x.toFixed(
+                        2
+                    )}, ${vertices[i].y.toFixed(2)}) bulge=${bulges[i].toFixed(
+                        4
+                    )}`
+                );
+            } else {
+                this.log.debug(
+                    `[Polyline] Vertex ${i}: (${vertices[i].x.toFixed(
+                        2
+                    )}, ${vertices[i].y.toFixed(2)})`
+                );
             }
         }
+
+        this.log.debug(`[Polyline] ✓ LWPOLYLINE written`);
     }
 
     /**
@@ -4359,7 +4616,7 @@ class DXFExporter {
     writePolylineGroup(segments, layerName) {
         if (segments.length === 0) return;
 
-        console.log("writePolylineGroup: segments:", segments.length);
+        this.log.debug("writePolylineGroup: segments:", segments.length);
 
         // Collect all vertices and calculate bulge values
         const vertices = [];
@@ -4397,10 +4654,10 @@ class DXFExporter {
             }
         }
 
-        console.log("writePolylineGroup: vertices:", vertices.length);
+        this.log.debug("writePolylineGroup: vertices:", vertices.length);
 
         // Проверяем замкнутость пути
-        const tolerance = 0.01;
+        const tolerance = ARC_RADIUS_TOLERANCE;
         const isClosed =
             vertices.length > 2 &&
             Math.abs(vertices[vertices.length - 1].x - vertices[0].x) <
@@ -4408,7 +4665,7 @@ class DXFExporter {
             Math.abs(vertices[vertices.length - 1].y - vertices[0].y) <
                 tolerance;
 
-        console.log("writePolylineGroup: isClosed:", isClosed);
+        this.log.debug("writePolylineGroup: isClosed:", isClosed);
 
         // Для замкнутых путей удаляем дубликат последней вершины
         if (isClosed && vertices.length > 1) {

@@ -1,5 +1,4 @@
 import LoggerFactory from "../core/LoggerFactory.js";
-import { makerCalculateResultPolygon } from "../utils/makerProcessor.js";
 
 const svgNS = "http://www.w3.org/2000/svg";
 const log = LoggerFactory.createLogger("PanelManager");
@@ -257,13 +256,13 @@ class PanelManager {
         const archHeight = archRadius; // Высота арки = радиус (полукруг)
 
         const pathData = [
-            `M ${frontX + frontWidth} ${frontY + frontHeight}`, // Вправо по низу
-            `L ${frontX + frontWidth} ${frontY + archHeight + 150}`, // Вверх справа
+            `M ${frontX + frontWidth} ${frontY + frontHeight}`, // Старт: правый нижний угол
+            `L ${frontX + frontWidth} ${frontY + archHeight}`, // Вверх справа до начала арки
+            `L ${frontX + frontWidth} ${frontY + archHeight}`, // Вверх справа до начала арки
             `A ${archRadius} ${archRadius} 0 0 0 ${frontX} ${
-                frontY + archHeight - 150
-            }`, // Арка(полукруг влево)
-            `L ${frontX} ${frontY + archHeight}`, // Начало слева на уровне арки
-            `L ${frontX} ${frontY + frontHeight}`, // Вниз к низу
+                frontY + archHeight
+            }`, // Арка (полукруг влево)
+            `L ${frontX} ${frontY + frontHeight}`, // Вниз к низу слева
             `Z`, // Замыкаем путь
         ].join(" ");
 

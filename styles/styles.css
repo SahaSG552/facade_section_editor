@@ -821,7 +821,6 @@ html {
   display: flex;
   flex-direction: column;
   background-color: hsl(var(--muted));
-  z-index: 1001;
 }
 
 .bit-preview svg {

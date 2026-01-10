@@ -4,6 +4,8 @@ import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import BaseModule from "../core/BaseModule.js";
 import { LoggerFactory } from "../core/LoggerFactory.js";
+import eventBus from "../core/eventBus.js";
+import appState from "../state/AppState.js";
 import MaterialManager from "./MaterialManager.js";
 import CSGEngine from "./CSGEngine.js";
 import SceneManager from "./SceneManager.js";
@@ -17,6 +19,8 @@ export default class ThreeModule extends BaseModule {
         this.scene = null;
         this.container = null;
         this.animationFrameId = null;
+        this.enabled = true;
+        this.animateBound = this.animate.bind(this);
 
         // Managers
         this.sceneManager = new SceneManager();
@@ -24,6 +28,7 @@ export default class ThreeModule extends BaseModule {
         this.csgEngine = new CSGEngine();
         this.extrusionBuilder = new ExtrusionBuilder();
         this.stlExporter = new STLExporter(this.log);
+        this.lastValidPartFrontBBox = null;
 
         // Arc approximation control for panel shape
         // arcDivisionCoefficient: segments = arcLength / coefficient
@@ -108,13 +113,79 @@ export default class ThreeModule extends BaseModule {
         // Setup observer for partFront changes to trigger 3D updates
         this.setupPartFrontObserver();
 
-        // Start animation loop
-        this.animate();
+        // Subscribe to mode changes to enable/disable 3D workload
+        eventBus.on("mode:changed", (mode) => {
+            const shouldEnable = mode === "3d" || mode === "both";
+            this.setEnabled(shouldEnable);
+        });
+
+        // Honor initial mode
+        this.setEnabled(appState.is3DActive());
+
+        // Start animation loop if enabled
+        if (this.enabled) {
+            this.resumeAnimation();
+        }
 
         this.log.info("Initialized successfully");
     }
 
+    setEnabled(enabled) {
+        if (this.enabled === enabled) return;
+        this.enabled = enabled;
+        if (enabled) {
+            this.log.info("3D enabled (mode)");
+            this.resumeAnimation();
+            this.connectPartFrontObserver();
+            // Trigger update when enabling 3D to sync current state
+            if (
+                window.panelWidth &&
+                window.panelHeight &&
+                window.panelThickness
+            ) {
+                this.log.debug("3D enabled, triggering initial update");
+                this.updatePanel(
+                    window.panelWidth,
+                    window.panelHeight,
+                    window.panelThickness,
+                    window.bitsOnCanvas || [],
+                    window.panelAnchor || "top-left"
+                );
+                // Apply CSG if Part view is active
+                if (window.showPart) {
+                    this.log.debug("Part view active, applying CSG");
+                    setTimeout(() => {
+                        this.applyCSGOperation(true);
+                    }, 300);
+                }
+            }
+        } else {
+            this.log.info("3D disabled (mode)");
+            this.pauseAnimation();
+            this.disconnectPartFrontObserver();
+        }
+    }
+
+    resumeAnimation() {
+        if (this.animationFrameId) return;
+        this.animationFrameId = requestAnimationFrame(this.animateBound);
+    }
+
+    pauseAnimation() {
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+    }
+
     setupPartFrontObserver() {
+        if (this.partFrontObserver) {
+            try {
+                this.partFrontObserver.disconnect();
+            } catch (e) {
+                this.log.warn("Failed to disconnect previous observer", e);
+            }
+        }
         const partFront = document.getElementById("part-front");
         if (!partFront) {
             this.log.warn("partFront element not found for observer");
@@ -123,6 +194,7 @@ export default class ThreeModule extends BaseModule {
 
         // Create MutationObserver to watch for partFront changes
         this.partFrontObserver = new MutationObserver(() => {
+            if (!this.enabled) return;
             this.log.debug("partFront changed, triggering 3D update");
             // Trigger updatePanel with current panel parameters
             if (
@@ -149,6 +221,16 @@ export default class ThreeModule extends BaseModule {
         });
 
         this.log.info("partFront observer setup complete");
+    }
+
+    connectPartFrontObserver() {
+        this.setupPartFrontObserver();
+    }
+
+    disconnectPartFrontObserver() {
+        if (this.partFrontObserver && this.partFrontObserver.disconnect) {
+            this.partFrontObserver.disconnect();
+        }
     }
 
     initMaterialControls() {
@@ -428,6 +510,10 @@ export default class ThreeModule extends BaseModule {
         bits = [],
         panelAnchor = "top-left"
     ) {
+        if (!this.enabled) {
+            this.log.debug("Skip updatePanel: 3D disabled");
+            return;
+        }
         // Prevent overlapping runs: if already running, queue the latest request
         if (this.updatePanelRunning) {
             this.updatePanelQueuedArgs = {
@@ -504,30 +590,23 @@ export default class ThreeModule extends BaseModule {
 
             // Create panel geometry from partFront shape using SVGLoader
             const partFront = document.getElementById("part-front");
+            const partFrontBBox = this.getSafePartFrontBBox(
+                partFront,
+                width,
+                height,
+                thickness
+            );
             let geometry;
 
             // Check if shape was manually edited (has data attribute or flag)
             // For now, always try to get bbox to ensure 3D matches actual shape
-            if (partFront) {
-                try {
-                    const bbox = partFront.getBBox();
-                    // Always use bbox dimensions for 3D to match visual appearance
-                    // Even if shape wasn't manually edited, bbox reflects the actual rendered shape
-                    width = bbox.width;
-                    height = bbox.height;
-                    this.log.debug(
-                        "Using bbox dimensions for 3D:",
-                        width,
-                        "x",
-                        height
-                    );
-                } catch (error) {
-                    this.log.warn(
-                        "Could not get partFront bbox, using parameters:",
-                        error
-                    );
-                }
-            }
+            width = partFrontBBox.width || width;
+            height = partFrontBBox.height || height;
+            this.log.debug("Effective panel dimensions for 3D:", {
+                width,
+                height,
+                partFrontBBox,
+            });
 
             this.log.info("Creating panel geometry:", {
                 partFrontFound: !!partFront,
@@ -535,6 +614,7 @@ export default class ThreeModule extends BaseModule {
                 partFrontTagName: partFront?.tagName,
                 width,
                 height,
+                usingFallbackBBox: !this.isBBoxValid(partFrontBBox),
             });
 
             if (partFront && typeof SVGLoader !== "undefined") {
@@ -567,7 +647,6 @@ export default class ThreeModule extends BaseModule {
 
                             if (shapes && shapes.length > 0) {
                                 // Get partFront bbox to center and scale
-                                const partFrontBBox = partFront.getBBox();
                                 const centerX =
                                     partFrontBBox.x + partFrontBBox.width / 2;
                                 const centerY =
@@ -845,42 +924,27 @@ export default class ThreeModule extends BaseModule {
         // Get partFront element to understand its position
         const partFront = document.getElementById("part-front");
         if (!partFront) {
-            this.log.error("partFront element not found!");
-            return;
+            this.log.warn("partFront element not found, using fallback bbox");
         }
 
         // Get partFront bounding box (works for any SVG shape, including path)
-        const partFrontBBox = partFront.getBBox();
+        const partFrontBBox = this.getSafePartFrontBBox(
+            partFront,
+            panelWidth,
+            panelHeight,
+            panelThickness
+        );
         const partFrontX = partFrontBBox.x;
         const partFrontY = partFrontBBox.y;
         const partFrontWidth = partFrontBBox.width;
         const partFrontHeight = partFrontBBox.height;
-
-        // Validate partFront bounding box
-        if (
-            isNaN(partFrontX) ||
-            isNaN(partFrontY) ||
-            isNaN(partFrontWidth) ||
-            isNaN(partFrontHeight)
-        ) {
-            this.log.error("partFront has invalid bounding box!", {
-                element: partFront,
-                bbox: partFrontBBox,
-                parsed: {
-                    x: partFrontX,
-                    y: partFrontY,
-                    width: partFrontWidth,
-                    height: partFrontHeight,
-                },
-            });
-            return;
-        }
 
         this.log.debug("partFront info:", {
             x: partFrontX,
             y: partFrontY,
             width: partFrontWidth,
             height: partFrontHeight,
+            usingFallbackBBox: !this.isBBoxValid(partFrontBBox),
         });
 
         for (const [bitIndex, bit] of uniqueBits.entries()) {
@@ -1307,8 +1371,17 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // Get the main contour (not base offset)
-            const contour = bitContours.find((c) => c.pass !== 0);
+            // For 3D: prefer centered contour (for3D flag) if available (OU/IN operations)
+            // Otherwise use the main contour (AL operation)
+            let contour = bitContours.find((c) => c.for3D === true);
+            if (!contour) {
+                // Fallback: use main contour (not base offset)
+                contour = bitContours.find((c) => c.pass !== 0);
+            }
+            if (!contour) {
+                // Final fallback: any contour
+                contour = bitContours[0];
+            }
             if (!contour || !contour.element) {
                 this.log.debug(`No valid contour element for bit ${bitIndex}`);
                 continue;
@@ -1440,7 +1513,7 @@ export default class ThreeModule extends BaseModule {
                     mesh.userData.operation = bit.operation || "subtract";
                     mesh.userData.bitIndex = bitIndex;
                     this.bitExtrudeMeshes.push(mesh);
-                    console.log(
+                    this.log.debug(
                         `[SCENE] Added mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`
                     );
 
@@ -1462,7 +1535,7 @@ export default class ThreeModule extends BaseModule {
                         mesh.userData.operation = "extension";
                         mesh.userData.bitIndex = bitIndex;
                         this.bitExtrudeMeshes.push(mesh);
-                        console.log(
+                        this.log.debug(
                             `[SCENE] Added extension mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`
                         );
 
@@ -1484,6 +1557,78 @@ export default class ThreeModule extends BaseModule {
                 );
             }
         }
+    }
+
+    isBBoxValid(bbox) {
+        return (
+            !!bbox &&
+            Number.isFinite(bbox.x) &&
+            Number.isFinite(bbox.y) &&
+            Number.isFinite(bbox.width) &&
+            Number.isFinite(bbox.height) &&
+            bbox.width > 0 &&
+            bbox.height > 0
+        );
+    }
+
+    getSafePartFrontBBox(
+        partFront,
+        fallbackWidth,
+        fallbackHeight,
+        panelThickness
+    ) {
+        try {
+            if (partFront) {
+                const rawBBox = partFront.getBBox();
+                if (this.isBBoxValid(rawBBox)) {
+                    this.lastValidPartFrontBBox = rawBBox;
+                    return rawBBox;
+                }
+                this.log.warn("partFront bbox invalid, using fallback", {
+                    rawBBox,
+                });
+            }
+        } catch (error) {
+            this.log.warn("Failed to read partFront bbox, using fallback", {
+                error,
+            });
+        }
+
+        if (this.lastValidPartFrontBBox) {
+            this.log.debug("Using cached partFront bbox", {
+                bbox: this.lastValidPartFrontBBox,
+            });
+            return this.lastValidPartFrontBBox;
+        }
+
+        const canvasParams = window.mainCanvasManager?.canvasParameters;
+        if (canvasParams?.width && canvasParams?.height) {
+            const panelX = (canvasParams.width - fallbackWidth) / 2;
+            const panelY = (canvasParams.height - panelThickness) / 2;
+            const fallbackBBox = {
+                x: panelX,
+                y: panelY - fallbackHeight - 100,
+                width: fallbackWidth,
+                height: fallbackHeight,
+            };
+            this.lastValidPartFrontBBox = fallbackBBox;
+            this.log.warn("Using computed fallback partFront bbox", {
+                fallbackBBox,
+            });
+            return fallbackBBox;
+        }
+
+        const fallbackBBox = {
+            x: -fallbackWidth / 2,
+            y: -fallbackHeight / 2,
+            width: fallbackWidth,
+            height: fallbackHeight,
+        };
+        this.lastValidPartFrontBBox = fallbackBBox;
+        this.log.warn("Using default fallback partFront bbox", {
+            fallbackBBox,
+        });
+        return fallbackBBox;
     }
 
     /**
@@ -1538,7 +1683,12 @@ export default class ThreeModule extends BaseModule {
     }
 
     animate() {
-        this.animationFrameId = requestAnimationFrame(this.animate.bind(this));
+        if (!this.enabled) {
+            this.animationFrameId = null;
+            return;
+        }
+
+        this.animationFrameId = requestAnimationFrame(this.animateBound);
 
         // Delegate rendering to scene manager
         this.sceneManager.render();

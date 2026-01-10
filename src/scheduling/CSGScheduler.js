@@ -1,5 +1,6 @@
 import eventBus from "../core/eventBus.js";
 import LoggerFactory from "../core/LoggerFactory.js";
+import appState from "../state/AppState.js";
 
 /**
  * CSGScheduler centralizes debounced CSG application to avoid scattered timers.
@@ -35,6 +36,10 @@ class CSGScheduler {
     schedule(apply = true) {
         if (!this.applyFn) {
             this.log.warn("applyFn not configured; skipping schedule");
+            return;
+        }
+        if (!appState.is3DActive()) {
+            this.log.debug("Skip CSG schedule: 3D inactive");
             return;
         }
         if (this.timer) {

@@ -3,6 +3,14 @@
  * Аппроксимация кривых Безье в дуги для 2D canvas и 3D экструзии
  */
 
+import LoggerFactory from "../core/LoggerFactory.js";
+import {
+    ARC_APPROX_TOLERANCE,
+    ARC_RADIUS_TOLERANCE,
+} from "../config/constants.js";
+
+const log = LoggerFactory.createLogger("arcApproximation");
+
 /**
  * Конвертирует segments (после optimizeSegmentsToArcs) обратно в SVG path строку
  * @param {Array} segments - массив сегментов (line, arc, bezier)
@@ -46,8 +54,27 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false) {
                 const arc = segment.arc;
 
                 // radius (для DXF arc может быть уже готовый объект)
-                const rx = arc.radius || arc.rx || 0;
-                const ry = arc.radius || arc.ry || 0;
+                let rx = arc.radius || arc.rx || 0;
+                let ry = arc.radius || arc.ry || 0;
+
+                // Auto-correct arc radius if too small for chord length (like in DXF export)
+                // This ensures corrected arcs are used in both 2D display and 3D rendering
+                const dx = segment.end.x - segment.start.x;
+                const dy = segment.end.y - segment.start.y;
+                const chordLength = Math.sqrt(dx * dx + dy * dy);
+                const minRadius = chordLength / 2;
+
+                if (rx < minRadius - ARC_RADIUS_TOLERANCE) {
+                    log.warn(
+                        `[Arc Auto-correct] Radius ${rx.toFixed(
+                            2
+                        )}mm → ${minRadius.toFixed(
+                            2
+                        )}mm (chord ${chordLength.toFixed(2)}mm)`
+                    );
+                    rx = minRadius;
+                    ry = minRadius;
+                }
 
                 // rotation (обычно 0 для круговых дуг)
                 const rotation = arc.xAxisRotation || 0;
@@ -98,7 +125,7 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false) {
                 break;
 
             default:
-                console.warn(`Unknown segment type: ${segment.type}`);
+                log.warn(`Unknown segment type: ${segment.type}`);
         }
     });
 
@@ -127,9 +154,13 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false) {
  * @param {number} tolerance - RMS tolerance в мм (по умолчанию 0.15)
  * @returns {string} Аппроксимированный SVG path data с дугами
  */
-export function approximatePath(pathData, exportModule, tolerance = 0.15) {
+export function approximatePath(
+    pathData,
+    exportModule,
+    tolerance = ARC_APPROX_TOLERANCE
+) {
     if (!pathData || !exportModule) {
-        console.warn("approximatePath: missing pathData or exportModule");
+        log.warn("approximatePath: missing pathData or exportModule");
         return pathData;
     }
 
@@ -147,7 +178,7 @@ export function approximatePath(pathData, exportModule, tolerance = 0.15) {
         );
 
         if (!segments || segments.length === 0) {
-            console.warn("approximatePath: no segments parsed");
+            log.warn("approximatePath: no segments parsed");
             return pathData;
         }
 
@@ -172,7 +203,7 @@ export function approximatePath(pathData, exportModule, tolerance = 0.15) {
         ).length;
         const convertedCount = originalBezierCount - optimizedBezierCount;
 
-        console.log(
+        log.debug(
             `Arc approximation: ${convertedCount}/${originalBezierCount} Beziers converted (${(
                 (convertedCount / originalBezierCount) *
                 100
@@ -180,12 +211,12 @@ export function approximatePath(pathData, exportModule, tolerance = 0.15) {
         );
 
         // Конвертируем оптимизированные segments обратно в SVG path
-        // invertSweepFlag: true - арки были рассчитаны для DXF (Y вверх), инвертируем для SVG (Y вниз)
+        // invertSweepFlag: true - segments в DXF координатах (Y вверх), инвертируем для SVG (Y вниз)
         const approximatedPath = segmentsToSVGPath(optimizedSegments, true);
 
         return approximatedPath;
     } catch (error) {
-        console.error("approximatePath failed:", error);
+        log.error("approximatePath failed:", error);
         return pathData; // fallback to original
     }
 }
