@@ -12,6 +12,8 @@ import {
     computeBoundsTree,
     disposeBoundsTree,
 } from "three-mesh-bvh";
+import paper from "paper";
+import { PaperOffset } from "paperjs-offset";
 
 import LoggerFactory from "../core/LoggerFactory.js";
 import { approximatePath } from "../utils/arcApproximation.js";
@@ -1683,6 +1685,7 @@ export default class ExtrusionBuilder {
      * @param {string} type - Extrusion type: 'mitered' (sharp corners) or 'round' (lathe-filled corners)
      * @param {string} side - Panel side: 'top' (front face) or 'bottom' (back face) - default: 'top'
      * @param {object} options - Additional options for 'round' type: {partFrontX, partFrontY, depth, panelThickness, panelAnchor}
+     * @param {object} pathModifier - Path modification parameters: {offset: number, cornerStyle: 'round'|'bevel'} (default: disabled)
      * @returns {Array<THREE.Mesh>} Array of meshes (extrusions + lathes for 'round')
      */
     extrudeAlongPath(
@@ -1692,21 +1695,74 @@ export default class ExtrusionBuilder {
         zOffset = 0,
         type = "mitered",
         side = "top",
-        options = {}
+        options = {},
+        pathModifier = null
     ) {
         try {
+            this.log.info("extrudeAlongPath called:", {
+                type,
+                side,
+                hasPathModifier: !!pathModifier,
+                pathModifier: pathModifier
+                    ? JSON.stringify(pathModifier)
+                    : null,
+                pathType:
+                    typeof path === "string"
+                        ? "string"
+                        : path?.constructor?.name,
+            });
+
+            let modifiedPath = path;
+
+            // Apply path modification if specified
+            if (
+                pathModifier &&
+                (pathModifier.offset !== undefined || pathModifier.cornerStyle)
+            ) {
+                this.log.debug("Applying path modifier:", pathModifier);
+
+                modifiedPath = this._modifyPathWithOffset(
+                    path,
+                    pathModifier.offset || 0,
+                    pathModifier.cornerStyle || "miter"
+                );
+
+                if (!modifiedPath) {
+                    this.log.warn(
+                        "Path modification failed, using original path"
+                    );
+                    modifiedPath = path;
+                } else {
+                    this.log.info("Path successfully modified");
+                }
+            } else {
+                this.log.debug("No path modifier specified or invalid");
+            }
+
             let meshes = [];
 
             if (type === "mitered") {
                 // MITERED: Sharp corners, merged path
-                meshes = this._extrudeMitered(profile, path, color, side);
+                meshes = this._extrudeMitered(
+                    profile,
+                    modifiedPath,
+                    color,
+                    side,
+                    options
+                );
             } else if (type === "round") {
                 // ROUND: Lathe-filled corners
                 // Pass zOffset to options so lathe knows if it's an extension
-                meshes = this._extrudeRound(profile, path, color, side, {
-                    ...options,
-                    zOffset,
-                });
+                meshes = this._extrudeRound(
+                    profile,
+                    modifiedPath,
+                    color,
+                    side,
+                    {
+                        ...options,
+                        zOffset,
+                    }
+                );
             } else {
                 this.log.error(`Unknown extrusion type: ${type}`);
                 return [];
@@ -1735,11 +1791,255 @@ export default class ExtrusionBuilder {
     }
 
     /**
+     * Modify path using offset
+     * For SVG paths: uses paper.js offset
+     * For THREE.js CurvePath: not supported (return original)
+     * @private
+     * @param {THREE.CurvePath|string} path - Original path
+     * @param {number} offset - Offset distance (positive = outward, negative = inward)
+     * @param {string} cornerStyle - Corner style: 'round' or 'bevel' (default: 'round')
+     * @returns {THREE.CurvePath|string|null} Modified path or null if conversion fails
+     */
+    _modifyPathWithOffset(path, offset, cornerStyle = "round") {
+        try {
+            this.log.info("_modifyPathWithOffset called:", {
+                pathType:
+                    typeof path === "string"
+                        ? "string"
+                        : path?.constructor?.name,
+                offset,
+                cornerStyle,
+            });
+
+            // If offset is 0, return original path
+            if (offset === 0) {
+                this.log.debug("Offset is 0, returning original path");
+                return path;
+            }
+
+            // Handle SVG path string with paper.js
+            if (typeof path === "string") {
+                this.log.debug("Handling SVG path string with paper.js");
+                return this._modifySVGPathWithOffset(path, offset, cornerStyle);
+            }
+
+            // Handle THREE.js CurvePath - not supported, return original
+            if (path instanceof THREE.CurvePath) {
+                this.log.warn(
+                    "THREE.js CurvePath offset not supported, use SVG path string instead"
+                );
+                return path;
+            }
+
+            this.log.warn(
+                "Path modification: unsupported path type",
+                typeof path
+            );
+            return null;
+        } catch (error) {
+            this.log.error("Error in _modifyPathWithOffset:", error);
+            return null;
+        }
+    }
+
+    /**
+     * Modify SVG path string using paper.js offset
+     * @private
+     */
+    _modifySVGPathWithOffset(svgPathString, offset, cornerStyle) {
+        try {
+            // Check if paper.js is available
+            if (typeof paper === "undefined" || !paper.Path) {
+                this.log.warn("paper.js not available for path modification");
+                return svgPathString;
+            }
+
+            this.log.info("Starting SVG path modification:", {
+                offset,
+                cornerStyle,
+                pathLength: svgPathString.length,
+            });
+
+            // Create temporary canvas for paper.js if needed
+            let tempCanvas = null;
+            let tempScope = null;
+
+            if (!paper.project || !paper.project.activeLayer) {
+                tempCanvas = document.createElement("canvas");
+                tempScope = new paper.PaperScope();
+                tempScope.setup(tempCanvas);
+                this.log.debug("Created temporary paper.js scope");
+            }
+
+            // Use existing or temporary scope
+            const workingScope = tempScope || paper;
+
+            // Parse SVG path to paper.js path
+            let paperPath = new workingScope.Path(svgPathString);
+            if (
+                !paperPath ||
+                !paperPath.segments ||
+                paperPath.segments.length === 0
+            ) {
+                this.log.warn("Failed to parse SVG path");
+                if (tempCanvas) tempCanvas.remove();
+                return svgPathString;
+            }
+
+            this.log.debug("Parsed SVG to paper.js path:", {
+                segments: paperPath.segments.length,
+                closed: paperPath.closed,
+            });
+
+            // Close path if needed
+            const firstPoint = paperPath.firstSegment.point;
+            const lastPoint = paperPath.lastSegment.point;
+            if (firstPoint.getDistance(lastPoint) > 0.01) {
+                paperPath.closed = true;
+                this.log.debug("Path closed");
+            }
+
+            // Apply offset using PaperOffset library
+            let offsetPath;
+            if (offset !== 0) {
+                this.log.debug("Applying offset:", { offset, cornerStyle });
+
+                // PaperOffset expects outward positive; our negative means inward
+                const offsetResult = PaperOffset.offset(paperPath, -offset, {
+                    join:
+                        cornerStyle === "round"
+                            ? "round"
+                            : cornerStyle === "miter" ||
+                              cornerStyle === "mitered"
+                            ? "miter"
+                            : "bevel",
+                    cap: "butt",
+                    limit: 10,
+                    insert: false,
+                });
+
+                // PaperOffset may return Path or array
+                if (Array.isArray(offsetResult)) {
+                    offsetPath = offsetResult[0] || null;
+                    this.log.debug(
+                        "PaperOffset returned",
+                        offsetResult.length,
+                        "paths"
+                    );
+                } else {
+                    offsetPath = offsetResult || null;
+                }
+
+                if (!offsetPath) {
+                    this.log.warn("PaperOffset returned no paths");
+                }
+            } else {
+                offsetPath = paperPath;
+            }
+
+            if (!offsetPath) {
+                this.log.warn("paper.js offset failed");
+                paperPath.remove();
+                if (tempCanvas) tempCanvas.remove();
+                return svgPathString;
+            }
+
+            this.log.debug("Offset applied successfully:", {
+                resultSegments: offsetPath.segments?.length,
+            });
+
+            // Get modified SVG path data
+            let modifiedSVG = offsetPath.pathData;
+
+            // Optional: convert Beziers → arcs using existing export pipeline
+            try {
+                const exportModule =
+                    window?.dependencyContainer?.get?.("export") ||
+                    window?.app?.container?.get?.("export");
+                if (exportModule) {
+                    const approximated = approximatePath(
+                        modifiedSVG,
+                        exportModule
+                    );
+                    if (approximated) {
+                        modifiedSVG = approximated;
+                        this.log.debug(
+                            "Applied arc approximation to offset path"
+                        );
+                    }
+                }
+            } catch (e) {
+                this.log.warn("Arc approximation after offset failed", e);
+            }
+
+            this.log.info("SVG path modified with offset:", {
+                offset,
+                cornerStyle,
+                originalLength: svgPathString.length,
+                modifiedLength: modifiedSVG.length,
+                original: svgPathString.substring(0, 50) + "...",
+                modified: modifiedSVG.substring(0, 50) + "...",
+            });
+
+            // Clean up paper objects
+            offsetPath.remove();
+            paperPath.remove();
+            if (tempCanvas) {
+                tempScope?.remove();
+                tempCanvas.remove();
+                this.log.debug("Cleaned up temporary paper.js scope");
+            }
+
+            return modifiedSVG;
+        } catch (error) {
+            this.log.error("Error in _modifySVGPathWithOffset:", error.message);
+            return svgPathString;
+        }
+    }
+
+    /**
      * Internal: Create mitered extrusion (sharp corners, merged path)
      * @private
      */
-    _extrudeMitered(profile, curve, color, side = "top") {
+    _extrudeMitered(profile, curveOrString, color, side = "top", options = {}) {
         try {
+            let curve;
+
+            // Check if curveOrString is a string (SVG path data)
+            if (typeof curveOrString === "string") {
+                // Parse SVG path to curves
+                const pathCurves = this.parsePathToCurves(curveOrString);
+                if (pathCurves.length === 0) {
+                    this.log.warn("No curves parsed from SVG path");
+                    return [];
+                }
+
+                // Create 3D curve from 2D curves using coordinate transformation
+                const {
+                    partFrontX = 0,
+                    partFrontY = 0,
+                    partFrontWidth = 100,
+                    partFrontHeight = 100,
+                    depth = 0,
+                    panelThickness = 19,
+                    panelAnchor = { x: 0, y: 0 },
+                } = options;
+
+                curve = this.createCurveFromCurves(
+                    pathCurves,
+                    partFrontX,
+                    partFrontY,
+                    partFrontWidth,
+                    partFrontHeight,
+                    depth,
+                    panelThickness,
+                    panelAnchor
+                );
+            } else {
+                // curveOrString is already a CurvePath
+                curve = curveOrString;
+            }
+
             // Calculate adaptive curve segments based on profile complexity
             const curveSegments = this.calculateAdaptiveCurveSegments(profile);
             const profileGeometry = new THREE.ShapeGeometry(
@@ -2347,62 +2647,6 @@ export default class ExtrusionBuilder {
     }
 
     /**
-
-
-    /**
-     * Create a lathe (revolve) at a junction point
-     * DEPRECATED: Replaced by createPartialLatheAtJunction
-     * @private
-     */
-    _createLatheAtPoint_UNUSED(profile, point) {
-        try {
-            const lathePoints = this.createLatheHalfProfilePoints(
-                profile,
-                null
-            );
-
-            if (!lathePoints || lathePoints.length < 2) {
-                this.log.warn("Not enough points for lathe at junction");
-                return null;
-            }
-
-            // Create lathe geometry - simple revolve without caps for now
-            const latheGeometry = new THREE.LatheGeometry(
-                lathePoints,
-                32,
-                0,
-                Math.PI * 2
-            );
-
-            // Rotate 90 degrees to align properly with path
-            latheGeometry.rotateX(Math.PI / 2);
-
-            // Position at junction point
-            latheGeometry.translate(point.x, point.y, point.z);
-
-            const material = new THREE.MeshStandardMaterial({
-                color: new THREE.Color("#ffaa00"),
-                roughness: 0.6,
-                metalness: 0.1,
-                side: THREE.FrontSide,
-                wireframe: this.materialManager
-                    ? this.materialManager.isWireframeEnabled()
-                    : false,
-            });
-
-            const mesh = new THREE.Mesh(latheGeometry, material);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            mesh.userData.isLatheJunction = true;
-
-            return mesh;
-        } catch (error) {
-            this.log.error("Error creating lathe at point:", error.message);
-            return null;
-        }
-    }
-
-    /**
      * Create a partial lathe (revolve) at a junction point based on angle between segments
      * Uses custom geometry generation with integrated end caps for watertight result
      * @param {THREE.Shape} profile - Profile to revolve
@@ -2770,262 +3014,6 @@ export default class ExtrusionBuilder {
             const b = getVertexIndex(segments, triangles[i + 1]);
             const c = getVertexIndex(segments, triangles[i + 2]);
             indices.push(a, c, b);
-        }
-    }
-
-    /**
-     * Add end caps using THREE.ShapeGeometry for proper triangulation
-     * DEPRECATED: Replaced by Earcut-based implementation
-     * @private
-     */
-    _addShapeGeometryCaps_UNUSED(
-        vertices,
-        indices,
-        profilePoints,
-        segments,
-        phiStart,
-        phiLength
-    ) {
-        const profileCount = profilePoints.length;
-        const startBaseIdx = 0;
-        const endBaseIdx = segments * profileCount;
-
-        // Create shape from profile points
-        const shape = new THREE.Shape();
-        shape.moveTo(profilePoints[0].x, profilePoints[0].y);
-        for (let i = 1; i < profileCount; i++) {
-            shape.lineTo(profilePoints[i].x, profilePoints[i].y);
-        }
-        // Close the shape back to start
-        shape.lineTo(profilePoints[0].x, profilePoints[0].y);
-
-        // Generate triangulation using ShapeGeometry
-        const shapeGeo = new THREE.ShapeGeometry(shape);
-        const shapeIndices = shapeGeo.index.array;
-
-        // Add triangles for start cap (using existing vertices)
-        for (let i = 0; i < shapeIndices.length; i += 3) {
-            const a = startBaseIdx + shapeIndices[i];
-            const b = startBaseIdx + shapeIndices[i + 1];
-            const c = startBaseIdx + shapeIndices[i + 2];
-            indices.push(a, c, b); // Reversed winding
-        }
-
-        // Add triangles for end cap (using existing vertices)
-        for (let i = 0; i < shapeIndices.length; i += 3) {
-            const a = endBaseIdx + shapeIndices[i];
-            const b = endBaseIdx + shapeIndices[i + 1];
-            const c = endBaseIdx + shapeIndices[i + 2];
-            indices.push(a, b, c); // Normal winding
-        }
-
-        shapeGeo.dispose();
-    }
-
-    /**
-     * Add connections along axis between all segments
-     * DEPRECATED: Not needed with current axis vertex sharing implementation
-     * @private
-     */
-    _addAxisConnections_UNUSED(indices, profilePoints, segments) {
-        const profileCount = profilePoints.length;
-
-        // Find all axis points (points where radius ≈ 0)
-        const axisPointIndices = [];
-        for (let j = 0; j < profileCount; j++) {
-            if (Math.abs(profilePoints[j].x) < 0.0001) {
-                axisPointIndices.push(j);
-            }
-        }
-
-        // For each axis point, connect it across all segments
-        for (const axisIdx of axisPointIndices) {
-            // Find the adjacent non-axis point
-            let adjacentIdx = -1;
-            if (axisIdx === 0) {
-                // First point is on axis, next point should be off-axis
-                adjacentIdx = axisIdx + 1;
-            } else if (axisIdx === profileCount - 1) {
-                // Last point is on axis, previous point should be off-axis
-                adjacentIdx = axisIdx - 1;
-            }
-
-            if (adjacentIdx === -1) continue;
-
-            // Create triangles from axis to adjacent point across all segments
-            for (let i = 0; i < segments; i++) {
-                const axisA = i * profileCount + axisIdx;
-                const axisB = (i + 1) * profileCount + axisIdx;
-                const adjA = i * profileCount + adjacentIdx;
-                const adjB = (i + 1) * profileCount + adjacentIdx;
-
-                // Create two triangles to close the quad
-                // Winding depends on whether axis is at start or end
-                if (axisIdx === 0) {
-                    // Bottom axis - normal winding
-                    indices.push(axisA, adjA, axisB);
-                    indices.push(axisB, adjA, adjB);
-                } else {
-                    // Top axis - reversed winding
-                    indices.push(axisA, axisB, adjA);
-                    indices.push(axisB, adjB, adjA);
-                }
-            }
-        }
-    }
-
-    /**
-     * Adds triangulated end caps using Earcut library
-     * DEPRECATED: Integrated into addEarcutCapsToLathe
-     * @private
-     */
-    _addLatheEndCapsWithEarcut_UNUSED(
-        vertices,
-        indices,
-        profilePoints,
-        segments,
-        phiStart,
-        phiLength
-    ) {
-        const profileCount = profilePoints.length;
-
-        // CAP 1: At phiStart (first segment, indices 0 to profileCount-1)
-        this.addEarcutCap(
-            vertices,
-            indices,
-            profilePoints,
-            0, // baseIndex for first segment
-            phiStart,
-            true // isStart
-        );
-
-        // CAP 2: At phiStart + phiLength (last segment, indices segments*profileCount to (segments+1)*profileCount-1)
-        this.addEarcutCap(
-            vertices,
-            indices,
-            profilePoints,
-            segments * profileCount, // baseIndex for last segment
-            phiStart + phiLength,
-            false // isEnd
-        );
-    }
-
-    /**
-     * Add a single triangulated end cap using Earcut
-     * DEPRECATED: Integrated into addEarcutCapsToLathe
-     * @private
-     */
-    _addEarcutCap_UNUSED(
-        vertices,
-        indices,
-        profilePoints,
-        baseIndex,
-        phi,
-        isStart
-    ) {
-        const profileCount = profilePoints.length;
-
-        // Create simple triangle fan from first point (axis) to all others
-        // This closes the cap by creating triangles between consecutive profile points
-        for (let i = 1; i < profileCount - 1; i++) {
-            const a = baseIndex; // First point (on axis)
-            const b = baseIndex + i;
-            const c = baseIndex + i + 1;
-
-            // Wind triangles consistently - opposite for start vs end
-            if (isStart) {
-                indices.push(a, c, b); // Reversed winding for start cap
-            } else {
-                indices.push(a, b, c); // Normal winding for end cap
-            }
-        }
-
-        // Add one more triangle to close the last edge (from first axis point to last axis point)
-        // This triangle uses the first non-axis point
-        const firstAxis = baseIndex; // Point 0
-        const lastAxis = baseIndex + profileCount - 1; // Point 17
-        const firstNonAxis = baseIndex + 1; // Point 1
-
-        if (isStart) {
-            indices.push(firstAxis, firstNonAxis, lastAxis);
-        } else {
-            indices.push(firstAxis, lastAxis, firstNonAxis);
-        }
-    }
-
-    /**
-     * Analyze and debug boundary edges of a geometry
-     * DEPRECATED: Debug utility, not used in production
-     * @private
-     */
-    _debugBoundaryEdges_UNUSED(geometry, label = "Geometry") {
-        try {
-            const geom = geometry.index ? geometry : geometry.toNonIndexed();
-            const index = geom.index.array;
-            const positions = geom.attributes.position.array;
-            const edgeCount = new Map();
-            const edges = [];
-
-            const addEdge = (a, b) => {
-                const key = a < b ? `${a}_${b}` : `${b}_${a}`;
-                edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
-                if (
-                    !edges.find(
-                        (e) =>
-                            (e.a === a && e.b === b) || (e.a === b && e.b === a)
-                    )
-                ) {
-                    edges.push({ a, b });
-                }
-            };
-
-            for (let i = 0; i < index.length; i += 3) {
-                const a = index[i],
-                    b = index[i + 1],
-                    c = index[i + 2];
-                addEdge(a, b);
-                addEdge(b, c);
-                addEdge(c, a);
-            }
-
-            const boundaryVertices = new Set();
-            for (const [edge, count] of edgeCount) {
-                if (count === 1) {
-                    const [a, b] = edge.split("_").map(Number);
-                    boundaryVertices.add(a);
-                    boundaryVertices.add(b);
-                }
-            }
-
-            this.log.info(`${label} boundary analysis:`, {
-                totalVertices: positions.length / 3,
-                boundaryVertices: boundaryVertices.size,
-                boundaryEdges: edgeCount.size,
-            });
-
-            if (boundaryVertices.size > 0) {
-                const samples = Array.from(boundaryVertices).slice(0, 3);
-                this.log.info(`Sample boundary vertices:`, {
-                    count: boundaryVertices.size,
-                    samples: samples.map((i) => ({
-                        idx: i,
-                        x: positions[i * 3],
-                        y: positions[i * 3 + 1],
-                        z: positions[i * 3 + 2],
-                    })),
-                });
-            }
-
-            return {
-                boundaryVertices: Array.from(boundaryVertices),
-                totalEdges: edgeCount.size,
-                boundaryEdgeCount: Array.from(edgeCount.values()).filter(
-                    (c) => c === 1
-                ).length,
-            };
-        } catch (e) {
-            this.log.error("debugBoundaryEdges failed:", e);
-            return null;
         }
     }
 

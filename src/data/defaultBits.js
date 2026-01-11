@@ -1,6 +1,6 @@
 export default {
     cylindrical: {
-        operations: ["AL", "OU", "IN"],
+        operations: ["AL", "OU", "IN", "PO"],
         bits: [
             {
                 id: "cyl-1",
@@ -106,7 +106,7 @@ export default {
         ],
     },
     bull: {
-        operations: ["AL", "OU", "IN"],
+        operations: ["AL", "OU", "IN", "PO"],
         bits: [
             {
                 id: "bul-1",

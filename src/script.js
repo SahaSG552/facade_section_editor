@@ -507,6 +507,11 @@ function initializeSVG() {
         getShowPart: () => showPart,
         getThreeModule: () => window.threeModule,
         getCsgScheduler: () => csgScheduler,
+        updateOffsetContours: updateOffsetContours,
+        updatePhantomBits: updatePhantomBits,
+        updatePocketWidthInputs: updatePocketWidthInputs,
+        updateBitExtensions: updateBitExtensions,
+        updateThreeView: updateThreeView,
     });
 
     // Initialize PanelManager for panel shape and anchor operations
@@ -587,13 +592,16 @@ function initializeSVG() {
 
                         if (newBitShape) {
                             newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-                            newBitShape.setAttribute("stroke-width", thickness);
+                            newBitShape.setAttribute(
+                                "stroke-width",
+                                getAdaptiveStrokeWidth()
+                            );
                         }
                         if (newShankShape) {
                             newShankShape.setAttribute("stroke", "#00BFFF");
                             newShankShape.setAttribute(
                                 "stroke-width",
-                                thickness
+                                getAdaptiveStrokeWidth()
                             );
 
                             newShankShape.style.display = shankVisible
@@ -959,6 +967,66 @@ function updatePhantomBits() {
     });
 
     updateBitExtensions();
+    updatePocketWidthInputs(); // Update PO pocket width inputs
+}
+
+/**
+ * Update pocket width input fields for PO operations
+ * Shows interactive inputs between main and phantom bits when selected
+ */
+function updatePocketWidthInputs() {
+    if (!extensionCalculator || !mainCanvasManager) return;
+    const overlayLayer = mainCanvasManager.getLayer("overlay");
+    if (!overlayLayer) return;
+
+    // Показать инпуты не только для выбранных, но и для перетаскиваемого фантома
+    let selected = selectionManager.getSelectedIndices();
+    if (
+        typeof window !== "undefined" &&
+        window.draggedPhantomIndex !== null &&
+        window.draggedPhantomIndex !== undefined
+    ) {
+        selected = Array.from(
+            new Set([...selected, window.draggedPhantomIndex])
+        );
+    }
+
+    extensionCalculator.updatePocketInputs({
+        bitsOnCanvas,
+        selectedIndices: selected,
+        overlayLayer,
+        onPocketOffsetChange: handlePocketOffsetChange,
+    });
+}
+
+/**
+ * Handle pocket offset change from input
+ * @param {number} index - Bit index
+ * @param {number} newPocketOffset - New pocket offset value
+ */
+function handlePocketOffsetChange(index, newPocketOffset) {
+    const bit = bitsOnCanvas[index];
+    if (!bit || bit.operation !== "PO") return;
+
+    bit.pocketOffset = newPocketOffset;
+
+    // Update visuals
+    updateOffsetContours();
+    updatePhantomBits();
+    updateBitsSheet();
+
+    // Update 2D boolean operations if part is shown
+    if (showPart) {
+        updatePartShape();
+    }
+
+    if (window.threeModule) {
+        updateThreeView();
+        if (showPart) {
+            window.threeModule.showBasePanel();
+            csgScheduler.schedule(true);
+        }
+    }
 }
 
 // Update offset contours for all bits
@@ -1208,6 +1276,123 @@ function updateOffsetContours() {
             log.info(
                 `[VC] Created ${passes} intermediate contours${workOffsetMsg} for bit ${index} (displayed: base + work, 3D uses: intermediate only)`
             );
+        } else if (bit.operation === "PO") {
+            // PO (Pocketing) operation: two offsets (main bit left edge, phantom bit right edge)
+            const diameter = bit.bitData.diameter || 10;
+            const pocketOffset = bit.pocketOffset || 0;
+            const pocketWidth = diameter + pocketOffset;
+
+            // Main bit offset: from center at -diameter/2 (left edge)
+            const mainOffsetDistance = bit.x - diameter / 2;
+
+            // Create offsets for PO operation
+            {
+                const mainOffsetData = offsetCalculator.calculateOffsetFromSVG(
+                    partFront,
+                    mainOffsetDistance
+                );
+
+                if (mainOffsetData) {
+                    const mainPathData =
+                        typeof mainOffsetData === "string"
+                            ? mainOffsetData
+                            : "";
+
+                    const mainOffsetContour = document.createElementNS(
+                        svgNS,
+                        "path"
+                    );
+                    mainOffsetContour.setAttribute("d", mainPathData);
+                    mainOffsetContour.setAttribute("fill", "none");
+                    mainOffsetContour.setAttribute(
+                        "stroke",
+                        bit.color || "#cccccc"
+                    );
+                    mainOffsetContour.setAttribute(
+                        "stroke-width",
+                        getAdaptiveStrokeWidth()
+                    );
+                    mainOffsetContour.setAttribute("stroke-dasharray", "5,5");
+                    mainOffsetContour.classList.add("offset-contour");
+                    mainOffsetContour.classList.add("offset-contour-po-main");
+                    offsetsLayer.appendChild(mainOffsetContour);
+
+                    offsetContours.push({
+                        element: mainOffsetContour,
+                        bitIndex: index,
+                        offsetDistance: mainOffsetDistance,
+                        operation: "PO",
+                        isPOMain: true,
+                        pathData: mainPathData,
+                    });
+                }
+            }
+
+            // Phantom bit offset: only create if pocketOffset > 0
+            if (pocketOffset > 0) {
+                // Phantom center is at: bit.x + pocketOffset
+                const phantomCenterX = bit.x + pocketOffset;
+                const phantomOffsetDistance = phantomCenterX + diameter / 2;
+                const phantomOffsetData =
+                    offsetCalculator.calculateOffsetFromSVG(
+                        partFront,
+                        phantomOffsetDistance
+                    );
+
+                if (phantomOffsetData) {
+                    const phantomPathData =
+                        typeof phantomOffsetData === "string"
+                            ? phantomOffsetData
+                            : "";
+
+                    const phantomOffsetContour = document.createElementNS(
+                        svgNS,
+                        "path"
+                    );
+                    phantomOffsetContour.setAttribute("d", phantomPathData);
+                    phantomOffsetContour.setAttribute("fill", "none");
+                    phantomOffsetContour.setAttribute(
+                        "stroke",
+                        bit.color || "#cccccc"
+                    );
+                    phantomOffsetContour.setAttribute(
+                        "stroke-width",
+                        getAdaptiveStrokeWidth()
+                    );
+                    phantomOffsetContour.setAttribute(
+                        "stroke-dasharray",
+                        "5,5"
+                    );
+                    phantomOffsetContour.classList.add("offset-contour");
+                    phantomOffsetContour.classList.add(
+                        "offset-contour-po-phantom"
+                    );
+                    offsetsLayer.appendChild(phantomOffsetContour);
+
+                    offsetContours.push({
+                        element: phantomOffsetContour,
+                        bitIndex: index,
+                        offsetDistance: phantomOffsetDistance,
+                        operation: "PO",
+                        isPOPhantom: true,
+                        pathData: phantomPathData,
+                    });
+                }
+
+                // Log message for phantom created
+                log.info(
+                    `[PO] Created 2 offset contours for bit ${index}: main at ${mainOffsetDistance.toFixed(
+                        2
+                    )}mm, phantom at ${phantomOffsetDistance.toFixed(2)}mm`
+                );
+            } else {
+                // Log message for no phantom (pocketOffset = 0)
+                log.info(
+                    `[PO] Created 1 offset contour for bit ${index}: main at ${mainOffsetDistance.toFixed(
+                        2
+                    )}mm (phantom skipped: pocketOffset = 0)`
+                );
+            }
         } else {
             // Standard operations: AL, OU, IN
             let offsetDistance = bit.x;
@@ -1471,12 +1656,17 @@ async function updateCanvasBitsForBitId(bitId) {
 
                     if (newBitShape) {
                         newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-                        newBitShape.setAttribute("stroke-width", thickness);
+                        newBitShape.setAttribute(
+                            "stroke-width",
+                            getAdaptiveStrokeWidth()
+                        );
                     }
                     if (newShankShape) {
                         newShankShape.setAttribute("stroke", "#00BFFF");
-                        newShankShape.setAttribute("stroke-width", thickness);
-
+                        newShankShape.setAttribute(
+                            "stroke-width",
+                            getAdaptiveStrokeWidth()
+                        );
                         newShankShape.style.display = shankVisible
                             ? "block"
                             : "none";
@@ -1551,6 +1741,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
         baseAbsY: centerY,
         bitData: bit,
         groupName: groupName, // store the group name for updates
+        pocketOffset: 0, // Initialize pocketOffset for PO operations
     };
     bitsOnCanvas.push(newBit);
     // Assign profile path to the new bit
@@ -1620,6 +1811,7 @@ function handleColorChange(index, newColor) {
 function handleSelectionChange() {
     updateBitsSheet();
     redrawBitsOnCanvas();
+    updatePocketWidthInputs(); // Update PO pocket width inputs when selection changes
 }
 
 function clearBitSelection() {
@@ -1847,7 +2039,7 @@ function redrawBitsOnCanvas() {
         horizontal.setAttribute("x2", anchorX + crossSize);
         horizontal.setAttribute("y2", anchorY);
         horizontal.setAttribute("stroke", "red");
-        horizontal.setAttribute("stroke-width", thickness);
+        horizontal.setAttribute("stroke-width", getAdaptiveStrokeWidth());
         anchorPoint.appendChild(horizontal);
 
         const vertical = document.createElementNS(svgNS, "line");
@@ -1856,7 +2048,7 @@ function redrawBitsOnCanvas() {
         vertical.setAttribute("x2", anchorX);
         vertical.setAttribute("y2", anchorY + crossSize);
         vertical.setAttribute("stroke", "red");
-        vertical.setAttribute("stroke-width", thickness);
+        vertical.setAttribute("stroke-width", getAdaptiveStrokeWidth());
         anchorPoint.appendChild(vertical);
 
         // Only show anchor point for selected bits
@@ -2445,6 +2637,7 @@ function saveBitPositions() {
         alignment: bit.alignment,
         operation: bit.operation,
         color: bit.color,
+        pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
     }));
 
     localStorage.setItem("bits_positions", JSON.stringify(savedPositions));
@@ -2460,6 +2653,7 @@ function saveBitPositionsAs() {
         alignment: bit.alignment,
         operation: bit.operation,
         color: bit.color,
+        pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
     }));
 
     const dataStr = JSON.stringify(savedPositions, null, 2);
@@ -2587,6 +2781,7 @@ async function restoreBitPositions(positionsData) {
                     baseAbsY: centerY,
                     bitData: bitData,
                     groupName: groupName,
+                    pocketOffset: pos.pocketOffset || 0, // Restore pocketOffset for PO operations
                 };
 
                 bitsOnCanvas.push(newBit);

@@ -198,8 +198,31 @@ html {
 
 #bits-actions button:hover {
   background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
 }
+
+/* Pocket width input styles */
+.pocket-input {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+.pocket-input:focus {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+/* Hide number input spinners in WebKit */
+.no-spin::-webkit-outer-spin-button,
+.no-spin::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Hide number input spinners in Firefox */
+.no-spin {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 
 #bits-actions button:active {
   background-color: hsl(var(--secondary));

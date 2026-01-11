@@ -188,6 +188,117 @@ function createBitExtension(bitObj, materialTopY, materialBottomY) {
 }
 
 /**
+ * Создать прямоугольник заполнения кармана между основной и фантомной фрезой
+ * Это узкое расширение по ширине пocketOffset между двумя фрезами
+ */
+function createPocketFill(bitObj, materialTopY, materialBottomY) {
+    if (!bitObj.group) return null;
+
+    const element = bitObj.group.querySelector(".bit-shape");
+    if (!element) return null;
+
+    // Позиция бита
+    const transform = bitObj.group.getAttribute("transform");
+    let bitX = 0,
+        bitY = 0;
+    if (transform) {
+        const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+        if (match) {
+            bitX = parseFloat(match[1]);
+            bitY = parseFloat(match[2]);
+        }
+    }
+
+    // Bounding box
+    let bbox;
+    try {
+        bbox = element.getBBox();
+    } catch (e) {
+        console.error("Failed to get bbox for pocket fill:", e);
+        return null;
+    }
+
+    const bitWidth = bbox.width;
+    const pocketOffset = bitObj.pocketOffset || 0;
+
+    // Не показывать если нет кармана
+    if (pocketOffset <= 0) return null;
+
+    // Геометрия прямоугольника между основной и фантомной фрезой
+    // От центра основной фрезы (bitX + bitWidth/2) на ширину pocketOffset
+    // По высоте весь бит (от bbox.y до bbox.y + bbox.height)
+    const pocketFillX = bitX + bbox.x + bitWidth / 2; // От центра основной
+    const pocketFillY = bitY + bbox.y; // От верха бита
+    const pocketFillWidth = pocketOffset; // Ширина = смещению фантома
+    const pocketFillHeight = Math.abs(bbox.height); // Высота бита
+
+    const pocketFill = new paper.Path.Rectangle({
+        point: [pocketFillX, pocketFillY],
+        size: [pocketFillWidth, pocketFillHeight],
+    });
+
+    return pocketFill;
+}
+
+/**
+ * Создать прямоугольник расширения кармана (оранжевый) для операции PO
+ * Прямоугольник тянется от левого края основной фрезы до левого края + ширина + пocketOffset
+ * по высоте от поверхности материала до вершины фрезы.
+ */
+function createPocketExpansion(bitObj, materialTopY, materialBottomY) {
+    if (!bitObj.group) return null;
+
+    const element = bitObj.group.querySelector(".bit-shape");
+    if (!element) return null;
+
+    // Позиция бита
+    const transform = bitObj.group.getAttribute("transform");
+    let bitX = 0,
+        bitY = 0;
+    if (transform) {
+        const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+        if (match) {
+            bitX = parseFloat(match[1]);
+            bitY = parseFloat(match[2]);
+        }
+    }
+
+    // Bounding box
+    let bbox;
+    try {
+        bbox = element.getBBox();
+    } catch (e) {
+        console.error("Failed to get bbox for pocket expansion:", e);
+        return null;
+    }
+
+    const bitWidth = bbox.width;
+    const bitTopY = bitY + bbox.y; // верх фрезы в canvas координатах
+
+    // Показывать расширение только если вершина фрезы ниже поверхности материала
+    if (bitTopY <= materialTopY) return null;
+
+    const pocketOffset = bitObj.pocketOffset || 0;
+    if (pocketOffset <= 0) return null; // Не показывать если нет кармана
+
+    // Геометрия оранжевого расширения (как в ExtensionCalculator)
+    // От левого края основной фрезы до левого края + ширина + пocketOffset
+    const mainBitLeft = bitX + bbox.x;
+    const expansionWidth = bitWidth + pocketOffset; // ширина фрезы + смещение фантома
+    const overlap = 0.001;
+    const rectHeight = bitTopY - materialTopY + overlap;
+    const rectX = mainBitLeft;
+    const rectY = materialTopY;
+
+    const expansionRect = new paper.Path.Rectangle({
+        point: [rectX, rectY],
+        size: [expansionWidth, rectHeight],
+    });
+
+    return expansionRect;
+}
+
+/**
  * Главная функция: вычислить результирующий полигон панели после вычитания битов
  *
  * @param {HTMLElement} panelSection - Элемент панели
@@ -234,6 +345,22 @@ export function paperCalculateResultPolygon(
                 materialBottomY
             );
 
+            // Расширение кармана (оранжевое) для PO
+            let pocketExpansion = null;
+            let pocketFill = null;
+            if (bit.operation === "PO") {
+                pocketExpansion = createPocketExpansion(
+                    bit,
+                    materialTopY,
+                    materialBottomY
+                );
+                pocketFill = createPocketFill(
+                    bit,
+                    materialTopY,
+                    materialBottomY
+                );
+            }
+
             if (extension) {
                 console.log("Uniting bit with extension:", {
                     bitId: bit.bitData?.id,
@@ -243,15 +370,40 @@ export function paperCalculateResultPolygon(
                 });
 
                 // Объединяем бит с его extension сразу, чтобы не было линии между ними
-                const bitWithExtension = bitPath.unite(extension);
+                let united = bitPath.unite(extension);
                 bitPath.remove();
                 extension.remove();
 
-                console.log("United result bounds:", bitWithExtension.bounds);
+                // Если есть расширение кармана, добавим его
+                if (pocketExpansion) {
+                    united = united.unite(pocketExpansion);
+                    pocketExpansion.remove();
+                }
 
-                bitPaths.push(bitWithExtension);
+                // Добавляем заполнение кармана
+                if (pocketFill) {
+                    united = united.unite(pocketFill);
+                    pocketFill.remove();
+                }
+
+                console.log("United result bounds:", united.bounds);
+
+                bitPaths.push(united);
             } else {
-                bitPaths.push(bitPath);
+                // Если нет вертикального extension, но есть карман, объединяем с ним
+                let united = bitPath;
+                if (pocketExpansion) {
+                    united = united.unite(pocketExpansion);
+                    pocketExpansion.remove();
+                }
+                if (pocketFill) {
+                    united = united.unite(pocketFill);
+                    pocketFill.remove();
+                }
+                if (pocketExpansion || pocketFill) {
+                    bitPath.remove();
+                }
+                bitPaths.push(united);
             }
         }
 
@@ -354,6 +506,23 @@ export function paperCalculateResultPolygonDebug(
                 materialBottomY
             );
             if (extension) result.bitPaths.push(extension);
+
+            // Добавляем расширение кармана для PO в отладочную визуализацию
+            if (bit.operation === "PO") {
+                const pocketExpansion = createPocketExpansion(
+                    bit,
+                    materialTopY,
+                    materialBottomY
+                );
+                if (pocketExpansion) result.bitPaths.push(pocketExpansion);
+
+                const pocketFill = createPocketFill(
+                    bit,
+                    materialTopY,
+                    materialBottomY
+                );
+                if (pocketFill) result.bitPaths.push(pocketFill);
+            }
         }
 
         if (result.bitPaths.length > 0) {

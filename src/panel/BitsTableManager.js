@@ -120,6 +120,17 @@ class BitsTableManager {
         // Check for shank collision (set in updateBitExtensions)
         builder.addIf(bit.hasShankCollision, "⚠ Shank collision");
 
+        // Check for PO (Pocketing) operation parameters
+        if (bit.operation === "PO") {
+            const diameter = bit.bitData?.diameter || 10;
+            const pocketOffset = bit.pocketOffset || 0;
+            const pocketWidth = diameter + pocketOffset;
+
+            builder.add(
+                `Pocket width: ${parseFloat(pocketWidth.toFixed(1))}mm`
+            );
+        }
+
         // Check if bit cuts through material
         if (this.convertToTopAnchorCoordinates && this.getPanelThickness) {
             const topAnchorCoords = this.convertToTopAnchorCoordinates(bit);

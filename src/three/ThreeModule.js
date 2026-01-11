@@ -484,6 +484,7 @@ export default class ThreeModule extends BaseModule {
                 b.bitData?.id ||
                 b.bitData?.type ||
                 "profile",
+            pocketOffset: b.pocketOffset || 0, // Include pocketOffset for PO operations
         }));
 
         return JSON.stringify({
@@ -1358,6 +1359,165 @@ export default class ThreeModule extends BaseModule {
                     }
                 }
                 continue; // Skip normal processing for VC bits
+            }
+
+            // PO (Pocketing) operation: render main bit and phantom bit
+            const isPO = (bit.operation || "").toUpperCase() === "PO";
+            if (isPO) {
+                this.log.info(`PO bit ${bitIndex}: Starting PO processing`);
+
+                const diameter = bit.bitData?.diameter || 10;
+                const pocketOffset = bit.pocketOffset || 0;
+                const pocketWidth = diameter + pocketOffset;
+
+                // Render PO operation in 3D
+                {
+                    // Find both contours (main bit left edge, phantom bit right edge)
+                    const mainContour = offsetContours.find(
+                        (c) => c.bitIndex === bitIndex && c.isPOMain === true
+                    );
+                    const phantomContour = offsetContours.find(
+                        (c) => c.bitIndex === bitIndex && c.isPOPhantom === true
+                    );
+
+                    // Main contour is required, phantom is optional (only if pocketOffset > 0)
+                    if (mainContour) {
+                        const mainPathData =
+                            mainContour.pathData ||
+                            mainContour.element?.getAttribute("d");
+
+                        if (mainPathData) {
+                            // Create bit profile
+                            const bitProfile =
+                                await this.extrusionBuilder.createBitProfile(
+                                    bit.bitData
+                                );
+
+                            if (bitProfile) {
+                                // Transformation options for coordinate conversion
+                                const transformOptions = {
+                                    partFrontX,
+                                    partFrontY,
+                                    partFrontWidth,
+                                    partFrontHeight,
+                                    depth: bit.y,
+                                    panelThickness,
+                                    panelAnchor,
+                                };
+
+                                // Extrude main bit using SVG path with modifier
+                                // Pass SVG path string directly, let extrudeAlongPath handle it
+                                const mainMeshes =
+                                    this.extrusionBuilder.extrudeAlongPath(
+                                        bitProfile,
+                                        mainPathData, // SVG path string
+                                        bit.color || "#cccccc",
+                                        0,
+                                        "round",
+                                        this.panelSide,
+                                        transformOptions,
+                                        {
+                                            offset: 5, // Apply -5mm offset to SVG path
+                                            cornerStyle: "miter",
+                                        }
+                                    );
+
+                                // Add main bit meshes
+                                if (mainMeshes?.length > 0) {
+                                    mainMeshes.forEach((mesh) => {
+                                        mesh.userData.operation =
+                                            bit.operation || "subtract";
+                                        mesh.userData.bitIndex = bitIndex;
+                                        mesh.userData.isPOMain = true;
+                                        this.bitExtrudeMeshes.push(mesh);
+
+                                        if (
+                                            this.materialManager?.isEdgesEnabled()
+                                        ) {
+                                            this.materialManager.addEdgeVisualization(
+                                                mesh
+                                            );
+                                        }
+                                    });
+                                    this.log.debug(
+                                        `Added PO main bit: ${mainMeshes.length} meshes`
+                                    );
+                                }
+
+                                // Extrude phantom bit only if pocketOffset > 0
+                                if (pocketOffset > 0 && phantomContour) {
+                                    const phantomPathData =
+                                        phantomContour.pathData ||
+                                        phantomContour.element?.getAttribute(
+                                            "d"
+                                        );
+
+                                    if (phantomPathData) {
+                                        const phantomMeshes =
+                                            this.extrusionBuilder.extrudeAlongPath(
+                                                bitProfile,
+                                                phantomPathData, // SVG path string
+                                                "rgba(255, 165, 0, 0.3)",
+                                                0,
+                                                "round",
+                                                this.panelSide,
+                                                transformOptions,
+                                                {
+                                                    offset: -5, // Apply -5mm offset to SVG path
+                                                    cornerStyle: "miter",
+                                                }
+                                            );
+
+                                        // Add phantom bit meshes (semi-transparent)
+                                        if (phantomMeshes?.length > 0) {
+                                            phantomMeshes.forEach((mesh) => {
+                                                mesh.userData.operation =
+                                                    bit.operation || "subtract";
+                                                mesh.userData.bitIndex =
+                                                    bitIndex;
+                                                mesh.userData.isPOPhantom = true;
+                                                mesh.material.transparent = true;
+                                                mesh.material.opacity = 0.3;
+                                                this.bitExtrudeMeshes.push(
+                                                    mesh
+                                                );
+
+                                                if (
+                                                    this.materialManager?.isEdgesEnabled()
+                                                ) {
+                                                    this.materialManager.addEdgeVisualization(
+                                                        mesh
+                                                    );
+                                                }
+                                            });
+                                            this.log.debug(
+                                                `Added PO phantom bit: ${phantomMeshes.length} meshes`
+                                            );
+                                        }
+                                    }
+                                } else if (pocketOffset === 0) {
+                                    this.log.debug(
+                                        `PO bit ${bitIndex}: Skipped phantom (pocketOffset = 0)`
+                                    );
+                                }
+
+                                this.log.info(
+                                    `PO bit ${bitIndex}: Successfully rendered ${
+                                        pocketOffset > 0
+                                            ? "main and phantom bits"
+                                            : "main bit only"
+                                    }`
+                                );
+                            }
+                        }
+                    } else {
+                        this.log.warn(
+                            `PO bit ${bitIndex}: Missing main contour`
+                        );
+                    }
+                }
+
+                continue; // Skip normal processing for PO bits
             }
 
             // Standard operations: AL, OU, IN

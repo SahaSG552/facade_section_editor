@@ -62,12 +62,41 @@ export class PhantomBitCalculator {
      * @returns {void}
      */
     updatePhantoms({ bitsOnCanvas, phantomsLayer, anchorCoords }) {
-        if (!phantomsLayer) return;
+        if (!phantomsLayer) {
+            console.warn("PhantomBitCalculator: phantomsLayer not found");
+            return;
+        }
         phantomsLayer.innerHTML = "";
+
+        console.log("PhantomBitCalculator: Updating phantoms", {
+            bitsCount: bitsOnCanvas.length,
+            poBits: bitsOnCanvas.filter((b) => b.operation === "PO").length,
+        });
 
         const zoomLevel = this.getZoomLevel ? this.getZoomLevel() : 1;
 
         bitsOnCanvas.forEach((bit, index) => {
+            // Handle PO (Pocketing) phantom bits
+            if (bit.operation === "PO") {
+                console.log(
+                    `PhantomBitCalculator: Creating PO phantom for bit ${index}`,
+                    {
+                        x: bit.x,
+                        y: bit.y,
+                        diameter: bit.bitData?.diameter,
+                        pocketOffset: bit.pocketOffset,
+                    }
+                );
+                this.createPOPhantom(
+                    bit,
+                    index,
+                    phantomsLayer,
+                    anchorCoords,
+                    zoomLevel
+                );
+                return;
+            }
+
             if (bit.operation !== "VC") return;
 
             const topAnchorCoords = this.convertToTopAnchorCoordinates(bit);
@@ -125,14 +154,11 @@ export class PhantomBitCalculator {
                         phantomAbsX,
                         phantomAbsY,
                         false,
-                        false
+                        false,
+                        this.getAdaptiveStrokeWidth(zoomLevel)
                     );
 
                     phantomShape.setAttribute("stroke", "gray");
-                    phantomShape.setAttribute(
-                        "stroke-width",
-                        this.getAdaptiveStrokeWidth(zoomLevel)
-                    );
                     phantomShape.setAttribute(
                         "fill",
                         "rgba(128, 128, 128, 0.1)"
@@ -148,6 +174,71 @@ export class PhantomBitCalculator {
                 }
             }
         });
+    }
+
+    /**
+     * Create PO (Pocketing) phantom bit at offset position
+     * @param {Object} bit - Main bit data
+     * @param {number} index - Bit index
+     * @param {SVGGElement} phantomsLayer - SVG group for phantoms
+     * @param {Object} anchorCoords - Panel anchor coordinates
+     * @param {number} zoomLevel - Current zoom level
+     */
+    createPOPhantom(bit, index, phantomsLayer, anchorCoords, zoomLevel) {
+        const diameter = bit.bitData.diameter || 10;
+        const pocketOffset = bit.pocketOffset || 0;
+
+        // Calculate pocket width: diameter + pocketOffset
+        // At pocketOffset = 0, pocketWidth = diameter (minimum pocket width)
+        const pocketWidth = diameter + pocketOffset;
+
+        const phantomBitData = {
+            ...bit.bitData,
+            fillColor: "rgba(255, 165, 0, 0.15)", // Orange semi-transparent
+        };
+
+        const currentAnchorOffset = this.getAnchorOffset();
+
+        // Phantom is positioned relative to main bit at pocketOffset distance
+        // pocketWidth is used only for UI display (diameter + pocketOffset)
+        const logicalX = bit.x + pocketOffset;
+        const logicalY = bit.y;
+
+        const phantomAbsX = anchorCoords.x + logicalX;
+        const phantomAbsY = anchorCoords.y + logicalY;
+
+        const phantomShape = this.bitsManager.createBitShapeElement(
+            phantomBitData,
+            bit.groupName,
+            phantomAbsX,
+            phantomAbsY,
+            false,
+            false,
+            this.getAdaptiveStrokeWidth(zoomLevel)
+        );
+
+        phantomShape.setAttribute("stroke", "darkorange");
+        phantomShape.setAttribute("fill", "rgba(255, 165, 0, 0.15)");
+        phantomShape.classList.add("phantom-bit");
+        phantomShape.classList.add("phantom-bit-po");
+
+        // Store metadata for interaction
+        phantomShape.__bitData = bit.bitData;
+        phantomShape.__bitIndex = index;
+        phantomShape.__mainBitIndex = index;
+        phantomShape.__pocketWidth = pocketWidth;
+        phantomShape.setAttribute("data-phantom-index", index);
+        phantomShape.setAttribute("data-main-bit-index", index);
+
+        phantomsLayer.appendChild(phantomShape);
+        console.log(
+            `PhantomBitCalculator: PO phantom created and appended for bit ${index}`,
+            {
+                phantomX: phantomAbsX,
+                phantomY: phantomAbsY,
+                pocketWidth,
+            }
+        );
     }
 }
 

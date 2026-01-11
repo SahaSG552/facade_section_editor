@@ -28,6 +28,8 @@ export default class InteractionManager {
 
         // Drag state
         this.draggedBitIndex = null;
+        this.draggedPhantomIndex = null; // For phantom bit dragging
+        this.isDraggingPhantom = false; // Flag for phantom dragging
         this.dragStartX = 0;
         this.dragStartY = 0;
 
@@ -75,6 +77,10 @@ export default class InteractionManager {
             getShowPart: null,
             getThreeModule: null,
             getCsgScheduler: null,
+            updateOffsetContours: null,
+            updatePhantomBits: null,
+            updateThreeView: null,
+            clearBitSelection: null,
         };
 
         this.initializeEventListeners();
@@ -220,6 +226,67 @@ export default class InteractionManager {
             }
         }
 
+        // Check for phantom bit clicks (PO operation)
+        if (bitsVisible) {
+            const phantomsLayer =
+                this.canvasManager.canvas.querySelector("[id*='phantoms']");
+            if (phantomsLayer) {
+                const phantomBits =
+                    phantomsLayer.querySelectorAll(".phantom-bit-po");
+                for (let i = 0; i < phantomBits.length; i++) {
+                    const phantomGroup = phantomBits[i];
+                    // Get the actual shape element inside the group
+                    const phantomShape =
+                        phantomGroup.querySelector(".bit-shape");
+
+                    if (phantomShape) {
+                        const transform =
+                            phantomGroup.getAttribute("transform");
+                        let dx = 0,
+                            dy = 0;
+                        if (transform) {
+                            const match = transform.match(
+                                /translate\(([^,]+),\s*([^)]+)\)/
+                            );
+                            if (match) {
+                                dx = parseFloat(match[1]) || 0;
+                                dy = parseFloat(match[2]) || 0;
+                            }
+                        }
+
+                        const localX = svgCoords.x - dx;
+                        const localY = svgCoords.y - dy;
+
+                        if (
+                            phantomShape.isPointInFill(
+                                new DOMPoint(localX, localY)
+                            )
+                        ) {
+                            // Find the parent bit index
+                            const bitIndex = phantomGroup.__bitIndex;
+                            if (bitIndex !== undefined) {
+                                clickedOnBit = true;
+
+                                // Start dragging phantom bit (X-axis only)
+                                this.isDraggingPhantom = true;
+                                this.draggedPhantomIndex = bitIndex;
+                                // Экспорт индекса перетаскиваемого фантома в window, чтобы показать инпут
+                                try {
+                                    window.draggedPhantomIndex = bitIndex;
+                                } catch (e) {}
+                                this.callbacks.getCsgScheduler?.()?.cancel();
+                                this.dragStartX = svgCoords.x;
+                                this.dragStartY = svgCoords.y;
+                                this.dragStarted = false;
+                                this.canvas.style.cursor = "pointer";
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Clear selections if clicked on empty area
         if (!clickedOnBit && selectedBitIndices.length > 0) {
             // Use clearBitSelection callback to properly sync with SelectionManager
@@ -236,7 +303,85 @@ export default class InteractionManager {
     }
 
     handleMouseMove(e) {
-        if (this.isDraggingBit && this.draggedBitIndex !== null) {
+        if (this.isDraggingPhantom && this.draggedPhantomIndex !== null) {
+            // Handle phantom bit dragging (X-axis only for PO operation)
+            this.dragStarted = true;
+
+            this.callbacks.getCsgScheduler?.()?.cancel();
+
+            const svgCoords = this.canvasManager.screenToSvg(
+                e.clientX,
+                e.clientY
+            );
+            const bitsOnCanvas = this.callbacks.getBitsOnCanvas?.() || [];
+            const bit = bitsOnCanvas[this.draggedPhantomIndex];
+
+            if (bit && bit.operation === "PO") {
+                const panelAnchorCoords =
+                    this.callbacks.getPanelAnchorCoords?.() || { x: 0, y: 0 };
+
+                // Snap mouse position to grid (X-axis only)
+                let snappedX = this.canvasManager.snapToGrid(svgCoords.x);
+
+                // Calculate new pocket offset from phantom X position
+                // pocketWidth = pocketOffset (phantom offset from main bit)
+                // phantomX = mainBitX + pocketWidth = mainBitX + pocketOffset
+                // So: pocketOffset = phantomX - mainBitX
+                const diameter = bit.bitData?.diameter || 10;
+                const mainBitX = bit.x;
+                const phantomAbsX = snappedX - panelAnchorCoords.x;
+                const newPocketOffset = phantomAbsX - mainBitX;
+
+                // Apply constraint: pocketOffset >= 0 and snap to grid
+                const rawOffset = Math.max(0, newPocketOffset);
+                // Snap pocketOffset to grid (so phantom stays on grid)
+                const constrainedPocketOffset =
+                    this.canvasManager.snapToGrid(rawOffset);
+                bit.pocketOffset = constrainedPocketOffset;
+
+                // Calculate actual pocketWidth = diameter + pocketOffset
+                const pocketWidth = diameter + constrainedPocketOffset;
+
+                // Update phantom position in real-time
+                const phantomsLayer =
+                    this.canvasManager.canvas.querySelector("[id*='phantoms']");
+                if (phantomsLayer) {
+                    const allPhantoms =
+                        phantomsLayer.querySelectorAll(".phantom-bit-po");
+                    for (const phantom of allPhantoms) {
+                        if (phantom.__bitIndex === this.draggedPhantomIndex) {
+                            // Phantom was created at: anchorCoords.x + (mainBitX + initial_pocketOffset)
+                            // We want it at: anchorCoords.x + (mainBitX + constrainedPocketOffset)
+                            // So relative transform = constrainedPocketOffset - initial_pocketOffset
+                            // But we don't store initial_pocketOffset, so just recalculate from scratch:
+                            // Transform should move it to the target position
+                            const initialPhantomX =
+                                phantom.__initialX ||
+                                panelAnchorCoords.x +
+                                    mainBitX +
+                                    (phantom.__pocketWidth - diameter);
+                            const targetPhantomX =
+                                panelAnchorCoords.x +
+                                mainBitX +
+                                constrainedPocketOffset;
+                            const deltaX = targetPhantomX - initialPhantomX;
+
+                            phantom.setAttribute(
+                                "transform",
+                                `translate(${deltaX}, 0)`
+                            );
+                            break;
+                        }
+                    }
+                }
+
+                // Update extensions and inputs during drag
+                this.callbacks.updateBitExtensions?.();
+                this.callbacks.updatePocketWidthInputs?.();
+
+                this.checkAutoScroll(e.clientX, e.clientY);
+            }
+        } else if (this.isDraggingBit && this.draggedBitIndex !== null) {
             this.dragStarted = true;
             window.isDraggingBit = true;
 
@@ -296,7 +441,35 @@ export default class InteractionManager {
     }
 
     handleMouseUp(e) {
-        if (this.isDraggingBit) {
+        if (this.isDraggingPhantom) {
+            this.isDraggingPhantom = false;
+            this.draggedPhantomIndex = null;
+            this.dragStarted = false;
+            this.canvas.style.cursor = "grab";
+            try {
+                window.draggedPhantomIndex = null;
+            } catch (e) {}
+
+            // Update everything after drag to show final state
+            this.callbacks.updateOffsetContours?.();
+            this.callbacks.updatePhantomBits?.();
+            this.callbacks.updatePocketWidthInputs?.();
+
+            const showPart = this.callbacks.getShowPart?.();
+            if (showPart) {
+                this.callbacks.updatePartShape?.();
+            }
+
+            const threeModule = this.callbacks.getThreeModule?.();
+            if (threeModule) {
+                // Update 3D view with new pocket offset
+                this.callbacks.updateThreeView?.();
+                if (showPart) {
+                    threeModule.showBasePanel();
+                    this.callbacks.getCsgScheduler?.()?.schedule(true);
+                }
+            }
+        } else if (this.isDraggingBit) {
             this.isDraggingBit = false;
             window.isDraggingBit = false;
 
@@ -307,6 +480,9 @@ export default class InteractionManager {
             this.draggedBitIndex = null;
             this.dragStarted = false;
             this.canvas.style.cursor = "grab";
+
+            // Refresh inputs visibility after drag
+            this.callbacks.updatePocketWidthInputs?.();
 
             const showPart = this.callbacks.getShowPart?.();
             if (showPart) {

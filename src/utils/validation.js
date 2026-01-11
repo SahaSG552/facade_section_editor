@@ -124,9 +124,9 @@ export function validatePanelAnchor(anchor) {
  * @throws {ValidationError} If operation is invalid
  */
 export function validateOperation(operation) {
-    if (!["AL", "OU", "IN", "VC"].includes(operation)) {
+    if (!["AL", "OU", "IN", "VC", "PO"].includes(operation)) {
         throw new ValidationError(
-            `Invalid operation: ${operation} (must be AL, OU, IN, or VC)`
+            `Invalid operation: ${operation} (must be AL, OU, IN, VC, or PO)`
         );
     }
 }
