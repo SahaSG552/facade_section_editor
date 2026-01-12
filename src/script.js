@@ -830,6 +830,20 @@ function updatePanelParams() {
         // Update bits and other elements
         updateBitsPositions();
         bitsManager.assignProfilePathsToBits(bitsOnCanvas);
+
+        // Recalculate pocket offsets for PO bits in full removal mode
+        bitsOnCanvas.forEach((bit, index) => {
+            if (bit.operation === "PO" && bit.isFullRemoval) {
+                const calculatedOffset = panelWidth - bit.x * 2;
+                bit.pocketOffset = Math.max(0, calculatedOffset);
+                log.debug(
+                    `[PO] Auto-recalculated pocketOffset for bit ${index}: ${bit.pocketOffset.toFixed(
+                        2
+                    )}mm (panel width changed)`
+                );
+            }
+        });
+
         updateOffsetContours();
         updatePhantomBits();
         if (showPart) updatePartShape();
@@ -837,6 +851,11 @@ function updatePanelParams() {
         // Update 3D view if it's visible
         if (window.threeModule) {
             updateThreeView();
+            // If in Part view, trigger CSG recalculation
+            if (showPart) {
+                window.threeModule.showBasePanel();
+                csgScheduler.schedule(true);
+            }
         }
     }
 }
@@ -1003,12 +1022,28 @@ function updatePocketWidthInputs() {
  * Handle pocket offset change from input
  * @param {number} index - Bit index
  * @param {number} newPocketOffset - New pocket offset value
+ * @param {boolean} isZeroWidth - Whether pocket width was set to 0 (full material removal)
  */
-function handlePocketOffsetChange(index, newPocketOffset) {
+function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = false) {
     const bit = bitsOnCanvas[index];
     if (!bit || bit.operation !== "PO") return;
 
-    bit.pocketOffset = newPocketOffset;
+    // If zero width requested, calculate pocketOffset to fill entire panel width
+    if (isZeroWidth) {
+        // pocketOffset = panelWidth - bit.x * 2
+        // This makes the phantom bit reach the opposite edge of the panel
+        const calculatedOffset = panelWidth - bit.x * 2;
+        bit.pocketOffset = Math.max(0, calculatedOffset); // Ensure non-negative
+        bit.isFullRemoval = true; // Mark for special handling
+        log.info(
+            `[PO] Bit ${index}: Auto-calculated pocketOffset = ${bit.pocketOffset.toFixed(
+                2
+            )}mm (full removal mode)`
+        );
+    } else {
+        bit.pocketOffset = newPocketOffset;
+        bit.isFullRemoval = false;
+    }
 
     // Update visuals
     updateOffsetContours();
@@ -1328,8 +1363,10 @@ function updateOffsetContours() {
                 }
             }
 
-            // Phantom bit offset: only create if pocketOffset > 0
-            if (pocketOffset > 0) {
+            // Phantom bit offset: only create if pocketOffset > 0 and not in full removal mode
+            const isFullRemoval = bit.isFullRemoval || pocketOffset === 0;
+
+            if (pocketOffset > 0 && !isFullRemoval) {
                 // Phantom center is at: bit.x + pocketOffset
                 const phantomCenterX = bit.x + pocketOffset;
                 const phantomOffsetDistance = phantomCenterX + diameter / 2;
@@ -1386,11 +1423,14 @@ function updateOffsetContours() {
                     )}mm, phantom at ${phantomOffsetDistance.toFixed(2)}mm`
                 );
             } else {
-                // Log message for no phantom (pocketOffset = 0)
+                // Log message for no phantom (pocketOffset = 0 or full removal mode)
+                const reason = isFullRemoval
+                    ? "full removal mode"
+                    : "pocketOffset = 0";
                 log.info(
                     `[PO] Created 1 offset contour for bit ${index}: main at ${mainOffsetDistance.toFixed(
                         2
-                    )}mm (phantom skipped: pocketOffset = 0)`
+                    )}mm (phantom skipped: ${reason})`
                 );
             }
         } else {
@@ -1770,6 +1810,11 @@ function handleOperationChange(index, newOperation) {
     updateOffsetContours();
     updatePhantomBits();
 
+    // Update 2D boolean operations if part is shown
+    if (showPart) {
+        updatePartShape();
+    }
+
     if (window.threeModule) {
         updateThreeView();
         if (showPart) {
@@ -1854,6 +1899,11 @@ function deleteBitFromCanvas(index) {
     // Update 3D view
     if (window.threeModule) {
         updateThreeView();
+        // If in Part view, trigger CSG recalculation
+        if (showPart) {
+            window.threeModule.showBasePanel();
+            csgScheduler.schedule(true);
+        }
     }
 }
 
@@ -1980,6 +2030,17 @@ async function updateBitPosition(index, newX, newY) {
     // save new logical positions
     bit.x = newX;
     bit.y = newY;
+
+    // Recalculate pocket offset for PO bits in full removal mode when position changes
+    if (bit.operation === "PO" && bit.isFullRemoval) {
+        const calculatedOffset = panelWidth - bit.x * 2;
+        bit.pocketOffset = Math.max(0, calculatedOffset);
+        log.debug(
+            `[PO] Auto-recalculated pocketOffset for bit ${index}: ${bit.pocketOffset.toFixed(
+                2
+            )}mm (bit moved via table)`
+        );
+    }
 
     // DO NOT call updateBitsSheet() here - it recreates inputs and breaks focus
     // redraw layer order if needed
@@ -2638,6 +2699,7 @@ function saveBitPositions() {
         operation: bit.operation,
         color: bit.color,
         pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
+        isFullRemoval: bit.isFullRemoval || false, // Save isFullRemoval flag for PO operations
     }));
 
     localStorage.setItem("bits_positions", JSON.stringify(savedPositions));
@@ -2654,6 +2716,7 @@ function saveBitPositionsAs() {
         operation: bit.operation,
         color: bit.color,
         pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
+        isFullRemoval: bit.isFullRemoval || false, // Save isFullRemoval flag for PO operations
     }));
 
     const dataStr = JSON.stringify(savedPositions, null, 2);
@@ -2782,6 +2845,7 @@ async function restoreBitPositions(positionsData) {
                     bitData: bitData,
                     groupName: groupName,
                     pocketOffset: pos.pocketOffset || 0, // Restore pocketOffset for PO operations
+                    isFullRemoval: pos.isFullRemoval || false, // Restore isFullRemoval flag for PO operations
                 };
 
                 bitsOnCanvas.push(newBit);

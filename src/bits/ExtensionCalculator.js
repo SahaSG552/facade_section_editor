@@ -493,16 +493,31 @@ export class ExtensionCalculator {
 
             // Handle value change
             input.addEventListener("change", (e) => {
-                const newPocketWidth = parseFloat(input.value) || diameter;
-                // pocketWidth must be >= diameter (pocketOffset >= 0)
-                const constrainedWidth = Math.max(diameter, newPocketWidth);
-                input.value = parseFloat(constrainedWidth.toFixed(1));
+                const inputValue = parseFloat(input.value);
+                let newPocketWidth;
+
+                // Allow 0 or >= diameter
+                if (inputValue === 0 || isNaN(inputValue)) {
+                    newPocketWidth = 0; // Special case: full material removal
+                } else if (inputValue < diameter) {
+                    // Constrain to minimum diameter
+                    newPocketWidth = diameter;
+                } else {
+                    newPocketWidth = inputValue;
+                }
+
+                input.value = parseFloat(newPocketWidth.toFixed(1));
 
                 // Convert pocketWidth to pocketOffset: offset = width - diameter
-                const newPocketOffset = constrainedWidth - diameter;
+                const newPocketOffset =
+                    newPocketWidth === 0 ? 0 : newPocketWidth - diameter;
 
                 if (onPocketOffsetChange) {
-                    onPocketOffsetChange(index, newPocketOffset);
+                    onPocketOffsetChange(
+                        index,
+                        newPocketOffset,
+                        newPocketWidth === 0
+                    );
                 }
             });
 

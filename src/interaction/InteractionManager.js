@@ -339,6 +339,14 @@ export default class InteractionManager {
                     this.canvasManager.snapToGrid(rawOffset);
                 bit.pocketOffset = constrainedPocketOffset;
 
+                // Reset full removal mode when user manually drags phantom
+                if (bit.isFullRemoval) {
+                    bit.isFullRemoval = false;
+                    console.log(
+                        `[PO] Bit ${this.draggedPhantomIndex}: Disabled full removal mode (user dragged phantom)`
+                    );
+                }
+
                 // Calculate actual pocketWidth = diameter + pocketOffset
                 const pocketWidth = diameter + constrainedPocketOffset;
 

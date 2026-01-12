@@ -129,6 +129,7 @@ class BitsTableManager {
             builder.add(
                 `Pocket width: ${parseFloat(pocketWidth.toFixed(1))}mm`
             );
+            builder.addIf(bit.isFullRemoval, "▧ Full pocket");
         }
 
         // Check if bit cuts through material
@@ -285,6 +286,7 @@ class BitsTableManager {
             const option = document.createElement("option");
             option.value = opValue;
             option.textContent = operationLabels[opValue] || opValue;
+
             if (bit.operation === opValue) {
                 option.selected = true;
             }

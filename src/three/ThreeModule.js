@@ -1593,16 +1593,23 @@ export default class ThreeModule extends BaseModule {
                                     bit.bitData?.length ||
                                     bit.bitData?.totalLength ||
                                     20;
+
+                                // Check if full removal mode (pocketOffset = 0 or isFullRemoval flag)
+                                const isFullRemoval =
+                                    bit.isFullRemoval || pocketOffset === 0;
+
                                 if (
                                     pocketWidth > diameter * 2 - 1 &&
-                                    phantomPathData
+                                    (phantomPathData || isFullRemoval)
                                 ) {
                                     const fillerMeshes =
                                         await this.createPOPocketFiller(
                                             bit,
                                             bitIndex,
                                             mainPathData,
-                                            phantomPathData,
+                                            isFullRemoval
+                                                ? null
+                                                : phantomPathData, // No hole for full removal
                                             diameter,
                                             bitLength,
                                             transformOptions
@@ -1614,6 +1621,8 @@ export default class ThreeModule extends BaseModule {
                                                 "subtract"; // Force subtract for CSG
                                             mesh.userData.bitIndex = bitIndex;
                                             mesh.userData.isPOFiller = true;
+                                            mesh.userData.isFullRemoval =
+                                                isFullRemoval;
                                             this.bitExtrudeMeshes.push(mesh);
 
                                             if (
@@ -1895,27 +1904,9 @@ export default class ThreeModule extends BaseModule {
                 ? mainOffsetResult[0]
                 : mainOffsetResult;
 
-            // Parse and offset phantom path (outward)
-            const phantomPath = new tempScope.Path(phantomPathData);
-            phantomPath.closed = true;
-            const phantomOffsetResult = PaperOffset.offset(
-                phantomPath,
-                offsetDist,
-                {
-                    join: "miter",
-                    cap: "butt",
-                    limit: 10,
-                    insert: false,
-                }
-            );
-            const phantomOffset = Array.isArray(phantomOffsetResult)
-                ? phantomOffsetResult[0]
-                : phantomOffsetResult;
-
-            if (!mainOffset || !phantomOffset) {
-                this.log.warn("Failed to create offset paths for filler");
+            if (!mainOffset) {
+                this.log.warn("Failed to create main offset path for filler");
                 mainPath.remove();
-                phantomPath.remove();
                 tempScope.remove();
                 tempCanvas.remove();
                 return [];
@@ -1923,7 +1914,43 @@ export default class ThreeModule extends BaseModule {
 
             // Get SVG path data
             let outerSVG = mainOffset.pathData;
-            let innerSVG = phantomOffset.pathData;
+            let innerSVG = null;
+
+            // Parse and offset phantom path only if provided (not in full removal mode)
+            let phantomPath = null;
+            let phantomOffset = null;
+
+            if (phantomPathData) {
+                phantomPath = new tempScope.Path(phantomPathData);
+                phantomPath.closed = true;
+                const phantomOffsetResult = PaperOffset.offset(
+                    phantomPath,
+                    offsetDist,
+                    {
+                        join: "miter",
+                        cap: "butt",
+                        limit: 10,
+                        insert: false,
+                    }
+                );
+                phantomOffset = Array.isArray(phantomOffsetResult)
+                    ? phantomOffsetResult[0]
+                    : phantomOffsetResult;
+
+                if (!phantomOffset) {
+                    this.log.warn(
+                        "Failed to create phantom offset path for filler"
+                    );
+                    mainPath.remove();
+                    if (phantomPath) phantomPath.remove();
+                    mainOffset.remove();
+                    tempScope.remove();
+                    tempCanvas.remove();
+                    return [];
+                }
+
+                innerSVG = phantomOffset.pathData;
+            }
 
             // Apply arc approximation if available
             try {
@@ -1945,9 +1972,9 @@ export default class ThreeModule extends BaseModule {
 
             // Clean up paper.js objects
             mainPath.remove();
-            phantomPath.remove();
+            if (phantomPath) phantomPath.remove();
             mainOffset.remove();
-            phantomOffset.remove();
+            if (phantomOffset) phantomOffset.remove();
             tempScope.remove();
             tempCanvas.remove();
 
@@ -1962,14 +1989,23 @@ export default class ThreeModule extends BaseModule {
                 panelAnchor,
             } = transformOptions;
 
-            // Parse outer and inner paths to curves
+            // Parse outer path to curves
             const outerCurves =
                 this.extrusionBuilder.parsePathToCurves(outerSVG);
-            const innerCurves =
-                this.extrusionBuilder.parsePathToCurves(innerSVG);
 
-            if (!outerCurves?.length || !innerCurves?.length) {
-                this.log.warn("Failed to parse SVG paths to curves for filler");
+            // Parse inner path only if provided (not in full removal mode)
+            const innerCurves = innerSVG
+                ? this.extrusionBuilder.parsePathToCurves(innerSVG)
+                : null;
+
+            if (!outerCurves?.length) {
+                this.log.warn("Failed to parse outer SVG path for filler");
+                return [];
+            }
+
+            // Inner curves are optional (null for full removal mode)
+            if (innerSVG && !innerCurves?.length) {
+                this.log.warn("Failed to parse inner SVG path for filler");
                 return [];
             }
 
@@ -2005,36 +2041,40 @@ export default class ThreeModule extends BaseModule {
                 })
                 .filter((c) => c !== null);
 
-            const innerCurves3D = innerCurves
-                .map((curve) => {
-                    if (curve instanceof THREE.LineCurve3) {
-                        const v1 = this.extrusionBuilder.convertPoint2DTo3D(
-                            curve.v1.x,
-                            curve.v1.y,
-                            partFrontX,
-                            partFrontY,
-                            partFrontWidth,
-                            partFrontHeight,
-                            depth,
-                            panelThickness,
-                            panelAnchor
-                        );
-                        const v2 = this.extrusionBuilder.convertPoint2DTo3D(
-                            curve.v2.x,
-                            curve.v2.y,
-                            partFrontX,
-                            partFrontY,
-                            partFrontWidth,
-                            partFrontHeight,
-                            depth,
-                            panelThickness,
-                            panelAnchor
-                        );
-                        return new THREE.LineCurve3(v1, v2);
-                    }
-                    return null;
-                })
-                .filter((c) => c !== null);
+            // Convert inner curves to 3D only if provided (not in full removal mode)
+            let innerCurves3D = null;
+            if (innerCurves) {
+                innerCurves3D = innerCurves
+                    .map((curve) => {
+                        if (curve instanceof THREE.LineCurve3) {
+                            const v1 = this.extrusionBuilder.convertPoint2DTo3D(
+                                curve.v1.x,
+                                curve.v1.y,
+                                partFrontX,
+                                partFrontY,
+                                partFrontWidth,
+                                partFrontHeight,
+                                depth,
+                                panelThickness,
+                                panelAnchor
+                            );
+                            const v2 = this.extrusionBuilder.convertPoint2DTo3D(
+                                curve.v2.x,
+                                curve.v2.y,
+                                partFrontX,
+                                partFrontY,
+                                partFrontWidth,
+                                partFrontHeight,
+                                depth,
+                                panelThickness,
+                                panelAnchor
+                            );
+                            return new THREE.LineCurve3(v1, v2);
+                        }
+                        return null;
+                    })
+                    .filter((c) => c !== null);
+            }
 
             // Build ordered 2D loops from 3D curves and enforce closure/orientation
             const buildLoopPoints = (curves3D) => {
@@ -2061,21 +2101,42 @@ export default class ThreeModule extends BaseModule {
             };
 
             const outerPts = buildLoopPoints(outerCurves3D);
-            const innerPts = buildLoopPoints(innerCurves3D);
 
-            if (!outerPts.length || !innerPts.length) {
-                this.log.warn("Failed to build filler loops: empty points");
+            if (!outerPts.length) {
+                this.log.warn(
+                    "Failed to build outer filler loop: empty points"
+                );
                 return [];
             }
 
-            // Ensure correct winding: outer CCW, inner CW
+            // Ensure correct winding: outer CCW
             if (THREE.ShapeUtils.isClockWise(outerPts)) outerPts.reverse();
-            if (!THREE.ShapeUtils.isClockWise(innerPts)) innerPts.reverse();
 
-            // Construct shape with hole using Paths
+            // Construct shape (with or without hole)
             const outerShape = new THREE.Shape(outerPts);
-            const innerPath = new THREE.Path(innerPts);
-            outerShape.holes = [innerPath];
+
+            // Add hole only if inner path exists (not in full removal mode)
+            if (innerCurves3D) {
+                const innerPts = buildLoopPoints(innerCurves3D);
+
+                if (!innerPts.length) {
+                    this.log.warn(
+                        "Failed to build inner filler loop: empty points"
+                    );
+                    return [];
+                }
+
+                // Ensure correct winding: inner CW
+                if (!THREE.ShapeUtils.isClockWise(innerPts)) innerPts.reverse();
+
+                const innerPath = new THREE.Path(innerPts);
+                outerShape.holes = [innerPath];
+                this.log.debug("PO filler created with hole (normal mode)");
+            } else {
+                this.log.debug(
+                    "PO filler created without hole (full removal mode)"
+                );
+            }
 
             // Create extrude geometry along Z axis (depth direction)
             const extrudeDepth = bitLength;
