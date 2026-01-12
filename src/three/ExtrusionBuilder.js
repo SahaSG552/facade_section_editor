@@ -1684,9 +1684,9 @@ export default class ExtrusionBuilder {
      * @param {number} zOffset - Z offset to apply to all meshes after creation (default: 0)
      * @param {string} type - Extrusion type: 'mitered' (sharp corners) or 'round' (lathe-filled corners)
      * @param {string} side - Panel side: 'top' (front face) or 'bottom' (back face) - default: 'top'
-     * @param {object} options - Additional options for 'round' type: {partFrontX, partFrontY, depth, panelThickness, panelAnchor}
+     * @param {object} options - Additional options: {partFrontX, partFrontY, depth, panelThickness, panelAnchor, pathVisual=true}
      * @param {object} pathModifier - Path modification parameters: {offset: number, cornerStyle: 'round'|'bevel'} (default: disabled)
-     * @returns {Array<THREE.Mesh>} Array of meshes (extrusions + lathes for 'round')
+     * @returns {Array<THREE.Mesh>} Array of meshes (extrusions + lathes for 'round') + optional path visualization line
      */
     extrudeAlongPath(
         profile,
@@ -1699,19 +1699,6 @@ export default class ExtrusionBuilder {
         pathModifier = null
     ) {
         try {
-            this.log.info("extrudeAlongPath called:", {
-                type,
-                side,
-                hasPathModifier: !!pathModifier,
-                pathModifier: pathModifier
-                    ? JSON.stringify(pathModifier)
-                    : null,
-                pathType:
-                    typeof path === "string"
-                        ? "string"
-                        : path?.constructor?.name,
-            });
-
             let modifiedPath = path;
 
             // Apply path modification if specified
@@ -1719,8 +1706,6 @@ export default class ExtrusionBuilder {
                 pathModifier &&
                 (pathModifier.offset !== undefined || pathModifier.cornerStyle)
             ) {
-                this.log.debug("Applying path modifier:", pathModifier);
-
                 modifiedPath = this._modifyPathWithOffset(
                     path,
                     pathModifier.offset || 0,
@@ -1728,15 +1713,8 @@ export default class ExtrusionBuilder {
                 );
 
                 if (!modifiedPath) {
-                    this.log.warn(
-                        "Path modification failed, using original path"
-                    );
                     modifiedPath = path;
-                } else {
-                    this.log.info("Path successfully modified");
                 }
-            } else {
-                this.log.debug("No path modifier specified or invalid");
             }
 
             let meshes = [];
@@ -1775,9 +1753,55 @@ export default class ExtrusionBuilder {
                 meshes.forEach((mesh) => {
                     mesh.position.z += appliedOffset;
                 });
-                this.log.debug(
-                    `Applied Z offset ${appliedOffset}mm (side=${side}) to ${meshes.length} meshes`
-                );
+            }
+
+            // Create path visualization if enabled (default: true)
+            const pathVisual = options.pathVisual !== false; // true by default
+            if (pathVisual) {
+                let visualCurve = null;
+
+                // If path is already a CurvePath, use it directly
+                if (modifiedPath instanceof THREE.CurvePath) {
+                    visualCurve = modifiedPath;
+                }
+                // If path is an SVG string, convert to 3D curve
+                else if (typeof modifiedPath === "string") {
+                    const pathCurves = this.parsePathToCurves(modifiedPath);
+                    if (pathCurves.length > 0) {
+                        const {
+                            partFrontX = 0,
+                            partFrontY = 0,
+                            partFrontWidth = 100,
+                            partFrontHeight = 100,
+                            depth = 0,
+                            panelThickness = 19,
+                            panelAnchor = "top-left",
+                        } = options;
+
+                        visualCurve = this.createCurveFromCurves(
+                            pathCurves,
+                            partFrontX,
+                            partFrontY,
+                            partFrontWidth,
+                            partFrontHeight,
+                            depth,
+                            panelThickness,
+                            panelAnchor
+                        );
+                    }
+                }
+
+                // Create and add path visualization
+                if (visualCurve) {
+                    const pathLine = this.createPathVisualization(
+                        visualCurve,
+                        color,
+                        side
+                    );
+                    if (pathLine) {
+                        meshes.unshift(pathLine); // Add line at the beginning
+                    }
+                }
             }
 
             return meshes;

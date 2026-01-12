@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
+import paper from "paper";
+import { PaperOffset } from "paperjs-offset";
 import BaseModule from "../core/BaseModule.js";
 import { LoggerFactory } from "../core/LoggerFactory.js";
 import eventBus from "../core/eventBus.js";
@@ -1202,20 +1204,6 @@ export default class ThreeModule extends BaseModule {
                         } segments`
                     );
 
-                    // Add path visualization for debugging
-                    const pathColor = isMainBit ? bit.color : "gray";
-                    const pathLine =
-                        this.extrusionBuilder.createPathVisualization(
-                            curve3D,
-                            pathColor,
-                            this.panelSide
-                        );
-                    if (pathLine) {
-                        pathLine.userData.bitIndex = bitIndex;
-                        pathLine.userData.pass = passIndex;
-                        this.bitPathMeshes.push(pathLine);
-                    }
-
                     // Create bit profile shape
                     const bitProfile =
                         await this.extrusionBuilder.createBitProfile(
@@ -1248,14 +1236,35 @@ export default class ThreeModule extends BaseModule {
                     );
 
                     // Create bit using unified constructor
-                    const bitMeshes = this.extrusionBuilder.extrudeAlongPath(
+                    // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
+                    const pathColor = isMainBit ? bit.color : "gray";
+                    const bitResult = this.extrusionBuilder.extrudeAlongPath(
                         bitProfile,
                         curve3D,
                         pathColor,
                         0, // zOffset = 0 for main bit
                         "mitered", // Sharp corners
-                        this.panelSide // Panel side: 'top' or 'bottom'
+                        this.panelSide, // Panel side: 'top' or 'bottom'
+                        { pathVisual: true } // Enable path visualization
                     );
+
+                    // Separate path line from meshes
+                    let bitMeshes = [];
+                    if (bitResult?.length > 0) {
+                        const firstItem = bitResult[0];
+                        if (
+                            firstItem instanceof THREE.Line ||
+                            firstItem.type === "Line"
+                        ) {
+                            const pathLine = firstItem;
+                            bitMeshes = bitResult.slice(1);
+                            pathLine.userData.bitIndex = bitIndex;
+                            pathLine.userData.pass = passIndex;
+                            this.bitPathMeshes.push(pathLine);
+                        } else {
+                            bitMeshes = bitResult;
+                        }
+                    }
 
                     // Create extension if needed
                     let extensionMeshes = [];
@@ -1273,15 +1282,29 @@ export default class ThreeModule extends BaseModule {
                         // Use depth variable from outer scope (already defined for this pass)
                         const bitDepth = depth || 0;
 
-                        extensionMeshes =
+                        const extensionResult =
                             this.extrusionBuilder.extrudeAlongPath(
                                 extensionProfile,
                                 curve3D,
                                 "#FF0000", // Red color for extensions
                                 bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                                 "mitered",
-                                this.panelSide // Panel side: 'top' or 'bottom'
+                                this.panelSide, // Panel side: 'top' or 'bottom'
+                                { pathVisual: false } // Disable path visualization for extensions
                             );
+
+                        // Separate path line from meshes (though pathVisual is false)
+                        if (extensionResult?.length > 0) {
+                            const firstItem = extensionResult[0];
+                            if (
+                                firstItem instanceof THREE.Line ||
+                                firstItem.type === "Line"
+                            ) {
+                                extensionMeshes = extensionResult.slice(1);
+                            } else {
+                                extensionMeshes = extensionResult;
+                            }
+                        }
 
                         // Style extension meshes
                         extensionMeshes.forEach((mesh) => {
@@ -1406,8 +1429,8 @@ export default class ThreeModule extends BaseModule {
                                 };
 
                                 // Extrude main bit using SVG path with modifier
-                                // Pass SVG path string directly, let extrudeAlongPath handle it
-                                const mainMeshes =
+                                // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
+                                const mainResult =
                                     this.extrusionBuilder.extrudeAlongPath(
                                         bitProfile,
                                         mainPathData, // SVG path string
@@ -1421,6 +1444,29 @@ export default class ThreeModule extends BaseModule {
                                             cornerStyle: "miter",
                                         }
                                     );
+
+                                // Separate path line from meshes
+                                let mainPathLine = null;
+                                let mainMeshes = [];
+                                if (mainResult?.length > 0) {
+                                    const firstItem = mainResult[0];
+                                    if (
+                                        firstItem instanceof THREE.Line ||
+                                        firstItem.type === "Line"
+                                    ) {
+                                        mainPathLine = firstItem;
+                                        mainMeshes = mainResult.slice(1);
+                                    } else {
+                                        mainMeshes = mainResult;
+                                    }
+                                }
+
+                                // Add path visualization if available
+                                if (mainPathLine) {
+                                    mainPathLine.userData.bitIndex = bitIndex;
+                                    mainPathLine.userData.isPOMain = true;
+                                    this.bitPathMeshes.push(mainPathLine);
+                                }
 
                                 // Add main bit meshes
                                 if (mainMeshes?.length > 0) {
@@ -1444,22 +1490,25 @@ export default class ThreeModule extends BaseModule {
                                     );
                                 }
 
+                                // Get phantom path data for later use (filler creation)
+                                let phantomPathData = null;
+
                                 // Extrude phantom bit only if pocketOffset > 0
                                 if (pocketOffset > 0 && phantomContour) {
-                                    const phantomPathData =
+                                    phantomPathData =
                                         phantomContour.pathData ||
                                         phantomContour.element?.getAttribute(
                                             "d"
                                         );
 
                                     if (phantomPathData) {
-                                        const phantomMeshes =
+                                        const phantomResult =
                                             this.extrusionBuilder.extrudeAlongPath(
                                                 bitProfile,
                                                 phantomPathData, // SVG path string
                                                 "rgba(255, 165, 0, 0.3)",
                                                 0,
-                                                "round",
+                                                "mitered",
                                                 this.panelSide,
                                                 transformOptions,
                                                 {
@@ -1467,6 +1516,36 @@ export default class ThreeModule extends BaseModule {
                                                     cornerStyle: "miter",
                                                 }
                                             );
+
+                                        // Separate path line from meshes
+                                        let phantomPathLine = null;
+                                        let phantomMeshes = [];
+                                        if (phantomResult?.length > 0) {
+                                            const firstItem = phantomResult[0];
+                                            if (
+                                                firstItem instanceof
+                                                    THREE.Line ||
+                                                firstItem.type === "Line"
+                                            ) {
+                                                phantomPathLine = firstItem;
+                                                phantomMeshes =
+                                                    phantomResult.slice(1);
+                                            } else {
+                                                phantomMeshes = phantomResult;
+                                            }
+                                        }
+
+                                        // Add path visualization if available
+                                        if (phantomPathLine) {
+                                            phantomPathLine.userData.bitIndex =
+                                                bitIndex;
+                                            phantomPathLine.userData.isPOPhantom = true;
+                                            phantomPathLine.material.transparent = true;
+                                            phantomPathLine.material.opacity = 0.5;
+                                            this.bitPathMeshes.push(
+                                                phantomPathLine
+                                            );
+                                        }
 
                                         // Add phantom bit meshes (semi-transparent)
                                         if (phantomMeshes?.length > 0) {
@@ -1508,6 +1587,53 @@ export default class ThreeModule extends BaseModule {
                                             : "main bit only"
                                     }`
                                 );
+
+                                // Create pocket filler if pocketWidth > diameter * 2
+                                const bitLength =
+                                    bit.bitData?.length ||
+                                    bit.bitData?.totalLength ||
+                                    20;
+                                if (
+                                    pocketWidth > diameter * 2 - 1 &&
+                                    phantomPathData
+                                ) {
+                                    const fillerMeshes =
+                                        await this.createPOPocketFiller(
+                                            bit,
+                                            bitIndex,
+                                            mainPathData,
+                                            phantomPathData,
+                                            diameter,
+                                            bitLength,
+                                            transformOptions
+                                        );
+
+                                    if (fillerMeshes?.length > 0) {
+                                        fillerMeshes.forEach((mesh) => {
+                                            mesh.userData.operation =
+                                                "subtract"; // Force subtract for CSG
+                                            mesh.userData.bitIndex = bitIndex;
+                                            mesh.userData.isPOFiller = true;
+                                            this.bitExtrudeMeshes.push(mesh);
+
+                                            if (
+                                                this.materialManager?.isEdgesEnabled()
+                                            ) {
+                                                this.materialManager.addEdgeVisualization(
+                                                    mesh
+                                                );
+                                            }
+                                        });
+                                    } else {
+                                        this.log.warn(
+                                            `PO bit ${bitIndex}: Filler creation returned empty array`
+                                        );
+                                    }
+                                } else if (pocketWidth > diameter * 2) {
+                                    this.log.warn(
+                                        `PO bit ${bitIndex}: Cannot create filler - phantomPathData is missing (pocketOffset=${pocketOffset})`
+                                    );
+                                }
                             }
                         }
                     } else {
@@ -1567,30 +1693,7 @@ export default class ThreeModule extends BaseModule {
             // Parse path to curves for visualization
             const pathCurves =
                 this.extrusionBuilder.parsePathToCurves(pathData);
-            if (pathCurves.length > 0) {
-                // Create 3D curve for path visualization
-                const pathCurve3D = this.extrusionBuilder.createCurveFromCurves(
-                    pathCurves,
-                    partFrontX,
-                    partFrontY,
-                    partFrontWidth,
-                    partFrontHeight,
-                    bitDepth,
-                    panelThickness,
-                    panelAnchor
-                );
-
-                // Add path visualization
-                const pathLine = this.extrusionBuilder.createPathVisualization(
-                    pathCurve3D,
-                    bit.color,
-                    this.panelSide
-                );
-                if (pathLine) {
-                    pathLine.userData.bitIndex = bitIndex;
-                    this.bitPathMeshes.push(pathLine);
-                }
-            }
+            // Path visualization is now handled by extrudeAlongPath with pathVisual=true by default
 
             // Create bit profile shape
             const bitProfile = await this.extrusionBuilder.createBitProfile(
@@ -1620,7 +1723,8 @@ export default class ThreeModule extends BaseModule {
             };
 
             // Create bit using unified constructor
-            const bitMeshes = this.extrusionBuilder.extrudeAlongPath(
+            // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
+            const bitResult = this.extrusionBuilder.extrudeAlongPath(
                 bitProfile,
                 pathData, // SVG path string (already with approximated arcs)
                 bit.color,
@@ -1629,6 +1733,23 @@ export default class ThreeModule extends BaseModule {
                 this.panelSide, // Panel side: 'top' or 'bottom'
                 transformOptions
             );
+
+            // Separate path line from meshes
+            let bitMeshes = [];
+            if (bitResult?.length > 0) {
+                const firstItem = bitResult[0];
+                if (
+                    firstItem instanceof THREE.Line ||
+                    firstItem.type === "Line"
+                ) {
+                    const pathLine = firstItem;
+                    bitMeshes = bitResult.slice(1);
+                    pathLine.userData.bitIndex = bitIndex;
+                    this.bitPathMeshes.push(pathLine);
+                } else {
+                    bitMeshes = bitResult;
+                }
+            }
 
             // Create extension if needed
             let extensionMeshes = [];
@@ -1643,15 +1764,28 @@ export default class ThreeModule extends BaseModule {
                         passExtensionInfo.height
                     );
 
-                extensionMeshes = this.extrusionBuilder.extrudeAlongPath(
+                const extensionResult = this.extrusionBuilder.extrudeAlongPath(
                     extensionProfile,
                     pathData,
                     "#FF0000", // Red color for extensions
                     bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                     "round",
                     this.panelSide, // Panel side: 'top' or 'bottom'
-                    transformOptions
+                    { ...transformOptions, pathVisual: false } // Disable path visualization for extensions
                 );
+
+                // Separate path line from meshes (though pathVisual is false)
+                if (extensionResult?.length > 0) {
+                    const firstItem = extensionResult[0];
+                    if (
+                        firstItem instanceof THREE.Line ||
+                        firstItem.type === "Line"
+                    ) {
+                        extensionMeshes = extensionResult.slice(1);
+                    } else {
+                        extensionMeshes = extensionResult;
+                    }
+                }
 
                 // Style extension meshes
                 extensionMeshes.forEach((mesh) => {
@@ -1716,6 +1850,309 @@ export default class ThreeModule extends BaseModule {
                     `Failed to create extrude mesh for bit ${bitIndex}`
                 );
             }
+        }
+    }
+
+    /**
+     * Create pocket filler mesh for PO operations (fills space between main and phantom)
+     * @param {object} bit - Bit object
+     * @param {number} bitIndex - Bit index
+     * @param {string} mainPathData - Main contour SVG path
+     * @param {string} phantomPathData - Phantom contour SVG path
+     * @param {number} diameter - Bit diameter
+     * @param {number} bitLength - Bit length/height
+     * @param {object} transformOptions - Coordinate transformation options
+     * @returns {Array<THREE.Mesh>} Array of filler meshes
+     */
+    async createPOPocketFiller(
+        bit,
+        bitIndex,
+        mainPathData,
+        phantomPathData,
+        diameter,
+        bitLength,
+        transformOptions
+    ) {
+        try {
+            // Create temporary paper.js scope
+            const tempCanvas = document.createElement("canvas");
+            const tempScope = new paper.PaperScope();
+            tempScope.setup(tempCanvas);
+
+            // Offset distances: inward for main, outward for phantom
+            const offsetDist = diameter / 2;
+
+            // Parse and offset main path (inward)
+            const mainPath = new tempScope.Path(mainPathData);
+            mainPath.closed = true;
+            const mainOffsetResult = PaperOffset.offset(mainPath, -offsetDist, {
+                join: "miter",
+                cap: "butt",
+                limit: 10,
+                insert: false,
+            });
+            const mainOffset = Array.isArray(mainOffsetResult)
+                ? mainOffsetResult[0]
+                : mainOffsetResult;
+
+            // Parse and offset phantom path (outward)
+            const phantomPath = new tempScope.Path(phantomPathData);
+            phantomPath.closed = true;
+            const phantomOffsetResult = PaperOffset.offset(
+                phantomPath,
+                offsetDist,
+                {
+                    join: "miter",
+                    cap: "butt",
+                    limit: 10,
+                    insert: false,
+                }
+            );
+            const phantomOffset = Array.isArray(phantomOffsetResult)
+                ? phantomOffsetResult[0]
+                : phantomOffsetResult;
+
+            if (!mainOffset || !phantomOffset) {
+                this.log.warn("Failed to create offset paths for filler");
+                mainPath.remove();
+                phantomPath.remove();
+                tempScope.remove();
+                tempCanvas.remove();
+                return [];
+            }
+
+            // Get SVG path data
+            let outerSVG = mainOffset.pathData;
+            let innerSVG = phantomOffset.pathData;
+
+            // Apply arc approximation if available
+            try {
+                const exportModule =
+                    window?.dependencyContainer?.get?.("export") ||
+                    window?.app?.container?.get?.("export");
+                if (exportModule) {
+                    const { approximatePath } = await import(
+                        "../utils/arcApproximation.js"
+                    );
+                    outerSVG =
+                        approximatePath(outerSVG, exportModule) || outerSVG;
+                    innerSVG =
+                        approximatePath(innerSVG, exportModule) || innerSVG;
+                }
+            } catch (e) {
+                this.log.debug("Arc approximation skipped for filler", e);
+            }
+
+            // Clean up paper.js objects
+            mainPath.remove();
+            phantomPath.remove();
+            mainOffset.remove();
+            phantomOffset.remove();
+            tempScope.remove();
+            tempCanvas.remove();
+
+            // Parse SVG paths to THREE.js curves and transform to 3D
+            const {
+                partFrontX,
+                partFrontY,
+                partFrontWidth,
+                partFrontHeight,
+                depth,
+                panelThickness,
+                panelAnchor,
+            } = transformOptions;
+
+            // Parse outer and inner paths to curves
+            const outerCurves =
+                this.extrusionBuilder.parsePathToCurves(outerSVG);
+            const innerCurves =
+                this.extrusionBuilder.parsePathToCurves(innerSVG);
+
+            if (!outerCurves?.length || !innerCurves?.length) {
+                this.log.warn("Failed to parse SVG paths to curves for filler");
+                return [];
+            }
+
+            // Convert 2D curves to 3D using proper coordinate transformation
+            const outerCurves3D = outerCurves
+                .map((curve) => {
+                    if (curve instanceof THREE.LineCurve3) {
+                        const v1 = this.extrusionBuilder.convertPoint2DTo3D(
+                            curve.v1.x,
+                            curve.v1.y,
+                            partFrontX,
+                            partFrontY,
+                            partFrontWidth,
+                            partFrontHeight,
+                            depth,
+                            panelThickness,
+                            panelAnchor
+                        );
+                        const v2 = this.extrusionBuilder.convertPoint2DTo3D(
+                            curve.v2.x,
+                            curve.v2.y,
+                            partFrontX,
+                            partFrontY,
+                            partFrontWidth,
+                            partFrontHeight,
+                            depth,
+                            panelThickness,
+                            panelAnchor
+                        );
+                        return new THREE.LineCurve3(v1, v2);
+                    }
+                    return null;
+                })
+                .filter((c) => c !== null);
+
+            const innerCurves3D = innerCurves
+                .map((curve) => {
+                    if (curve instanceof THREE.LineCurve3) {
+                        const v1 = this.extrusionBuilder.convertPoint2DTo3D(
+                            curve.v1.x,
+                            curve.v1.y,
+                            partFrontX,
+                            partFrontY,
+                            partFrontWidth,
+                            partFrontHeight,
+                            depth,
+                            panelThickness,
+                            panelAnchor
+                        );
+                        const v2 = this.extrusionBuilder.convertPoint2DTo3D(
+                            curve.v2.x,
+                            curve.v2.y,
+                            partFrontX,
+                            partFrontY,
+                            partFrontWidth,
+                            partFrontHeight,
+                            depth,
+                            panelThickness,
+                            panelAnchor
+                        );
+                        return new THREE.LineCurve3(v1, v2);
+                    }
+                    return null;
+                })
+                .filter((c) => c !== null);
+
+            // Build ordered 2D loops from 3D curves and enforce closure/orientation
+            const buildLoopPoints = (curves3D) => {
+                const pts = [];
+                if (!curves3D || curves3D.length === 0) return pts;
+                // seed with first point
+                let prev = curves3D[0].getPoint(0);
+                pts.push(new THREE.Vector2(prev.x, prev.y));
+                for (const c of curves3D) {
+                    const p = c.getPoint(1);
+                    // skip duplicate consecutive points
+                    if (p.x !== prev.x || p.y !== prev.y) {
+                        pts.push(new THREE.Vector2(p.x, p.y));
+                    }
+                    prev = p;
+                }
+                // explicitly close if not closed
+                const first = pts[0];
+                const last = pts[pts.length - 1];
+                if (first && (first.x !== last.x || first.y !== last.y)) {
+                    pts.push(new THREE.Vector2(first.x, first.y));
+                }
+                return pts;
+            };
+
+            const outerPts = buildLoopPoints(outerCurves3D);
+            const innerPts = buildLoopPoints(innerCurves3D);
+
+            if (!outerPts.length || !innerPts.length) {
+                this.log.warn("Failed to build filler loops: empty points");
+                return [];
+            }
+
+            // Ensure correct winding: outer CCW, inner CW
+            if (THREE.ShapeUtils.isClockWise(outerPts)) outerPts.reverse();
+            if (!THREE.ShapeUtils.isClockWise(innerPts)) innerPts.reverse();
+
+            // Construct shape with hole using Paths
+            const outerShape = new THREE.Shape(outerPts);
+            const innerPath = new THREE.Path(innerPts);
+            outerShape.holes = [innerPath];
+
+            // Create extrude geometry along Z axis (depth direction)
+            const extrudeDepth = bitLength;
+            const geometry = new THREE.ExtrudeGeometry(outerShape, {
+                depth: extrudeDepth,
+                bevelEnabled: false,
+                steps: 1,
+                curveSegments: 32,
+            });
+
+            // Compute vertex normals for proper face orientation
+            geometry.computeVertexNormals();
+
+            // Position geometry: start at bit depth (bit.y), extrude downward
+            // Z position calculation same as in convertPoint2DTo3D
+            let startZ;
+            if (panelAnchor === "top-left") {
+                startZ = -depth + panelThickness / 2;
+            } else if (panelAnchor === "bottom-left") {
+                startZ = -depth - panelThickness / 2;
+            } else {
+                startZ = depth;
+            }
+
+            // Translate geometry to start at bit depth
+            geometry.translate(0, 0, startZ);
+
+            // Create mesh
+            const material = new THREE.MeshStandardMaterial({
+                color: new THREE.Color("#FF6600"),
+                roughness: 0.5,
+                metalness: 0.2,
+                transparent: true,
+                opacity: 0.5,
+                side: THREE.DoubleSide,
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            return [mesh];
+        } catch (error) {
+            this.log.error("Error creating PO filler:", error);
+            return [];
+        }
+    }
+
+    /**
+     * Parse SVG path data to THREE.Shape
+     * @param {string} pathData - SVG path data
+     * @returns {THREE.Shape|null} THREE.Shape or null
+     */
+    parseSVGPathToShape(pathData) {
+        try {
+            // Create temporary SVG element
+            const svgNS = "http://www.w3.org/2000/svg";
+            const svg = document.createElementNS(svgNS, "svg");
+            const path = document.createElementNS(svgNS, "path");
+            path.setAttribute("d", pathData);
+            svg.appendChild(path);
+
+            // Use SVGLoader to parse
+            const loader = new SVGLoader();
+            const svgData = loader.parse(svg.outerHTML);
+
+            if (svgData && svgData.paths && svgData.paths.length > 0) {
+                const shapes = svgData.paths[0].toShapes(true);
+                if (shapes && shapes.length > 0) {
+                    return shapes[0];
+                }
+            }
+
+            return null;
+        } catch (error) {
+            this.log.error("Error parsing SVG to shape:", error);
+            return null;
         }
     }
 
