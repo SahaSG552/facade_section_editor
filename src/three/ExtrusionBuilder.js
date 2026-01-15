@@ -1937,7 +1937,7 @@ export default class ExtrusionBuilder {
             if (offset !== 0) {
                 this.log.debug("Applying offset:", { offset, cornerStyle });
 
-// PaperOffset expects outward positive; our negative means inward
+                // PaperOffset expects outward positive; our negative means inward
                 const offsetResult = PaperOffset.offset(paperPath, -offset, {
                     join:
                         cornerStyle === "round"
