@@ -1741,6 +1741,15 @@ export default class ExtrusionBuilder {
                         zOffset,
                     }
                 );
+            } else if (type === "mixed") {
+                // MIXED: Split profile, dual offsets, cap
+                meshes = this._extrudeMixed(
+                    profile,
+                    modifiedPath, // passed as is (string usually)
+                    color,
+                    side,
+                    options
+                );
             } else {
                 this.log.error(`Unknown extrusion type: ${type}`);
                 return [];
@@ -1928,7 +1937,7 @@ export default class ExtrusionBuilder {
             if (offset !== 0) {
                 this.log.debug("Applying offset:", { offset, cornerStyle });
 
-                // PaperOffset expects outward positive; our negative means inward
+// PaperOffset expects outward positive; our negative means inward
                 const offsetResult = PaperOffset.offset(paperPath, -offset, {
                     join:
                         cornerStyle === "round"
@@ -1938,8 +1947,10 @@ export default class ExtrusionBuilder {
                             ? "miter"
                             : "bevel",
                     cap: "butt",
-                    limit: 10,
+                    limit: 20, // Increased for more precise rounded corners
                     insert: false,
+                    tolerance: 1e-6, // Higher precision for corner calculations
+                    resolution: cornerStyle === "round" ? 128 : 64, // Higher resolution for round corners
                 });
 
                 // PaperOffset may return Path or array
@@ -2019,6 +2030,670 @@ export default class ExtrusionBuilder {
             this.log.error("Error in _modifySVGPathWithOffset:", error.message);
             return svgPathString;
         }
+    }
+
+    /**
+     * Internal: Create mixed extrusion (split profile on two offset paths)
+     * @private
+     */
+    _extrudeMixed(profile, path, color, side = "top", options = {}) {
+        try {
+            const bitDiameter = options.bitData?.diameter || 10;
+            const outerOffset = -bitDiameter / 2;
+            const innerOffset = bitDiameter / 2;
+
+            const cornerStyle = options.cornerStyle || "miter";
+
+            // 1. Prepare Paths
+            // Outer Path (Left/Outward offset)
+            let outerPath = this._modifyPathWithOffset(
+                path,
+                outerOffset,
+                cornerStyle
+            );
+            if (!outerPath) outerPath = path;
+
+            // Inner Path (Right/Inward offset)
+            let innerPath = this._modifyPathWithOffset(
+                path,
+                innerOffset,
+                cornerStyle
+            );
+            if (!innerPath) innerPath = path;
+
+            // 2. Prepare Profiles
+            // Split profile into Left (X<=0) and Right (X>=0) halves
+            // Profile is centered at X=0
+            const { left, right } = this._splitProfile(profile);
+
+            // User specification:
+            // - Left part of profile → outerOffset (outer path) with anchor at top-left
+            // - Right part of profile → innerOffset (inner path) with anchor at top-right
+
+            const leftProfileAligned = this._alignProfile(left, "top-left");
+            const rightProfileAligned = this._alignProfile(right, "top-right");
+
+            // User request: lift both profiles by bit length
+            const bitLength = options.bitData?.length || 0;
+            if (bitLength > 0) {
+                leftProfileAligned.forEach((p) => (p.y += bitLength));
+                rightProfileAligned.forEach((p) => (p.y += bitLength));
+            }
+
+            // 3. Extrude
+            // Reuse _extrudeMitered logic but pass explicit points array instead of shape
+            // We need to temporarily force _extrudeMitered to accept points...
+            // But _extrudeMitered calls createProfiledContourGeometry which we just updated!
+            // So we just need to pass the points array as 'profile'.
+
+            // Note: _extrudeMitered expects a "profile" argument.
+            // If we pass an array, we must ensure _extrudeMitered handles it.
+            // _extrudeMitered logic:
+            // const curveSegments = this.calculateAdaptiveCurveSegments(profile);
+            // const profileGeometry = new THREE.ShapeGeometry(profile, ...);
+            // This part in _extrudeMitered needs update or we bypass it.
+
+            // Better: Call createProfiledContourGeometry directly here.
+
+            const meshes = [];
+
+            // Helper to extrude points along path
+            // Helper to extrude points along path
+            const extrudePoints = (
+                points,
+                pathInput,
+                name,
+                overrideColor = null
+            ) => {
+                let contourPath;
+                let path3D;
+
+                // 1. Resolve Path (String vs CurvePath)
+                if (typeof pathInput === "string") {
+                    const pathCurves = this.parsePathToCurves(pathInput);
+                    if (pathCurves.length === 0) return null;
+
+                    const {
+                        partFrontX = 0,
+                        partFrontY = 0,
+                        partFrontWidth = 100,
+                        partFrontHeight = 100,
+                        depth = 0,
+                        panelThickness = 19,
+                        panelAnchor = { x: 0, y: 0 },
+                    } = options;
+
+                    path3D = this.createCurveFromCurves(
+                        pathCurves,
+                        partFrontX,
+                        partFrontY,
+                        partFrontWidth,
+                        partFrontHeight,
+                        depth,
+                        panelThickness,
+                        panelAnchor
+                    );
+                } else {
+                    // Assume already a 3D CurvePath
+                    path3D = pathInput;
+                }
+
+                if (!path3D || !path3D.curves) return null;
+
+                // Group curves (reuse logic)
+                const curveGroups = this.groupCurves(path3D.curves);
+                if (curveGroups.length === 0) return null;
+
+                // Merge to single contour for mitered
+                const mergedPath = new THREE.CurvePath();
+                curveGroups.forEach((g) =>
+                    g.curves.forEach((c) => mergedPath.add(c))
+                );
+
+                // Explicit segment count for consistent geometry structure
+                const segments = Math.max(
+                    64,
+                    Math.ceil(mergedPath.getLength() * 2)
+                );
+                const contourPoints = mergedPath.getPoints(segments);
+                const contour = contourPoints.map(
+                    (p) => new THREE.Vector3(p.x, p.y, p.z)
+                );
+
+                // Check closed
+                const isClosed =
+                    contour[0].distanceTo(contour[contour.length - 1]) < 0.01;
+                if (isClosed) contour.pop();
+
+                const geo = this.createProfiledContourGeometry(
+                    points,
+                    contour,
+                    isClosed,
+                    false,
+                    12,
+                    false, // invertCaps
+                    side
+                );
+
+                if (geo) {
+                    const m = new THREE.Mesh(
+                        geo,
+                        new THREE.MeshStandardMaterial({
+                            color: new THREE.Color(overrideColor || color),
+                            side: THREE.FrontSide,
+                        })
+                    );
+                    m.userData.isBitPart = true;
+                    m.userData.subPart = name;
+
+                    // Extract Edge Paths (naked edges of the open profile)
+                    // Geometry assumes grid structure: (pathSegments + 1) * profilePoints
+                    const edgePaths = [];
+                    const pos = geo.attributes.position;
+                    const numProfilePoints = points.length;
+                    const numPathPoints = contour.length; // contourPoints
+
+                    // There might be mismatch if createProfiledContourGeometry modifies counts, but usually it matches contour input size for 'mitered' style
+                    // However, getPoints(segments) returns segments+1 points.
+                    // contour array size is effectively the number of "rings".
+
+                    if (pos.count === numPathPoints * numProfilePoints) {
+                        const edge1Points = [];
+                        const edge2Points = [];
+
+                        for (let i = 0; i < numPathPoints; i++) {
+                            const idx1 = i * numProfilePoints; // First point of profile
+                            const idx2 =
+                                i * numProfilePoints + (numProfilePoints - 1); // Last point of profile
+
+                            edge1Points.push(
+                                new THREE.Vector3(
+                                    pos.getX(idx1),
+                                    pos.getY(idx1),
+                                    pos.getZ(idx1)
+                                )
+                            );
+                            edge2Points.push(
+                                new THREE.Vector3(
+                                    pos.getX(idx2),
+                                    pos.getY(idx2),
+                                    pos.getZ(idx2)
+                                )
+                            );
+                        }
+
+                        const ptsToPath = (pts) => {
+                            const p = new THREE.CurvePath();
+                            if (pts.length < 2) return p;
+
+                            // Filter duplicates/close points
+                            const cleanPts = [pts[0]];
+                            const threshold = 0.001;
+                            for (let k = 1; k < pts.length; k++) {
+                                if (
+                                    pts[k].distanceTo(
+                                        cleanPts[cleanPts.length - 1]
+                                    ) > threshold
+                                ) {
+                                    cleanPts.push(pts[k]);
+                                }
+                            }
+
+                            for (let k = 0; k < cleanPts.length - 1; k++) {
+                                p.add(
+                                    new THREE.LineCurve3(
+                                        cleanPts[k],
+                                        cleanPts[k + 1]
+                                    )
+                                );
+                            }
+                            return p;
+                        };
+
+                        edgePaths.push(ptsToPath(edge1Points));
+                        edgePaths.push(ptsToPath(edge2Points));
+                    }
+
+                    return { mesh: m, edgePaths, isPathClosed: isClosed };
+                }
+                return null;
+            };
+
+            // Extrude Right Profile (Outer)
+            const outerResult = extrudePoints(
+                rightProfileAligned,
+                outerPath,
+                "outer"
+            );
+            if (outerResult) {
+                meshes.push(outerResult.mesh);
+
+                // User Request: Visualize naked edges to verify correctness
+                if (
+                    outerResult.edgePaths &&
+                    outerResult.edgePaths.length === 2
+                ) {
+                    this.log.info("Visualizing outer edges...");
+
+                    // Visualize Start Edge (Point 0 of profile) - Red
+                    const line1 = this.createPathVisualization(
+                        outerResult.edgePaths[0],
+                        "#ff0000",
+                        side
+                    );
+                    if (line1) {
+                        line1.userData.isHelper = true;
+                        meshes.push(line1);
+                    }
+
+                    // Visualize End Edge (Last Point of profile) - Blue
+                    const line2 = this.createPathVisualization(
+                        outerResult.edgePaths[1],
+                        "#eeff00ff",
+                        side
+                    );
+                    if (line2) {
+                        line2.userData.isHelper = true;
+                        meshes.push(line2);
+                    }
+                }
+
+                // User Request: Extrude LEFT profile along the YELLOW edge (edgePaths[1])
+                // Also check for closure
+                if (
+                    outerResult.edgePaths &&
+                    outerResult.edgePaths.length === 2
+                ) {
+                    const yellowPath = outerResult.edgePaths[1]; // Second edge
+
+                    // Check closure
+                    // Use flag from outerResult or check distance
+                    if (outerResult.isPathClosed) {
+                        // For a closed path, the start and end points of the path itself should be close
+                        const start = yellowPath.getPointAt(0); // First point
+                        const end = yellowPath.getPointAt(1); // Last point (normalized parameter 1)
+                        if (start.distanceTo(end) > 0.01) {
+                            this.log.info("Closing yellow edge path loop");
+                            // If the path is meant to be closed but isn't, add a closing segment
+                            yellowPath.add(new THREE.LineCurve3(end, start));
+                        }
+                    }
+
+                    // DEBUG: Analyze yellow path points
+                    const debugPoints = yellowPath.getPoints(); // Note: getPoints uses default divisions (5) per curve usually, or we can pass count
+                    this.log.warn(
+                        `Yellow Path Analysis: Total Points from getPoints(): ${debugPoints.length}, Curves: ${yellowPath.curves.length}`
+                    );
+                    let anomalyCount = 0;
+                    for (let i = 0; i < debugPoints.length - 1; i++) {
+                        const d = debugPoints[i].distanceTo(debugPoints[i + 1]);
+                        if (d < 0.1) {
+                            // Check for somewhat close points
+                            anomalyCount++;
+                            if (anomalyCount <= 10) {
+                                this.log.warn(
+                                    `  Close points at idx ${i}: dist=${d.toFixed(
+                                        6
+                                    )}, p=${JSON.stringify(debugPoints[i])}`
+                                );
+                            }
+                        }
+                    }
+                    this.log.warn(
+                        `  Total close segments (< 0.1mm): ${anomalyCount}`
+                    );
+
+                    // Prepare Left Profile for Edge Extrusion
+                    // User Request: "change to opposite angle" - switching from bottom-left to top-right
+                    const leftProfileForEdge = this._alignProfile(
+                        left,
+                        "top-right"
+                    );
+
+                    // Apply bit length lift (same as before)
+                    if (bitLength > 0) {
+                        leftProfileForEdge.forEach((p) => (p.y += bitLength));
+                    }
+
+                    this.log.info(
+                        "Extruding left profile along yellow edge..."
+                    );
+                    const edgeMesh = extrudePoints(
+                        leftProfileForEdge,
+                        yellowPath,
+                        "edge_Left",
+                        color
+                    );
+                    if (edgeMesh) meshes.push(edgeMesh.mesh);
+                }
+            }
+
+            // Extrude Left Profile (Inner) - Original logic
+            // HIDDEN per user request: "let's make the left extrude invisible"
+            // const innerResult = extrudePoints(leftProfileAligned, innerPath, "inner");
+            // if (innerResult) meshes.push(innerResult.mesh);
+
+            // 4. Cap Geometry (Gap between top edges)
+            const capMesh = this._createCapMesh(
+                outerPath,
+                innerPath,
+                color,
+                side,
+                options
+            );
+            if (capMesh) meshes.push(capMesh);
+
+            return meshes;
+
+            return meshes;
+        } catch (e) {
+            this.log.error("Error in _extrudeMixed:", e);
+            return [];
+        }
+    }
+
+    /**
+     * Split profile into left (X<=0) and right (X>=0) halves
+     * Finds intersections with X=0 axis and splits profile correctly
+     */
+    _splitProfile(profileShape) {
+        // Get points from shape
+        let points;
+        if (Array.isArray(profileShape)) {
+            points = profileShape;
+        } else {
+            points = profileShape.getPoints(32);
+        }
+
+        const center = 0;
+        const tolerance = 1e-5;
+
+        // Find or calculate intersection points with X=0 axis
+        const intersections = [];
+
+        for (let i = 0; i < points.length; i++) {
+            const p1 = points[i];
+            const p2 = points[(i + 1) % points.length];
+
+            // Check if point is on axis
+            if (Math.abs(p1.x - center) <= tolerance) {
+                intersections.push({
+                    index: i,
+                    point: new THREE.Vector2(p1.x, p1.y),
+                    isExact: true,
+                });
+            }
+            // Check if segment crosses axis
+            else if (
+                (p1.x < center && p2.x > center) ||
+                (p1.x > center && p2.x < center)
+            ) {
+                // Calculate intersection point
+                const t = (center - p1.x) / (p2.x - p1.x);
+                const y = p1.y + t * (p2.y - p1.y);
+                intersections.push({
+                    index: i,
+                    point: new THREE.Vector2(center, y),
+                    isExact: false,
+                    afterIndex: i, // intersection is between i and i+1
+                });
+            }
+        }
+
+        this.log.info(
+            `Found ${intersections.length} intersections with X=0 axis`
+        );
+
+        // Need exactly 2 intersections for proper split
+        if (intersections.length !== 2) {
+            this.log.warn(
+                `Expected 2 intersections, found ${intersections.length}, using simple split`
+            );
+            // Fallback
+            const left = points
+                .filter((p) => p.x <= center + tolerance)
+                .map((p) => new THREE.Vector2(p.x, p.y));
+            const right = points
+                .filter((p) => p.x >= center - tolerance)
+                .map((p) => new THREE.Vector2(p.x, p.y));
+            return { left, right };
+        }
+
+        const int1 = intersections[0];
+        const int2 = intersections[1];
+
+        this.log.info(
+            `Intersection 1: index=${int1.index}, point=(${int1.point.x.toFixed(
+                3
+            )}, ${int1.point.y.toFixed(3)})`
+        );
+        this.log.info(
+            `Intersection 2: index=${int2.index}, point=(${int2.point.x.toFixed(
+                3
+            )}, ${int2.point.y.toFixed(3)})`
+        );
+
+        // Helper to collect points between two indices (inclusive of boundary logic)
+        const collectArc = (startInt, endInt) => {
+            const arcIsExactStart = startInt.isExact;
+            const arcIsExactEnd = endInt.isExact;
+
+            const startIdx = arcIsExactStart
+                ? startInt.index + 1
+                : startInt.afterIndex + 1;
+            const endIdx = arcIsExactEnd ? endInt.index : endInt.afterIndex + 1;
+
+            const arcPoints = [];
+
+            // Add start intersection
+            arcPoints.push(startInt.point);
+
+            // Traverse
+            let idx = startIdx;
+            let loopCount = 0;
+            const maxPoints = points.length + 5;
+
+            // Handle wrap-around traversal
+            while (loopCount < maxPoints) {
+                // Check if we reached the end index
+                // Note: handling wrap-around index matching is tricky because endIdx might be 0
+                // Use strict index comparison with modulo
+                const currentIdx = idx % points.length;
+
+                // If we hit the end index, stop
+                if (currentIdx === endIdx % points.length) break;
+
+                arcPoints.push(
+                    new THREE.Vector2(
+                        points[currentIdx].x,
+                        points[currentIdx].y
+                    )
+                );
+
+                idx++;
+                loopCount++;
+            }
+
+            // Add end intersection
+            arcPoints.push(endInt.point);
+
+            return arcPoints;
+        };
+
+        // Collect both arcs
+        // Arc 1: int1 -> int2
+        const arc1 = collectArc(int1, int2);
+
+        // Arc 2: int2 -> int1
+        const arc2 = collectArc(int2, int1);
+
+        // Determine which is Left and which is Right
+        // Calculate average X for each arc
+        const getAvgX = (arc) => {
+            if (arc.length === 0) return 0;
+            return arc.reduce((sum, p) => sum + p.x, 0) / arc.length;
+        };
+
+        const avgX1 = getAvgX(arc1);
+        const avgX2 = getAvgX(arc2);
+
+        let left, right;
+
+        if (avgX1 < avgX2) {
+            left = arc1;
+            right = arc2;
+        } else {
+            left = arc2;
+            right = arc1;
+        }
+
+        // User request: remove start point of left profile and end point of right profile
+        if (right.length > 0) right.shift();
+        if (left.length > 0) left.pop();
+
+        return { left, right };
+    }
+
+    /**
+     * Align profile points so the anchor is at (0,0)
+     * @param {Array<THREE.Vector2>} points
+     * @param {string} anchor "top-left", "top-right", "bottom-left", "bottom-right"
+     */
+    _alignProfile(points, anchor) {
+        if (!points || points.length === 0) return points;
+
+        let minX = Infinity,
+            maxX = -Infinity,
+            minY = Infinity,
+            maxY = -Infinity;
+        points.forEach((p) => {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        });
+
+        let anchorX = 0,
+            anchorY = 0;
+
+        if (anchor.includes("left")) anchorX = minX;
+        if (anchor.includes("right")) anchorX = maxX;
+        if (anchor.includes("top")) anchorY = maxY;
+        if (anchor.includes("bottom")) anchorY = minY;
+
+        return points.map(
+            (p) => new THREE.Vector2(p.x - anchorX, p.y - anchorY)
+        );
+    }
+
+    _createCapMesh(outerPathStr, innerPathStr, color, side, options) {
+        try {
+            // Parse paths to 2D points
+            const outerCurve = this.parsePathToCurves(outerPathStr);
+            const innerCurve = this.parsePathToCurves(innerPathStr);
+
+            // Get sampled points
+            // Use 2D logic first
+
+            const getPoints2D = (curves) => {
+                if (!curves || curves.length === 0) return [];
+                // Flatten curves to points
+                // This is a bit duplicating parseSVG, but we have curves now
+                const pts = [];
+                curves.forEach((c) => {
+                    const p = c.getPoints(10); // coarse sample
+                    p.forEach((v) => pts.push(new THREE.Vector2(v.x, v.y)));
+                });
+                return pts;
+            };
+
+            // ... actually parsePathToCurves produces 3D curves with Z=0
+            // We can just use them.
+
+            // Triangulate between two loops is tricky if they don't match point counts.
+            // But we can use ShapeGeometry with hole!
+
+            const outerPoints = this._getContourPoints(outerCurve);
+            const innerPoints = this._getContourPoints(innerCurve);
+
+            if (outerPoints.length < 3 || innerPoints.length < 3) return null;
+
+            const shape = new THREE.Shape(outerPoints);
+            const hole = new THREE.Path(innerPoints);
+            shape.holes.push(hole);
+
+            const geometry = new THREE.ShapeGeometry(shape);
+
+            // Now we need to transform this 2D geometry to 3D space on the panel
+            // shape is in SVG coordinates.
+            // We need convertPoint2DTo3D for every vertex.
+
+            const pos = geometry.attributes.position;
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i);
+                const y = pos.getY(i);
+
+                const v3 = this.convertPoint2DTo3D(
+                    x,
+                    y,
+                    options.partFrontX,
+                    options.partFrontY,
+                    options.partFrontWidth,
+                    options.partFrontHeight,
+                    options.depth, // depth? or 0?
+                    options.panelThickness,
+                    options.panelAnchor
+                );
+
+                // Recalculate v3 with depth=0 for the Cap.
+                const v3Surf = this.convertPoint2DTo3D(
+                    x,
+                    y,
+                    options.partFrontX,
+                    options.partFrontY,
+                    options.partFrontWidth,
+                    options.partFrontHeight,
+                    0, // Depth 0 = Surface
+                    options.panelThickness,
+                    options.panelAnchor
+                );
+
+                pos.setXYZ(i, v3Surf.x, v3Surf.y, v3Surf.z);
+            }
+
+            // Invert Z if side is bottom
+            if (side === "bottom") {
+                // The convertPoint2DTo3D handles basic Z.
+                // But we might need to flip normals?
+                // ShapeGeometry is XY plane.
+                // convert maps it to 3D.
+                // We should check winding.
+            }
+
+            geometry.computeVertexNormals();
+
+            const mesh = new THREE.Mesh(
+                geometry,
+                new THREE.MeshStandardMaterial({
+                    color: color,
+                    side: THREE.FrontSide,
+                })
+            );
+            mesh.userData.isCap = true;
+            return mesh;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    _getContourPoints(curvePath) {
+        if (!curvePath) return [];
+        // Approximate
+        // We need a smooth loop.
+        const len = curvePath.getLength();
+        const segments = Math.max(20, Math.ceil(len / 2));
+        const points = curvePath.getPoints(segments);
+        return points.map((p) => new THREE.Vector2(p.x, p.y));
     }
 
     /**
@@ -2467,6 +3142,7 @@ export default class ExtrusionBuilder {
                 openEnded,
                 curveSegments,
                 side,
+                isProfileArray: Array.isArray(profileShape),
             });
 
             const flags = this._getGeometryTransformFlags(side, false);
@@ -2476,10 +3152,31 @@ export default class ExtrusionBuilder {
                 contour = contour.map((p) => new THREE.Vector3(p.x, p.y, -p.z));
             }
 
-            let profileGeometry = new THREE.ShapeGeometry(
-                profileShape,
-                curveSegments
-            );
+            let profileGeometry;
+            if (Array.isArray(profileShape)) {
+                // Handle array of Vector2 points directly
+                const points = profileShape;
+                const vertices = [];
+                points.forEach((p) => vertices.push(p.x, p.y, 0));
+                profileGeometry = new THREE.BufferGeometry();
+                profileGeometry.setAttribute(
+                    "position",
+                    new THREE.Float32BufferAttribute(vertices, 3)
+                );
+                // Mark as open profile if first/last points don't match
+                const first = points[0];
+                const last = points[points.length - 1];
+                if (first.distanceTo(last) > 0.001) {
+                    profileGeometry.userData.isOpenProfile = true;
+                }
+            } else {
+                // Original logic for THREE.Shape
+                profileGeometry = new THREE.ShapeGeometry(
+                    profileShape,
+                    curveSegments
+                );
+            }
+
             profileGeometry.rotateX(Math.PI * 0.5);
 
             // Apply profile rotation if needed (for bottom side)
@@ -2595,10 +3292,30 @@ export default class ExtrusionBuilder {
             );
             let index = [];
 
+            // Check if profile is open (from userData or check points)
+            // Existing logic uses profile array from geometry
+            const profilePos = profileGeometry.attributes.position;
+            const pFirst = new THREE.Vector3(
+                profilePos.getX(0),
+                profilePos.getY(0),
+                profilePos.getZ(0)
+            );
+            const pLast = new THREE.Vector3(
+                profilePos.getX(profilePos.count - 1),
+                profilePos.getY(profilePos.count - 1),
+                profilePos.getZ(profilePos.count - 1)
+            );
+            const profileClosed = pFirst.distanceTo(pLast) < 0.001;
+
             let lastCorner =
                 contourClosed == false ? contour.length - 1 : contour.length;
             for (let i = 0; i < lastCorner; i++) {
-                for (let j = 0; j < profile.count; j++) {
+                // If profile is open, don't wrap last segment
+                const lastProfileSegment = profileClosed
+                    ? profile.count
+                    : profile.count - 1;
+
+                for (let j = 0; j < lastProfileSegment; j++) {
                     let currCorner = i;
                     let nextCorner = i + 1 == contour.length ? 0 : i + 1;
                     let currPoint = j;

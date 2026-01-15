@@ -1238,14 +1238,27 @@ export default class ThreeModule extends BaseModule {
                     // Create bit using unified constructor
                     // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
                     const pathColor = isMainBit ? bit.color : "gray";
+                    // VC uses MITERED extrusion (sharp corners)
+                    // Use mixed extrusion for better profile handling
                     const bitResult = this.extrusionBuilder.extrudeAlongPath(
                         bitProfile,
-                        curve3D,
+                        contourPathData, // Use string path for mixed extrusion (required for offsets)
                         pathColor,
                         0, // zOffset = 0 for main bit
-                        "mitered", // Sharp corners
+                        "mitered", // Use mixed method
                         this.panelSide, // Panel side: 'top' or 'bottom'
-                        { pathVisual: true } // Enable path visualization
+                        {
+                            pathVisual: true,
+                            cornerStyle: "miter",
+                            bitData: bit.bitData,
+                            partFrontX,
+                            partFrontY,
+                            partFrontWidth,
+                            partFrontHeight,
+                            depth,
+                            panelThickness,
+                            panelAnchor,
+                        }
                     );
 
                     // Separate path line from meshes
@@ -1430,18 +1443,20 @@ export default class ThreeModule extends BaseModule {
 
                                 // Extrude main bit using SVG path with modifier
                                 // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
+                                // Extrude main bit using SVG path with modifier
+                                // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
                                 const mainResult =
                                     this.extrusionBuilder.extrudeAlongPath(
                                         bitProfile,
                                         mainPathData, // SVG path string
                                         bit.color || "#cccccc",
                                         0,
-                                        "round",
+                                        "mixed", // Use mixed method
                                         this.panelSide,
                                         transformOptions,
                                         {
-                                            offset: 5, // Apply -5mm offset to SVG path
-                                            cornerStyle: "miter",
+                                            offset: diameter / 2,
+                                            cornerStyle: "round",
                                         }
                                     );
 
@@ -1508,11 +1523,11 @@ export default class ThreeModule extends BaseModule {
                                                 phantomPathData, // SVG path string
                                                 "rgba(255, 165, 0, 0.3)",
                                                 0,
-                                                "mitered",
+                                                "mixed",
                                                 this.panelSide,
                                                 transformOptions,
                                                 {
-                                                    offset: -5, // Apply -5mm offset to SVG path
+                                                    offset: -diameter / 2,
                                                     cornerStyle: "miter",
                                                 }
                                             );
@@ -1733,14 +1748,20 @@ export default class ThreeModule extends BaseModule {
 
             // Create bit using unified constructor
             // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
+            // Create bit using unified constructor
+            // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
             const bitResult = this.extrusionBuilder.extrudeAlongPath(
                 bitProfile,
                 pathData, // SVG path string (already with approximated arcs)
                 bit.color,
                 0, // zOffset = 0 for main bit
-                "round", // Lathe-filled corners
+                "round", // Use mixed method
                 this.panelSide, // Panel side: 'top' or 'bottom'
-                transformOptions
+                {
+                    ...transformOptions,
+                    bitData: bit.bitData,
+                    cornerStyle: "round",
+                } // Default behavior was Round. Pass round corner style.
             );
 
             // Separate path line from meshes
