@@ -284,6 +284,14 @@ export default class ExtrusionBuilder {
         // Can be changed from console: extrusionBuilder.arcDivisionCoefficient = 5
         this.arcDivisionCoefficient = 5; // 1 sample point per 5mm of arc length
 
+        // Precision improvements for createProfiledContourGeometry
+        // Miter limit: maximum allowed miter length to prevent extreme spikes
+        this.miterLimit = 10.0;
+        // Epsilon: minimum gap for numerical stability
+        this.epsilon = 1e-10;
+        // Angle epsilon: threshold in radians (about 0.0001 degrees)
+        this.angleEpsilon = 1.745e-6;
+
         this.log.info("Created");
     }
 
@@ -3204,7 +3212,24 @@ export default class ExtrusionBuilder {
                     contour[i + 1 == contour.length ? 0 : i + 1],
                     contour[i]
                 );
+
+                // PRECISION IMPROVEMENT: Normalize vectors for numerical stability
+                // This ensures consistent angle calculations regardless of segment lengths
+                const v1Len = v1.length();
+                const v2Len = v2.length();
+                if (v1Len > this.epsilon) v1.normalize();
+                if (v2Len > this.epsilon) v2.normalize();
+
+                // PRECISION IMPROVEMENT: Clamp angle to handle near-straight lines
+                // Prevents numerical instability when angle is very close to 0 or 2*PI
                 let angle = v2.angle() - v1.angle();
+                if (Math.abs(angle) < this.angleEpsilon) {
+                    angle = 0;
+                }
+                // Normalize angle to [-PI, PI] range for consistent behavior
+                if (angle > Math.PI) angle -= Math.PI * 2;
+                if (angle < -Math.PI) angle += Math.PI * 2;
+
                 let halfAngle = angle * 0.5;
 
                 let hA = halfAngle;
@@ -3218,7 +3243,11 @@ export default class ExtrusionBuilder {
                     }
                 }
 
+                // PRECISION IMPROVEMENT: Clamp miter shift to prevent extreme values
+                // When miter angle approaches 90 degrees (PI/2), tan() becomes very large
+                // This can cause vertices to shoot off to infinity
                 let shift = Math.tan(hA - Math.PI * 0.5);
+                shift = Math.max(-this.miterLimit, Math.min(this.miterLimit, shift));
                 let shiftMatrix = new THREE.Matrix4().set(
                     1,
                     0,
@@ -4049,6 +4078,366 @@ export default class ExtrusionBuilder {
             this.log.error("Error checking mesh watertight:", error.message);
             return false;
         }
+    }
+
+    /**
+     * Clamp miter value to prevent extreme values
+     * @private
+     */
+    _clampMiter(value) {
+        return Math.max(-this.miterLimit, Math.min(this.miterLimit, value));
+    }
+
+    /**
+     * Normalize angle to range [-PI, PI]
+     * @private
+     */
+    _normalizeAngle(angle) {
+        while (angle > Math.PI) angle -= Math.PI * 2;
+        while (angle < -Math.PI) angle += Math.PI * 2;
+        return angle;
+    }
+
+    /**
+     * Calculate safe angle between two vectors with epsilon check
+     * @private
+     */
+    _safeAngleBetween(v1, v2) {
+        const v1Len = v1.length();
+        const v2Len = v2.length();
+
+        if (v1Len < this.epsilon || v2Len < this.epsilon) {
+            return 0;
+        }
+
+        v1 = v1.clone().normalize();
+        v2 = v2.clone().normalize();
+
+        let angle = Math.atan2(v2.y, v2.x) - Math.atan2(v1.y, v1.x);
+
+        if (Math.abs(angle) < this.angleEpsilon) {
+            return 0;
+        }
+
+        return this._normalizeAngle(angle);
+    }
+
+    /**
+     * Analyze geometry for gaps and discontinuities
+     * @public
+     */
+    analyzeGeometryGaps(geometry, profileCount, contourCount) {
+        if (!geometry || !geometry.attributes.position) {
+            return { error: "Invalid geometry" };
+        }
+
+        const positions = geometry.attributes.position.array;
+        const tolerance = 0.01;
+        let maxGap = 0;
+        let gapCount = 0;
+        let totalGapDistance = 0;
+        const gaps = [];
+
+        for (let i = 0; i < contourCount; i++) {
+            const nextIdx = (i + 1) % contourCount;
+
+            const currX = positions[i * profileCount * 3];
+            const currY = positions[i * profileCount * 3 + 1];
+            const currZ = positions[i * profileCount * 3 + 2];
+
+            const nextX = positions[nextIdx * profileCount * 3];
+            const nextY = positions[nextIdx * profileCount * 3 + 1];
+            const nextZ = positions[nextIdx * profileCount * 3 + 2];
+
+            const gap = Math.sqrt(
+                Math.pow(nextX - currX, 2) +
+                Math.pow(nextY - currY, 2) +
+                Math.pow(nextZ - currZ, 2)
+            );
+
+            if (gap > tolerance) {
+                gapCount++;
+                totalGapDistance += gap;
+                gaps.push({
+                    fromIndex: i,
+                    toIndex: nextIdx,
+                    gap: gap,
+                    position: { x: currX, y: currY, z: currZ }
+                });
+
+                if (gap > maxGap) {
+                    maxGap = gap;
+                }
+            }
+        }
+
+        const firstX = positions[0];
+        const firstY = positions[1];
+        const firstZ = positions[2];
+        const lastStartIdx = (contourCount - 1) * profileCount * 3;
+        const lastX = positions[lastStartIdx];
+        const lastY = positions[lastStartIdx + 1];
+        const lastZ = positions[lastStartIdx + 2];
+        const closureGap = Math.sqrt(
+            Math.pow(firstX - lastX, 2) +
+            Math.pow(firstY - lastY, 2) +
+            Math.pow(firstZ - lastZ, 2)
+        );
+
+        const analysis = {
+            maxGap,
+            gapCount,
+            avgGap: gapCount > 0 ? totalGapDistance / gapCount : 0,
+            totalGapDistance,
+            closureGap,
+            tolerance,
+            hasGaps: gapCount > 0,
+            isClosed: closureGap < tolerance * 2,
+            gaps: gaps.slice(0, 10)
+        };
+
+        return analysis;
+    }
+
+    /**
+     * Test extrusion precision with problematic scenario
+     * @public
+     */
+    testPrecision(profileWidth = 20, profileHeight = 10, arcRadius = null) {
+        this.log.info(`Testing extrusion precision with:`, {
+            profileWidth,
+            profileHeight,
+            arcRadius: arcRadius || profileWidth
+        });
+
+        const profileShape = new THREE.Shape();
+        profileShape.moveTo(0, 0);
+        profileShape.lineTo(profileWidth, 0);
+        profileShape.lineTo(profileWidth, profileHeight);
+        profileShape.lineTo(0, profileHeight);
+        profileShape.lineTo(0, 0);
+
+        const radius = arcRadius !== null ? arcRadius : profileWidth;
+        const arcLength = Math.PI * radius * 0.5;
+
+        const contour = [
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(50, 0, 0),
+            new THREE.Vector3(50 + radius, radius, 0),
+            new THREE.Vector3(50, 2 * radius, 0),
+            new THREE.Vector3(0, 2 * radius, 0)
+        ];
+
+        const arcSegments = 32;
+        const detailedContour = [];
+        detailedContour.push(contour[0]);
+        detailedContour.push(contour[1]);
+
+        for (let i = 0; i <= arcSegments; i++) {
+            const t = i / arcSegments;
+            const angle = 0 + (Math.PI / 2) * t;
+            const x = 50 + radius * Math.cos(angle);
+            const y = radius + radius * Math.sin(angle);
+            detailedContour.push(new THREE.Vector3(x, y, 0));
+        }
+
+        detailedContour.push(contour[3]);
+        detailedContour.push(contour[4]);
+
+        const geometry = this.createProfiledContourGeometry(
+            profileShape,
+            detailedContour,
+            false,
+            true,
+            32,
+            false,
+            "top"
+        );
+
+        const analysis = this.analyzeGeometryGaps(
+            geometry,
+            4,
+            detailedContour.length
+        );
+
+        this.log.info(`Precision test results:`, analysis);
+
+        const material = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            wireframe: true
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+
+        return {
+            geometry,
+            analysis,
+            mesh,
+            profileShape,
+            contour: detailedContour
+        };
+    }
+
+    /**
+     * Get current precision settings for console debugging
+     * @public
+     */
+    getPrecisionInfo() {
+        return {
+            miterLimit: this.miterLimit,
+            description: "Maximum allowed miter shift (prevents extreme spikes)",
+            epsilon: this.epsilon,
+            angleEpsilon: this.angleEpsilon,
+            descriptionEpsilon: "Minimum angle in radians to treat as straight line",
+            examples: {
+                "Angle 0.01°": (0.01 * Math.PI / 180).toFixed(10),
+                "Angle 0.001°": (0.001 * Math.PI / 180).toFixed(10),
+                "Current threshold": this.angleEpsilon.toFixed(10)
+            },
+            commands: [
+                `window.extrusionBuilder.miterLimit = ${this.miterLimit}`,
+                `window.extrusionBuilder.angleEpsilon = ${this.angleEpsilon}`,
+                `window.extrusionBuilder.testPrecision()`
+            ]
+        };
+    }
+
+    /**
+     * Compute curvature information for each point in a contour
+     * @private
+     */
+    _computeContourCurvature(contour, contourClosed, curvatureThreshold = 1000) {
+        const curvatureData = [];
+
+        for (let i = 0; i < contour.length; i++) {
+            const idxPrev = (i - 1 + contour.length) % contour.length;
+            const idxNext = (i + 1) % contour.length;
+            const idxNextNext = (i + 2) % contour.length;
+
+            const pPrev = contour[idxPrev];
+            const pCurr = contour[i];
+            const pNext = contour[idxNext];
+            const pNextNext = contour[idxNextNext];
+
+            const x0 = pPrev.x, y0 = pPrev.y;
+            const x1 = pCurr.x, y1 = pCurr.y;
+            const x2 = pNext.x, y2 = pNext.y;
+
+            const result = this._circleThroughThreePoints(x0, y0, x1, y1, x2, y2);
+
+            if (!result || result.radius === Infinity || result.radius > curvatureThreshold) {
+                curvatureData.push({
+                    isArc: false,
+                    curvature: 0,
+                    radius: Infinity,
+                    center: new THREE.Vector2(x1, y1),
+                    tangent: new THREE.Vector2(x2 - x0, y2 - y0).normalize(),
+                    normal: new THREE.Vector2(-(y2 - y0), x2 - x0).normalize()
+                });
+            } else {
+                curvatureData.push({
+                    isArc: true,
+                    curvature: 1.0 / result.radius,
+                    radius: result.radius,
+                    center: result.center,
+                    tangent: this._arcTangentAtPoint(result.center, result.radius, new THREE.Vector2(x1, y1), new THREE.Vector2(x2, y2)),
+                    normal: this._arcNormalAtPoint(result.center, result.radius, new THREE.Vector2(x1, y1))
+                });
+            }
+        }
+
+        return curvatureData;
+    }
+
+    /**
+     * Compute circle that passes through three points
+     * @private
+     */
+    _circleThroughThreePoints(x0, y0, x1, y1, x2, y2) {
+        const x01 = x1 - x0;
+        const y01 = y1 - y0;
+        const x12 = x2 - x1;
+        const y12 = y2 - y1;
+
+        const mx01 = (x0 + x1) / 2;
+        const my01 = (y0 + y1) / 2;
+        const mx12 = (x1 + x2) / 2;
+        const my12 = (y1 + y2) / 2;
+
+        let a01, b01, a12, b12;
+
+        if (Math.abs(y01) < this.epsilon) {
+            a01 = 0; b01 = 1;
+        } else if (Math.abs(x01) < this.epsilon) {
+            a01 = 1; b01 = 0;
+        } else {
+            a01 = x01 / y01;
+            b01 = my01 - a01 * mx01;
+        }
+
+        if (Math.abs(y12) < this.epsilon) {
+            a12 = 0; b12 = 1;
+        } else if (Math.abs(x12) < this.epsilon) {
+            a12 = 1; b12 = 0;
+        } else {
+            a12 = x12 / y12;
+            b12 = my12 - a12 * mx12;
+        }
+
+        if (Math.abs(a01 - a12) < this.epsilon && Math.abs(b01 - b12) < this.epsilon) {
+            return null;
+        }
+
+        const denom = a12 - a01;
+        if (Math.abs(denom) < this.epsilon) {
+            return null;
+        }
+
+        const cx = (b12 - b01) / denom;
+        const cy = (a01 * b12 - a12 * b01) / denom;
+
+        const radius = Math.sqrt(Math.pow(x1 - cx, 2) + Math.pow(y1 - cy, 2));
+
+        if (radius < this.epsilon || !isFinite(radius)) {
+            return null;
+        }
+
+        return {
+            center: new THREE.Vector2(cx, cy),
+            radius: radius
+        };
+    }
+
+    /**
+     * Compute tangent vector at a point on an arc
+     * @private
+     */
+    _arcTangentAtPoint(center, radius, p1, p2) {
+        const radiusVec = new THREE.Vector2().subVectors(p1, center);
+        const radiusLen = radiusVec.length();
+
+        if (radiusLen < this.epsilon) {
+            return new THREE.Vector2().subVectors(p2, p1).normalize();
+        }
+
+        const toNext = new THREE.Vector2().subVectors(p2, p1).normalize();
+        const cross = radiusVec.x * toNext.y - radiusVec.y * toNext.x;
+
+        let tangent = new THREE.Vector2(-radiusVec.y, radiusVec.x).normalize();
+
+        if (cross < 0) {
+            tangent = new THREE.Vector2(radiusVec.y, -radiusVec.x).normalize();
+        }
+
+        return tangent;
+    }
+
+    /**
+     * Compute normal vector pointing toward curvature center at a point
+     * @private
+     */
+    _arcNormalAtPoint(center, radius, point) {
+        const normal = new THREE.Vector2().subVectors(center, point);
+        return normal.normalize();
     }
 
     /**

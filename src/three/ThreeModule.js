@@ -1245,7 +1245,7 @@ export default class ThreeModule extends BaseModule {
                         contourPathData, // Use string path for mixed extrusion (required for offsets)
                         pathColor,
                         0, // zOffset = 0 for main bit
-                        "mitered", // Use mixed method
+                        "mixed", // Use mixed method
                         this.panelSide, // Panel side: 'top' or 'bottom'
                         {
                             pathVisual: true,
@@ -1755,7 +1755,7 @@ export default class ThreeModule extends BaseModule {
                 pathData, // SVG path string (already with approximated arcs)
                 bit.color,
                 0, // zOffset = 0 for main bit
-                "round", // Use mixed method
+                "mixed", // Use mixed method
                 this.panelSide, // Panel side: 'top' or 'bottom'
                 {
                     ...transformOptions,
