@@ -17,6 +17,8 @@ import { PaperOffset } from "paperjs-offset";
 
 import LoggerFactory from "../core/LoggerFactory.js";
 import { approximatePath } from "../utils/arcApproximation.js";
+import { getRepairInstance } from "../utils/meshRepair.js";
+import { appConfig } from "../config/AppConfig.js";
 
 // Add three-mesh-bvh extensions to BufferGeometry
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -587,146 +589,6 @@ export default class ExtrusionBuilder {
                 100 / coefficient,
             )} samples per 100mm)`,
         );
-    }
-
-    /**
-     * Convert segments from ExportModule parser to THREE.js curves
-     * DEPRECATED: Not used in current implementation
-     * @private
-     */
-    _segmentsToCurves_UNUSED(
-        segments,
-        offsetX = 0,
-        offsetY = 0,
-        transformY = null,
-    ) {
-        const curves = [];
-
-        // Helper to get point coordinates
-        const getPoint = (pt) => {
-            if (!pt) return new THREE.Vector3(0, 0, 0);
-            const x = (pt.x || pt.X || 0) + offsetX;
-            const y = transformY
-                ? transformY((pt.y || pt.Y || 0) + offsetY)
-                : (pt.y || pt.Y || 0) + offsetY;
-            return new THREE.Vector3(x, y, 0);
-        };
-
-        for (const segment of segments) {
-            if (segment.type === "arc") {
-                // Всегда аппроксимируем дугу через точки (polyline), чтобы не было линий вместо дуг
-                const start = getPoint(segment.start);
-                const end = getPoint(segment.end);
-                let arcPoints = [];
-                // Если есть параметры центра и радиуса — строим дугу по окружности
-                if (segment.arc && (segment.arc.radius || segment.arc.rx)) {
-                    const arc = segment.arc;
-                    const centerX = (arc.cx || arc.centerX || 0) + offsetX;
-                    const centerY = transformY
-                        ? transformY((arc.cy || arc.centerY || 0) + offsetY)
-                        : (arc.cy || arc.centerY || 0) + offsetY;
-                    const radius = arc.radius || arc.rx;
-                    // Определяем углы
-                    const startAngle = Math.atan2(
-                        start.y - centerY,
-                        start.x - centerX,
-                    );
-                    const endAngle = Math.atan2(
-                        end.y - centerY,
-                        end.x - centerX,
-                    );
-                    // sweepFlag: 1 = по часовой, 0 = против
-                    let sweep = arc.sweepFlag !== undefined ? arc.sweepFlag : 1;
-                    // largeArcFlag: 1 = >180°, 0 = <180°
-                    let largeArc =
-                        arc.largeArcFlag !== undefined ? arc.largeArcFlag : 0;
-                    // Вычисляем угол дуги
-                    let delta = endAngle - startAngle;
-                    if (sweep === 1 && delta < 0) delta += Math.PI * 2;
-                    if (sweep === 0 && delta > 0) delta -= Math.PI * 2;
-                    if (!largeArc && Math.abs(delta) > Math.PI) {
-                        delta += delta > 0 ? -Math.PI * 2 : Math.PI * 2;
-                    }
-                    if (largeArc && Math.abs(delta) < Math.PI) {
-                        delta += delta > 0 ? Math.PI * 2 : -Math.PI * 2;
-                    }
-                    // Сэмплируем дугу через точки
-                    const numPoints = Math.max(
-                        16,
-                        Math.ceil((Math.abs(delta) * radius) / 2),
-                    );
-                    for (let i = 0; i <= numPoints; i++) {
-                        const t = i / numPoints;
-                        const angle = startAngle + delta * t;
-                        arcPoints.push(
-                            new THREE.Vector3(
-                                centerX + radius * Math.cos(angle),
-                                centerY + radius * Math.sin(angle),
-                                0,
-                            ),
-                        );
-                    }
-                } else {
-                    // Если нет центра/радиуса — просто линейная аппроксимация
-                    arcPoints = [start, end];
-                }
-                // Добавляем polyline как набор LineCurve3
-                for (let i = 1; i < arcPoints.length; i++) {
-                    curves.push(
-                        new THREE.LineCurve3(arcPoints[i - 1], arcPoints[i]),
-                    );
-                }
-            } else if (segment.type === "bezier") {
-                const start = getPoint(segment.start);
-                const cp1 = getPoint(segment.cp1);
-                const cp2 = getPoint(segment.cp2);
-                const end = getPoint(segment.end);
-
-                if (
-                    !isNaN(start.x) &&
-                    !isNaN(start.y) &&
-                    !isNaN(cp1.x) &&
-                    !isNaN(cp1.y) &&
-                    !isNaN(cp2.x) &&
-                    !isNaN(cp2.y) &&
-                    !isNaN(end.x) &&
-                    !isNaN(end.y)
-                ) {
-                    curves.push(
-                        new THREE.CubicBezierCurve3(start, cp1, cp2, end),
-                    );
-                } else {
-                    this.log.warn("Skipping bezier with NaN coordinates:", {
-                        start,
-                        cp1,
-                        cp2,
-                        end,
-                    });
-                }
-            } else {
-                // Default: treat as line
-                const start = getPoint(segment.start);
-                const end = getPoint(segment.end);
-                if (
-                    !isNaN(start.x) &&
-                    !isNaN(start.y) &&
-                    !isNaN(end.x) &&
-                    !isNaN(end.y)
-                ) {
-                    curves.push(new THREE.LineCurve3(start, end));
-                } else {
-                    this.log.warn("Skipping line with NaN coordinates:", {
-                        start,
-                        end,
-                    });
-                }
-            }
-        }
-
-        this.log.debug(
-            `Converted ${segments.length} segments to ${curves.length} THREE.js curves`,
-        );
-        return curves;
     }
 
     /**
@@ -2534,13 +2396,6 @@ export default class ExtrusionBuilder {
     }
 
     /**
-     * Internal: Create sweep extrusion (single continuous sweep with parallel transport)
-     * Uses open half-profile points (left/right) and does NOT create separate lathe meshes
-     * @private
-     * @deprecated UNUSED - use _extrudeRoundHalf instead
-     */
-
-    /**
      * Calculate geometry transformation flags based on side and extension type
      * @private
      */
@@ -3052,7 +2907,7 @@ export default class ExtrusionBuilder {
 
             // Rotate to match orientation (Z becomes height axis)
             finalGeometry.rotateX(Math.PI / 2);
-            
+
             // Compute normals for proper lighting
             finalGeometry.computeVertexNormals();
             finalGeometry.normalizeNormals();
@@ -3733,9 +3588,23 @@ export default class ExtrusionBuilder {
                 });
             }
 
+            // Apply mesh repair if enabled (post-extrusion validation)
+            let finalGeometry = weldedGeometry;
+            if (appConfig.meshRepair.enabled) {
+                const repairInstance = getRepairInstance(appConfig.meshRepair);
+                finalGeometry = repairInstance.repairAndValidate(
+                    weldedGeometry,
+                    {
+                        repairLevel: appConfig.meshRepair.repairLevel,
+                        logRepairs: appConfig.meshRepair.logRepairs,
+                        stage: "post-extrusion", // For telemetry tracking
+                    },
+                );
+            }
+
             // Ensure normals are computed correctly
-            weldedGeometry.computeVertexNormals();
-            weldedGeometry.normalizeNormals();
+            finalGeometry.computeVertexNormals();
+            finalGeometry.normalizeNormals();
 
             // Create material for merged mesh
             const material = new THREE.MeshStandardMaterial({
@@ -3748,7 +3617,7 @@ export default class ExtrusionBuilder {
                     : false,
             });
 
-            const mergedMesh = new THREE.Mesh(weldedGeometry, material);
+            const mergedMesh = new THREE.Mesh(finalGeometry, material);
             mergedMesh.castShadow = true;
             mergedMesh.receiveShadow = true;
             mergedMesh.userData.isMergedExtrude = true;

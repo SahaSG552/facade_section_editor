@@ -13,6 +13,8 @@ import CSGEngine from "./CSGEngine.js";
 import SceneManager from "./SceneManager.js";
 import ExtrusionBuilder from "./ExtrusionBuilder.js";
 import STLExporter from "../export/STLExporter.js";
+import { getRepairInstance } from "../utils/meshRepair.js";
+import { appConfig } from "../config/AppConfig.js";
 
 export default class ThreeModule extends BaseModule {
     constructor() {
@@ -52,6 +54,9 @@ export default class ThreeModule extends BaseModule {
 
         // Extrude meshes for CSG operations
         this.bitExtrudeMeshes = [];
+
+        // Last unique bits processed (for naming exported meshes)
+        this.lastUniqueBits = [];
 
         // CSG related (kept for compatibility, but managed by CSGEngine now)
         this.partMesh = null;
@@ -915,6 +920,9 @@ export default class ThreeModule extends BaseModule {
                 uniqueBits.push(b);
             }
         }
+
+        // Keep for naming during export
+        this.lastUniqueBits = uniqueBits;
 
         this.log.info("Creating bit path extrusions", {
             bitsCount: bits.length,
@@ -2418,7 +2426,292 @@ export default class ThreeModule extends BaseModule {
             return;
         }
 
+        // Assign readable names for STL (panel, bit names, or fallback)
+        meshesToExport.forEach((mesh, idx) => {
+            if (mesh.name && mesh.name !== "unnamed") return;
+            if (mesh === this.panelMesh) {
+                mesh.name = "panel";
+                return;
+            }
+            const bitIndex = mesh.userData?.bitIndex;
+            if (
+                bitIndex !== undefined &&
+                bitIndex !== null &&
+                this.lastUniqueBits?.[bitIndex]?.name
+            ) {
+                const base = this.lastUniqueBits[bitIndex].name;
+                const pass = mesh.userData?.pass;
+                mesh.name =
+                    pass !== undefined && pass !== null
+                        ? `${base}_pass${pass}`
+                        : base;
+                return;
+            }
+            mesh.name = `mesh_${idx}`;
+        });
+
+        // Export-time repair/validation - check exportRepairMode independently
+        const exportRepairMode =
+            appConfig.meshRepair.exportRepairMode || "none";
+
+        // Apply Manifold repair ONLY to raw meshes, NOT to CSG result (partMesh already healed by CSG)
+        const shouldRepairWithManifold =
+            (exportRepairMode === "manifold" ||
+                exportRepairMode === "manifold-fallback") &&
+            !(this.csgEngine.isActive() && this.csgEngine.partMesh);
+
+        if (shouldRepairWithManifold) {
+            const repairedMeshes = this.repairMeshesWithManifold(
+                meshesToExport,
+                exportRepairMode === "manifold-fallback",
+            );
+            this.stlExporter.exportToSTL(repairedMeshes, filename);
+            return;
+        }
+
+        // Legacy validation path (only if enabled AND exportValidation flag set)
+        if (
+            appConfig.meshRepair.enabled &&
+            appConfig.meshRepair.exportValidation
+        ) {
+            this.validateAndRepairForExport(meshesToExport, filename);
+            return;
+        }
+
         this.stlExporter.exportToSTL(meshesToExport, filename);
+    }
+
+    /**
+     * Repair meshes using a Manifold round-trip (non-destructive healing)
+     * @param {Array<THREE.Mesh>} meshes
+     * @param {boolean} useFallback - If true, use direct repair when Manifold fails
+     * @returns {Array<THREE.Mesh>} repaired mesh clones
+     */
+    repairMeshesWithManifold(meshes, useFallback = false) {
+        const manifoldCSG = this.csgEngine?.manifoldCSG;
+        if (!manifoldCSG) {
+            this.log.warn("ManifoldCSG not available for export repair");
+            return meshes;
+        }
+
+        const repaired = [];
+
+        for (const mesh of meshes) {
+            // Skip panelMesh from repair pipeline - panel is usually not broken and repairing it causes transform issues
+            if (mesh === this.panelMesh) {
+                repaired.push(mesh);
+                continue;
+            }
+
+            try {
+                mesh.updateMatrixWorld?.(true);
+
+                // Clone geometry (do NOT bake world matrix to avoid double transforms in exporter)
+                const cloned = mesh.geometry.clone();
+
+                // Apply same basic cleanup as CSG operations (from ManifoldCSG.cleanupGeometry)
+                // This is lighter than full repair and matches what CSG does
+                const cleaned = manifoldCSG.cleanupGeometry(
+                    cloned,
+                    this.csgEngine.manifoldTolerance || 1e-3,
+                );
+
+                // Round-trip through Manifold (heals manifold issues without heuristic deletions)
+                const manifold = manifoldCSG.toManifold(
+                    cleaned,
+                    mesh.matrixWorld || new THREE.Matrix4(),
+                    undefined,
+                    this.csgEngine.manifoldTolerance,
+                );
+                if (!manifold) {
+                    this.log.warn(
+                        `Manifold conversion failed for mesh "${mesh.name || "unnamed"}" - geometry is NotManifold`,
+                        `Verts: ${cleaned.attributes.position.count}, Tris: ${cleaned.index ? cleaned.index.count / 3 : cleaned.attributes.position.count / 3}`,
+                    );
+
+                    // Fallback to direct repair if enabled
+                    if (useFallback && appConfig.meshRepair.enabled) {
+                        this.log.info(
+                            "Applying direct mesh repair as fallback...",
+                        );
+                        const repairInstance = getRepairInstance(
+                            appConfig.meshRepair,
+                        );
+                        const repairedGeom = repairInstance.repairAndValidate(
+                            cleaned,
+                            {
+                                repairLevel: appConfig.meshRepair.repairLevel,
+                                logRepairs: appConfig.meshRepair.logRepairs,
+                                stage: "export-fallback",
+                            },
+                        );
+
+                        const repairedMesh = mesh.clone();
+                        repairedMesh.geometry = repairedGeom;
+                        repairedMesh.position.set(0, 0, 0);
+                        repairedMesh.rotation.set(0, 0, 0);
+                        repairedMesh.scale.set(1, 1, 1);
+                        repairedMesh.updateMatrix();
+                        repairedMesh.matrixWorld.copy(mesh.matrixWorld);
+                        repaired.push(repairedMesh);
+                    } else {
+                        repaired.push(mesh);
+                    }
+                    continue;
+                }
+
+                const healedResult = manifoldCSG.fromManifold(manifold);
+                const healedGeom = healedResult?.geometry || healedResult; // adapt to {geometry, meta}
+                const healedMesh = mesh.clone();
+                healedMesh.geometry = healedGeom;
+                healedMesh.position.set(0, 0, 0);
+                healedMesh.rotation.set(0, 0, 0);
+                healedMesh.scale.set(1, 1, 1);
+                healedMesh.updateMatrix();
+                healedMesh.matrixWorld.copy(mesh.matrixWorld);
+
+                repaired.push(healedMesh);
+            } catch (err) {
+                this.log.warn(
+                    "Manifold export repair failed, exporting original mesh",
+                    err?.message || err,
+                );
+                repaired.push(mesh);
+            }
+        }
+
+        return repaired;
+    }
+
+    /**
+     * Validate meshes before export and show warnings if issues detected
+     * @param {Array<THREE.Mesh>} meshes - Meshes to validate
+     * @param {string} filename - Filename for export
+     */
+    validateAndRepairForExport(meshes, filename) {
+        const repairInstance = getRepairInstance(appConfig.meshRepair);
+        let hasErrors = false;
+        let totalIssues = {
+            nonManifoldEdges: 0,
+            degenerateTriangles: 0,
+            shortEdges: 0,
+        };
+
+        // Validate each mesh
+        const validatedMeshes = meshes.map((mesh) => {
+            const validation = repairInstance.validateForExport(mesh.geometry);
+
+            if (!validation.valid) {
+                hasErrors = true;
+                const report = validation.report;
+
+                // Accumulate issues
+                if (report.original) {
+                    report.original.errors.forEach((error) => {
+                        if (error.includes("non-manifold")) {
+                            const match = error.match(/(\d+)/);
+                            totalIssues.nonManifoldEdges += match
+                                ? parseInt(match[1])
+                                : 0;
+                        }
+                        if (error.includes("degenerate")) {
+                            const match = error.match(/(\d+)/);
+                            totalIssues.degenerateTriangles += match
+                                ? parseInt(match[1])
+                                : 0;
+                        }
+                    });
+                    report.original.warnings.forEach((warning) => {
+                        if (warning.includes("short edges")) {
+                            const match = warning.match(/(\d+)/);
+                            totalIssues.shortEdges += match
+                                ? parseInt(match[1])
+                                : 0;
+                        }
+                    });
+                }
+            }
+
+            // Return mesh with validated/repaired geometry
+            const repairedMesh = mesh.clone();
+            repairedMesh.geometry = validation.geometry;
+            return repairedMesh;
+        });
+
+        // Show warning if issues were detected
+        if (hasErrors) {
+            const message = this._buildExportWarningMessage(totalIssues);
+            this.log.warn(
+                "Mesh validation detected issues before export:",
+                totalIssues,
+            );
+
+            // Show user-visible warning (you can customize this UI)
+            if (
+                confirm(
+                    message +
+                        "\n\nExport anyway? (Recommended: Yes - meshes have been automatically repaired)",
+                )
+            ) {
+                this.stlExporter.exportToSTL(validatedMeshes, filename);
+
+                // Track repair stats
+                eventBus.emit("meshRepair:exportValidation", {
+                    hadIssues: true,
+                    issues: totalIssues,
+                    wasRepaired: true,
+                    exported: true,
+                });
+            } else {
+                this.log.info("Export cancelled by user");
+                eventBus.emit("meshRepair:exportValidation", {
+                    hadIssues: true,
+                    issues: totalIssues,
+                    wasRepaired: true,
+                    exported: false,
+                });
+            }
+        } else {
+            // No issues, proceed with export
+            this.stlExporter.exportToSTL(validatedMeshes, filename);
+            this.log.info("Mesh validation passed - no issues detected");
+
+            eventBus.emit("meshRepair:exportValidation", {
+                hadIssues: false,
+                exported: true,
+            });
+        }
+    }
+
+    /**
+     * Build user-friendly warning message for export validation
+     * @param {Object} issues - Issue counts
+     * @returns {string} - Formatted message
+     */
+    _buildExportWarningMessage(issues) {
+        const parts = [
+            "⚠️ Mesh Quality Warning\n\nThe following issues were detected and automatically repaired:\n",
+        ];
+
+        if (issues.nonManifoldEdges > 0) {
+            parts.push(
+                `• ${issues.nonManifoldEdges} non-manifold edges (fixed)`,
+            );
+        }
+        if (issues.degenerateTriangles > 0) {
+            parts.push(
+                `• ${issues.degenerateTriangles} degenerate triangles (removed)`,
+            );
+        }
+        if (issues.shortEdges > 0) {
+            parts.push(
+                `• ${issues.shortEdges} extremely short edges (warning)`,
+            );
+        }
+
+        parts.push("\nRepaired mesh is ready for export.");
+
+        return parts.join("\n");
     }
 
     /**

@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { getManifoldModule, setWasmUrl } from "manifold-3d/lib/wasm.js";
 import wasmUrl from "manifold-3d/manifold.wasm?url";
+import { getRepairInstance } from "../utils/meshRepair.js";
+import { appConfig } from "../config/AppConfig.js";
 
 // Dev: serve directly from node_modules; Prod: use Vite-resolved asset URL
 const resolvedWasmUrl = import.meta.env.DEV
@@ -68,24 +70,25 @@ export default class ManifoldCSG {
             panelGeometry,
             panelMatrix,
             idStart,
-            tolerance
+            tolerance,
         );
         if (!panelManifold) return null;
 
         const cutterManifolds = cutters
             .map((mesh, idx) => {
                 mesh.updateMatrixWorld?.(true);
-                // Clean up cutter geometry to fix naked edges, use higher tolerance for cutters
+                // Apply comprehensive mesh repair before CSG
                 const cleanTol = cutterTolerance || tolerance || 1e-3;
-                const cleanedGeom = this.cleanupGeometry(
+                const cleanedGeom = this.prepareGeometryForCSG(
                     mesh.geometry,
-                    cleanTol
+                    mesh.matrixWorld,
+                    cleanTol,
                 );
                 return this.toManifold(
                     cleanedGeom,
-                    mesh.matrixWorld,
+                    new THREE.Matrix4(), // Already applied transform in prepare
                     idStart + idx + 1,
-                    tolerance
+                    tolerance,
                 );
             })
             .filter(Boolean);
@@ -148,7 +151,7 @@ export default class ManifoldCSG {
                     cleaned,
                     mesh.matrixWorld,
                     undefined,
-                    cleanTol
+                    cleanTol,
                 );
                 cleaned?.dispose?.();
                 if (manifold) {
@@ -156,7 +159,7 @@ export default class ManifoldCSG {
                 } else {
                     this.log?.warn?.(
                         "weldUnion: skipping non-manifold mesh",
-                        mesh.uuid || mesh.id || "unknown"
+                        mesh.uuid || mesh.id || "unknown",
                     );
                 }
             });
@@ -204,7 +207,24 @@ export default class ManifoldCSG {
         }
     }
 
+    /**Prepare geometry for CSG operations with comprehensive mesh repair
+     * Replaces basic cleanupGeometry with full validation and repair pipeline
+     */
+    prepareGeometryForCSG(geometry, worldMatrix = null, weldTolerance = 1e-3) {
+        if (!appConfig.meshRepair.enabled) {
+            // Fall back to basic cleanup if repair disabled
+            return this.cleanupGeometry(geometry, weldTolerance);
+        }
+
+        const repairInstance = getRepairInstance(appConfig.meshRepair);
+        const prepared = repairInstance.prepareForCSG(geometry, worldMatrix);
+
+        return prepared;
+    }
+
     /**
+     * Clean up geometry: weld vertices, compute normals, remove extra attributes
+     * Legacy method - kept for backward compatibility when repair is disabled
      * Clean up geometry: weld vertices, compute normals, remove extra attributes
      */
     cleanupGeometry(geometry, weldTolerance = 1e-3) {
@@ -316,7 +336,7 @@ export default class ManifoldCSG {
                 `toManifold failed for geometry with ${vertCount} verts, ${
                     triVerts.length / 3
                 } tris:`,
-                err.code || err.message
+                err.code || err.message,
             );
             return null;
         }
@@ -344,7 +364,7 @@ export default class ManifoldCSG {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute(
             "position",
-            new THREE.BufferAttribute(positions, 3)
+            new THREE.BufferAttribute(positions, 3),
         );
         geometry.setIndex(new THREE.BufferAttribute(indices, 1));
         geometry.computeVertexNormals();
@@ -374,7 +394,7 @@ export default class ManifoldCSG {
         return new THREE.Matrix4().compose(
             pos,
             new THREE.Quaternion().setFromEuler(rot),
-            scl
+            scl,
         );
     }
 }

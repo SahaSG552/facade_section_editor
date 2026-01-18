@@ -83,7 +83,7 @@ class CSGEngine {
             "applyCSGOperation called with apply:",
             apply,
             "bitExtrudeMeshes count:",
-            this.bitExtrudeMeshes.length
+            this.bitExtrudeMeshes.length,
         );
 
         // Block CSG during active drag to prevent broken topology
@@ -112,13 +112,14 @@ class CSGEngine {
                 this.originalPanelGeometry,
                 this.originalPanelPosition,
                 this.originalPanelRotation,
-                this.originalPanelScale
+                this.originalPanelScale,
             );
         }
 
         try {
             if (!apply) {
                 this.log.info("Restoring base panel (Material view)");
+                this.csgActive = false; // ensure exports go back to panel+bits
                 this.showBasePanel();
                 this.csgBusy = false;
                 return;
@@ -126,7 +127,7 @@ class CSGEngine {
 
             // ===== PART VIEW: Apply CSG subtraction from original panel =====
             this.log.info(
-                "Applying CSG with optimized filtering/caching from original panel"
+                "Applying CSG with optimized filtering/caching from original panel",
             );
             this.log.info("CSG Operation Start:", {
                 timestamp: Date.now(),
@@ -136,7 +137,7 @@ class CSGEngine {
 
             if (!this.bitExtrudeMeshes.length) {
                 this.log.warn(
-                    "No extrude meshes available, showing base panel"
+                    "No extrude meshes available, showing base panel",
                 );
                 this.showBasePanel();
                 this.csgBusy = false;
@@ -145,7 +146,7 @@ class CSGEngine {
 
             // Cull non-intersecting bits first
             const intersectingMeshes = this.filterIntersectingExtrudes(
-                this.panelBBox
+                this.panelBBox,
             );
 
             // Deduplicate by mesh identity (geometry uuid) to keep all separate bit parts
@@ -183,17 +184,17 @@ class CSGEngine {
                 segmentsFirst: uniqueIntersectingMeshes.filter(
                     (m) =>
                         !m.userData?.isPartialLathe &&
-                        !m.userData?.isLatheJunction
+                        !m.userData?.isLatheJunction,
                 ).length,
                 lathesSecond: uniqueIntersectingMeshes.filter(
                     (m) =>
                         m.userData?.isPartialLathe ||
-                        m.userData?.isLatheJunction
+                        m.userData?.isLatheJunction,
                 ).length,
             });
 
             const csgSignature = this.buildCSGSignature(
-                uniqueIntersectingMeshes
+                uniqueIntersectingMeshes,
             );
 
             // Check cache
@@ -203,7 +204,7 @@ class CSGEngine {
                 this.lastCSGSignature === csgSignature
             ) {
                 this.log.info(
-                    "CSG signature unchanged - reusing cached result"
+                    "CSG signature unchanged - reusing cached result",
                 );
                 this.showCSGResult();
                 return;
@@ -211,7 +212,7 @@ class CSGEngine {
 
             if (uniqueIntersectingMeshes.length === 0) {
                 this.log.warn(
-                    "No intersecting bits with panel, skipping CSG subtraction"
+                    "No intersecting bits with panel, skipping CSG subtraction",
                 );
                 this.lastCSGSignature = csgSignature;
                 this.csgActive = false;
@@ -224,13 +225,13 @@ class CSGEngine {
 
             if (this.useManifoldBackend) {
                 const manifoldOutput = await this.runManifoldCSG(
-                    uniqueIntersectingMeshes
+                    uniqueIntersectingMeshes,
                 );
 
                 if (manifoldOutput?.geometry) {
                     const resultMesh = new THREE.Mesh(
                         manifoldOutput.geometry,
-                        resultMaterial
+                        resultMaterial,
                     );
                     resultMesh.castShadow = true;
                     resultMesh.receiveShadow = true;
@@ -244,7 +245,7 @@ class CSGEngine {
                     this.showCSGResult();
 
                     this.log.info(
-                        `CSG applied via Manifold, processed ${uniqueIntersectingMeshes.length} intersecting bits`
+                        `CSG applied via Manifold, processed ${uniqueIntersectingMeshes.length} intersecting bits`,
                     );
                     this.log.info("CSG Operation End:", {
                         timestamp: Date.now(),
@@ -256,7 +257,7 @@ class CSGEngine {
                 }
 
                 this.log.warn(
-                    "Manifold backend failed or returned empty, falling back to BVH CSG"
+                    "Manifold backend failed or returned empty, falling back to BVH CSG",
                 );
             }
 
@@ -287,7 +288,7 @@ class CSGEngine {
                 try {
                     const weldedGeometry = weldGeometry(
                         bitMesh.geometry,
-                        this.manifoldCutterTolerance
+                        this.manifoldCutterTolerance,
                     );
                     const bitBrush = new Brush(weldedGeometry);
                     bitBrush.position.copy(bitMesh.position);
@@ -298,12 +299,12 @@ class CSGEngine {
                     resultBrush = evaluator.evaluate(
                         resultBrush,
                         bitBrush,
-                        SUBTRACTION
+                        SUBTRACTION,
                     );
 
                     if (!resultBrush) {
                         this.log.warn(
-                            `Sequential subtraction failed at bit ${processed}`
+                            `Sequential subtraction failed at bit ${processed}`,
                         );
                         break;
                     }
@@ -311,7 +312,7 @@ class CSGEngine {
                 } catch (error) {
                     this.log.warn(
                         `Error in sequential subtraction for bit ${processed}:`,
-                        error.message
+                        error.message,
                     );
                     break;
                 }
@@ -319,7 +320,7 @@ class CSGEngine {
 
             if (!resultBrush) {
                 this.log.error(
-                    "CSG subtraction failed, reverting to base panel"
+                    "CSG subtraction failed, reverting to base panel",
                 );
                 this.lastCSGSignature = null;
                 this.csgActive = false;
@@ -336,7 +337,7 @@ class CSGEngine {
             this.showCSGResult();
 
             this.log.info(
-                `CSG applied successfully, processed ${processed} intersecting bits`
+                `CSG applied successfully, processed ${processed} intersecting bits`,
             );
             this.log.info("CSG Operation End:", {
                 timestamp: Date.now(),
@@ -365,7 +366,7 @@ class CSGEngine {
             const panelMatrix = ManifoldCSG.buildMatrix(
                 this.originalPanelPosition,
                 this.originalPanelRotation,
-                this.originalPanelScale
+                this.originalPanelScale,
             );
 
             return await this.manifoldCSG.subtract({
@@ -412,7 +413,7 @@ class CSGEngine {
 
     createResultMaterial() {
         const materialFactory = this.materialManager.getMaterialFactory(
-            this.materialManager.getCurrentMaterialKey()
+            this.materialManager.getCurrentMaterialKey(),
         );
         const material =
             materialFactory?.() ||
@@ -471,7 +472,7 @@ class CSGEngine {
                 mesh.geometry,
                 mesh.position,
                 mesh.rotation,
-                mesh.scale
+                mesh.scale,
             );
 
             if (bbox.intersectsBox(panelBBox)) {
@@ -521,6 +522,7 @@ class CSGEngine {
         });
 
         this.csgVisible = false;
+        this.csgActive = false; // keep export logic aligned with visible state
     }
 
     /**

@@ -37,7 +37,7 @@ export default class BitsManager {
         const innerGroup = document.createElementNS(svgNS, "g");
         innerGroup.setAttribute(
             "transform",
-            `translate(${size / 2}, ${size / 2})`
+            `translate(${size / 2}, ${size / 2})`,
         );
 
         let innerShape;
@@ -50,7 +50,7 @@ export default class BitsManager {
                 0,
                 params.length / 2,
                 false, // isSelected = false for icon
-                false // includeShank = false for icon
+                false, // includeShank = false for icon
             );
             // Adjust transform for proper scaling in icon
             innerShape.setAttribute("transform", `scale(${size / 80})`);
@@ -74,7 +74,7 @@ export default class BitsManager {
                     L ${s} ${-s}
                     L ${s} 0
                     L 0 ${s}
-                    Z`
+                    Z`,
                     );
                     break;
                 case "ball":
@@ -87,7 +87,7 @@ export default class BitsManager {
                     L ${s} 0
                     A ${s} ${s} 0 0 1 0 ${s}
                     A ${s} ${s} 0 0 1 ${-s} 0
-                    Z`
+                    Z`,
                     );
                     break;
                 case "fillet":
@@ -101,7 +101,7 @@ export default class BitsManager {
                     A ${s} ${s} 0 0 0 ${s / 4} ${s}
                     L ${-s / 4} ${s}
                     A ${s} ${s} 0 0 0 ${-s} ${s / 4}
-                    Z`
+                    Z`,
                     );
                     break;
                 case "bull":
@@ -115,14 +115,14 @@ export default class BitsManager {
                     A ${s / 2} ${s / 2} 0 0 1 ${s / 2} ${s}
                     L ${-s / 2} ${s}
                     A ${s / 2} ${s / 2} 0 0 1 ${-s} ${s / 2}
-                    Z`
+                    Z`,
                     );
                     break;
                 case "newBit":
                     innerShape = document.createElementNS(svgNS, "path");
                     innerShape.setAttribute(
                         "d",
-                        `M0 ${-size / 6}V${size / 6}M${-size / 6} 0H${size / 6}`
+                        `M0 ${-size / 6}V${size / 6}M${-size / 6} 0H${size / 6}`,
                     );
                     break;
             }
@@ -166,21 +166,21 @@ export default class BitsManager {
                 circle.setAttribute("stroke", "green");
                 path.setAttribute(
                     "d",
-                    "M16.293 2.293l3.414 3.414-13 13-3.414-3.414 13-13zM18 10v8h-8v-8h8z"
+                    "M16.293 2.293l3.414 3.414-13 13-3.414-3.414 13-13zM18 10v8h-8v-8h8z",
                 );
                 break;
             case "copy":
                 circle.setAttribute("stroke", "orange");
                 path.setAttribute(
                     "d",
-                    "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"
+                    "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
                 );
                 break;
             case "remove":
                 circle.setAttribute("stroke", "red");
                 path.setAttribute(
                     "d",
-                    "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"
+                    "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
                 );
                 break;
         }
@@ -198,7 +198,7 @@ export default class BitsManager {
         y = 0,
         isSelected = false,
         includeShank = true,
-        strokeWidth = 1
+        strokeWidth = 1,
     ) {
         // Create a group to contain bit and shank shapes
         const group = document.createElementNS(svgNS, "g");
@@ -251,23 +251,26 @@ export default class BitsManager {
                         y - bit.height
                     }
         L ${x - bit.diameter / 2} ${y - bit.length}
-        L ${x + bit.diameter / 2} ${y - bit.length} Z`
+        L ${x + bit.diameter / 2} ${y - bit.length} Z`,
                 );
                 bitShape.setAttribute("fill", fillColor);
                 break;
             case "fillet":
                 // Fillet cutter: cylindrical part + fillet profile
+                // For R-type cutters: ensure minimum flat value of 0.2 to avoid sharp point issues
+                // User-entered value is preserved for UI display, but minimum 0.2 is used for geometry
+                const effectiveFlat = Math.max(bit.flat || 0, 0.2);
                 arcRad = bit.cornerRadius;
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
                     "d",
                     `M ${x + bit.diameter / 2} ${
                         y - bit.height
-                    } A ${arcRad} ${arcRad} 0 0 0 ${x + bit.flat / 2} ${y}
-        L ${x - bit.flat / 2} ${y}
+                    } A ${arcRad} ${arcRad} 0 0 0 ${x + effectiveFlat / 2} ${y}
+        L ${x - effectiveFlat / 2} ${y}
         A ${arcRad} ${arcRad} 0 0 0 ${x - bit.diameter / 2} ${y - bit.height}
         L ${x - bit.diameter / 2} ${y - bit.length}
-        L ${x + bit.diameter / 2} ${y - bit.length} Z`
+        L ${x + bit.diameter / 2} ${y - bit.length} Z`,
                 );
                 bitShape.setAttribute("fill", fillColor);
                 break;
@@ -283,7 +286,7 @@ export default class BitsManager {
         L ${x - bit.flat / 2} ${y}
         A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${y - bit.height}
         L ${x - bit.diameter / 2} ${y - bit.length}
-        L ${x + bit.diameter / 2} ${y - bit.length} Z`
+        L ${x + bit.diameter / 2} ${y - bit.length} Z`,
                 );
                 bitShape.setAttribute("fill", fillColor);
                 break;
@@ -329,7 +332,7 @@ export default class BitsManager {
         if (baseColor.startsWith("rgba")) {
             // Extract RGB from rgba(r, g, b, a)
             const match = baseColor.match(
-                /rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d.]+\)/
+                /rgba\((\d+),\s*(\d+),\s*(\d+),\s*[\d.]+\)/,
             );
             if (match) {
                 r = parseInt(match[1]);
@@ -425,7 +428,7 @@ export default class BitsManager {
                 bitDiv.appendChild(actionIcons);
 
                 bitDiv.addEventListener("click", () =>
-                    this.drawBitShape(bit, groupName)
+                    this.drawBitShape(bit, groupName),
                 );
                 bitList.appendChild(bitDiv);
             });
@@ -441,7 +444,7 @@ export default class BitsManager {
             addButton.appendChild(addBitIcon);
 
             addButton.addEventListener("click", () =>
-                this.openNewBitMenu(groupName)
+                this.openNewBitMenu(groupName),
             );
 
             bitList.appendChild(addButton);
@@ -543,14 +546,14 @@ export default class BitsManager {
     collectBitParameters(form, groupName) {
         const name = form.querySelector("#bit-name").value.trim();
         const diameter = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-diameter").value)
+            evaluateMathExpression(form.querySelector("#bit-diameter").value),
         );
         const length = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-length").value)
+            evaluateMathExpression(form.querySelector("#bit-length").value),
         );
         const toolNumber = parseInt(
             evaluateMathExpression(form.querySelector("#bit-toolnumber").value),
-            10
+            10,
         );
 
         // Color picker is now in the toolbar, not in the form
@@ -569,7 +572,7 @@ export default class BitsManager {
             form.querySelector("#bit-shankDiameter")?.value;
         if (shankDiameterStr) {
             const shankDiameter = parseFloat(
-                evaluateMathExpression(shankDiameterStr)
+                evaluateMathExpression(shankDiameterStr),
             );
             if (!isNaN(shankDiameter)) bitParams.shankDiameter = shankDiameter;
         }
@@ -577,7 +580,7 @@ export default class BitsManager {
         const totalLengthStr = form.querySelector("#bit-totalLength")?.value;
         if (totalLengthStr) {
             const totalLength = parseFloat(
-                evaluateMathExpression(totalLengthStr)
+                evaluateMathExpression(totalLengthStr),
             );
             if (!isNaN(totalLength)) bitParams.totalLength = totalLength;
         }
@@ -585,25 +588,25 @@ export default class BitsManager {
         // Add group-specific parameters
         if (groupName === "conical") {
             bitParams.angle = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-angle").value)
+                evaluateMathExpression(form.querySelector("#bit-angle").value),
             );
         }
         if (groupName === "ball") {
             bitParams.height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value)
+                evaluateMathExpression(form.querySelector("#bit-height").value),
             );
         }
         if (groupName === "fillet" || groupName === "bull") {
             bitParams.height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value)
+                evaluateMathExpression(form.querySelector("#bit-height").value),
             );
             bitParams.cornerRadius = parseFloat(
                 evaluateMathExpression(
-                    form.querySelector("#bit-cornerRadius").value
-                )
+                    form.querySelector("#bit-cornerRadius").value,
+                ),
             );
             bitParams.flat = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-flat").value)
+                evaluateMathExpression(form.querySelector("#bit-flat").value),
             );
         }
 
@@ -647,17 +650,17 @@ export default class BitsManager {
     // Helper method to build bit payload for saving
     buildBitPayload(form, groupName) {
         const diameter = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-diameter").value)
+            evaluateMathExpression(form.querySelector("#bit-diameter").value),
         );
         const length = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-length").value)
+            evaluateMathExpression(form.querySelector("#bit-length").value),
         );
         const toolNumber =
             parseInt(
                 evaluateMathExpression(
-                    form.querySelector("#bit-toolnumber").value
+                    form.querySelector("#bit-toolnumber").value,
                 ),
-                10
+                10,
             ) || 1;
 
         // Color picker is now in the toolbar, not in the form
@@ -676,7 +679,7 @@ export default class BitsManager {
             form.querySelector("#bit-shankDiameter")?.value;
         if (shankDiameterStr) {
             const shankDiameter = parseFloat(
-                evaluateMathExpression(shankDiameterStr)
+                evaluateMathExpression(shankDiameterStr),
             );
             if (!isNaN(shankDiameter)) payload.shankDiameter = shankDiameter;
         }
@@ -684,7 +687,7 @@ export default class BitsManager {
         const totalLengthStr = form.querySelector("#bit-totalLength")?.value;
         if (totalLengthStr) {
             const totalLength = parseFloat(
-                evaluateMathExpression(totalLengthStr)
+                evaluateMathExpression(totalLengthStr),
             );
             if (!isNaN(totalLength)) payload.totalLength = totalLength;
         }
@@ -692,29 +695,29 @@ export default class BitsManager {
         // Add group-specific parameters
         if (groupName === "conical") {
             const angle = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-angle").value)
+                evaluateMathExpression(form.querySelector("#bit-angle").value),
             );
             payload.angle = angle;
         }
         if (groupName === "ball") {
             const height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value)
+                evaluateMathExpression(form.querySelector("#bit-height").value),
             );
             payload.height = height;
         }
         if (groupName === "fillet" || groupName === "bull") {
             const height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value)
+                evaluateMathExpression(form.querySelector("#bit-height").value),
             );
             payload.height = height;
             const cornerRadius = parseFloat(
                 evaluateMathExpression(
-                    form.querySelector("#bit-cornerRadius").value
-                )
+                    form.querySelector("#bit-cornerRadius").value,
+                ),
             );
             payload.cornerRadius = cornerRadius;
             const flat = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-flat").value)
+                evaluateMathExpression(form.querySelector("#bit-flat").value),
             );
             payload.flat = flat;
         }
@@ -864,7 +867,7 @@ export default class BitsManager {
             if (this.validateBitParameters(form, groupName)) {
                 const tempBitParams = this.collectBitParameters(
                     form,
-                    groupName
+                    groupName,
                 );
 
                 // Create temp group to get bounds
@@ -873,7 +876,7 @@ export default class BitsManager {
                     groupName,
                     0,
                     0,
-                    true
+                    true,
                 );
                 const bounds = getSVGBounds(tempGroup);
 
@@ -902,7 +905,7 @@ export default class BitsManager {
 
         // Function to update stroke widths in preview based on zoom level
         function updatePreviewStrokeWidths(
-            zoomLevel = previewCanvasManager?.zoomLevel
+            zoomLevel = previewCanvasManager?.zoomLevel,
         ) {
             if (!zoomLevel || !previewCanvasManager) return;
             const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
@@ -946,7 +949,7 @@ export default class BitsManager {
                 groupName,
                 0,
                 0,
-                true
+                true,
             );
             const bounds = getSVGBounds(tempGroup);
 
@@ -969,7 +972,7 @@ export default class BitsManager {
             // Calculate stroke width based on zoom level
             const strokeWidth = Math.max(
                 0.1,
-                0.5 / Math.sqrt(previewCanvasManager.zoomLevel)
+                0.5 / Math.sqrt(previewCanvasManager.zoomLevel),
             );
 
             // Create bit shape centered at pan position
@@ -980,7 +983,7 @@ export default class BitsManager {
                 previewCanvasManager.panY - bounds.centerY,
                 true, // isSelected = true for modal preview
                 true, // includeShank = true
-                strokeWidth // pass calculated stroke width
+                strokeWidth, // pass calculated stroke width
             );
 
             previewBitsLayer.appendChild(shape);
@@ -1039,20 +1042,20 @@ export default class BitsManager {
                 // Collect current parameters from form and update canvas bit
                 const currentParams = this.collectBitParameters(
                     form,
-                    groupName
+                    groupName,
                 );
                 if (this.onUpdateCanvasBitWithParams) {
                     this.onUpdateCanvasBitWithParams(
                         bit.id,
                         currentParams,
-                        groupName
+                        groupName,
                     );
                 }
             };
 
             // Update canvas when ANY parameter changes (not just shank)
             const allInputs = form.querySelectorAll(
-                'input[type="text"], input[type="number"]'
+                'input[type="text"], input[type="number"]',
             );
             const colorInput = modal.querySelector("#bit-color");
 
@@ -1074,7 +1077,7 @@ export default class BitsManager {
 
             if (await this.isBitNameDuplicate(name, isEdit ? bit?.id : null)) {
                 alert(
-                    "A bit with this name already exists. Please choose a different name."
+                    "A bit with this name already exists. Please choose a different name.",
                 );
                 return;
             }
@@ -1179,7 +1182,7 @@ export default class BitsManager {
                 0,
                 0,
                 false,
-                false
+                false,
             );
             const bitShape = group.querySelector(".bit-shape");
 
@@ -1265,7 +1268,7 @@ export default class BitsManager {
                         params[i + 2],
                         -params[i + 3],
                         params[i + 4],
-                        -params[i + 5]
+                        -params[i + 5],
                     );
                     i += 6;
                 } else if (type === "S" || type === "Q") {
@@ -1274,7 +1277,7 @@ export default class BitsManager {
                         params[i],
                         -params[i + 1],
                         params[i + 2],
-                        -params[i + 3]
+                        -params[i + 3],
                     );
                     i += 4;
                 } else if (type === "A") {
@@ -1288,7 +1291,7 @@ export default class BitsManager {
                         params[i + 3],
                         sweep,
                         params[i + 5],
-                        -params[i + 6]
+                        -params[i + 6],
                     );
                     i += 7;
                 } else if (type === "Z") {

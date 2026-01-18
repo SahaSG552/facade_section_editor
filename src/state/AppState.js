@@ -19,6 +19,22 @@ class AppState {
             gridSize: 1,
             isDraggingBit: false,
             viewMode: "both", // "2d" | "3d" | "both"
+
+            // Mesh repair telemetry
+            meshRepairStats: {
+                totalRepairs: 0,
+                postExtrusionRepairs: 0,
+                preCSGRepairs: 0,
+                exportValidations: 0,
+                lastRepair: null, // { timestamp, stage, stats }
+                cumulativeStats: {
+                    verticesMerged: 0,
+                    trianglesRemoved: 0,
+                    shortEdgesRemoved: 0,
+                    nonManifoldEdgesFixed: 0,
+                },
+            },
+
             ...initial,
         };
         if (LoggerFactory.setModeLevels) {
@@ -87,6 +103,65 @@ class AppState {
         if (LoggerFactory.setModeLevels) {
             LoggerFactory.setModeLevels(mode);
         }
+    }
+
+    // Mesh repair telemetry methods
+    recordMeshRepair(stage, stats) {
+        const repairStats = this.state.meshRepairStats;
+
+        repairStats.totalRepairs++;
+
+        if (stage === "post-extrusion") {
+            repairStats.postExtrusionRepairs++;
+        } else if (stage === "pre-csg") {
+            repairStats.preCSGRepairs++;
+        } else if (stage === "export") {
+            repairStats.exportValidations++;
+        }
+
+        repairStats.lastRepair = {
+            timestamp: Date.now(),
+            stage,
+            stats: { ...stats },
+        };
+
+        // Accumulate stats
+        if (stats.verticesMerged)
+            repairStats.cumulativeStats.verticesMerged += stats.verticesMerged;
+        if (stats.trianglesRemoved)
+            repairStats.cumulativeStats.trianglesRemoved +=
+                stats.trianglesRemoved;
+        if (stats.shortEdgesRemoved)
+            repairStats.cumulativeStats.shortEdgesRemoved +=
+                stats.shortEdgesRemoved;
+        if (stats.nonManifoldEdgesFixed)
+            repairStats.cumulativeStats.nonManifoldEdgesFixed +=
+                stats.nonManifoldEdgesFixed;
+
+        eventBus.emit("meshRepair:statsUpdated", repairStats);
+        this.log.debug("Mesh repair stats updated:", repairStats);
+    }
+
+    getMeshRepairStats() {
+        return this.state.meshRepairStats;
+    }
+
+    resetMeshRepairStats() {
+        this.state.meshRepairStats = {
+            totalRepairs: 0,
+            postExtrusionRepairs: 0,
+            preCSGRepairs: 0,
+            exportValidations: 0,
+            lastRepair: null,
+            cumulativeStats: {
+                verticesMerged: 0,
+                trianglesRemoved: 0,
+                shortEdgesRemoved: 0,
+                nonManifoldEdgesFixed: 0,
+            },
+        };
+        eventBus.emit("meshRepair:statsReset");
+        this.log.info("Mesh repair stats reset");
     }
 
     is2DActive() {

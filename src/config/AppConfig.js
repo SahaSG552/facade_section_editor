@@ -42,6 +42,19 @@ export class AppConfig {
             panelThickness: 19,
             zExtension: 38, // panelThickness * 2
         };
+
+        // Mesh repair settings
+        this.meshRepair = {
+            enabled: true, // Enable for export-time repair testing
+            repairLevel: "minimal", // 'minimal' | 'standard' | 'aggressive'
+            shortEdgeThreshold: 1e-6, // 0.001mm
+            weldTolerance: 1e-5, // 0.01mm
+            minTriangleArea: 1e-15,
+            enableIntersectionRepair: true,
+            logRepairs: true,
+            exportValidation: false, // Export-time validation (legacy path)
+            exportRepairMode: "manifold-fallback", // Try Manifold first, fallback to direct repair if fails
+        };
     }
 
     /**
@@ -119,6 +132,7 @@ export class AppConfig {
             canvas: { ...this.canvas },
             interaction: { ...this.interaction },
             csg: { ...this.csg },
+            meshRepair: { ...this.meshRepair },
         };
     }
 
@@ -133,6 +147,7 @@ export class AppConfig {
         if (data.canvas) Object.assign(this.canvas, data.canvas);
         if (data.interaction) Object.assign(this.interaction, data.interaction);
         if (data.csg) Object.assign(this.csg, data.csg);
+        if (data.meshRepair) Object.assign(this.meshRepair, data.meshRepair);
     }
 }
 
