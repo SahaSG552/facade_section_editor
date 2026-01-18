@@ -17,7 +17,7 @@ function stripManifoldWasmBadSourceMap() {
 
             return code.replace(
                 /\n\/\/#[#@]\s*sourceMappingURL=wasm\.js\.map\s*$/,
-                "\n"
+                "\n",
             );
         },
     };

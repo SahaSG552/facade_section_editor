@@ -69,7 +69,7 @@ export default class ThreeModule extends BaseModule {
         // Panel side for bit operations: 'top' (front face) or 'bottom' (back face)
         this.panelSide = "top";
 
-        // Extrude mode is selected automatically per bit operation (VC → mitered, others → round)
+        // Extrude mode is selected automatically per bit operation (VC → miter, others → round)
     }
 
     async init() {
@@ -109,7 +109,7 @@ export default class ThreeModule extends BaseModule {
 
         // Add Stats widget
         this.sceneManager.addStatsWidget(
-            typeof window !== "undefined" && window.Stats ? window.Stats : null
+            typeof window !== "undefined" && window.Stats ? window.Stats : null,
         );
 
         // Setup observer for partFront changes to trigger 3D updates
@@ -151,7 +151,7 @@ export default class ThreeModule extends BaseModule {
                     window.panelHeight,
                     window.panelThickness,
                     window.bitsOnCanvas || [],
-                    window.panelAnchor || "top-left"
+                    window.panelAnchor || "top-left",
                 );
                 // Apply CSG if Part view is active
                 if (window.showPart) {
@@ -209,7 +209,7 @@ export default class ThreeModule extends BaseModule {
                     window.panelHeight,
                     window.panelThickness,
                     window.bitsOnCanvas || [],
-                    window.panelAnchor || "top-left"
+                    window.panelAnchor || "top-left",
                 );
             }
         });
@@ -445,7 +445,7 @@ export default class ThreeModule extends BaseModule {
                     window.panelHeight,
                     window.panelThickness,
                     window.bitsOnCanvas || [],
-                    window.panelAnchor || "top-left"
+                    window.panelAnchor || "top-left",
                 );
             }
         });
@@ -511,7 +511,7 @@ export default class ThreeModule extends BaseModule {
         height,
         thickness,
         bits = [],
-        panelAnchor = "top-left"
+        panelAnchor = "top-left",
     ) {
         if (!this.enabled) {
             this.log.debug("Skip updatePanel: 3D disabled");
@@ -536,12 +536,12 @@ export default class ThreeModule extends BaseModule {
                 height,
                 thickness,
                 bits,
-                panelAnchor
+                panelAnchor,
             );
 
             if (this.lastPanelUpdateSignature === nextSignature) {
                 this.log.debug(
-                    "Panel signature unchanged, skipping 3D rebuild"
+                    "Panel signature unchanged, skipping 3D rebuild",
                 );
                 return;
             }
@@ -597,7 +597,7 @@ export default class ThreeModule extends BaseModule {
                 partFront,
                 width,
                 height,
-                thickness
+                thickness,
             );
             let geometry;
 
@@ -624,11 +624,11 @@ export default class ThreeModule extends BaseModule {
                 try {
                     // Get SVG data
                     const svgData = new XMLSerializer().serializeToString(
-                        partFront
+                        partFront,
                     );
                     this.log.debug(
                         "SVG data (first 200 chars):",
-                        svgData.substring(0, 200)
+                        svgData.substring(0, 200),
                     );
 
                     const loader = new SVGLoader();
@@ -683,8 +683,8 @@ export default class ThreeModule extends BaseModule {
                                               Math.ceil(
                                                   totalArcLength /
                                                       this
-                                                          .arcDivisionCoefficient
-                                              )
+                                                          .arcDivisionCoefficient,
+                                              ),
                                           )
                                         : 12;
 
@@ -702,7 +702,7 @@ export default class ThreeModule extends BaseModule {
                                 };
                                 geometry = new THREE.ExtrudeGeometry(
                                     shape,
-                                    extrudeSettings
+                                    extrudeSettings,
                                 );
 
                                 // Transform to correct position and orientation
@@ -724,36 +724,36 @@ export default class ThreeModule extends BaseModule {
                                     "shape(s), real dimensions:",
                                     realWidth,
                                     "x",
-                                    realHeight
+                                    realHeight,
                                 );
                             } else {
                                 this.log.warn(
-                                    "No shapes from SVGLoader, using box geometry"
+                                    "No shapes from SVGLoader, using box geometry",
                                 );
                                 geometry = new THREE.BoxGeometry(
                                     width,
                                     height,
-                                    thickness
+                                    thickness,
                                 );
                             }
                         } else {
                             this.log.warn(
-                                "Path has no toShapes method, using box geometry"
+                                "Path has no toShapes method, using box geometry",
                             );
                             geometry = new THREE.BoxGeometry(
                                 width,
                                 height,
-                                thickness
+                                thickness,
                             );
                         }
                     } else {
                         this.log.warn(
-                            "No paths from SVGLoader, using box geometry"
+                            "No paths from SVGLoader, using box geometry",
                         );
                         geometry = new THREE.BoxGeometry(
                             width,
                             height,
-                            thickness
+                            thickness,
                         );
                     }
                 } catch (error) {
@@ -763,18 +763,18 @@ export default class ThreeModule extends BaseModule {
             } else {
                 if (!partFront) {
                     this.log.warn(
-                        "partFront element not found, using box geometry"
+                        "partFront element not found, using box geometry",
                     );
                 } else {
                     this.log.warn(
-                        "SVGLoader not available, using box geometry"
+                        "SVGLoader not available, using box geometry",
                     );
                 }
                 geometry = new THREE.BoxGeometry(width, height, thickness);
             }
 
             const material = this.materialManager.createMaterial(
-                this.materialManager.getCurrentMaterialKey()
+                this.materialManager.getCurrentMaterialKey(),
             );
             this.panelMesh = new THREE.Mesh(geometry, material);
             this.panelMesh.castShadow = true;
@@ -787,7 +787,7 @@ export default class ThreeModule extends BaseModule {
                 this.panelMesh,
                 this.partMesh,
                 this.scene,
-                this.bitExtrudeMeshes
+                this.bitExtrudeMeshes,
             );
 
             // Save original panel data on first creation (before any CSG)
@@ -800,7 +800,7 @@ export default class ThreeModule extends BaseModule {
                 this.originalPanelGeometry,
                 this.originalPanelPosition,
                 this.originalPanelRotation,
-                this.originalPanelScale
+                this.originalPanelScale,
             );
 
             // Initialize CSG engine with panel data and utilities
@@ -826,7 +826,7 @@ export default class ThreeModule extends BaseModule {
                     width,
                     height,
                     thickness,
-                    panelAnchor
+                    panelAnchor,
                 );
             }
 
@@ -885,7 +885,7 @@ export default class ThreeModule extends BaseModule {
                     queued.height,
                     queued.thickness,
                     queued.bits,
-                    queued.panelAnchor
+                    queued.panelAnchor,
                 );
             }
         }
@@ -903,7 +903,7 @@ export default class ThreeModule extends BaseModule {
         panelWidth,
         panelHeight,
         panelThickness,
-        panelAnchor
+        panelAnchor,
     ) {
         // Deduplicate incoming bits by their SVG group reference to avoid duplicates
         const seenGroups = new Set();
@@ -935,7 +935,7 @@ export default class ThreeModule extends BaseModule {
             partFront,
             panelWidth,
             panelHeight,
-            panelThickness
+            panelThickness,
         );
         const partFrontX = partFrontBBox.x;
         const partFrontY = partFrontBBox.y;
@@ -988,7 +988,7 @@ export default class ThreeModule extends BaseModule {
                         bitY,
                         hypotenuse,
                         bitHeight,
-                    }
+                    },
                 );
 
                 // Calculate partial results (depth values for each pass)
@@ -1017,14 +1017,14 @@ export default class ThreeModule extends BaseModule {
                     `VC bit ${bitIndex}: ${passes} passes, depths:`,
                     depths,
                     "offsets:",
-                    contourOffsets
+                    contourOffsets,
                 );
 
                 // Get partFront points for offset calculation
                 const partFront = document.getElementById("part-front");
                 if (!partFront) {
                     this.log.error(
-                        "partFront element not found for offset calculation!"
+                        "partFront element not found for offset calculation!",
                     );
                     continue;
                 }
@@ -1049,7 +1049,7 @@ export default class ThreeModule extends BaseModule {
                 const partFrontPoints =
                     this.extrusionBuilder.parseSVGElementToPoints(
                         partFront,
-                        exportModule
+                        exportModule,
                     );
                 if (!partFrontPoints || partFrontPoints.length === 0) {
                     this.log.error("Failed to get partFront points");
@@ -1058,7 +1058,7 @@ export default class ThreeModule extends BaseModule {
 
                 // Find all contours for this bit
                 const bitContours = offsetContours.filter(
-                    (c) => c.bitIndex === bitIndex
+                    (c) => c.bitIndex === bitIndex,
                 );
 
                 this.log.info(
@@ -1068,7 +1068,7 @@ export default class ThreeModule extends BaseModule {
                             passIndex: c.passIndex,
                             hasPathData: !!c.pathData,
                         })),
-                    }
+                    },
                 );
 
                 if (bitContours.length === 0) {
@@ -1087,7 +1087,7 @@ export default class ThreeModule extends BaseModule {
 
                 // Process each pass
                 this.log.info(
-                    `VC bit ${bitIndex}: Starting pass loop for ${passes} passes`
+                    `VC bit ${bitIndex}: Starting pass loop for ${passes} passes`,
                 );
 
                 for (let passIndex = 0; passIndex < passes; passIndex++) {
@@ -1096,7 +1096,7 @@ export default class ThreeModule extends BaseModule {
                     const contourOffset = contourOffsets[passIndex];
 
                     this.log.info(
-                        `VC bit ${bitIndex} pass ${passIndex}: Starting (depth=${depth}, offset=${contourOffset})`
+                        `VC bit ${bitIndex} pass ${passIndex}: Starting (depth=${depth}, offset=${contourOffset})`,
                     );
 
                     // Get extension info for this specific pass
@@ -1120,7 +1120,7 @@ export default class ThreeModule extends BaseModule {
                                 if (passExtensionInfo) {
                                     this.log.debug(
                                         `Found phantom extension for bit ${bitIndex} pass ${passIndex}:`,
-                                        passExtensionInfo
+                                        passExtensionInfo,
                                     );
                                 }
                             }
@@ -1128,7 +1128,7 @@ export default class ThreeModule extends BaseModule {
 
                         if (!passExtensionInfo) {
                             this.log.debug(
-                                `No phantom extension found for bit ${bitIndex} pass ${passIndex}`
+                                `No phantom extension found for bit ${bitIndex} pass ${passIndex}`,
                             );
                         }
                     }
@@ -1136,7 +1136,7 @@ export default class ThreeModule extends BaseModule {
                     this.log.debug(
                         `Pass ${passIndex} extension info:`,
                         passExtensionInfo ? "found" : "not found",
-                        passExtensionInfo
+                        passExtensionInfo,
                     );
 
                     // Find pre-computed contour for this pass
@@ -1158,12 +1158,12 @@ export default class ThreeModule extends BaseModule {
                             : null);
 
                     this.log.info(
-                        `VC bit ${bitIndex} pass ${passIndex}: passContour found=${!!passContour}, hasPathData=${!!contourPathData}`
+                        `VC bit ${bitIndex} pass ${passIndex}: passContour found=${!!passContour}, hasPathData=${!!contourPathData}`,
                     );
 
                     if (!passContour || !contourPathData) {
                         this.log.warn(
-                            `No contour data for VC bit ${bitIndex} pass ${passIndex}`
+                            `No contour data for VC bit ${bitIndex} pass ${passIndex}`,
                         );
                         continue;
                     }
@@ -1176,12 +1176,12 @@ export default class ThreeModule extends BaseModule {
                         this.extrusionBuilder.parsePathToCurves(pathData);
 
                     this.log.info(
-                        `VC bit ${bitIndex} pass ${passIndex}: parsed ${pathCurves.length} curves`
+                        `VC bit ${bitIndex} pass ${passIndex}: parsed ${pathCurves.length} curves`,
                     );
 
                     if (pathCurves.length === 0) {
                         this.log.warn(
-                            `No curves found for VC bit ${bitIndex} pass ${passIndex}`
+                            `No curves found for VC bit ${bitIndex} pass ${passIndex}`,
                         );
                         continue;
                     }
@@ -1195,44 +1195,44 @@ export default class ThreeModule extends BaseModule {
                         partFrontHeight,
                         depth,
                         panelThickness,
-                        panelAnchor
+                        panelAnchor,
                     );
 
                     this.log.info(
                         `VC bit ${bitIndex} pass ${passIndex}: created 3D curve with ${
                             curve3D.curves?.length || 0
-                        } segments`
+                        } segments`,
                     );
 
                     // Create bit profile shape
                     const bitProfile =
                         await this.extrusionBuilder.createBitProfile(
-                            bit.bitData
+                            bit.bitData,
                         );
 
                     this.log.info(
                         `VC bit ${bitIndex} pass ${passIndex}: profile created=${!!bitProfile}, curves=${
                             bitProfile?.curves?.length || 0
-                        }`
+                        }`,
                     );
 
                     if (!bitProfile) {
                         this.log.warn(
-                            `No bit profile created for VC bit ${bitIndex} pass ${passIndex}`
+                            `No bit profile created for VC bit ${bitIndex} pass ${passIndex}`,
                         );
                         continue;
                     }
 
-                    // VC uses MITERED extrusion (sharp corners), not round
+                    // VC uses MITER extrusion (sharp corners), not round
                     this.log.info(
-                        `Extruding VC bit ${bitIndex} pass ${passIndex} with MITERED mode`,
+                        `Extruding VC bit ${bitIndex} pass ${passIndex} with MITER mode`,
                         {
                             profileType: typeof bitProfile,
                             profileIsShape: bitProfile instanceof THREE.Shape,
                             curveType: typeof curve3D,
                             curveLength: curve3D?.getLength?.() || 0,
                             curvesCount: curve3D?.curves?.length || 0,
-                        }
+                        },
                     );
 
                     // Create bit using unified constructor
@@ -1243,9 +1243,9 @@ export default class ThreeModule extends BaseModule {
                         curve3D,
                         pathColor,
                         0, // zOffset = 0 for main bit
-                        "mitered", // Sharp corners
+                        "miter", // Sharp corners
                         this.panelSide, // Panel side: 'top' or 'bottom'
-                        { pathVisual: true } // Enable path visualization
+                        { pathVisual: true }, // Enable path visualization
                     );
 
                     // Separate path line from meshes
@@ -1276,7 +1276,7 @@ export default class ThreeModule extends BaseModule {
                         const extensionProfile =
                             this.extrusionBuilder.createExtensionProfile(
                                 passExtensionInfo.width,
-                                passExtensionInfo.height
+                                passExtensionInfo.height,
                             );
 
                         // Use depth variable from outer scope (already defined for this pass)
@@ -1288,9 +1288,9 @@ export default class ThreeModule extends BaseModule {
                                 curve3D,
                                 "#FF0000", // Red color for extensions
                                 bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
-                                "mitered",
+                                "miter",
                                 this.panelSide, // Panel side: 'top' or 'bottom'
-                                { pathVisual: false } // Disable path visualization for extensions
+                                { pathVisual: false }, // Disable path visualization for extensions
                             );
 
                         // Separate path line from meshes (though pathVisual is false)
@@ -1315,7 +1315,7 @@ export default class ThreeModule extends BaseModule {
                             mesh.material.color.set(
                                 passExtensionInfo.hasShankCollision
                                     ? "#8B0000"
-                                    : "#FF0000"
+                                    : "#FF0000",
                             );
                         });
                     }
@@ -1325,7 +1325,7 @@ export default class ThreeModule extends BaseModule {
                         {
                             bitMeshes: bitMeshes.length,
                             extensionMeshes: extensionMeshes.length,
-                        }
+                        },
                     );
 
                     // Add bit meshes
@@ -1355,7 +1355,7 @@ export default class ThreeModule extends BaseModule {
                         });
 
                         this.log.debug(
-                            `Added VC pass ${passIndex}: ${bitMeshes.length} mesh parts for bit ${bitIndex}`
+                            `Added VC pass ${passIndex}: ${bitMeshes.length} mesh parts for bit ${bitIndex}`,
                         );
                     }
 
@@ -1377,7 +1377,7 @@ export default class ThreeModule extends BaseModule {
                         });
 
                         this.log.debug(
-                            `Added VC pass ${passIndex} extension: ${extensionMeshes.length} meshes for bit ${bitIndex}`
+                            `Added VC pass ${passIndex} extension: ${extensionMeshes.length} meshes for bit ${bitIndex}`,
                         );
                     }
                 }
@@ -1397,10 +1397,11 @@ export default class ThreeModule extends BaseModule {
                 {
                     // Find both contours (main bit left edge, phantom bit right edge)
                     const mainContour = offsetContours.find(
-                        (c) => c.bitIndex === bitIndex && c.isPOMain === true
+                        (c) => c.bitIndex === bitIndex && c.isPOMain === true,
                     );
                     const phantomContour = offsetContours.find(
-                        (c) => c.bitIndex === bitIndex && c.isPOPhantom === true
+                        (c) =>
+                            c.bitIndex === bitIndex && c.isPOPhantom === true,
                     );
 
                     // Main contour is required, phantom is optional (only if pocketOffset > 0)
@@ -1413,7 +1414,7 @@ export default class ThreeModule extends BaseModule {
                             // Create bit profile
                             const bitProfile =
                                 await this.extrusionBuilder.createBitProfile(
-                                    bit.bitData
+                                    bit.bitData,
                                 );
 
                             if (bitProfile) {
@@ -1440,9 +1441,9 @@ export default class ThreeModule extends BaseModule {
                                         this.panelSide,
                                         transformOptions,
                                         {
-                                            offset: 5, // Apply -5mm offset to SVG path
+                                            offset: diameter / 2,
                                             cornerStyle: "miter",
-                                        }
+                                        },
                                     );
 
                                 // Separate path line from meshes
@@ -1481,12 +1482,12 @@ export default class ThreeModule extends BaseModule {
                                             this.materialManager?.isEdgesEnabled()
                                         ) {
                                             this.materialManager.addEdgeVisualization(
-                                                mesh
+                                                mesh,
                                             );
                                         }
                                     });
                                     this.log.debug(
-                                        `Added PO main bit: ${mainMeshes.length} meshes`
+                                        `Added PO main bit: ${mainMeshes.length} meshes`,
                                     );
                                 }
 
@@ -1498,7 +1499,7 @@ export default class ThreeModule extends BaseModule {
                                     phantomPathData =
                                         phantomContour.pathData ||
                                         phantomContour.element?.getAttribute(
-                                            "d"
+                                            "d",
                                         );
 
                                     if (phantomPathData) {
@@ -1508,13 +1509,13 @@ export default class ThreeModule extends BaseModule {
                                                 phantomPathData, // SVG path string
                                                 "rgba(255, 165, 0, 0.3)",
                                                 0,
-                                                "mitered",
+                                                "miter",
                                                 this.panelSide,
                                                 transformOptions,
                                                 {
-                                                    offset: -5, // Apply -5mm offset to SVG path
+                                                    offset: -diameter / 2,
                                                     cornerStyle: "miter",
-                                                }
+                                                },
                                             );
 
                                         // Separate path line from meshes
@@ -1543,7 +1544,7 @@ export default class ThreeModule extends BaseModule {
                                             phantomPathLine.material.transparent = true;
                                             phantomPathLine.material.opacity = 0.5;
                                             this.bitPathMeshes.push(
-                                                phantomPathLine
+                                                phantomPathLine,
                                             );
                                         }
 
@@ -1558,25 +1559,25 @@ export default class ThreeModule extends BaseModule {
                                                 mesh.material.transparent = true;
                                                 mesh.material.opacity = 0.3;
                                                 this.bitExtrudeMeshes.push(
-                                                    mesh
+                                                    mesh,
                                                 );
 
                                                 if (
                                                     this.materialManager?.isEdgesEnabled()
                                                 ) {
                                                     this.materialManager.addEdgeVisualization(
-                                                        mesh
+                                                        mesh,
                                                     );
                                                 }
                                             });
                                             this.log.debug(
-                                                `Added PO phantom bit: ${phantomMeshes.length} meshes`
+                                                `Added PO phantom bit: ${phantomMeshes.length} meshes`,
                                             );
                                         }
                                     }
                                 } else if (pocketOffset === 0) {
                                     this.log.debug(
-                                        `PO bit ${bitIndex}: Skipped phantom (pocketOffset = 0)`
+                                        `PO bit ${bitIndex}: Skipped phantom (pocketOffset = 0)`,
                                     );
                                 }
 
@@ -1585,7 +1586,7 @@ export default class ThreeModule extends BaseModule {
                                         pocketOffset > 0
                                             ? "main and phantom bits"
                                             : "main bit only"
-                                    }`
+                                    }`,
                                 );
 
                                 // Create pocket filler if pocketWidth > diameter * 2
@@ -1612,7 +1613,7 @@ export default class ThreeModule extends BaseModule {
                                                 : phantomPathData, // No hole for full removal
                                             diameter,
                                             bitLength,
-                                            transformOptions
+                                            transformOptions,
                                         );
 
                                     if (fillerMeshes?.length > 0) {
@@ -1629,25 +1630,25 @@ export default class ThreeModule extends BaseModule {
                                                 this.materialManager?.isEdgesEnabled()
                                             ) {
                                                 this.materialManager.addEdgeVisualization(
-                                                    mesh
+                                                    mesh,
                                                 );
                                             }
                                         });
                                     } else {
                                         this.log.warn(
-                                            `PO bit ${bitIndex}: Filler creation returned empty array`
+                                            `PO bit ${bitIndex}: Filler creation returned empty array`,
                                         );
                                     }
                                 } else if (pocketWidth > diameter * 2) {
                                     this.log.warn(
-                                        `PO bit ${bitIndex}: Cannot create filler - phantomPathData is missing (pocketOffset=${pocketOffset})`
+                                        `PO bit ${bitIndex}: Cannot create filler - phantomPathData is missing (pocketOffset=${pocketOffset})`,
                                     );
                                 }
                             }
                         }
                     } else {
                         this.log.warn(
-                            `PO bit ${bitIndex}: Missing main contour`
+                            `PO bit ${bitIndex}: Missing main contour`,
                         );
                     }
                 }
@@ -1658,7 +1659,7 @@ export default class ThreeModule extends BaseModule {
             // Standard operations: AL, OU, IN
             // Find offset contour for this bit
             const bitContours = offsetContours.filter(
-                (c) => c.bitIndex === bitIndex
+                (c) => c.bitIndex === bitIndex,
             );
 
             if (bitContours.length === 0) {
@@ -1693,7 +1694,7 @@ export default class ThreeModule extends BaseModule {
 
             this.log.debug(
                 `Path data for bit ${bitIndex}:`,
-                pathData.substring(0, 100) + "..."
+                pathData.substring(0, 100) + "...",
             );
 
             // Get bit depth for z offset (needed for path visualization)
@@ -1706,7 +1707,7 @@ export default class ThreeModule extends BaseModule {
 
             // Create bit profile shape
             const bitProfile = await this.extrusionBuilder.createBitProfile(
-                bit.bitData
+                bit.bitData,
             );
 
             if (!bitProfile) {
@@ -1738,9 +1739,9 @@ export default class ThreeModule extends BaseModule {
                 pathData, // SVG path string (already with approximated arcs)
                 bit.color,
                 0, // zOffset = 0 for main bit
-                "round", // Lathe-filled corners
+                "round", // Half-profile with lathe corners
                 this.panelSide, // Panel side: 'top' or 'bottom'
-                transformOptions
+                transformOptions,
             );
 
             // Separate path line from meshes
@@ -1770,7 +1771,7 @@ export default class ThreeModule extends BaseModule {
                 const extensionProfile =
                     this.extrusionBuilder.createExtensionProfile(
                         passExtensionInfo.width,
-                        passExtensionInfo.height
+                        passExtensionInfo.height,
                     );
 
                 const extensionResult = this.extrusionBuilder.extrudeAlongPath(
@@ -1780,7 +1781,7 @@ export default class ThreeModule extends BaseModule {
                     bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                     "round",
                     this.panelSide, // Panel side: 'top' or 'bottom'
-                    { ...transformOptions, pathVisual: false } // Disable path visualization for extensions
+                    { ...transformOptions, pathVisual: false }, // Disable path visualization for extensions
                 );
 
                 // Separate path line from meshes (though pathVisual is false)
@@ -1805,7 +1806,7 @@ export default class ThreeModule extends BaseModule {
                     mesh.material.color.set(
                         passExtensionInfo.hasShankCollision
                             ? "#8B0000"
-                            : "#FF0000"
+                            : "#FF0000",
                     );
                 });
             }
@@ -1817,7 +1818,7 @@ export default class ThreeModule extends BaseModule {
                     mesh.userData.bitIndex = bitIndex;
                     this.bitExtrudeMeshes.push(mesh);
                     this.log.debug(
-                        `[SCENE] Added mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`
+                        `[SCENE] Added mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`,
                     );
 
                     // Add edge visualization to bit extrusions
@@ -1829,7 +1830,7 @@ export default class ThreeModule extends BaseModule {
                     }
                 });
                 this.log.debug(
-                    `Created ${bitMeshes.length} extrude mesh(es) for bit ${bitIndex}`
+                    `Created ${bitMeshes.length} extrude mesh(es) for bit ${bitIndex}`,
                 );
 
                 // Process extension meshes (if any)
@@ -1839,7 +1840,7 @@ export default class ThreeModule extends BaseModule {
                         mesh.userData.bitIndex = bitIndex;
                         this.bitExtrudeMeshes.push(mesh);
                         this.log.debug(
-                            `[SCENE] Added extension mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`
+                            `[SCENE] Added extension mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`,
                         );
 
                         // Add edge visualization to extensions
@@ -1851,12 +1852,12 @@ export default class ThreeModule extends BaseModule {
                         }
                     });
                     this.log.debug(
-                        `Created ${extensionMeshes.length} extension mesh(es) for bit ${bitIndex}`
+                        `Created ${extensionMeshes.length} extension mesh(es) for bit ${bitIndex}`,
                     );
                 }
             } else {
                 this.log.debug(
-                    `Failed to create extrude mesh for bit ${bitIndex}`
+                    `Failed to create extrude mesh for bit ${bitIndex}`,
                 );
             }
         }
@@ -1880,7 +1881,7 @@ export default class ThreeModule extends BaseModule {
         phantomPathData,
         diameter,
         bitLength,
-        transformOptions
+        transformOptions,
     ) {
         try {
             // Create temporary paper.js scope
@@ -1931,7 +1932,7 @@ export default class ThreeModule extends BaseModule {
                         cap: "butt",
                         limit: 10,
                         insert: false,
-                    }
+                    },
                 );
                 phantomOffset = Array.isArray(phantomOffsetResult)
                     ? phantomOffsetResult[0]
@@ -1939,7 +1940,7 @@ export default class ThreeModule extends BaseModule {
 
                 if (!phantomOffset) {
                     this.log.warn(
-                        "Failed to create phantom offset path for filler"
+                        "Failed to create phantom offset path for filler",
                     );
                     mainPath.remove();
                     if (phantomPath) phantomPath.remove();
@@ -1958,9 +1959,8 @@ export default class ThreeModule extends BaseModule {
                     window?.dependencyContainer?.get?.("export") ||
                     window?.app?.container?.get?.("export");
                 if (exportModule) {
-                    const { approximatePath } = await import(
-                        "../utils/arcApproximation.js"
-                    );
+                    const { approximatePath } =
+                        await import("../utils/arcApproximation.js");
                     outerSVG =
                         approximatePath(outerSVG, exportModule) || outerSVG;
                     innerSVG =
@@ -2022,7 +2022,7 @@ export default class ThreeModule extends BaseModule {
                             partFrontHeight,
                             depth,
                             panelThickness,
-                            panelAnchor
+                            panelAnchor,
                         );
                         const v2 = this.extrusionBuilder.convertPoint2DTo3D(
                             curve.v2.x,
@@ -2033,7 +2033,7 @@ export default class ThreeModule extends BaseModule {
                             partFrontHeight,
                             depth,
                             panelThickness,
-                            panelAnchor
+                            panelAnchor,
                         );
                         return new THREE.LineCurve3(v1, v2);
                     }
@@ -2056,7 +2056,7 @@ export default class ThreeModule extends BaseModule {
                                 partFrontHeight,
                                 depth,
                                 panelThickness,
-                                panelAnchor
+                                panelAnchor,
                             );
                             const v2 = this.extrusionBuilder.convertPoint2DTo3D(
                                 curve.v2.x,
@@ -2067,7 +2067,7 @@ export default class ThreeModule extends BaseModule {
                                 partFrontHeight,
                                 depth,
                                 panelThickness,
-                                panelAnchor
+                                panelAnchor,
                             );
                             return new THREE.LineCurve3(v1, v2);
                         }
@@ -2104,7 +2104,7 @@ export default class ThreeModule extends BaseModule {
 
             if (!outerPts.length) {
                 this.log.warn(
-                    "Failed to build outer filler loop: empty points"
+                    "Failed to build outer filler loop: empty points",
                 );
                 return [];
             }
@@ -2121,7 +2121,7 @@ export default class ThreeModule extends BaseModule {
 
                 if (!innerPts.length) {
                     this.log.warn(
-                        "Failed to build inner filler loop: empty points"
+                        "Failed to build inner filler loop: empty points",
                     );
                     return [];
                 }
@@ -2134,7 +2134,7 @@ export default class ThreeModule extends BaseModule {
                 this.log.debug("PO filler created with hole (normal mode)");
             } else {
                 this.log.debug(
-                    "PO filler created without hole (full removal mode)"
+                    "PO filler created without hole (full removal mode)",
                 );
             }
 
@@ -2233,7 +2233,7 @@ export default class ThreeModule extends BaseModule {
         partFront,
         fallbackWidth,
         fallbackHeight,
-        panelThickness
+        panelThickness,
     ) {
         try {
             if (partFront) {
@@ -2309,7 +2309,7 @@ export default class ThreeModule extends BaseModule {
     toggleBitMeshesVisibility(visible) {
         this.log.debug(
             "toggleBitMeshesVisibility called with visible:",
-            visible
+            visible,
         );
         this.bitPathMeshes.forEach((mesh) => {
             mesh.visible = visible;
@@ -2393,7 +2393,7 @@ export default class ThreeModule extends BaseModule {
         if (this.csgEngine.isActive() && this.csgEngine.partMesh) {
             meshesToExport.push(this.csgEngine.partMesh);
             this.log.info(
-                "Part mode active: Exporting ONLY Part view (CSG result mesh)"
+                "Part mode active: Exporting ONLY Part view (CSG result mesh)",
             );
         } else {
             // Otherwise export panel + raw extrude pieces
@@ -2404,11 +2404,11 @@ export default class ThreeModule extends BaseModule {
             // Export raw extrude pieces (segments + lathes), excluding debug cutting planes
             if (this.bitExtrudeMeshes && this.bitExtrudeMeshes.length) {
                 const filtered = this.bitExtrudeMeshes.filter(
-                    (m) => !m.userData?.isCuttingPlane
+                    (m) => !m.userData?.isCuttingPlane,
                 );
                 meshesToExport.push(...filtered);
                 this.log.info(
-                    `Exporting raw extrudes (segments + lathes): ${filtered.length} meshes`
+                    `Exporting raw extrudes (segments + lathes): ${filtered.length} meshes`,
                 );
             }
         }
@@ -2476,7 +2476,7 @@ export default class ThreeModule extends BaseModule {
                 if (object.material) {
                     if (Array.isArray(object.material)) {
                         object.material.forEach((material) =>
-                            material.dispose()
+                            material.dispose(),
                         );
                     } else {
                         object.material.dispose();
