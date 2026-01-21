@@ -13,6 +13,7 @@ import CSGEngine from "./CSGEngine.js";
 import SceneManager from "./SceneManager.js";
 import ExtrusionBuilder from "./ExtrusionBuilder.js";
 import STLExporter from "../export/STLExporter.js";
+import ColorUtils from "../utils/ColorUtils.js";
 import { getRepairInstance } from "../utils/meshRepair.js";
 import { appConfig } from "../config/AppConfig.js";
 
@@ -87,7 +88,7 @@ export default class ThreeModule extends BaseModule {
         }
 
         // Initialize scene manager (camera, renderer, controls, lighting, etc.)
-        this.sceneManager.initialize(this.container);
+        await this.sceneManager.initialize(this.container);
 
         // Keep reference to scene from scene manager
         this.scene = this.sceneManager.scene;
@@ -253,6 +254,15 @@ export default class ThreeModule extends BaseModule {
             wrap.style.borderRadius = "6px";
             wrap.style.boxShadow = "0 2px 8px rgba(0,0,0,0.15)";
             wrap.style.zIndex = "101";
+            wrap.style.display = "flex";
+            wrap.style.flexDirection = "column";
+            wrap.style.gap = "8px";
+
+            // Row 1: Material & wireframe
+            const row1 = document.createElement("div");
+            row1.style.display = "flex";
+            row1.style.gap = "8px";
+            row1.style.alignItems = "center";
 
             // Material selector
             const select = document.createElement("select");
@@ -318,10 +328,88 @@ export default class ThreeModule extends BaseModule {
                 this.exportToSTL("facade");
             });
 
-            wrap.appendChild(select);
-            wrap.appendChild(wfLabel);
-            wrap.appendChild(edLabel);
-            wrap.appendChild(exportBtn);
+            row1.appendChild(select);
+            row1.appendChild(wfLabel);
+            row1.appendChild(edLabel);
+            row1.appendChild(exportBtn);
+
+            // Row 2: Colors
+            const row2 = document.createElement("div");
+            row2.style.display = "flex";
+            row2.style.gap = "8px";
+            row2.style.alignItems = "center";
+            row2.style.fontSize = "12px";
+
+            // Panel Color Input
+            const pColorDiv = document.createElement("div");
+            pColorDiv.style.display = "flex";
+            pColorDiv.style.alignItems = "center";
+            pColorDiv.style.gap = "4px";
+            const pColorLabel = document.createElement("span");
+            pColorLabel.textContent = "Panel:";
+            const pColorInput = document.createElement("input");
+            pColorInput.type = "color";
+            pColorInput.value = "#deb887"; // Default
+            pColorInput.style.border = "none";
+            pColorInput.style.padding = "0";
+            pColorInput.style.width = "24px";
+            pColorInput.style.height = "24px";
+            pColorInput.style.cursor = "pointer";
+            pColorInput.title = "Panel Color";
+            pColorInput.addEventListener("input", (e) => {
+                this.materialManager.setTargetPanelColor(e.target.value);
+                // Also suggest a background? Maybe only on explicit magic click
+            });
+            pColorDiv.appendChild(pColorLabel);
+            pColorDiv.appendChild(pColorInput);
+
+            // Magic Button (Generator)
+            const magicBtn = document.createElement("button");
+            magicBtn.textContent = "✨";
+            magicBtn.title = "Generate Harmony";
+            magicBtn.style.border = "none";
+            magicBtn.style.background = "transparent";
+            magicBtn.style.cursor = "pointer";
+            magicBtn.style.fontSize = "16px";
+            magicBtn.addEventListener("click", () => {
+                // Generate BG based on current panel color
+                const currentPanelColor = new THREE.Color(pColorInput.value);
+                const newBg = ColorUtils.generateCompatibleBackgroundColor(currentPanelColor);
+
+                // Update BG input and scene
+                const hex = "#" + newBg.getHexString();
+                bgColorInput.value = hex;
+                this.sceneManager.setBackgroundColor(newBg);
+            });
+
+            // BG Color Input
+            const bColorDiv = document.createElement("div");
+            bColorDiv.style.display = "flex";
+            bColorDiv.style.alignItems = "center";
+            bColorDiv.style.gap = "4px";
+            const bColorLabel = document.createElement("span");
+            bColorLabel.textContent = "BG:";
+            const bgColorInput = document.createElement("input");
+            bgColorInput.type = "color";
+            bgColorInput.value = "#f5f5f5"; // Default
+            bgColorInput.style.border = "none";
+            bgColorInput.style.padding = "0";
+            bgColorInput.style.width = "24px";
+            bgColorInput.style.height = "24px";
+            bgColorInput.style.cursor = "pointer";
+            bgColorInput.title = "Background Color";
+            bgColorInput.addEventListener("input", (e) => {
+                this.sceneManager.setBackgroundColor(e.target.value);
+            });
+            bColorDiv.appendChild(bColorLabel);
+            bColorDiv.appendChild(bgColorInput);
+
+            row2.appendChild(pColorDiv);
+            row2.appendChild(magicBtn);
+            row2.appendChild(bColorDiv);
+
+            wrap.appendChild(row1);
+            wrap.appendChild(row2);
 
             // Position wrap inside container (over renderer)
             this.container.style.position = "relative";
@@ -684,13 +772,13 @@ export default class ThreeModule extends BaseModule {
                                 const curveSegments =
                                     totalArcLength > 0
                                         ? Math.max(
-                                              12,
-                                              Math.ceil(
-                                                  totalArcLength /
-                                                      this
-                                                          .arcDivisionCoefficient,
-                                              ),
-                                          )
+                                            12,
+                                            Math.ceil(
+                                                totalArcLength /
+                                                this
+                                                    .arcDivisionCoefficient,
+                                            ),
+                                        )
                                         : 12;
 
                                 this.log.info("Panel arc approximation:", {
@@ -1161,7 +1249,7 @@ export default class ThreeModule extends BaseModule {
                     const contourPathData =
                         passContour?.pathData ||
                         (typeof passContour?.element?.getAttribute ===
-                        "function"
+                            "function"
                             ? passContour.element.getAttribute("d")
                             : null);
 
@@ -1207,8 +1295,7 @@ export default class ThreeModule extends BaseModule {
                     );
 
                     this.log.info(
-                        `VC bit ${bitIndex} pass ${passIndex}: created 3D curve with ${
-                            curve3D.curves?.length || 0
+                        `VC bit ${bitIndex} pass ${passIndex}: created 3D curve with ${curve3D.curves?.length || 0
                         } segments`,
                     );
 
@@ -1219,8 +1306,7 @@ export default class ThreeModule extends BaseModule {
                         );
 
                     this.log.info(
-                        `VC bit ${bitIndex} pass ${passIndex}: profile created=${!!bitProfile}, curves=${
-                            bitProfile?.curves?.length || 0
+                        `VC bit ${bitIndex} pass ${passIndex}: profile created=${!!bitProfile}, curves=${bitProfile?.curves?.length || 0
                         }`,
                     );
 
@@ -1533,7 +1619,7 @@ export default class ThreeModule extends BaseModule {
                                             const firstItem = phantomResult[0];
                                             if (
                                                 firstItem instanceof
-                                                    THREE.Line ||
+                                                THREE.Line ||
                                                 firstItem.type === "Line"
                                             ) {
                                                 phantomPathLine = firstItem;
@@ -1590,10 +1676,9 @@ export default class ThreeModule extends BaseModule {
                                 }
 
                                 this.log.info(
-                                    `PO bit ${bitIndex}: Successfully rendered ${
-                                        pocketOffset > 0
-                                            ? "main and phantom bits"
-                                            : "main bit only"
+                                    `PO bit ${bitIndex}: Successfully rendered ${pocketOffset > 0
+                                        ? "main and phantom bits"
+                                        : "main bit only"
                                     }`,
                                 );
 
@@ -2353,13 +2438,22 @@ export default class ThreeModule extends BaseModule {
             this.animationFrameId = null;
             return;
         }
-
+        // Standard loop
         this.animationFrameId = requestAnimationFrame(this.animateBound);
 
-        // Delegate rendering to scene manager
-        this.sceneManager.render();
-    }
+        if (this.stats) {
+            this.stats.update();
+        }
 
+        // Update material transitions
+        if (this.materialManager) {
+            this.materialManager.update();
+        }
+
+        if (this.sceneManager) {
+            this.sceneManager.render();
+        }
+    }
     /**
      * Handle window resize - delegate to scene manager
      */
@@ -2650,7 +2744,7 @@ export default class ThreeModule extends BaseModule {
             if (
                 confirm(
                     message +
-                        "\n\nExport anyway? (Recommended: Yes - meshes have been automatically repaired)",
+                    "\n\nExport anyway? (Recommended: Yes - meshes have been automatically repaired)",
                 )
             ) {
                 this.stlExporter.exportToSTL(validatedMeshes, filename);

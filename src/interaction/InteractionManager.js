@@ -193,7 +193,7 @@ export default class InteractionManager {
                             const bitCenterY = bit.baseAbsY + dy;
                             const distance = Math.sqrt(
                                 (svgCoords.x - bitCenterX) ** 2 +
-                                    (svgCoords.y - bitCenterY) ** 2
+                                (svgCoords.y - bitCenterY) ** 2
                             );
 
                             if (distance <= this.bitTolerance) {
@@ -273,7 +273,7 @@ export default class InteractionManager {
                                 // Экспорт индекса перетаскиваемого фантома в window, чтобы показать инпут
                                 try {
                                     window.draggedPhantomIndex = bitIndex;
-                                } catch (e) {}
+                                } catch (e) { }
                                 this.callbacks.getCsgScheduler?.()?.cancel();
                                 this.dragStartX = svgCoords.x;
                                 this.dragStartY = svgCoords.y;
@@ -366,8 +366,8 @@ export default class InteractionManager {
                             const initialPhantomX =
                                 phantom.__initialX ||
                                 panelAnchorCoords.x +
-                                    mainBitX +
-                                    (phantom.__pocketWidth - diameter);
+                                mainBitX +
+                                (phantom.__pocketWidth - diameter);
                             const targetPhantomX =
                                 panelAnchorCoords.x +
                                 mainBitX +
@@ -449,6 +449,9 @@ export default class InteractionManager {
     }
 
     handleMouseUp(e) {
+        // ALWAYS stop auto-scroll on mouse up
+        this.stopAutoScroll();
+
         if (this.isDraggingPhantom) {
             this.isDraggingPhantom = false;
             this.draggedPhantomIndex = null;
@@ -456,7 +459,7 @@ export default class InteractionManager {
             this.canvas.style.cursor = "grab";
             try {
                 window.draggedPhantomIndex = null;
-            } catch (e) {}
+            } catch (e) { }
 
             // Update everything after drag to show final state
             this.callbacks.updateOffsetContours?.();
@@ -514,6 +517,8 @@ export default class InteractionManager {
     handleTouchStart(e) {
         e.preventDefault();
 
+        // Allow multi-touch gestures (e.g. pinch) to proceed to other handlers (CanvasManager)
+        // by only handling single touch here for drag/pan
         if (e.touches.length === 1) {
             const touch = e.touches[0];
             const svgCoords = this.canvasManager.screenToSvg(
@@ -526,6 +531,11 @@ export default class InteractionManager {
             const selectedBitIndices =
                 this.callbacks.getSelectedBitIndices?.() || [];
             const bitsVisible = this.callbacks.getBitsVisible?.() ?? true;
+
+            // Calculate tolerance in SVG units based on current zoom
+            // We want a constant screen-space tolerance (e.g. 30px)
+            const zoomLevel = this.canvasManager.zoomLevel || 1;
+            const effectiveTolerance = this.touchTolerance / zoomLevel;
 
             if (bitsVisible) {
                 for (let i = 0; i < bitsOnCanvas.length; i++) {
@@ -550,6 +560,8 @@ export default class InteractionManager {
                             const localX = svgCoords.x - dx;
                             const localY = svgCoords.y - dy;
 
+                            // Check bounding box first for performance
+                            // Check precise fill
                             if (
                                 shape.isPointInFill(
                                     new DOMPoint(localX, localY)
@@ -559,10 +571,11 @@ export default class InteractionManager {
                                 const bitCenterY = bit.baseAbsY + dy;
                                 const distance = Math.sqrt(
                                     (svgCoords.x - bitCenterX) ** 2 +
-                                        (svgCoords.y - bitCenterY) ** 2
+                                    (svgCoords.y - bitCenterY) ** 2
                                 );
 
-                                if (distance <= this.touchTolerance) {
+                                // Use effective zoom-scaled tolerance
+                                if (distance <= effectiveTolerance) {
                                     touchedBit = true;
                                     this.touchIdentifier = touch.identifier;
 
@@ -663,6 +676,9 @@ export default class InteractionManager {
     }
 
     handleTouchEnd(e) {
+        // ALWAYS stop auto-scroll on touch end
+        this.stopAutoScroll();
+
         const endedTouch = Array.from(e.changedTouches).find(
             (t) => t.identifier === this.touchIdentifier
         );
@@ -720,53 +736,87 @@ export default class InteractionManager {
 
     // ========== Auto-Scroll ==========
 
+    // ========== Auto-Scroll ==========
+
     checkAutoScroll(clientX, clientY) {
         const canvasRect = this.canvas.getBoundingClientRect();
         const threshold = this.autoScrollThreshold;
+        const maxSpeed = this.autoScrollSpeed;
 
-        let scrollX = 0;
-        let scrollY = 0;
+        let velocityX = 0;
+        let velocityY = 0;
 
+        // Calculate X velocity based on distance from edge
         if (clientX < canvasRect.left + threshold) {
-            scrollX = -1;
+            const dist = Math.max(0, clientX - canvasRect.left);
+            const factor = 1 - dist / threshold; // 0 to 1 (1 at edge)
+            velocityX = -maxSpeed * factor * factor; // Quadratic falloff for smoothness
         } else if (clientX > canvasRect.right - threshold) {
-            scrollX = 1;
+            const dist = Math.max(0, canvasRect.right - clientX);
+            const factor = 1 - dist / threshold;
+            velocityX = maxSpeed * factor * factor;
         }
 
+        // Calculate Y velocity
         if (clientY < canvasRect.top + threshold) {
-            scrollY = -1;
+            const dist = Math.max(0, clientY - canvasRect.top);
+            const factor = 1 - dist / threshold;
+            velocityY = -maxSpeed * factor * factor;
         } else if (clientY > canvasRect.bottom - threshold) {
-            scrollY = 1;
+            const dist = Math.max(0, canvasRect.bottom - clientY);
+            const factor = 1 - dist / threshold;
+            velocityY = maxSpeed * factor * factor;
         }
 
-        if (scrollX !== 0 || scrollY !== 0) {
-            if (!this.autoScrollActive) {
-                this.startAutoScroll(scrollX, scrollY);
-            }
+        if (Math.abs(velocityX) > 0.1 || Math.abs(velocityY) > 0.1) {
+            this.startAutoScroll(velocityX, velocityY);
         } else {
-            if (this.autoScrollActive) {
-                this.stopAutoScroll();
-            }
+            this.stopAutoScroll();
         }
     }
 
-    startAutoScroll(directionX, directionY) {
-        this.autoScrollActive = true;
-        const speed = this.autoScrollSpeed / this.canvasManager.zoomLevel;
+    startAutoScroll(velocityX, velocityY) {
+        // Update velocities
+        this.currentScrollVelocityX = velocityX;
+        this.currentScrollVelocityY = velocityY;
 
-        this.autoScrollInterval = setInterval(() => {
-            this.canvasManager.panX += directionX * speed;
-            this.canvasManager.panY += directionY * speed;
+        if (this.autoScrollActive) return;
+
+        this.autoScrollActive = true;
+
+        const scrollLoop = () => {
+            // Safety check: if we are not dragging, stop immediately
+            if (!this.autoScrollActive || (!this.isDraggingBit && !this.isDraggingPhantom)) {
+                this.stopAutoScroll();
+                return;
+            }
+
+            // Apply scroll
+            const zoom = this.canvasManager.zoomLevel;
+            this.canvasManager.panX += this.currentScrollVelocityX / zoom;
+            this.canvasManager.panY += this.currentScrollVelocityY / zoom;
             this.canvasManager.updateViewBox();
-        }, 16);
+
+            // Continue loop
+            this.autoScrollFrameId = requestAnimationFrame(scrollLoop);
+        };
+
+        this.autoScrollFrameId = requestAnimationFrame(scrollLoop);
     }
 
     stopAutoScroll() {
         this.autoScrollActive = false;
-        if (this.autoScrollInterval) {
-            clearInterval(this.autoScrollInterval);
-            this.autoScrollInterval = null;
+        if (this.autoScrollFrameId) {
+            cancelAnimationFrame(this.autoScrollFrameId);
+            this.autoScrollFrameId = null;
         }
+        this.currentScrollVelocityX = 0;
+        this.currentScrollVelocityY = 0;
+    }
+
+    // Helper to ensure we stop scrolling when dragging ends
+    handleDragEnd() {
+        this.stopAutoScroll();
     }
 
     // ========== Cleanup ==========

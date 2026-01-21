@@ -98,6 +98,11 @@ class MaterialManager {
 
         // UI elements
         this.wireframeToggleBtn = null;
+
+        // Color Transition State
+        this.targetPanelColor = new THREE.Color(0xdeb887); // Default shaded color
+        this.currentPanelColor = new THREE.Color(0xdeb887);
+        this.colorLerpFactor = 0.05;
     }
 
     /**
@@ -383,6 +388,54 @@ class MaterialManager {
             this.originalPanelMaterial = null;
         }
         this.log.info("MaterialManager disposed");
+    }
+    /**
+     * Set the target color for the panel material
+     * @param {THREE.Color|number|string} color 
+     */
+    setTargetPanelColor(color) {
+        this.targetPanelColor.set(color);
+        // Also update the factory definition for future creations (optional)
+        if (this.materialRegistry.shaded) {
+            // We don't easily update the factory function closure, but we rely on update() specific logic 
+            // to override the color on the active instance.
+        }
+    }
+
+    /**
+     * Update loop for smooth transitions
+     * @param {number} deltaTime - Time since last frame (optional)
+     */
+    update(deltaTime) {
+        // Smoothly interpolate current color to target
+        this.currentPanelColor.lerp(this.targetPanelColor, this.colorLerpFactor);
+
+        // Apply to panel mesh if it exists and has a color property
+        if (this.panelMesh && this.panelMesh.material && this.panelMesh.material.color) {
+            // Apply color to panel mesh
+            if (Array.isArray(this.panelMesh.material)) {
+                this.panelMesh.material.forEach(mat => {
+                    if (mat.color) mat.color.copy(this.currentPanelColor);
+                });
+            } else {
+                if (this.panelMesh.material.color) {
+                    this.panelMesh.material.color.copy(this.currentPanelColor);
+                }
+            }
+        }
+
+        // Apply to part mesh (CSG result) if it exists
+        if (this.partMesh && this.partMesh.material) {
+            if (Array.isArray(this.partMesh.material)) {
+                this.partMesh.material.forEach(mat => {
+                    if (mat.color) mat.color.copy(this.currentPanelColor);
+                });
+            } else {
+                if (this.partMesh.material.color) {
+                    this.partMesh.material.color.copy(this.currentPanelColor);
+                }
+            }
+        }
     }
 }
 

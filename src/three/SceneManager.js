@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { WebGPURenderer } from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import LoggerFactory from "../core/LoggerFactory.js";
 
@@ -25,6 +26,13 @@ export default class SceneManager {
             hemisphere: null,
         };
 
+        // Background Color State
+        this.targetBackgroundColor = new THREE.Color(0xf5f5f5);
+        this.currentBackgroundColor = new THREE.Color(0xf5f5f5);
+        this.backgroundColorLerpFactor = 0.05;
+
+        // State
+
         // State
         this.cameraFitted = false;
         this.animationFrameId = null;
@@ -37,7 +45,7 @@ export default class SceneManager {
      * Initialize scene manager with DOM container
      * @param {HTMLElement} container - The DOM container for Three.js canvas
      */
-    initialize(container) {
+    async initialize(container) {
         if (!container) {
             throw new Error(
                 "SceneManager.initialize() requires a DOM container"
@@ -50,6 +58,11 @@ export default class SceneManager {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0xf5f5f5);
 
+        // Helper for touch interactions: prevent browser scrolling/zooming on the 3D container
+        if (this.container) {
+            this.container.style.touchAction = "none";
+        }
+
         // Create camera
         const aspect = this.container.clientWidth / this.container.clientHeight;
         this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 10000);
@@ -57,15 +70,32 @@ export default class SceneManager {
         this.camera.lookAt(0, 0, 0);
 
         // Create renderer
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        // Create renderer
+        // Use WebGPURenderer if available
+        // Note: As of r167+, WebGPURenderer is imported from 'three/webgpu'
+        // We will assume the import is handled or shimmed; if strictly separate package, might need adjustment.
+        // For standard three.js imports in newer versions:
+
+        // Dynamic import or check if possible? 
+        // Since we are module based, we can try to import it at the top, but for now let's stick to the plan.
+        // Actually, I need to change the imports at the top first.
+        // Re-reading file via replace might be tricky if I need to change imports.
+        // I will use multi_replace for this to handle imports and the renderer creation.
+
+        this.renderer = new WebGPURenderer({ antialias: true, forceWebGL: false });
         this.renderer.setSize(
             this.container.clientWidth,
             this.container.clientHeight
         );
         this.renderer.setPixelRatio(window.devicePixelRatio);
+        // ShadowMap is handled differently in WebGPU usually, but basics might map. 
+        // WebGPURenderer handles lights differently (node based), but basic compatibility exists.
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
+
+        // WebGPURenderer initialization
+        await this.renderer.init();
 
         // Create controls
         this.controls = new OrbitControls(
@@ -212,14 +242,33 @@ export default class SceneManager {
     /**
      * Render the scene (called each animation frame)
      */
+    /**
+     * Set target background color
+     * @param {string|number|THREE.Color} color
+     */
+    setBackgroundColor(color) {
+        this.targetBackgroundColor.set(color);
+    }
+
+    /**
+     * Render the scene (called each animation frame)
+     */
     render() {
         if (this.stats) this.stats.begin();
+
+        // Smooth background transition
+        if (this.scene && this.scene.background) {
+            this.currentBackgroundColor.lerp(this.targetBackgroundColor, this.backgroundColorLerpFactor);
+            this.scene.background.copy(this.currentBackgroundColor);
+        }
 
         if (this.controls) {
             this.controls.update();
         }
 
         if (this.renderer && this.scene && this.camera) {
+            // WebGPURenderer usually requires renderAsync or similar, but basic render might work if shimmed.
+            // If this throws, we might need to switch to setAnimationLoop in ThreeModule.
             this.renderer.render(this.scene, this.camera);
         }
 

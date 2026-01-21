@@ -258,10 +258,8 @@ class PanelManager {
         const pathData = [
             `M ${frontX + frontWidth} ${frontY + frontHeight}`, // Старт: правый нижний угол
             `L ${frontX + frontWidth} ${frontY + archHeight}`, // Вверх справа до начала арки
-            `L ${frontX + frontWidth} ${frontY + archHeight}`, // Вверх справа до начала арки
-            `A ${archRadius} ${archRadius} 0 0 0 ${frontX} ${
-                frontY + archHeight
-            }`, // Арка (полукруг влево)
+            //`L ${frontX} ${frontY + archHeight}`, // Вверх влево до начала арки
+            `A ${archRadius} ${archRadius} 0 0 0 ${frontX} ${frontY + archHeight}`, // Арка (полукруг влево)
             `L ${frontX} ${frontY + frontHeight}`, // Вниз к низу слева
             `Z`, // Замыкаем путь
         ].join(" ");
@@ -271,7 +269,7 @@ class PanelManager {
         this.partFront.setAttribute("stroke", "black");
         this.partFront.setAttribute(
             "stroke-width",
-            this.getAdaptiveStrokeWidth()
+            this.getAdaptiveStrokeWidth(),
         );
 
         // Note: Do NOT sync params here during initialization
@@ -307,7 +305,7 @@ class PanelManager {
         const crossSize = 5;
         const thickness = Math.max(
             0.1,
-            0.5 / Math.sqrt(this.canvasManager.zoomLevel)
+            0.5 / Math.sqrt(this.canvasManager.zoomLevel),
         );
 
         const horizontal = document.createElementNS(svgNS, "line");
@@ -374,7 +372,7 @@ class PanelManager {
         this.updatePartShape();
 
         log.debug(
-            `Panel params updated: ${this.panelWidth}x${this.panelHeight}x${this.panelThickness}`
+            `Panel params updated: ${this.panelWidth}x${this.panelHeight}x${this.panelThickness}`,
         );
     }
 
@@ -432,7 +430,7 @@ class PanelManager {
         }
 
         log.debug(
-            `Synced params from partFront: ${this.panelWidth}x${this.panelHeight}`
+            `Synced params from partFront: ${this.panelWidth}x${this.panelHeight}`,
         );
     }
 

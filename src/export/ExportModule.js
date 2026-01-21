@@ -2312,8 +2312,7 @@ class DXFExporter {
 
                 if (originalBezierCount > 0) {
                     this.log.debug(
-                        `Contour ${
-                            index + 1
+                        `Contour ${index + 1
                         }: Bezier → Arc: converted ${convertedCount}/${originalBezierCount} (${(
                             (convertedCount / originalBezierCount) *
                             100
@@ -3090,8 +3089,7 @@ class DXFExporter {
                             ? currentY - command.y
                             : currentY + command.y;
                         this.log.debug(
-                            `  Relative: adding (${command.x}, ${
-                                command.y
+                            `  Relative: adding (${command.x}, ${command.y
                             }) → end (${arcEndX.toFixed(2)}, ${arcEndY.toFixed(
                                 2
                             )})`
@@ -3100,8 +3098,7 @@ class DXFExporter {
                         arcEndX = command.x + offsetX;
                         arcEndY = convertY(command.y + offsetY);
                         this.log.debug(
-                            `  Absolute: x=${command.x}+${offsetX}, y=${
-                                command.y
+                            `  Absolute: x=${command.x}+${offsetX}, y=${command.y
                             }+${offsetY} → convertY → end (${arcEndX.toFixed(
                                 2
                             )}, ${arcEndY.toFixed(2)})`
@@ -3207,8 +3204,8 @@ class DXFExporter {
                                 i === 0
                                     ? isRelative
                                     : type === "M"
-                                    ? false
-                                    : isRelative,
+                                        ? false
+                                        : isRelative,
                             x: params[i] || 0,
                             y: params[i + 1] || 0,
                         });
@@ -3551,8 +3548,7 @@ class DXFExporter {
                 1
             )}, ${circle.cy.toFixed(1)}) r=${circle.radius.toFixed(
                 1
-            )} start=${startAngle.toFixed(1)}° end=${endAngle.toFixed(1)}° ${
-                isCCW ? "CCW" : "CW"
+            )} start=${startAngle.toFixed(1)}° end=${endAngle.toFixed(1)}° ${isCCW ? "CCW" : "CW"
             } fitError=${maxError.toFixed(
                 3
             )}mm endpointError=${radiusError.toFixed(4)}mm`
@@ -3600,13 +3596,11 @@ class DXFExporter {
                 // Success - log the result
                 const levelText =
                     level > 0
-                        ? ` (tolerance level ${
-                              level + 1
-                          }: ${currentTolerance.toFixed(2)}mm)`
+                        ? ` (tolerance level ${level + 1
+                        }: ${currentTolerance.toFixed(2)}mm)`
                         : "";
                 this.log.debug(
-                    `  ✓ Bezier→Arc GROUP: ${
-                        result.segmentCount
+                    `  ✓ Bezier→Arc GROUP: ${result.segmentCount
                     } segments → center=(${result.cx.toFixed(
                         1
                     )}, ${result.cy.toFixed(1)}) r=${result.radius.toFixed(
@@ -4066,8 +4060,7 @@ class DXFExporter {
 
         if (convertedCount > 0) {
             this.log.debug(
-                `  ✓ Bezier→Arc: converted ${convertedCount} bezier segments in ${
-                    groups.filter((g) => g.type === "bezier-group").length
+                `  ✓ Bezier→Arc: converted ${convertedCount} bezier segments in ${groups.filter((g) => g.type === "bezier-group").length
                 } group(s)`
             );
         }
@@ -4380,8 +4373,7 @@ class DXFExporter {
 
         if (validSegments.length !== segments.length) {
             this.log.debug(
-                `[Polyline] Filtered ${
-                    segments.length - validSegments.length
+                `[Polyline] Filtered ${segments.length - validSegments.length
                 } degenerate segments, now ${validSegments.length} segments`
             );
         }
@@ -4463,9 +4455,9 @@ class DXFExporter {
         const isClosed =
             vertices.length > 2 &&
             Math.abs(vertices[vertices.length - 1].x - vertices[0].x) <
-                closeTolerance &&
+            closeTolerance &&
             Math.abs(vertices[vertices.length - 1].y - vertices[0].y) <
-                closeTolerance;
+            closeTolerance;
 
         this.log.debug(
             `[Polyline] Closed: ${isClosed} (${vertices.length} vertices before cleanup)`
@@ -4661,9 +4653,9 @@ class DXFExporter {
         const isClosed =
             vertices.length > 2 &&
             Math.abs(vertices[vertices.length - 1].x - vertices[0].x) <
-                tolerance &&
+            tolerance &&
             Math.abs(vertices[vertices.length - 1].y - vertices[0].y) <
-                tolerance;
+            tolerance;
 
         this.log.debug("writePolylineGroup: isClosed:", isClosed);
 
@@ -4885,8 +4877,8 @@ class DXFExporter {
             const color = standardColors[i];
             const distance = Math.sqrt(
                 Math.pow(r - color.r, 2) +
-                    Math.pow(g - color.g, 2) +
-                    Math.pow(b - color.b, 2)
+                Math.pow(g - color.g, 2) +
+                Math.pow(b - color.b, 2)
             );
             if (distance < minDistance) {
                 minDistance = distance;
