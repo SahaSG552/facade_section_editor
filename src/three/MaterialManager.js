@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { LoggerFactory } from "../core/LoggerFactory.js";
+import { SemanticEdgesGeometry } from "./SemanticEdgesGeometry.js";
 
 /**
  * MaterialManager - Manages material registry, switching, and wireframe/edges modes
@@ -289,8 +290,18 @@ class MaterialManager {
             // Don't create if edges are disabled
             if (!this.edgesEnabled) return;
 
-            // Create edges from the current geometry
-            const edges = new THREE.EdgesGeometry(mesh.geometry);
+            // Create edges
+            let edges;
+
+            // Try enabling Semantic Edges if metadata exists (faceID check)
+            if (mesh.userData && mesh.userData.manifoldMeta && mesh.userData.manifoldMeta.faceID) {
+                this.log.debug("Found Manifold metadata, using SemanticEdgesGeometry for clean edges");
+                edges = new SemanticEdgesGeometry(mesh.geometry, mesh.userData.manifoldMeta.faceID);
+            } else {
+                // Fallback to standard geometric edges
+                edges = new THREE.EdgesGeometry(mesh.geometry);
+            }
+
             const lineSegments = new THREE.LineSegments(
                 edges,
                 new THREE.LineBasicMaterial({

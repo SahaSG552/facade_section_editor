@@ -11,6 +11,7 @@ import appState from "../state/AppState.js";
 import MaterialManager from "./MaterialManager.js";
 import CSGEngine from "./CSGEngine.js";
 import SceneManager from "./SceneManager.js";
+import SelectionManager from "./SelectionManager.js";
 import ExtrusionBuilder from "./ExtrusionBuilder.js";
 import STLExporter from "../export/STLExporter.js";
 import ColorUtils from "../utils/ColorUtils.js";
@@ -98,6 +99,16 @@ export default class ThreeModule extends BaseModule {
             materialManager: this.materialManager,
             csgEngine: this.csgEngine,
         });
+
+        // Initialize SelectionManager
+        this.selectionManager = new SelectionManager({
+            scene: this.sceneManager.scene,
+            camera: this.sceneManager.camera,
+            renderer: this.sceneManager.renderer,
+            container: this.container,
+            materialManager: this.materialManager
+        });
+        this.sceneManager.initializeSelectionManager(this.selectionManager);
 
         // Add minimal on-canvas controls (material + wireframe + edges)
         this.initMaterialControls();
@@ -2464,8 +2475,17 @@ export default class ThreeModule extends BaseModule {
     /**
      * Apply CSG operation - delegate to CSG engine
      */
-    applyCSGOperation(apply) {
-        this.csgEngine.applyCSGOperation(apply);
+    async applyCSGOperation(apply) {
+        await this.csgEngine.applyCSGOperation(apply);
+
+        // Update selection manager with the new (or current) mesh
+        if (this.selectionManager) {
+            if (apply && this.csgEngine.partMesh) {
+                this.selectionManager.setTargetMesh(this.csgEngine.partMesh);
+            } else {
+                this.selectionManager.setTargetMesh(null);
+            }
+        }
     }
 
     /**

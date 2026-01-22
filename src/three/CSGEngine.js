@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import ManifoldCSG from "./ManifoldCSG.js";
+import { FaceIDGenerator } from "./FaceIDGenerator.js";
 import { LoggerFactory } from "../core/LoggerFactory.js";
 import { weldGeometry } from "../utils/utils.js";
 
@@ -234,7 +235,17 @@ class CSGEngine {
                         resultMaterial,
                     );
                     resultMesh.castShadow = true;
+                    resultMesh.castShadow = true;
                     resultMesh.receiveShadow = true;
+
+                    // Post-process: Generate Face IDs if missing or if we want strict planar merging
+                    // Manifold might return faceID, but FaceIDGenerator ensures planar grouping
+                    if (manifoldOutput.geometry.index) {
+                        const faceIDs = FaceIDGenerator.generateFaceIDs(manifoldOutput.geometry, 1.0);
+                        if (!manifoldOutput.meta) manifoldOutput.meta = {};
+                        manifoldOutput.meta.faceID = faceIDs; // Override or set
+                    }
+
                     resultMesh.userData.manifoldMeta = manifoldOutput.meta;
 
                     this.replacePartMesh(resultMesh);
@@ -434,10 +445,10 @@ class CSGEngine {
                 : null,
             rotation: this.originalPanelRotation
                 ? [
-                      this.originalPanelRotation.x,
-                      this.originalPanelRotation.y,
-                      this.originalPanelRotation.z,
-                  ]
+                    this.originalPanelRotation.x,
+                    this.originalPanelRotation.y,
+                    this.originalPanelRotation.z,
+                ]
                 : null,
             scale: this.originalPanelScale
                 ? this.originalPanelScale.toArray()

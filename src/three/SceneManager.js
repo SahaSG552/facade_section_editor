@@ -26,6 +26,9 @@ export default class SceneManager {
             hemisphere: null,
         };
 
+        // Selection / Interaction
+        this.selectionManager = null;
+
         // Background Color State
         this.targetBackgroundColor = new THREE.Color(0xf5f5f5);
         this.currentBackgroundColor = new THREE.Color(0xf5f5f5);
@@ -125,6 +128,14 @@ export default class SceneManager {
         window.addEventListener("resize", this.onWindowResize.bind(this));
 
         this.log.info("Initialized successfully");
+    }
+
+    /**
+     * Initialize SelectionManager (call after materialManager is ready if needed)
+     */
+    initializeSelectionManager(selectionManager) {
+        this.selectionManager = selectionManager;
+        this.selectionManager.enable();
     }
 
     /**
