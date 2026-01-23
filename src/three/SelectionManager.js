@@ -25,11 +25,11 @@ export default class SelectionManager {
         // Highlight Overlay
         this.highlightMesh = null;
         this.highlightMaterial = new THREE.MeshStandardMaterial({
-            color: 0xffd700, // Gold
-            emissive: 0xffa500, // Gold/Orange emissive for glow
+            color: '#FFD700', // Gold
+            emissive: '#FFD700', // Gold/Orange emissive for glow
             emissiveIntensity: 0.5,
             transparent: true,
-            opacity: 0.6,
+            opacity: 0.5,
             depthTest: false, // Always show on top
             depthWrite: false,
             side: THREE.DoubleSide,
