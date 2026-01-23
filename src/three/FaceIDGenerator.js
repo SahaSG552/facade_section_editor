@@ -5,17 +5,18 @@ import * as THREE from "three";
  * EXACT port of BREP's meshToBrep._buildFromGeometry face grouping algorithm
  * 
  * Enhanced with Topological Split to handle disjoint islands of the same FaceID.
+ * Feature unity is handled by Post-Union ID generation in the CSG engine.
  */
 export class FaceIDGenerator {
 
     /**
      * Generate Face IDs for the given geometry.
      * @param {THREE.BufferGeometry} geometry 
-     * @param {number} faceDeflectionAngle - Angle in degrees (default 30 like BREP)
-     * @param {number} weldTolerance - Vertex welding tolerance (default 1e-5 like BREP)
+     * @param {number} faceDeflectionAngle - Angle in degrees (default 15 for CAD-like precision)
+     * @param {number} weldTolerance - Vertex welding tolerance (default 1e-5)
      * @returns {Uint32Array} - Array of Face IDs matching the triangle count.
      */
-    static generateFaceIDs(geometry, faceDeflectionAngle = 30, weldTolerance = 1e-5) {
+    static generateFaceIDs(geometry, faceDeflectionAngle = 15, weldTolerance = 1e-5) {
         const posAttr = geometry.getAttribute('position');
         if (!posAttr) return new Uint32Array(0);
 
@@ -120,8 +121,8 @@ export class FaceIDGenerator {
     }
 
     /**
-     * Split disjoint components.
-     * CRITICAL: Skip split for IDs > 1,000,000 (Bit Namespaces) to keep operations unified.
+     * Split disjoint components that share the same FaceID.
+     * Guarantees that spatially separated parts get unique IDs.
      */
     static splitDisjointFaceGroups(geometry, faceIDs, minNewID = null) {
         const triCount = faceIDs.length;
@@ -165,17 +166,16 @@ export class FaceIDGenerator {
 
         const visited = new Uint8Array(triCount);
         const seenIDs = new Set();
-        const NAMESPACE_THRESHOLD = 1000000;
 
         for (let seed = 0; seed < triCount; seed++) {
             if (visited[seed]) continue;
             const originalID = triFaceID[seed];
             let activeID = originalID;
 
-            // Only split for Base Namespace (Facade IDs < 1M)
-            if (originalID < NAMESPACE_THRESHOLD) {
-                if (seenIDs.has(originalID)) activeID = ++maxID;
-                else seenIDs.add(originalID);
+            if (seenIDs.has(originalID)) {
+                activeID = ++maxID;
+            } else {
+                seenIDs.add(originalID);
             }
 
             const queue = [seed]; visited[seed] = 1; triFaceID[seed] = activeID;

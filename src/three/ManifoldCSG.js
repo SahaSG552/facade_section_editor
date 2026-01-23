@@ -69,6 +69,7 @@ export default class ManifoldCSG {
         const ID_RANGE = 1000000;
         let currentFaceOffset = 0;
 
+        // 1. Process Panel
         const panelManifold = await this.toManifold(
             panelGeometry,
             panelMatrix,
@@ -80,24 +81,6 @@ export default class ManifoldCSG {
 
         const cutterManifolds = [];
 
-        // Helper to process a mesh
-        const processMesh = async (mesh, offset, idxOffset) => {
-            mesh.updateMatrixWorld?.(true);
-            const cleanTol = cutterTolerance || tolerance || 1e-3;
-            const cleanedGeom = this.prepareGeometryForCSG(
-                mesh.geometry,
-                mesh.matrixWorld,
-                cleanTol,
-            );
-            return await this.toManifold(
-                cleanedGeom,
-                new THREE.Matrix4(),
-                idStart + idxOffset + 1,
-                tolerance,
-                offset
-            );
-        };
-
         if (isGrouped) {
             for (let gIdx = 0; gIdx < cutters.length; gIdx++) {
                 const group = cutters[gIdx];
@@ -105,25 +88,50 @@ export default class ManifoldCSG {
                 const groupManifolds = [];
 
                 for (const mesh of group) {
-                    const m = await processMesh(mesh, currentFaceOffset, gIdx);
+                    // Convert to raw manifold without IDs first
+                    const m = await this.toManifold(
+                        mesh.geometry,
+                        mesh.matrixWorld,
+                        undefined,
+                        cutterTolerance || tolerance || 1e-3,
+                        0,
+                        false // Skip ID generation for parts
+                    );
                     if (m) groupManifolds.push(m);
                 }
 
                 if (groupManifolds.length) {
+                    let grouped;
                     if (groupManifolds.length === 1) {
-                        cutterManifolds.push(groupManifolds[0]);
+                        grouped = groupManifolds[0];
                     } else {
-                        const grouped = Manifold.union(groupManifolds);
-                        cutterManifolds.push(grouped);
+                        grouped = Manifold.union(groupManifolds);
                         groupManifolds.forEach(m => { if (m !== grouped) m.delete(); });
                     }
+
+                    // Now run FaceIDGenerator on the UNION result to establish topological connectivity
+                    const finalized = await this.attachFaceIDsToManifold(
+                        grouped,
+                        idStart + gIdx + 1, // originalID
+                        currentFaceOffset,  // namespace offset
+                        tolerance
+                    );
+                    grouped.delete();
+                    if (finalized) cutterManifolds.push(finalized);
                 }
             }
         } else {
+            // Flat list (Legacy)
             for (let idx = 0; idx < cutters.length; idx++) {
                 currentFaceOffset += ID_RANGE;
                 const mesh = cutters[idx];
-                const manifold = await processMesh(mesh, currentFaceOffset, idx);
+                const manifold = await this.toManifold(
+                    mesh.geometry,
+                    mesh.matrixWorld,
+                    idStart + idx + 1,
+                    tolerance,
+                    currentFaceOffset
+                );
                 if (manifold) cutterManifolds.push(manifold);
             }
         }
@@ -158,6 +166,55 @@ export default class ManifoldCSG {
             }
             panelManifold.delete();
             result?.delete();
+        }
+    }
+
+    /**
+     * Helper to run FaceIDGenerator on a Manifold and return a new Manifold with IDs attached.
+     */
+    async attachFaceIDsToManifold(manifold, originalId, faceIDOffset, tolerance) {
+        const mesh = manifold.getMesh();
+        const { FaceIDGenerator } = await import('./FaceIDGenerator.js');
+
+        // Prepare geometry for generator
+        const tempGeom = new THREE.BufferGeometry();
+        const numProp = mesh.numProp;
+        const positions = new Float32Array(mesh.numVert * 3);
+        for (let i = 0; i < mesh.numVert; i++) {
+            positions[i * 3] = mesh.vertProperties[i * numProp];
+            positions[i * 3 + 1] = mesh.vertProperties[i * numProp + 1];
+            positions[i * 3 + 2] = mesh.vertProperties[i * numProp + 2];
+        }
+        tempGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        tempGeom.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.triVerts), 1));
+
+        // Generate IDs (now considering the union topology!)
+        const weldTol = typeof tolerance === "number" && tolerance > 0 ? tolerance : 1e-4;
+        const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, weldTol);
+
+        const faceID = new Uint32Array(groupedFaceIDs.length);
+        for (let i = 0; i < groupedFaceIDs.length; i++) {
+            faceID[i] = groupedFaceIDs[i] + faceIDOffset;
+        }
+
+        const meshOptions = {
+            numProp: mesh.numProp,
+            vertProperties: mesh.vertProperties,
+            triVerts: mesh.triVerts,
+            faceID,
+            runIndex: new Uint32Array([0, mesh.triVerts.length]),
+            runOriginalID: new Uint32Array([originalId]),
+            tolerance: mesh.tolerance
+        };
+
+        tempGeom.dispose();
+
+        try {
+            const newMesh = new this.Mesh(meshOptions);
+            return this.Manifold.ofMesh(newMesh);
+        } catch (e) {
+            this.log?.warn?.("attachFaceIDsToManifold failed:", e);
+            return null;
         }
     }
 
@@ -220,7 +277,7 @@ export default class ManifoldCSG {
         return geom;
     }
 
-    async toManifold(geometry, matrixWorld, originalId, tolerance, faceIDOffset = 0) {
+    async toManifold(geometry, matrixWorld, originalId, tolerance, faceIDOffset = 0, generateIDs = true) {
         if (!geometry || !geometry.attributes?.position) return null;
         if (!this.Mesh || !this.Manifold) return null;
 
@@ -249,20 +306,24 @@ export default class ManifoldCSG {
             for (let i = 0; i < position.count; i++) triVerts[i] = i;
         }
 
-        const { FaceIDGenerator } = await import('./FaceIDGenerator.js');
+        let faceID = null;
+        if (generateIDs) {
+            const { FaceIDGenerator } = await import('./FaceIDGenerator.js');
 
-        const tempGeom = new THREE.BufferGeometry();
-        tempGeom.setAttribute('position', new THREE.BufferAttribute(vertProperties, 3));
-        tempGeom.setIndex(new THREE.BufferAttribute(triVerts, 1));
+            const tempGeom = new THREE.BufferGeometry();
+            tempGeom.setAttribute('position', new THREE.BufferAttribute(vertProperties, 3));
+            tempGeom.setIndex(new THREE.BufferAttribute(triVerts, 1));
 
-        const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, Math.max(weldTol, 1e-4));
-        const faceID = new Uint32Array(groupedFaceIDs.length);
-        for (let i = 0; i < groupedFaceIDs.length; i++) {
-            faceID[i] = groupedFaceIDs[i] + faceIDOffset;
+            const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, Math.max(weldTol, 1e-4));
+            faceID = new Uint32Array(groupedFaceIDs.length);
+            for (let i = 0; i < groupedFaceIDs.length; i++) {
+                faceID[i] = groupedFaceIDs[i] + faceIDOffset;
+            }
+            tempGeom.dispose();
         }
-        tempGeom.dispose();
 
-        const meshOptions = { numProp: 3, vertProperties, triVerts, faceID };
+        const meshOptions = { numProp: 3, vertProperties, triVerts };
+        if (faceID) meshOptions.faceID = faceID;
         if (typeof tolerance === "number" && tolerance > 0) meshOptions.tolerance = tolerance;
         if (typeof originalId === "number") {
             meshOptions.runOriginalID = new Uint32Array([originalId]);
