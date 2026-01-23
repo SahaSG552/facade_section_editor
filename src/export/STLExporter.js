@@ -33,7 +33,9 @@ class STLExporter {
     generateSTL(meshes) {
         let stl = "";
 
-        meshes.forEach((mesh, meshIdx) => {
+        const exportableMeshes = this.collectMeshes(meshes);
+
+        exportableMeshes.forEach((mesh, meshIdx) => {
             if (!mesh?.geometry) {
                 this.log?.warn?.(`Mesh ${meshIdx} has no geometry, skipping`);
                 return;
@@ -130,12 +132,33 @@ class STLExporter {
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = `${filename}_${
-            new Date().toISOString().split("T")[0]
-        }.stl`;
+        link.download = `${filename}_${new Date().toISOString().split("T")[0]
+            }.stl`;
         link.click();
         URL.revokeObjectURL(url);
         this.log?.info?.(`STL exported: ${link.download}`);
+    }
+
+    /**
+     * Recursively collect valid meshes for export
+     * Ignores Line2 (fat lines), Edges, and meshes without geometry
+     */
+    collectMeshes(objects) {
+        const result = [];
+        const process = (obj) => {
+            // Check if object is a Mesh and not a Line/Line2/Helper
+            // Line2 extends Mesh but has isLine2 flag
+            if (obj.isMesh && obj.geometry && !obj.isLine2 && !obj.userData?.isEdge) {
+                result.push(obj);
+            }
+            if (obj.children && obj.children.length > 0) {
+                obj.children.forEach(process);
+            }
+        };
+
+        const list = Array.isArray(objects) ? objects : [objects];
+        list.forEach(process);
+        return result;
     }
 }
 

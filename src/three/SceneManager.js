@@ -87,8 +87,8 @@ export default class SceneManager {
 
         this.renderer = new WebGPURenderer({ antialias: true, forceWebGL: false });
         this.renderer.setSize(
-            this.container.clientWidth,
-            this.container.clientHeight
+            Math.max(1, this.container.clientWidth),
+            Math.max(1, this.container.clientHeight)
         );
         this.renderer.setPixelRatio(window.devicePixelRatio);
         // ShadowMap is handled differently in WebGPU usually, but basics might map. 
@@ -198,6 +198,7 @@ export default class SceneManager {
      */
     fitCameraToPanel(width, height, thickness) {
         if (this.cameraFitted) return; // Don't reset camera position on every update
+        if (!this.controls) return; // Wait for controls to be initialized
 
         const maxDim = Math.max(width, height, thickness);
         const distance = maxDim * 2;
@@ -223,10 +224,20 @@ export default class SceneManager {
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
 
-        this.camera.aspect = width / height;
+        this.camera.aspect = Math.max(1, width) / Math.max(1, height);
         this.camera.updateProjectionMatrix();
 
-        this.renderer.setSize(width, height);
+        this.renderer.setSize(Math.max(1, width), Math.max(1, height));
+
+        // Update Line2 material resolutions (required for thick lines)
+        if (this.scene) {
+            this.scene.traverse((obj) => {
+                if (obj.isLine2 && obj.material && obj.material.resolution) {
+                    obj.material.resolution.set(width, height);
+                }
+            });
+        }
+
         this.log.debug(`Window resized: ${width}x${height}`);
     }
 

@@ -307,7 +307,7 @@ export default class InteractionManager {
             // Handle phantom bit dragging (X-axis only for PO operation)
             this.dragStarted = true;
 
-            this.callbacks.getCsgScheduler?.()?.cancel();
+            // this.callbacks.getCsgScheduler?.()?.cancel();
 
             const svgCoords = this.canvasManager.screenToSvg(
                 e.clientX,
@@ -393,13 +393,13 @@ export default class InteractionManager {
             this.dragStarted = true;
             window.isDraggingBit = true;
 
-            this.callbacks.getCsgScheduler?.()?.cancel();
+            // this.callbacks.getCsgScheduler?.()?.cancel();
 
             const threeModule = this.callbacks.getThreeModule?.();
             const showPart = this.callbacks.getShowPart?.();
-            if (threeModule && showPart) {
-                threeModule.showBasePanel();
-            }
+            // if (threeModule && showPart) {
+            //     threeModule.showBasePanel();
+            // }
 
             const svgCoords = this.canvasManager.screenToSvg(
                 e.clientX,

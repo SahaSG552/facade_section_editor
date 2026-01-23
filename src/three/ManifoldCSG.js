@@ -66,7 +66,7 @@ export default class ManifoldCSG {
         // Reserve unique IDs for provenance tracking
         const idStart = Manifold.reserveIDs(1 + cutters.length);
 
-        const panelManifold = this.toManifold(
+        const panelManifold = await this.toManifold(
             panelGeometry,
             panelMatrix,
             idStart,
@@ -74,24 +74,25 @@ export default class ManifoldCSG {
         );
         if (!panelManifold) return null;
 
-        const cutterManifolds = cutters
-            .map((mesh, idx) => {
-                mesh.updateMatrixWorld?.(true);
-                // Apply comprehensive mesh repair before CSG
-                const cleanTol = cutterTolerance || tolerance || 1e-3;
-                const cleanedGeom = this.prepareGeometryForCSG(
-                    mesh.geometry,
-                    mesh.matrixWorld,
-                    cleanTol,
-                );
-                return this.toManifold(
-                    cleanedGeom,
-                    new THREE.Matrix4(), // Already applied transform in prepare
-                    idStart + idx + 1,
-                    tolerance,
-                );
-            })
-            .filter(Boolean);
+        const cutterManifolds = [];
+        for (let idx = 0; idx < cutters.length; idx++) {
+            const mesh = cutters[idx];
+            mesh.updateMatrixWorld?.(true);
+            // Apply comprehensive mesh repair before CSG
+            const cleanTol = cutterTolerance || tolerance || 1e-3;
+            const cleanedGeom = this.prepareGeometryForCSG(
+                mesh.geometry,
+                mesh.matrixWorld,
+                cleanTol,
+            );
+            const manifold = await this.toManifold(
+                cleanedGeom,
+                new THREE.Matrix4(), // Already applied transform in prepare
+                idStart + idx + 1,
+                tolerance,
+            );
+            if (manifold) cutterManifolds.push(manifold);
+        }
 
         if (!cutterManifolds.length) {
             panelManifold.delete();
@@ -143,11 +144,11 @@ export default class ManifoldCSG {
         let union = null;
         let finalManifold = null;
         try {
-            meshes.forEach((mesh) => {
+            for (const mesh of meshes) {
                 mesh.updateMatrixWorld?.(true);
                 const cleanTol = tolerance || 1e-3;
                 const cleaned = this.cleanupGeometry(mesh.geometry, cleanTol);
-                const manifold = this.toManifold(
+                const manifold = await this.toManifold(
                     cleaned,
                     mesh.matrixWorld,
                     undefined,
@@ -162,7 +163,7 @@ export default class ManifoldCSG {
                         mesh.uuid || mesh.id || "unknown",
                     );
                 }
-            });
+            }
 
             if (!manifolds.length) return null;
 
@@ -258,7 +259,7 @@ export default class ManifoldCSG {
     /**
      * Convert a Three BufferGeometry + transform into a Manifold.
      */
-    toManifold(geometry, matrixWorld, originalId, tolerance) {
+    async toManifold(geometry, matrixWorld, originalId, tolerance) {
         if (!geometry || !geometry.attributes?.position) return null;
 
         if (!this.Mesh || !this.Manifold) return null;
@@ -301,11 +302,42 @@ export default class ManifoldCSG {
             for (let i = 0; i < vertCount; i++) triVerts[i] = i;
         }
 
+        // BREP BEHAVIOR: Group triangles by normal deflectio n BEFORE Manifold conversion
+        // This ensures curved surfaces (like lathe segments) are properly grouped
+        const triCount = triVerts.length / 3;
+        let faceID = null;
+
+        if (triCount > 0) {
+            // Import FaceIDGenerator dynamically to avoid circular dependency
+            const { FaceIDGenerator } = await import('./FaceIDGenerator.js');
+
+            // Create temporary geometry for face grouping
+            const tempGeom = new THREE.BufferGeometry();
+            tempGeom.setAttribute('position', new THREE.BufferAttribute(vertProperties, 3));
+            tempGeom.setIndex(new THREE.BufferAttribute(triVerts, 1));
+
+            // Group faces using BREP's algorithm (30 degrees default -> changed to 15 to match Reference Import)
+            // Generate Face IDs using the same tolerance as vertex merging (or slightly more forgiving)
+            // Using 1e-4 to better handle coplanar faces that might have slight deviations
+            const groupTol = Math.max(weldTol, 1e-4);
+            const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, groupTol);
+
+            // Convert to Uint32Array for Manifold
+            faceID = new Uint32Array(groupedFaceIDs);
+
+            tempGeom.dispose();
+        }
+
         const meshOptions = {
             numProp: 3,
             vertProperties,
             triVerts,
         };
+
+        // Add faceID if we generated it
+        if (faceID) {
+            meshOptions.faceID = faceID;
+        }
 
         // Use tolerance if provided, otherwise let Manifold use default
         if (typeof tolerance === "number" && tolerance > 0) {
@@ -333,8 +365,7 @@ export default class ManifoldCSG {
         } catch (err) {
             geom.dispose();
             this.log?.warn?.(
-                `toManifold failed for geometry with ${vertCount} verts, ${
-                    triVerts.length / 3
+                `toManifold failed for geometry with ${vertCount} verts, ${triVerts.length / 3
                 } tris:`,
                 err.code || err.message,
             );

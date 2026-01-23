@@ -1,9 +1,10 @@
 import * as THREE from "three";
 import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
 import ManifoldCSG from "./ManifoldCSG.js";
-import { FaceIDGenerator } from "./FaceIDGenerator.js";
 import { LoggerFactory } from "../core/LoggerFactory.js";
 import { weldGeometry } from "../utils/utils.js";
+import { FaceIDGenerator } from "./FaceIDGenerator.js";
+import BREPVisualizer from "./BREPVisualizer.js";
 
 /**
  * CSGEngine - Manages CSG (Constructive Solid Geometry) boolean operations
@@ -235,17 +236,10 @@ class CSGEngine {
                         resultMaterial,
                     );
                     resultMesh.castShadow = true;
-                    resultMesh.castShadow = true;
                     resultMesh.receiveShadow = true;
 
-                    // Post-process: Generate Face IDs if missing or if we want strict planar merging
-                    // Manifold might return faceID, but FaceIDGenerator ensures planar grouping
-                    if (manifoldOutput.geometry.index) {
-                        const faceIDs = FaceIDGenerator.generateFaceIDs(manifoldOutput.geometry, 1.0);
-                        if (!manifoldOutput.meta) manifoldOutput.meta = {};
-                        manifoldOutput.meta.faceID = faceIDs; // Override or set
-                    }
-
+                    // BREP BEHAVIOR: Use Manifold's faceID directly without modification
+                    // Manifold handles face grouping internally during boolean operations
                     resultMesh.userData.manifoldMeta = manifoldOutput.meta;
 
                     this.replacePartMesh(resultMesh);
@@ -253,7 +247,54 @@ class CSGEngine {
                     this.lastCSGSignature = csgSignature;
                     this.csgActive = true;
 
-                    this.showCSGResult();
+                    // BREP Visualization (Optional but recommended for CAD-like experience)
+                    // We can generate the BREP group here and attach it to the result mesh or replace it
+                    if (true) { // Always enable for now as per user request
+                        // Use Manifold's preserved FaceIDs (Provenance) if available.
+                        // This ensures that boolean operations preserve the logical grouping of the input parts.
+                        let faceIDs = manifoldOutput.meta?.faceID;
+
+                        if (faceIDs && faceIDs.length > 0) {
+                            // Provenance IDs exist. 
+                            // Refine them: Split disjoint fragments sharing the same ID (topological fix)
+                            faceIDs = FaceIDGenerator.splitDisjointFaceGroups(manifoldOutput.geometry, faceIDs);
+                        } else {
+                            // Fallback: Regenerate IDs geometrically if provenance is lost
+                            faceIDs = FaceIDGenerator.generateFaceIDs(
+                                manifoldOutput.geometry,
+                                15,    // faceDeflectionAngle
+                                1e-5   // weldTolerance
+                            );
+                        }
+
+                        // Generate BREP visualization group
+                        const brepGroup = BREPVisualizer.visualize(
+                            manifoldOutput.geometry,
+                            faceIDs,
+                            {
+                                showEdges: true,
+                                showVertices: true,
+                                deterministicColors: true,
+                                name: 'CSG_Result_BREP'
+                            }
+                        );
+
+                        // Position correctly
+                        brepGroup.position.copy(resultMesh.position);
+                        brepGroup.rotation.copy(resultMesh.rotation);
+                        brepGroup.scale.copy(resultMesh.scale);
+                        brepGroup.castShadow = true;
+                        brepGroup.receiveShadow = true;
+
+                        // Store unified mesh for STL export (prevents fragmentation)
+                        brepGroup.userData.mergedMesh = resultMesh;
+
+                        // Replace the simple mesh with the BREP group
+                        this.replacePartMesh(brepGroup);
+                        this.showCSGResult();
+                    } else {
+                        this.showCSGResult();
+                    }
 
                     this.log.info(
                         `CSG applied via Manifold, processed ${uniqueIntersectingMeshes.length} intersecting bits`,
@@ -394,31 +435,53 @@ class CSGEngine {
         }
     }
 
-    replacePartMesh(mesh, material) {
+    replacePartMesh(object, material) {
+        // Remove existing part mesh/group
         if (this.partMesh) {
-            if (this.partMesh.userData.edgeLines) {
-                this.scene?.remove(this.partMesh.userData.edgeLines);
-                this.partMesh.userData.edgeLines.geometry?.dispose();
-                this.partMesh.userData.edgeLines.material?.dispose();
-            }
             this.scene?.remove(this.partMesh);
-            this.partMesh.geometry?.dispose();
-            this.partMesh.material?.dispose();
+
+            // Recursive disposal for Groups (BREP structure)
+            const disposeObject = (obj) => {
+                if (obj.geometry) obj.geometry.dispose();
+                if (obj.material) {
+                    if (Array.isArray(obj.material)) {
+                        obj.material.forEach(m => m.dispose());
+                    } else {
+                        obj.material.dispose();
+                    }
+                }
+                if (obj.children) {
+                    obj.children.forEach(child => disposeObject(child));
+                }
+            };
+            disposeObject(this.partMesh);
         }
 
-        if (mesh) {
-            if (material) {
-                mesh.material = material;
+        // Add new object
+        if (object) {
+            // Apply material if provided and object is a Mesh (not Group)
+            if (material && object.isMesh) {
+                object.material = material;
             }
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
+
+            // Shadows for the whole group/mesh
+            object.castShadow = true;
+            object.receiveShadow = true;
+            object.traverse(child => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
         }
 
-        this.partMesh = mesh;
-        this.materialManager.partMesh = mesh;
+        this.partMesh = object;
+        this.materialManager.partMesh = object;
 
-        if (mesh && this.materialManager.isEdgesEnabled()) {
-            this.materialManager.addEdgeVisualization(mesh);
+        // Note: Edge visualization via MaterialManager is disabled for BREP groups
+        // as they have their own edge handling.
+        if (object && object.isMesh && this.materialManager.isEdgesEnabled()) {
+            this.materialManager.addEdgeVisualization(object);
         }
     }
 
@@ -539,9 +602,13 @@ class CSGEngine {
     /**
      * Show CSG result (part view - panel with bits subtracted)
      */
+    /**
+     * Show CSG result (part view - panel with bits subtracted)
+     */
     showCSGResult() {
         if (this.panelMesh) {
             this.panelMesh.visible = false;
+            // Legacy edge lines check - probably not needed if migrating fully
             if (this.panelMesh.userData.edgeLines) {
                 this.panelMesh.userData.edgeLines.visible = false;
             }
@@ -552,26 +619,25 @@ class CSGEngine {
                 this.scene.add(this.partMesh);
             }
             this.partMesh.visible = true;
-            if (this.materialManager.isEdgesEnabled()) {
+
+            // Logic for BREP Group vs Simple Mesh
+            if (this.partMesh.isGroup) {
+                // BREP Visualizer handles its own edges
+            } else if (this.materialManager.isEdgesEnabled()) {
+                // Legacy path for simple meshes
                 if (!this.partMesh.userData.edgeLines) {
                     this.materialManager.addEdgeVisualization(this.partMesh);
                 } else {
                     this.partMesh.userData.edgeLines.visible = true;
                 }
-            } else if (this.partMesh.userData.edgeLines) {
-                this.partMesh.userData.edgeLines.visible = false;
             }
         }
 
-        this.bitPathMeshes.forEach((mesh) => {
+        // Hide bits
+        this.bitPathMeshes.forEach(mesh => mesh.visible = false);
+        this.bitExtrudeMeshes.forEach(mesh => {
             mesh.visible = false;
-        });
-        this.bitExtrudeMeshes.forEach((mesh) => {
-            mesh.visible = false;
-            // Hide edges when part view is active (frezas hidden)
-            if (mesh.userData && mesh.userData.edgeLines) {
-                mesh.userData.edgeLines.visible = false;
-            }
+            if (mesh.userData?.edgeLines) mesh.userData.edgeLines.visible = false;
         });
 
         this.csgVisible = true;

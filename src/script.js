@@ -338,33 +338,33 @@ function initializeSVG() {
             if (!bitData) return;
             bitData.extension = extensionInfo
                 ? {
-                      height: extensionInfo.height,
-                      width: extensionInfo.width,
-                      relativeX:
-                          extensionInfo.relativeX || extensionInfo.localX,
-                      relativeY:
-                          extensionInfo.relativeY || extensionInfo.localY,
-                      materialTopY: extensionInfo.materialTopY,
-                      distanceBelowMaterial:
-                          extensionInfo.distanceBelowMaterial,
-                      color: extensionInfo.color,
-                      fillColor: extensionInfo.fillColor,
-                      strokeColor: extensionInfo.strokeColor,
-                      createdAt: extensionInfo.createdAt || Date.now(),
-                      source: extensionInfo.source || "2D",
-                  }
+                    height: extensionInfo.height,
+                    width: extensionInfo.width,
+                    relativeX:
+                        extensionInfo.relativeX || extensionInfo.localX,
+                    relativeY:
+                        extensionInfo.relativeY || extensionInfo.localY,
+                    materialTopY: extensionInfo.materialTopY,
+                    distanceBelowMaterial:
+                        extensionInfo.distanceBelowMaterial,
+                    color: extensionInfo.color,
+                    fillColor: extensionInfo.fillColor,
+                    strokeColor: extensionInfo.strokeColor,
+                    createdAt: extensionInfo.createdAt || Date.now(),
+                    source: extensionInfo.source || "2D",
+                }
                 : null;
         },
         setShank(bitData, shankInfo) {
             if (!bitData) return;
             bitData.shank = shankInfo
                 ? {
-                      diameter: shankInfo.shankDiameter,
-                      bitDiameter: shankInfo.bitDiameter,
-                      hasCollision: shankInfo.hasCollision || false,
-                      widthDifference: shankInfo.widthDifference,
-                      scale: shankInfo.scale,
-                  }
+                    diameter: shankInfo.shankDiameter,
+                    bitDiameter: shankInfo.bitDiameter,
+                    hasCollision: shankInfo.hasCollision || false,
+                    widthDifference: shankInfo.widthDifference,
+                    scale: shankInfo.scale,
+                }
                 : null;
         },
         setPhantomPass(bitData, passIndex, depth, extensionInfo = null) {
@@ -376,23 +376,23 @@ function initializeSVG() {
                     depth: depth,
                     extension: extensionInfo
                         ? {
-                              height: extensionInfo.height,
-                              width: extensionInfo.width,
-                              relativeX:
-                                  extensionInfo.relativeX ||
-                                  extensionInfo.localX,
-                              relativeY:
-                                  extensionInfo.relativeY ||
-                                  extensionInfo.localY,
-                              materialTopY: extensionInfo.materialTopY,
-                              distanceBelowMaterial:
-                                  extensionInfo.distanceBelowMaterial,
-                              color: extensionInfo.color,
-                              fillColor: extensionInfo.fillColor,
-                              strokeColor: extensionInfo.strokeColor,
-                              createdAt: extensionInfo.createdAt || Date.now(),
-                              source: extensionInfo.source || "2D",
-                          }
+                            height: extensionInfo.height,
+                            width: extensionInfo.width,
+                            relativeX:
+                                extensionInfo.relativeX ||
+                                extensionInfo.localX,
+                            relativeY:
+                                extensionInfo.relativeY ||
+                                extensionInfo.localY,
+                            materialTopY: extensionInfo.materialTopY,
+                            distanceBelowMaterial:
+                                extensionInfo.distanceBelowMaterial,
+                            color: extensionInfo.color,
+                            fillColor: extensionInfo.fillColor,
+                            strokeColor: extensionInfo.strokeColor,
+                            createdAt: extensionInfo.createdAt || Date.now(),
+                            source: extensionInfo.source || "2D",
+                        }
                         : null,
                 };
             }
@@ -1024,7 +1024,7 @@ function updatePocketWidthInputs() {
  * @param {number} newPocketOffset - New pocket offset value
  * @param {boolean} isZeroWidth - Whether pocket width was set to 0 (full material removal)
  */
-function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = false) {
+async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = false) {
     const bit = bitsOnCanvas[index];
     if (!bit || bit.operation !== "PO") return;
 
@@ -1056,7 +1056,7 @@ function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = false) {
     }
 
     if (window.threeModule) {
-        updateThreeView();
+        await updateThreeView();
         if (showPart) {
             window.threeModule.showBasePanel();
             csgScheduler.schedule(true);
@@ -1790,6 +1790,15 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
     updateStrokeWidths();
     updateOffsetContours();
     if (showPart) updatePartShape();
+
+    // Update 3D view and CSG
+    if (window.threeModule) {
+        updateThreeView();
+        if (showPart) {
+            window.threeModule.showBasePanel();
+            csgScheduler.schedule(true);
+        }
+    }
 }
 
 // Update bits sheet
@@ -1802,7 +1811,7 @@ function updateBitsSheet() {
     }
 }
 
-function handleOperationChange(index, newOperation) {
+async function handleOperationChange(index, newOperation) {
     const bit = bitsOnCanvas[index];
     if (!bit) return;
 
@@ -1816,7 +1825,7 @@ function handleOperationChange(index, newOperation) {
     }
 
     if (window.threeModule) {
-        updateThreeView();
+        await updateThreeView();
         if (showPart) {
             window.threeModule.showBasePanel();
             csgScheduler.schedule(true);
@@ -1939,6 +1948,11 @@ async function cycleAlignment(index) {
     // Update 3D view
     if (window.threeModule) {
         updateThreeView();
+
+        if (showPart) {
+            window.threeModule.showBasePanel();
+            csgScheduler.schedule(true);
+        }
     }
 }
 
@@ -1964,8 +1978,7 @@ async function updateBitPosition(index, newX, newY) {
     // Log bit position update
     const bit = bitsOnCanvas[index];
     log.debug(
-        `Moving bit #${index} (${
-            bit.bitData?.name || "Unknown"
+        `Moving bit #${index} (${bit.bitData?.name || "Unknown"
         }) from (${bit.x.toFixed(1)}, ${bit.y.toFixed(1)}) to (${newX.toFixed(
             1
         )}, ${newY.toFixed(1)})`
@@ -2300,8 +2313,8 @@ function getPanelAnchorOffset() {
     return panelManager
         ? panelManager.getPanelAnchorOffset()
         : panelAnchor === "top-left"
-        ? { x: 0, y: 0 }
-        : { x: 0, y: panelThickness };
+            ? { x: 0, y: 0 }
+            : { x: 0, y: panelThickness };
 }
 
 // Helper function to transform Y coordinate for display based on anchor
@@ -2966,11 +2979,10 @@ async function initializeModularSystem() {
 
         // Initialize Three.js module
         if (threeModule) {
-            await threeModule.init();
-            // Make it globally accessible
+            // Make it globally accessible immediately (for callbacks in initialize)
             window.threeModule = threeModule;
-            // Make ExtrusionBuilder publicly accessible for console adjustments
             window.extrusionBuilder = threeModule.extrusionBuilder;
+
             log.info("ExtrusionBuilder available as window.extrusionBuilder");
             log.info("Adjust curve segments from console:");
             log.info("  window.extrusionBuilder.curveSegmentCoefficient = 3");
@@ -2984,14 +2996,20 @@ async function initializeModularSystem() {
             );
             log.info("  window.extrusionBuilder.getArcQualityInfo()");
             log.info("  window.extrusionBuilder.setArcQuality(3) // to change");
+        }
+
+        // Start the original initialization (creates DOM elements like partFront)
+        // This must run BEFORE threeModule.init() so observers can attach
+        initialize();
+
+        if (threeModule) {
+            await threeModule.init();
+
             // Configure centralized CSG scheduler
             csgScheduler.configure((apply) =>
                 threeModule.applyCSGOperation(apply)
             );
         }
-
-        // Start the original initialization
-        initialize();
 
         // Populate material selector once Three.js module is ready
         setupMaterialSelector();

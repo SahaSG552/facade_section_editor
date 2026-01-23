@@ -143,13 +143,30 @@ class MaterialManager {
         }
 
         // Apply to CSG result mesh (part mesh)
+        // Apply to CSG result mesh (part mesh)
         if (this.partMesh) {
-            if (this.partMesh.material) {
-                this.partMesh.material.dispose();
+            if (this.partMesh.isGroup) {
+                this.partMesh.traverse(child => {
+                    if (child.isMesh && child.type === 'FACE') {
+                        if (child.material) child.material.dispose();
+                        const pm = entry.factory();
+                        pm.wireframe = this.wireframeMode;
+                        child.material = pm;
+                        // Update base backup?
+                        // For BREP, maybe we want to keep the deterministic color if mode is Shaded
+                        // But if user explicitly requests 'Shaded' (reset), maybe uniform is okay?
+                        // Or we should recreate BREP colors? 
+                        // For now, simple uniform application.
+                    }
+                });
+            } else {
+                if (this.partMesh.material) {
+                    this.partMesh.material.dispose();
+                }
+                const pm = entry.factory();
+                pm.wireframe = this.wireframeMode;
+                this.partMesh.material = pm;
             }
-            const pm = entry.factory();
-            pm.wireframe = this.wireframeMode;
-            this.partMesh.material = pm;
         }
 
         this.log.info("Material mode changed to:", modeKey);
@@ -198,7 +215,14 @@ class MaterialManager {
                 this.addEdgeVisualization(this.panelMesh);
             }
             if (this.partMesh && this.partMesh.visible) {
-                this.addEdgeVisualization(this.partMesh);
+                if (this.partMesh.isGroup) {
+                    // BREP: Show existing edge objects
+                    this.partMesh.traverse(child => {
+                        if (child.type === 'EDGE') child.visible = true;
+                    });
+                } else {
+                    this.addEdgeVisualization(this.partMesh);
+                }
             }
             // Create edge visualization ONLY for visible bit extrusions
             // In Part mode, bit extrusions are hidden, so don't create edges for them
@@ -215,7 +239,14 @@ class MaterialManager {
                 this.removeEdgeVisualization(this.panelMesh);
             }
             if (this.partMesh) {
-                this.removeEdgeVisualization(this.partMesh);
+                if (this.partMesh.isGroup) {
+                    // BREP: Hide existing edge objects
+                    this.partMesh.traverse(child => {
+                        if (child.type === 'EDGE') child.visible = false;
+                    });
+                } else {
+                    this.removeEdgeVisualization(this.partMesh);
+                }
             }
             // Remove edge visualization for all bit extrusions
             if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
@@ -282,7 +313,7 @@ class MaterialManager {
      */
     addEdgeVisualization(mesh) {
         try {
-            if (!mesh) return;
+            if (!mesh || !mesh.geometry) return;
 
             // Always remove old edges first to avoid duplicates
             this.removeEdgeVisualization(mesh);
@@ -436,14 +467,28 @@ class MaterialManager {
         }
 
         // Apply to part mesh (CSG result) if it exists
-        if (this.partMesh && this.partMesh.material) {
-            if (Array.isArray(this.partMesh.material)) {
-                this.partMesh.material.forEach(mat => {
-                    if (mat.color) mat.color.copy(this.currentPanelColor);
+        // Apply to part mesh (CSG result) if it exists
+        if (this.partMesh) {
+            if (this.partMesh.isGroup) {
+                // Traverse children for Faces (BREP)
+                this.partMesh.traverse(child => {
+                    if (child.isMesh && child.type === 'FACE' && child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(mat => { if (mat.color) mat.color.copy(this.currentPanelColor); });
+                        } else if (child.material.color) {
+                            child.material.color.copy(this.currentPanelColor);
+                        }
+                    }
                 });
-            } else {
-                if (this.partMesh.material.color) {
-                    this.partMesh.material.color.copy(this.currentPanelColor);
+            } else if (this.partMesh.material) {
+                if (Array.isArray(this.partMesh.material)) {
+                    this.partMesh.material.forEach(mat => {
+                        if (mat.color) mat.color.copy(this.currentPanelColor);
+                    });
+                } else {
+                    if (this.partMesh.material.color) {
+                        this.partMesh.material.color.copy(this.currentPanelColor);
+                    }
                 }
             }
         }

@@ -621,6 +621,10 @@ export default class ThreeModule extends BaseModule {
             this.log.debug("Skip updatePanel: 3D disabled");
             return;
         }
+        if (!this.scene) {
+            this.log.debug("Skip updatePanel: Scene not initialized");
+            return;
+        }
         // Prevent overlapping runs: if already running, queue the latest request
         if (this.updatePanelRunning) {
             this.updatePanelQueuedArgs = {
@@ -2513,7 +2517,9 @@ export default class ThreeModule extends BaseModule {
 
         // If Part mode is active, export ONLY the CSG result mesh
         if (this.csgEngine.isActive() && this.csgEngine.partMesh) {
-            meshesToExport.push(this.csgEngine.partMesh);
+            // Use unified mesh if available (prevents STL fragmentation)
+            const exportMesh = this.csgEngine.partMesh.userData?.mergedMesh || this.csgEngine.partMesh;
+            meshesToExport.push(exportMesh);
             this.log.info(
                 "Part mode active: Exporting ONLY Part view (CSG result mesh)",
             );
