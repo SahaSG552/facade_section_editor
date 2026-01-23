@@ -41,12 +41,7 @@ export default class ManifoldCSG {
 
     /**
      * Perform panel minus cutters using Manifold. Returns null on failure.
-     * @param {object} config
-     * @param {THREE.BufferGeometry} config.panelGeometry
-     * @param {THREE.Matrix4} config.panelMatrix - world transform for panel
-     * @param {Array<THREE.Mesh>} config.cutters - meshes to subtract
-     * @param {number} [config.tolerance] - optional mesh tolerance
-     * @param {number} [config.simplifyTolerance] - optional simplification tol
+     * Supports 'cutters' as Array<Mesh> (legacy) or Array<Array<Mesh>> (grouped by feature).
      */
     async subtract({
         panelGeometry,
@@ -63,35 +58,74 @@ export default class ManifoldCSG {
 
         const { Manifold } = this;
 
-        // Reserve unique IDs for provenance tracking
-        const idStart = Manifold.reserveIDs(1 + cutters.length);
+        // Check if input is grouped (Array of Arrays)
+        const isGrouped = cutters.length > 0 && Array.isArray(cutters[0]);
+        const groupCount = cutters.length;
+
+        // Reserve unique IDs: 1 for panel + N for groups/cutters
+        const idStart = Manifold.reserveIDs(1 + groupCount);
+
+        // Offset strategy: Each GROUP/FEATURE gets a large ID range
+        const ID_RANGE = 1000000;
+        let currentFaceOffset = 0;
 
         const panelManifold = await this.toManifold(
             panelGeometry,
             panelMatrix,
             idStart,
             tolerance,
+            currentFaceOffset // Panel starts at 0
         );
         if (!panelManifold) return null;
 
         const cutterManifolds = [];
-        for (let idx = 0; idx < cutters.length; idx++) {
-            const mesh = cutters[idx];
+
+        // Helper to process a mesh
+        const processMesh = async (mesh, offset, idxOffset) => {
             mesh.updateMatrixWorld?.(true);
-            // Apply comprehensive mesh repair before CSG
             const cleanTol = cutterTolerance || tolerance || 1e-3;
             const cleanedGeom = this.prepareGeometryForCSG(
                 mesh.geometry,
                 mesh.matrixWorld,
                 cleanTol,
             );
-            const manifold = await this.toManifold(
+            return await this.toManifold(
                 cleanedGeom,
-                new THREE.Matrix4(), // Already applied transform in prepare
-                idStart + idx + 1,
+                new THREE.Matrix4(),
+                idStart + idxOffset + 1,
                 tolerance,
+                offset
             );
-            if (manifold) cutterManifolds.push(manifold);
+        };
+
+        if (isGrouped) {
+            for (let gIdx = 0; gIdx < cutters.length; gIdx++) {
+                const group = cutters[gIdx];
+                currentFaceOffset += ID_RANGE;
+                const groupManifolds = [];
+
+                for (const mesh of group) {
+                    const m = await processMesh(mesh, currentFaceOffset, gIdx);
+                    if (m) groupManifolds.push(m);
+                }
+
+                if (groupManifolds.length) {
+                    if (groupManifolds.length === 1) {
+                        cutterManifolds.push(groupManifolds[0]);
+                    } else {
+                        const grouped = Manifold.union(groupManifolds);
+                        cutterManifolds.push(grouped);
+                        groupManifolds.forEach(m => { if (m !== grouped) m.delete(); });
+                    }
+                }
+            }
+        } else {
+            for (let idx = 0; idx < cutters.length; idx++) {
+                currentFaceOffset += ID_RANGE;
+                const mesh = cutters[idx];
+                const manifold = await processMesh(mesh, currentFaceOffset, idx);
+                if (manifold) cutterManifolds.push(manifold);
+            }
         }
 
         if (!cutterManifolds.length) {
@@ -118,7 +152,6 @@ export default class ManifoldCSG {
             this.log?.warn?.("Manifold subtract failed", err);
             return null;
         } finally {
-            // Clean up all WASM objects
             cutterManifolds.forEach((m) => m?.delete());
             if (union && union !== cutterManifolds[0]) {
                 union.delete();
@@ -128,18 +161,11 @@ export default class ManifoldCSG {
         }
     }
 
-    /**
-     * Union a set of meshes and weld edges via Manifold. Returns { geometry } or null on failure.
-     * Useful for edge-matching extrudes before export.
-     */
     async weldUnion({ meshes = [], tolerance, simplifyTolerance } = {}) {
         if (!meshes.length) return null;
-
         const ready = await this.ensureModule();
         if (!ready) return null;
-
         const { Manifold } = this;
-
         const manifolds = [];
         let union = null;
         let finalManifold = null;
@@ -148,137 +174,66 @@ export default class ManifoldCSG {
                 mesh.updateMatrixWorld?.(true);
                 const cleanTol = tolerance || 1e-3;
                 const cleaned = this.cleanupGeometry(mesh.geometry, cleanTol);
-                const manifold = await this.toManifold(
-                    cleaned,
-                    mesh.matrixWorld,
-                    undefined,
-                    cleanTol,
-                );
+                const manifold = await this.toManifold(cleaned, mesh.matrixWorld, undefined, cleanTol);
                 cleaned?.dispose?.();
-                if (manifold) {
-                    manifolds.push(manifold);
-                } else {
-                    this.log?.warn?.(
-                        "weldUnion: skipping non-manifold mesh",
-                        mesh.uuid || mesh.id || "unknown",
-                    );
-                }
+                if (manifold) manifolds.push(manifold);
             }
-
             if (!manifolds.length) return null;
-
-            union =
-                manifolds.length === 1
-                    ? manifolds[0]
-                    : Manifold.union(manifolds);
-
+            union = manifolds.length === 1 ? manifolds[0] : Manifold.union(manifolds);
             if (!union) return null;
-
             finalManifold = union;
             if (simplifyTolerance && simplifyTolerance > 0) {
                 const simplified = union.setTolerance(simplifyTolerance);
-                if (simplified) {
-                    finalManifold = simplified;
-                    if (simplified !== union) {
-                        union = union; // no-op, keep union for later delete
-                    }
-                }
+                if (simplified) finalManifold = simplified;
             }
-
-            const output = this.fromManifold(finalManifold);
-            return output;
+            return this.fromManifold(finalManifold);
         } catch (err) {
             this.log?.warn?.("weldUnion failed", err);
             return null;
         } finally {
-            // Dispose all manifolds
             manifolds.forEach((m) => m?.delete?.());
-
-            if (finalManifold && !manifolds.includes(finalManifold)) {
-                finalManifold.delete();
-            }
-
-            if (
-                union &&
-                union !== finalManifold &&
-                !manifolds.includes(union)
-            ) {
-                union.delete();
-            }
+            if (finalManifold && !manifolds.includes(finalManifold)) finalManifold.delete();
+            if (union && union !== finalManifold && !manifolds.includes(union)) union.delete();
         }
     }
 
-    /**Prepare geometry for CSG operations with comprehensive mesh repair
-     * Replaces basic cleanupGeometry with full validation and repair pipeline
-     */
     prepareGeometryForCSG(geometry, worldMatrix = null, weldTolerance = 1e-3) {
-        if (!appConfig.meshRepair.enabled) {
-            // Fall back to basic cleanup if repair disabled
-            return this.cleanupGeometry(geometry, weldTolerance);
-        }
-
+        if (!appConfig.meshRepair.enabled) return this.cleanupGeometry(geometry, weldTolerance);
         const repairInstance = getRepairInstance(appConfig.meshRepair);
-        const prepared = repairInstance.prepareForCSG(geometry, worldMatrix);
-
-        return prepared;
+        return repairInstance.prepareForCSG(geometry, worldMatrix);
     }
 
-    /**
-     * Clean up geometry: weld vertices, compute normals, remove extra attributes
-     * Legacy method - kept for backward compatibility when repair is disabled
-     * Clean up geometry: weld vertices, compute normals, remove extra attributes
-     */
     cleanupGeometry(geometry, weldTolerance = 1e-3) {
         let geom = geometry.clone();
-
-        // Remove unnecessary attributes that might cause issues
         const attrsToKeep = ["position", "normal"];
         const keysToRemove = [];
         for (const key in geom.attributes) {
-            if (!attrsToKeep.includes(key)) {
-                keysToRemove.push(key);
-            }
+            if (!attrsToKeep.includes(key)) keysToRemove.push(key);
         }
         keysToRemove.forEach((key) => geom.deleteAttribute(key));
-
-        // Merge duplicate vertices using tolerance
         geom = mergeVertices(geom, weldTolerance) || geom;
-
-        // Recompute normals to ensure correct face orientation
         geom.computeVertexNormals();
-
-        // Ensure geometry is valid
         if (!geom.attributes.position || geom.attributes.position.count < 3) {
             geom.dispose();
-            return geometry; // Return original if cleanup failed
+            return geometry;
         }
-
         return geom;
     }
 
-    /**
-     * Convert a Three BufferGeometry + transform into a Manifold.
-     */
-    async toManifold(geometry, matrixWorld, originalId, tolerance) {
+    async toManifold(geometry, matrixWorld, originalId, tolerance, faceIDOffset = 0) {
         if (!geometry || !geometry.attributes?.position) return null;
-
         if (!this.Mesh || !this.Manifold) return null;
 
-        // Clone and weld vertices to improve manifoldness
         let geom = geometry.clone();
-        const weldTol =
-            typeof tolerance === "number" && tolerance > 0 ? tolerance : 1e-3;
+        const weldTol = typeof tolerance === "number" && tolerance > 0 ? tolerance : 1e-3;
         geom = mergeVertices(geom, weldTol) || geom;
         geom.computeVertexNormals();
 
-        // If still unindexed, keep as-is without forcing toNonIndexed
-
         const position = geom.attributes.position;
-        const vertCount = position.count;
-        const vertProperties = new Float32Array(vertCount * 3);
+        const vertProperties = new Float32Array(position.count * 3);
         const v = new THREE.Vector3();
 
-        for (let i = 0; i < vertCount; i++) {
+        for (let i = 0; i < position.count; i++) {
             v.fromBufferAttribute(position, i).applyMatrix4(matrixWorld);
             const base = i * 3;
             vertProperties[base] = v.x;
@@ -288,62 +243,27 @@ export default class ManifoldCSG {
 
         let triVerts;
         if (geom.index) {
-            const indexArray = geom.index.array;
-            triVerts = new Uint32Array(indexArray.length);
-            for (let i = 0; i < indexArray.length; i++) {
-                triVerts[i] = indexArray[i];
-            }
+            triVerts = new Uint32Array(geom.index.array);
         } else {
-            if (vertCount % 3 !== 0) {
-                geom.dispose();
-                return null;
-            }
-            triVerts = new Uint32Array(vertCount);
-            for (let i = 0; i < vertCount; i++) triVerts[i] = i;
+            triVerts = new Uint32Array(position.count);
+            for (let i = 0; i < position.count; i++) triVerts[i] = i;
         }
 
-        // BREP BEHAVIOR: Group triangles by normal deflectio n BEFORE Manifold conversion
-        // This ensures curved surfaces (like lathe segments) are properly grouped
-        const triCount = triVerts.length / 3;
-        let faceID = null;
+        const { FaceIDGenerator } = await import('./FaceIDGenerator.js');
 
-        if (triCount > 0) {
-            // Import FaceIDGenerator dynamically to avoid circular dependency
-            const { FaceIDGenerator } = await import('./FaceIDGenerator.js');
+        const tempGeom = new THREE.BufferGeometry();
+        tempGeom.setAttribute('position', new THREE.BufferAttribute(vertProperties, 3));
+        tempGeom.setIndex(new THREE.BufferAttribute(triVerts, 1));
 
-            // Create temporary geometry for face grouping
-            const tempGeom = new THREE.BufferGeometry();
-            tempGeom.setAttribute('position', new THREE.BufferAttribute(vertProperties, 3));
-            tempGeom.setIndex(new THREE.BufferAttribute(triVerts, 1));
-
-            // Group faces using BREP's algorithm (30 degrees default -> changed to 15 to match Reference Import)
-            // Generate Face IDs using the same tolerance as vertex merging (or slightly more forgiving)
-            // Using 1e-4 to better handle coplanar faces that might have slight deviations
-            const groupTol = Math.max(weldTol, 1e-4);
-            const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, groupTol);
-
-            // Convert to Uint32Array for Manifold
-            faceID = new Uint32Array(groupedFaceIDs);
-
-            tempGeom.dispose();
+        const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, Math.max(weldTol, 1e-4));
+        const faceID = new Uint32Array(groupedFaceIDs.length);
+        for (let i = 0; i < groupedFaceIDs.length; i++) {
+            faceID[i] = groupedFaceIDs[i] + faceIDOffset;
         }
+        tempGeom.dispose();
 
-        const meshOptions = {
-            numProp: 3,
-            vertProperties,
-            triVerts,
-        };
-
-        // Add faceID if we generated it
-        if (faceID) {
-            meshOptions.faceID = faceID;
-        }
-
-        // Use tolerance if provided, otherwise let Manifold use default
-        if (typeof tolerance === "number" && tolerance > 0) {
-            meshOptions.tolerance = tolerance;
-        }
-
+        const meshOptions = { numProp: 3, vertProperties, triVerts, faceID };
+        if (typeof tolerance === "number" && tolerance > 0) meshOptions.tolerance = tolerance;
         if (typeof originalId === "number") {
             meshOptions.runOriginalID = new Uint32Array([originalId]);
             meshOptions.runIndex = new Uint32Array([0, triVerts.length]);
@@ -351,81 +271,45 @@ export default class ManifoldCSG {
 
         try {
             const mesh = new this.Mesh(meshOptions);
-
-            // Try to merge duplicate vertices which might fix manifold issues
-            const changed = mesh.merge();
-            if (changed) {
-                this.log?.info?.("Manifold: merged duplicate vertices");
-            }
-
+            mesh.merge();
             const manifold = this.Manifold.ofMesh(mesh);
-            // Mesh is a plain JS class here; no delete() needed
             geom.dispose();
             return manifold;
         } catch (err) {
             geom.dispose();
-            this.log?.warn?.(
-                `toManifold failed for geometry with ${vertCount} verts, ${triVerts.length / 3
-                } tris:`,
-                err.code || err.message,
-            );
             return null;
         }
     }
 
-    /**
-     * Convert a Manifold back into Three BufferGeometry plus metadata.
-     */
     fromManifold(manifold) {
         const mesh = manifold.getMesh();
-        const numProp = mesh.numProp;
-        const vertCount = mesh.numVert;
-
-        const positions = new Float32Array(vertCount * 3);
-        for (let i = 0; i < vertCount; i++) {
-            const baseIn = i * numProp;
-            const baseOut = i * 3;
-            positions[baseOut] = mesh.vertProperties[baseIn];
-            positions[baseOut + 1] = mesh.vertProperties[baseIn + 1];
-            positions[baseOut + 2] = mesh.vertProperties[baseIn + 2];
+        const positions = new Float32Array(mesh.numVert * 3);
+        for (let i = 0; i < mesh.numVert; i++) {
+            positions[i * 3] = mesh.vertProperties[i * mesh.numProp];
+            positions[i * 3 + 1] = mesh.vertProperties[i * mesh.numProp + 1];
+            positions[i * 3 + 2] = mesh.vertProperties[i * mesh.numProp + 2];
         }
 
-        const indices = new Uint32Array(mesh.triVerts);
-
         const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute(
-            "position",
-            new THREE.BufferAttribute(positions, 3),
-        );
-        geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+        geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(mesh.triVerts), 1));
         geometry.computeVertexNormals();
 
-        const meta = {
-            runOriginalID: mesh.runOriginalID
-                ? new Uint32Array(mesh.runOriginalID)
-                : undefined,
-            runIndex: mesh.runIndex
-                ? new Uint32Array(mesh.runIndex)
-                : undefined,
-            faceID: mesh.faceID ? new Uint32Array(mesh.faceID) : undefined,
-            tolerance: mesh.tolerance,
+        return {
+            geometry,
+            meta: {
+                faceID: mesh.faceID ? new Uint32Array(mesh.faceID) : undefined,
+                runOriginalID: mesh.runOriginalID ? new Uint32Array(mesh.runOriginalID) : undefined,
+                runIndex: mesh.runIndex ? new Uint32Array(mesh.runIndex) : undefined,
+                tolerance: mesh.tolerance
+            }
         };
-
-        // Mesh from getMesh is a JS wrapper without delete(); the manifold owning it is deleted elsewhere.
-        return { geometry, meta };
     }
 
-    /**
-     * Build transform matrix from position/rotation/scale triples.
-     */
     static buildMatrix(position, rotation, scale) {
         const pos = position?.clone?.() || new THREE.Vector3();
         const rot = rotation?.clone?.() || new THREE.Euler();
         const scl = scale?.clone?.() || new THREE.Vector3(1, 1, 1);
-        return new THREE.Matrix4().compose(
-            pos,
-            new THREE.Quaternion().setFromEuler(rot),
-            scl,
-        );
+        return new THREE.Matrix4().compose(pos, new THREE.Quaternion().setFromEuler(rot), scl);
     }
 }

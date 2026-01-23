@@ -226,9 +226,17 @@ class CSGEngine {
             const resultMaterial = this.createResultMaterial();
 
             if (this.useManifoldBackend) {
-                const manifoldOutput = await this.runManifoldCSG(
-                    uniqueIntersectingMeshes,
-                );
+                // Group meshes by bitIndex to ensure they share the same FaceID offset (Namespace)
+                // This merges components of the same operation (Main, Expansion, Phantom) into one selectable feature.
+                const featuredGroups = new Map();
+                for (const mesh of uniqueIntersectingMeshes) {
+                    const fid = mesh.userData?.bitIndex !== undefined ? `bit_${mesh.userData.bitIndex}` : mesh.uuid;
+                    if (!featuredGroups.has(fid)) featuredGroups.set(fid, []);
+                    featuredGroups.get(fid).push(mesh);
+                }
+                const groupedCutters = Array.from(featuredGroups.values());
+
+                const manifoldOutput = await this.runManifoldCSG(groupedCutters);
 
                 if (manifoldOutput?.geometry) {
                     const resultMesh = new THREE.Mesh(
