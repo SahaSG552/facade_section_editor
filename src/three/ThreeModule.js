@@ -277,11 +277,15 @@ export default class ThreeModule extends BaseModule {
 
             // Material selector
             const select = document.createElement("select");
-            select.title = "Material";
-            this.materialManager.getAvailableMaterials().forEach((key) => {
+            select.title = "Display Mode";
+            const materials = this.materialManager.getAvailableMaterials();
+            materials.forEach((key) => {
                 const opt = document.createElement("option");
                 opt.value = key;
-                opt.textContent = key;
+                // Get pretty label from registry if available, else standard logic
+                // Since we rewrote MaterialManager, we know registry structure can have labels
+                const reg = this.materialManager.materialRegistry[key];
+                opt.textContent = reg && reg.label ? reg.label : key;
                 select.appendChild(opt);
             });
             select.value = this.materialManager.getCurrentMaterialKey();
@@ -289,6 +293,14 @@ export default class ThreeModule extends BaseModule {
                 this.materialManager.setMaterialMode(select.value);
             });
 
+            // Toggle wireframe logic delegated to MaterialManager, but button here if needed.
+            // Keeping wireframe separate for debug is useful, but User emphasized cleanup.
+            // "Shaded", "ShadedEdges", "ShadedBEdges" are mutually exclusive modes.
+            // Wireframe is orthogonal usually.
+            // I'll keep the wireframe toggle invisible or just simple, 
+            // but remove the "Edges" toggle.
+
+            /*
             // Wireframe toggle (mesh wireframe)
             const wfLabel = document.createElement("label");
             wfLabel.style.display = "flex";
@@ -305,23 +317,7 @@ export default class ThreeModule extends BaseModule {
             wfText.textContent = "Wireframe";
             wfLabel.appendChild(wf);
             wfLabel.appendChild(wfText);
-
-            // Edges overlay toggle
-            const edLabel = document.createElement("label");
-            edLabel.style.display = "flex";
-            edLabel.style.alignItems = "center";
-            edLabel.style.gap = "4px";
-            const ed = document.createElement("input");
-            ed.type = "checkbox";
-            ed.checked = this.materialManager.isEdgesEnabled();
-            ed.title = "Edges Overlay";
-            ed.addEventListener("change", () => {
-                this.materialManager.setEdgesEnabled(ed.checked);
-            });
-            const edText = document.createElement("span");
-            edText.textContent = "Edges";
-            edLabel.appendChild(ed);
-            edLabel.appendChild(edText);
+            */
 
             // Export to STL button
             const exportBtn = document.createElement("button");
@@ -340,8 +336,7 @@ export default class ThreeModule extends BaseModule {
             });
 
             row1.appendChild(select);
-            row1.appendChild(wfLabel);
-            row1.appendChild(edLabel);
+            // row1.appendChild(wfLabel); // Hiding wireframe for cleaner UI as per request
             row1.appendChild(exportBtn);
 
             // Row 2: Colors
@@ -369,7 +364,6 @@ export default class ThreeModule extends BaseModule {
             pColorInput.title = "Panel Color";
             pColorInput.addEventListener("input", (e) => {
                 this.materialManager.setTargetPanelColor(e.target.value);
-                // Also suggest a background? Maybe only on explicit magic click
             });
             pColorDiv.appendChild(pColorLabel);
             pColorDiv.appendChild(pColorInput);
@@ -415,9 +409,41 @@ export default class ThreeModule extends BaseModule {
             bColorDiv.appendChild(bColorLabel);
             bColorDiv.appendChild(bgColorInput);
 
+            // Edges Color
+            const eColorDiv = document.createElement("div");
+            eColorDiv.style.display = "flex";
+            eColorDiv.style.alignItems = "center";
+            eColorDiv.style.gap = "4px";
+            eColorDiv.title = "Edges Color";
+            const eColorLabel = document.createElement("span");
+            eColorLabel.textContent = "Edge:";
+            const eColorInput = document.createElement("input");
+            eColorInput.type = "color";
+            eColorInput.value = "#333333"; // Default
+            eColorInput.style.border = "none";
+            eColorInput.style.padding = "0";
+            eColorInput.style.width = "24px";
+            eColorInput.style.height = "24px";
+            eColorInput.style.cursor = "pointer";
+            eColorInput.addEventListener("input", (e) => {
+                this.materialManager.setEdgesColor(e.target.value);
+            });
+            eColorDiv.appendChild(eColorLabel);
+            eColorDiv.appendChild(eColorInput);
+
             row2.appendChild(pColorDiv);
             row2.appendChild(magicBtn);
             row2.appendChild(bColorDiv);
+
+            // Separator
+            const sep = document.createElement("div");
+            sep.style.width = "1px";
+            sep.style.height = "16px";
+            sep.style.background = "#ddd";
+            sep.style.margin = "0 4px";
+            row2.appendChild(sep);
+
+            row2.appendChild(eColorDiv);
 
             wrap.appendChild(row1);
             wrap.appendChild(row2);
@@ -425,7 +451,7 @@ export default class ThreeModule extends BaseModule {
             // Position wrap inside container (over renderer)
             this.container.style.position = "relative";
             this.container.appendChild(wrap);
-            this.materialControls = { wrap, select, wf, ed, exportBtn };
+            this.materialControls = { wrap, select, exportBtn };
         } catch (e) {
             this.log.warn("Failed to init material controls:", e);
         }
@@ -683,17 +709,19 @@ export default class ThreeModule extends BaseModule {
                 this.partMesh.visible = false;
             }
             this.bitPathMeshes.forEach((mesh) => {
+                if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
                 this.scene.remove(mesh);
                 mesh.geometry.dispose();
                 mesh.material.dispose();
             });
-            this.bitPathMeshes = [];
+            this.bitPathMeshes.length = 0;
             this.bitExtrudeMeshes.forEach((mesh) => {
+                if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
                 this.scene.remove(mesh);
                 mesh.geometry.dispose();
                 mesh.material.dispose();
             });
-            this.bitExtrudeMeshes = [];
+            this.bitExtrudeMeshes.length = 0;
             this.lastCSGSignature = null;
             this.csgActive = false;
             this.csgVisible = false;
@@ -1375,6 +1403,13 @@ export default class ThreeModule extends BaseModule {
                         }
                     }
 
+                    // Store base color so MaterialManager preserves it
+                    bitMeshes.forEach(mesh => {
+                        if (mesh.isMesh) {
+                            mesh.userData.baseColor = pathColor;
+                        }
+                    });
+
                     // Create extension if needed
                     let extensionMeshes = [];
                     if (
@@ -1421,11 +1456,15 @@ export default class ThreeModule extends BaseModule {
                             mesh.material = mesh.material.clone();
                             mesh.material.transparent = true;
                             mesh.material.opacity = 0.4;
-                            mesh.material.color.set(
-                                passExtensionInfo.hasShankCollision
-                                    ? "#8B0000"
-                                    : "#FF0000",
-                            );
+                            const color = passExtensionInfo.hasShankCollision
+                                ? "#8B0000"
+                                : "#FF0000";
+                            mesh.material.color.set(color);
+
+                            // Store appearance data for MaterialManager
+                            mesh.userData.baseColor = color;
+                            mesh.userData.opacity = 0.4;
+                            mesh.userData.transparent = true;
                         });
                     }
 
@@ -1450,7 +1489,15 @@ export default class ThreeModule extends BaseModule {
                             if (!isMainBit) {
                                 mesh.material.transparent = true;
                                 mesh.material.opacity = 0.3;
+
+                                // Store appearance data for MaterialManager
+                                mesh.userData.opacity = 0.3;
+                                mesh.userData.transparent = true;
                             }
+
+                            // baseColor was already linked to loop above, but let's be sure
+                            // bitMeshes created from extrudeAlongPath use pathColor (line 1349 which is bit.color or gray)
+                            // We set mesh.userData.baseColor in previous edit!
 
                             this.bitExtrudeMeshes.push(mesh);
 
@@ -2424,9 +2471,10 @@ export default class ThreeModule extends BaseModule {
         });
         this.bitExtrudeMeshes.forEach((mesh) => {
             mesh.visible = visible;
-            // Sync edge visibility with mesh visibility
+            // Note: edgeLines are now children, so they inherit visibility automatically.
+            // But we might want to override if edges are disabled globally.
             if (mesh.userData.edgeLines) {
-                mesh.userData.edgeLines.visible = visible;
+                mesh.userData.edgeLines.visible = visible && this.materialManager.isEdgesEnabled();
             }
         });
     }

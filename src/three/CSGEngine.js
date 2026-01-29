@@ -486,10 +486,9 @@ class CSGEngine {
         this.partMesh = object;
         this.materialManager.partMesh = object;
 
-        // Note: Edge visualization via MaterialManager is disabled for BREP groups
-        // as they have their own edge handling.
-        if (object && object.isMesh && this.materialManager.isEdgesEnabled()) {
-            this.materialManager.addEdgeVisualization(object);
+        // Sync edges with current global state
+        if (object) {
+            this.materialManager.toggleEdges(object, this.materialManager.isEdgesEnabled());
         }
     }
 
@@ -573,22 +572,13 @@ class CSGEngine {
     showBasePanel() {
         if (this.panelMesh) {
             this.panelMesh.visible = true;
-            if (this.materialManager.isEdgesEnabled()) {
-                if (!this.panelMesh.userData.edgeLines) {
-                    this.materialManager.addEdgeVisualization(this.panelMesh);
-                } else {
-                    this.panelMesh.userData.edgeLines.visible = true;
-                }
-            } else if (this.panelMesh.userData.edgeLines) {
-                this.panelMesh.userData.edgeLines.visible = false;
-            }
+            // Ensure edges are synced
+            this.materialManager.toggleEdges(this.panelMesh, this.materialManager.isEdgesEnabled());
         }
 
         if (this.partMesh) {
             this.partMesh.visible = false;
-            if (this.partMesh.userData.edgeLines) {
-                this.partMesh.userData.edgeLines.visible = false;
-            }
+            // Edges as children are hidden automatically
         }
         this.bitPathMeshes.forEach((mesh) => {
             mesh.visible = window.bitsVisible !== false;
@@ -596,10 +586,8 @@ class CSGEngine {
         this.bitExtrudeMeshes.forEach((mesh) => {
             const shouldBeVisible = window.bitsVisible !== false;
             mesh.visible = shouldBeVisible;
-            // Sync edge visibility with mesh visibility (always visible with mesh if bits are visible)
-            if (mesh.userData && mesh.userData.edgeLines) {
-                mesh.userData.edgeLines.visible =
-                    shouldBeVisible && this.materialManager?.isEdgesEnabled?.();
+            if (shouldBeVisible) {
+                this.materialManager.toggleEdges(mesh, this.materialManager.isEdgesEnabled());
             }
         });
 
@@ -610,16 +598,9 @@ class CSGEngine {
     /**
      * Show CSG result (part view - panel with bits subtracted)
      */
-    /**
-     * Show CSG result (part view - panel with bits subtracted)
-     */
     showCSGResult() {
         if (this.panelMesh) {
             this.panelMesh.visible = false;
-            // Legacy edge lines check - probably not needed if migrating fully
-            if (this.panelMesh.userData.edgeLines) {
-                this.panelMesh.userData.edgeLines.visible = false;
-            }
         }
 
         if (this.partMesh) {
@@ -627,25 +608,15 @@ class CSGEngine {
                 this.scene.add(this.partMesh);
             }
             this.partMesh.visible = true;
-
-            // Logic for BREP Group vs Simple Mesh
-            if (this.partMesh.isGroup) {
-                // BREP Visualizer handles its own edges
-            } else if (this.materialManager.isEdgesEnabled()) {
-                // Legacy path for simple meshes
-                if (!this.partMesh.userData.edgeLines) {
-                    this.materialManager.addEdgeVisualization(this.partMesh);
-                } else {
-                    this.partMesh.userData.edgeLines.visible = true;
-                }
-            }
+            // Sync edges
+            this.materialManager.toggleEdges(this.partMesh, this.materialManager.isEdgesEnabled());
         }
 
         // Hide bits
         this.bitPathMeshes.forEach(mesh => mesh.visible = false);
         this.bitExtrudeMeshes.forEach(mesh => {
             mesh.visible = false;
-            if (mesh.userData?.edgeLines) mesh.userData.edgeLines.visible = false;
+            // Edges hidden automatically
         });
 
         this.csgVisible = true;

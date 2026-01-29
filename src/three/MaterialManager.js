@@ -18,6 +18,7 @@ class MaterialManager {
         // Material registry
         this.materialRegistry = {
             shaded: {
+                label: "Shaded",
                 enabled: true,
                 factory: () =>
                     new THREE.MeshStandardMaterial({
@@ -26,8 +27,10 @@ class MaterialManager {
                         metalness: 0.1,
                         wireframe: false,
                     }),
+                edgesType: 'none'
             },
             shadedEdges: {
+                label: "Shaded Edges",
                 enabled: true,
                 factory: () =>
                     new THREE.MeshStandardMaterial({
@@ -36,57 +39,48 @@ class MaterialManager {
                         metalness: 0.25,
                         wireframe: false,
                     }),
+                edgesType: 'standard'
             },
-            wireframe: {
+            shadedBEdges: {
+                label: "Shaded BREP Edges",
                 enabled: true,
                 factory: () =>
                     new THREE.MeshStandardMaterial({
                         color: 0xdeb887,
-                        roughness: 1,
-                        metalness: 0,
-                        wireframe: true,
+                        roughness: 0.75,
+                        metalness: 0.25,
+                        wireframe: false,
                     }),
+                edgesType: 'brep'
             },
-            clay: {
+            wireframe: {
+                label: "Wireframe",
                 enabled: true,
                 factory: () =>
                     new THREE.MeshStandardMaterial({
-                        color: 0xbfb6aa,
-                        roughness: 0.95,
-                        metalness: 0.05,
-                        wireframe: false,
+                        color: 0xdeb887,
+                        roughness: 0.5,
+                        metalness: 0.2,
+                        wireframe: false, // WebGPU doesn't support wireframe property
                     }),
+                edgesType: 'wireframe' // Use WireframeGeometry overlay instead
             },
-            metal: {
+            edges: {
+                label: "Hidden",
                 enabled: true,
                 factory: () =>
                     new THREE.MeshStandardMaterial({
-                        color: 0xcccccc,
-                        roughness: 0.25,
-                        metalness: 0.9,
+                        color: 0xdeb887,
+                        roughness: 0.75,
+                        metalness: 0.25,
                         wireframe: false,
                     }),
-            },
-            glass: {
-                enabled: true,
-                factory: () =>
-                    new THREE.MeshPhysicalMaterial({
-                        color: 0xffffff,
-                        roughness: 0,
-                        metalness: 0,
-                        transmission: 0.6,
-                        transparent: true,
-                        opacity: 0.4,
-                        ior: 1.4,
-                        thickness: 10,
-                        wireframe: false,
-                    }),
-            },
+                edgesType: 'dashedHidden' // Special mode for dashed hidden edges
+            }
         };
-        // Current material and display modes
+        // Shaded is default
         this.currentMaterialKey = "shaded";
         this.wireframeMode = false;
-        this.edgesEnabled = false;
 
         // References to meshes to update
         this.panelMesh = null;
@@ -101,9 +95,13 @@ class MaterialManager {
         this.wireframeToggleBtn = null;
 
         // Color Transition State
-        this.targetPanelColor = new THREE.Color(0xdeb887); // Default shaded color
+        this.targetPanelColor = new THREE.Color(0xdeb887);
         this.currentPanelColor = new THREE.Color(0xdeb887);
         this.colorLerpFactor = 0.05;
+
+        // Edges Appearance
+        this.edgesColor = new THREE.Color(0x333333); // Default dark grey
+        this.edgesWidth = 1;
     }
 
     /**
@@ -134,42 +132,97 @@ class MaterialManager {
         // Update original material reference
         this.originalPanelMaterial = mat.clone();
 
-        // Apply to panel mesh
-        if (this.panelMesh) {
-            if (this.panelMesh.material) {
-                this.panelMesh.material.dispose();
-            }
-            this.panelMesh.material = mat.clone();
-        }
+        // Helper to apply material and edges
+        const applyToMesh = (mesh) => {
+            if (!mesh) return;
 
-        // Apply to CSG result mesh (part mesh)
-        // Apply to CSG result mesh (part mesh)
-        if (this.partMesh) {
-            if (this.partMesh.isGroup) {
-                this.partMesh.traverse(child => {
-                    if (child.isMesh && child.type === 'FACE') {
-                        if (child.material) child.material.dispose();
-                        const pm = entry.factory();
-                        pm.wireframe = this.wireframeMode;
-                        child.material = pm;
-                        // Update base backup?
-                        // For BREP, maybe we want to keep the deterministic color if mode is Shaded
-                        // But if user explicitly requests 'Shaded' (reset), maybe uniform is okay?
-                        // Or we should recreate BREP colors? 
-                        // For now, simple uniform application.
+            // Apply Material
+            if (mesh.isMesh) {
+                // Check if this specific mesh is currently highlighted (has defaultMaterial stored)
+                const isHighlighted = !!mesh.userData.defaultMaterial;
+
+                // Determine target color:
+                // 1. userData.baseColor (set by ThreeModule for bits)
+                // 2. Current material color (if we want to preserve what's there on an un-tagged mesh)
+                // 3. currentPanelColor (fallback)
+
+                let targetColor;
+                if (mesh.userData.baseColor) {
+                    targetColor = new THREE.Color(mesh.userData.baseColor);
+                } else if (mesh.material && mesh.material.color && mesh !== this.panelMesh) {
+                    // If it's not the panel, and has a color, try to preserve it as the "base"
+                    // This fixes the "lost color" issue for existing bits that didn't get userData.baseColor yet
+                    targetColor = mesh.material.color.clone();
+                    // And save it for next time!
+                    mesh.userData.baseColor = '#' + targetColor.getHexString();
+                } else {
+                    targetColor = this.currentPanelColor;
+                }
+
+                // Create new material instance
+                const newMat = mat.clone();
+                if (newMat.color) newMat.color.copy(targetColor);
+
+                // Persistence of transparency/opacity (e.g. for Phantom bits)
+                if (mesh.userData.transparent !== undefined) newMat.transparent = mesh.userData.transparent;
+                if (mesh.userData.opacity !== undefined) newMat.opacity = mesh.userData.opacity;
+
+                // If highlighted, we update the BACKUP material, not the active one
+                if (isHighlighted) {
+                    if (mesh.userData.defaultMaterial) mesh.userData.defaultMaterial.dispose();
+                    mesh.userData.defaultMaterial = newMat;
+                    // Do not touch mesh.material (it is the highlight)
+                } else {
+                    if (mesh.material) mesh.material.dispose();
+                    mesh.material = newMat;
+                }
+
+            } else if (mesh.isGroup) {
+                mesh.traverse(child => {
+                    if (child.isMesh && child.type === 'FACE') { // Handle BREP structures
+                        const isHighlighted = !!child.userData.defaultMaterial;
+
+                        let targetColor;
+                        if (child.userData.baseColor) {
+                            targetColor = new THREE.Color(child.userData.baseColor);
+                        } else if (child.material && child.material.color) { // BREP faces aren't the panelMesh itself
+                            targetColor = child.material.color.clone();
+                            child.userData.baseColor = '#' + targetColor.getHexString();
+                        } else {
+                            targetColor = this.currentPanelColor;
+                        }
+
+                        const newMat = mat.clone();
+                        if (newMat.color) newMat.color.copy(targetColor);
+
+                        // Persistence of transparency/opacity
+                        if (child.userData.transparent !== undefined) newMat.transparent = child.userData.transparent;
+                        if (child.userData.opacity !== undefined) newMat.opacity = child.userData.opacity;
+
+                        if (isHighlighted) {
+                            if (child.userData.defaultMaterial) child.userData.defaultMaterial.dispose();
+                            child.userData.defaultMaterial = newMat;
+                        } else {
+                            if (child.material) child.material.dispose();
+                            child.material = newMat;
+                        }
                     }
                 });
-            } else {
-                if (this.partMesh.material) {
-                    this.partMesh.material.dispose();
-                }
-                const pm = entry.factory();
-                pm.wireframe = this.wireframeMode;
-                this.partMesh.material = pm;
             }
+
+            // Apply Edges
+            this.updateEdgesForMesh(mesh, entry.edgesType);
+        };
+
+        // Apply to known meshes
+        applyToMesh(this.panelMesh);
+        applyToMesh(this.partMesh);
+
+        if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
+            this.bitExtrudeMeshes.forEach(mesh => applyToMesh(mesh));
         }
 
-        this.log.info("Material mode changed to:", modeKey);
+        this.log.info("Material mode changed to:", modeKey, "Edges type:", entry.edgesType);
     }
 
     /**
@@ -204,61 +257,135 @@ class MaterialManager {
     }
 
     /**
-     * Enable/disable edges overlay visualization
+     * Update edges for a specific mesh based on requested type
+     * @param {THREE.Object3D} object 
+     * @param {string} type 'none', 'standard', 'brep'
      */
-    setEdgesEnabled(enabled) {
-        this.edgesEnabled = enabled;
+    updateEdgesForMesh(object, type) {
+        if (!object) return;
 
-        if (enabled) {
-            // Create fresh edge visualizations when enabled
-            if (this.panelMesh && this.panelMesh.visible) {
-                this.addEdgeVisualization(this.panelMesh);
-            }
-            if (this.partMesh && this.partMesh.visible) {
-                if (this.partMesh.isGroup) {
-                    // BREP: Show existing edge objects
-                    this.partMesh.traverse(child => {
-                        if (child.type === 'EDGE') child.visible = true;
-                    });
-                } else {
-                    this.addEdgeVisualization(this.partMesh);
-                }
-            }
-            // Create edge visualization ONLY for visible bit extrusions
-            // In Part mode, bit extrusions are hidden, so don't create edges for them
-            if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
-                this.bitExtrudeMeshes.forEach((mesh) => {
-                    if (mesh && mesh.visible) {
-                        this.addEdgeVisualization(mesh);
-                    }
-                });
-            }
-        } else {
-            // Remove all edge visualizations when disabled
-            if (this.panelMesh) {
-                this.removeEdgeVisualization(this.panelMesh);
-            }
-            if (this.partMesh) {
-                if (this.partMesh.isGroup) {
-                    // BREP: Hide existing edge objects
-                    this.partMesh.traverse(child => {
-                        if (child.type === 'EDGE') child.visible = false;
-                    });
-                } else {
-                    this.removeEdgeVisualization(this.partMesh);
-                }
-            }
-            // Remove edge visualization for all bit extrusions
-            if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
-                this.bitExtrudeMeshes.forEach((mesh) => {
-                    if (mesh) {
-                        this.removeEdgeVisualization(mesh);
-                    }
-                });
-            }
+        // Recursive for groups
+        if (object.isGroup) {
+            object.children.forEach(child => this.updateEdgesForMesh(child, type));
+            return;
         }
 
-        this.log.info("Edges enabled:", enabled);
+        // Clean up existing edges first if they exist
+        this.removeEdgeVisualization(object);
+
+        if (type === 'none') return;
+        if (!object.isMesh) return;
+        if (object.type === 'EDGE' || object.type === 'Wireframe') return; // Don't put edges on edges
+
+        // Add requested edges
+        try {
+            let edgesGeometry;
+
+            // Determine geometry type
+            if (type === 'wireframe') {
+                // Use WireframeGeometry for full triangle wireframe
+                edgesGeometry = new THREE.WireframeGeometry(object.geometry);
+            } else if (type === 'brep' || type === 'dashedHidden') {
+                // Try enabling Semantic Edges if metadata exists (faceID check)
+                if (object.userData && object.userData.manifoldMeta && object.userData.manifoldMeta.faceID) {
+                    // BREP Edges
+                    edgesGeometry = new SemanticEdgesGeometry(object.geometry, object.userData.manifoldMeta.faceID);
+                } else {
+                    // Fallback to standard if no metadata
+                    edgesGeometry = new THREE.EdgesGeometry(object.geometry, 15);
+                }
+            } else {
+                // Standard 'ShadedEdges'
+                edgesGeometry = new THREE.EdgesGeometry(object.geometry);
+            }
+
+            if (type === 'dashedHidden') {
+                // Multi-pass dashed hidden edges technique
+                // 1. Dashed lines (hidden edges) - rendered with depthTest: false
+                const dashedLines = new THREE.LineSegments(
+                    edgesGeometry.clone(),
+                    new THREE.LineDashedMaterial({
+                        color: this.edgesColor,
+                        dashSize: 3,
+                        gapSize: 2,
+                        transparent: true,
+                        opacity: 0.4,
+                        depthTest: false, // Render even when hidden
+                        depthWrite: false,
+                        // Note: polygonOffset is not supported for lines in WebGPU
+                    })
+                );
+                dashedLines.computeLineDistances(); // Required for dashed material
+                dashedLines.userData.isEdge = true;
+                dashedLines.userData.isHiddenEdge = true;
+                dashedLines.renderOrder = 1;
+
+                // 2. Solid lines (visible edges) - rendered with depthTest: true
+                const solidLines = new THREE.LineSegments(
+                    edgesGeometry,
+                    new THREE.LineBasicMaterial({
+                        color: this.edgesColor,
+                        transparent: true,
+                        opacity: 0.8,
+                        depthTest: true, // Only render when visible
+                        // Note: polygonOffset is not supported for lines in WebGPU
+                    })
+                );
+                solidLines.userData.isEdge = true;
+                solidLines.userData.isVisibleEdge = true;
+                solidLines.renderOrder = 2;
+
+                // Create a group to hold both
+                const edgeGroup = new THREE.Group();
+                edgeGroup.add(dashedLines);
+                edgeGroup.add(solidLines);
+                edgeGroup.userData.isEdge = true;
+
+                object.add(edgeGroup);
+                object.userData.edgeLines = edgeGroup;
+                edgeGroup.visible = true;
+
+            } else {
+                // Standard single-layer edges (standard or brep)
+                const lineSegments = new THREE.LineSegments(
+                    edgesGeometry,
+                    new THREE.LineBasicMaterial({
+                        color: this.edgesColor,
+                        linewidth: this.edgesWidth,
+                        transparent: true,
+                        opacity: 0.6,
+                    })
+                );
+
+                // Tag it so we can find it later for style updates
+                lineSegments.userData.isEdge = true;
+
+                object.add(lineSegments);
+                object.userData.edgeLines = lineSegments;
+                lineSegments.visible = true; // Always visible if created, since we remove them for 'none'
+            }
+
+        } catch (error) {
+            this.log.warn("Failed to create edges for mesh:", error);
+        }
+    }
+
+    /**
+     * Enable/disable edges overlay visualization
+     * DEPRECATED: Delegate to setMaterialMode logic or use updateEdgesForMesh internally
+     */
+    setEdgesEnabled(enabled) {
+        this.log.warn("setEdgesEnabled is deprecated. Use setMaterialMode instead.");
+    }
+
+    /**
+     * Helper for legacy code calling toggleEdges directly
+     */
+    toggleEdges(object, visible) {
+        // Map visible=true to current mode's edge type, or 'none' if false
+        const currentMode = this.materialRegistry[this.currentMaterialKey];
+        const targetType = visible ? (currentMode?.edgesType || 'standard') : 'none';
+        this.updateEdgesForMesh(object, targetType);
     }
 
     /**
@@ -286,14 +413,55 @@ class MaterialManager {
     }
 
     /**
+     * Set edges color and update scene
+     * @param {string|number|THREE.Color} color 
+     */
+    setEdgesColor(color) {
+        this.edgesColor.set(color);
+        this.updateAllEdgesStyle();
+    }
+
+    /**
+     * Set edges width and update scene
+     * @param {number} width 
+     */
+    setEdgesWidth(width) {
+        this.edgesWidth = width;
+        this.updateAllEdgesStyle();
+    }
+
+    /**
+     * Update style of all existing edges in the scene
+     */
+    updateAllEdgesStyle() {
+        const updateObject = (obj) => {
+            if (obj.isLineSegments && obj.userData && obj.userData.isEdge) {
+                if (obj.material) {
+                    obj.material.color.copy(this.edgesColor);
+                    obj.material.linewidth = this.edgesWidth;
+                }
+            }
+            if (obj.children) {
+                obj.children.forEach(updateObject);
+            }
+        };
+
+        if (this.scene) this.scene.traverse(updateObject);
+    }
+
+    /**
      * Remove edge visualization from a mesh
      */
     removeEdgeVisualization(mesh) {
         try {
             if (mesh && mesh.userData && mesh.userData.edgeLines) {
-                if (this.scene) {
+                // If added as child, remove from mesh. If added to scene (legacy), remove from scene.
+                if (mesh.userData.edgeLines.parent) {
+                    mesh.userData.edgeLines.parent.remove(mesh.userData.edgeLines);
+                } else if (this.scene) {
                     this.scene.remove(mesh.userData.edgeLines);
                 }
+
                 if (mesh.userData.edgeLines.geometry) {
                     mesh.userData.edgeLines.geometry.dispose();
                 }
@@ -308,56 +476,24 @@ class MaterialManager {
     }
 
     /**
-     * Add edge visualization to a mesh (shows wireframe edges with solid color)
+     * Add edge visualization to a mesh
      * Always removes old edges first to avoid duplicates
+     * @param {THREE.Mesh} mesh 
+     * @param {boolean} forceVisible - force visibility state (default: use global setting)
      */
-    addEdgeVisualization(mesh) {
-        try {
-            if (!mesh || !mesh.geometry) return;
+    addEdgeVisualization(mesh, forceVisible = null) {
+        // Deprecated, redirect to updatedEdgesForMesh with standard assumption if not specified
+        const currentMode = this.materialRegistry[this.currentMaterialKey];
+        const type = currentMode ? (currentMode.edgesType || 'standard') : 'standard';
 
-            // Always remove old edges first to avoid duplicates
+        // However, this function is supposed to force creation.
+        // If forceVisible is false, we should remove.
+        if (forceVisible === false) {
             this.removeEdgeVisualization(mesh);
-
-            // Don't create if edges are disabled
-            if (!this.edgesEnabled) return;
-
-            // Create edges
-            let edges;
-
-            // Try enabling Semantic Edges if metadata exists (faceID check)
-            if (mesh.userData && mesh.userData.manifoldMeta && mesh.userData.manifoldMeta.faceID) {
-                this.log.debug("Found Manifold metadata, using SemanticEdgesGeometry for clean edges");
-                edges = new SemanticEdgesGeometry(mesh.geometry, mesh.userData.manifoldMeta.faceID);
-            } else {
-                // Fallback to standard geometric edges
-                edges = new THREE.EdgesGeometry(mesh.geometry);
-            }
-
-            const lineSegments = new THREE.LineSegments(
-                edges,
-                new THREE.LineBasicMaterial({
-                    color: 0x333333, // Dark gray edges
-                    linewidth: 1,
-                    transparent: true,
-                    opacity: 0.6,
-                })
-            );
-
-            // Copy transform from the mesh
-            lineSegments.position.copy(mesh.position);
-            lineSegments.rotation.copy(mesh.rotation);
-            lineSegments.scale.copy(mesh.scale);
-
-            // Add to scene and to mesh for later cleanup
-            if (this.scene) {
-                this.scene.add(lineSegments);
-            }
-            mesh.userData.edgeLines = lineSegments;
-
-            this.log.debug("Added edge visualization to mesh");
-        } catch (error) {
-            this.log.error("Error adding edge visualization:", error);
+            return;
         }
+
+        this.updateEdgesForMesh(mesh, type);
     }
 
     /**
@@ -386,7 +522,9 @@ class MaterialManager {
      * Check if edges are enabled
      */
     isEdgesEnabled() {
-        return this.edgesEnabled;
+        // Just return true if current mode has edges, so external checks pass
+        const mode = this.materialRegistry[this.currentMaterialKey];
+        return mode && mode.edgesType !== 'none';
     }
 
     /**
