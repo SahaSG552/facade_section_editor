@@ -2095,9 +2095,10 @@ export default class ExtrusionBuilder {
             // Check if this is a top side extension
             const isExtension = !!options.isExtension;
             const isTopExtension = isExtension && side === "top";
+            const isBottomExtension = isExtension && side === "bottom";
 
             // Invert Y for top side extensions (both halfProfilePoints and lathePoints)
-            if (isTopExtension) {
+            if (isTopExtension || isBottomExtension) {
                 halfProfilePoints.forEach((p) => {
                     p.y = -p.y;
                 });
@@ -2322,7 +2323,7 @@ export default class ExtrusionBuilder {
                 );
 
                 // Invert Y for top side extensions
-                if (isTopExtension) {
+                if (isTopExtension || isBottomExtension) {
                     innerProfilePoints.forEach((p) => {
                         p.y = -p.y;
                     });
@@ -2428,10 +2429,9 @@ export default class ExtrusionBuilder {
             // Contour and profile transformations
             invertZ: isBottom, // Invert Z coordinates
             rotateProfile: isBottom, // Rotate profile 180° around Y
-            invertExtensionProfile: isExtension && !isBottom, // Invert extension profile for top side only
 
             // Lathe transformations
-            invertLatheProfile: isBottom, // Invert Y in lathe profile only for bottom side
+            invertLatheProfile: isBottom && !isExtension, // Invert Y in lathe profile for bottom side, but not for extensions (already inverted)
             invertLatheNormals: isBottom || (isExtension && !isBottom), // Invert lathe body winding for bottom or top extensions
 
             // Cap winding (simplified - caps always use base winding for lathe)
