@@ -1434,7 +1434,7 @@ export default class ThreeModule extends BaseModule {
                                 bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                                 "miter",
                                 this.panelSide, // Panel side: 'top' or 'bottom'
-                                { pathVisual: false }, // Disable path visualization for extensions
+                                { pathVisual: false, isExtension: true }, // Disable path visualization for extensions
                             );
 
                         // Separate path line from meshes (though pathVisual is false)
@@ -1936,7 +1936,7 @@ export default class ThreeModule extends BaseModule {
                     bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                     "round",
                     this.panelSide, // Panel side: 'top' or 'bottom'
-                    { ...transformOptions, pathVisual: false }, // Disable path visualization for extensions
+                    { ...transformOptions, pathVisual: false, isExtension: true }, // Disable path visualization for extensions
                 );
 
                 // Separate path line from meshes (though pathVisual is false)

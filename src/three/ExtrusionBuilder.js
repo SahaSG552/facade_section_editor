@@ -1927,9 +1927,15 @@ export default class ExtrusionBuilder {
             // Extract points from geometry
             const posAttr = profileGeometry.attributes.position;
             const profilePoints = [];
+            const isExtension = !!options.isExtension;
+            const isTopExtension = isExtension && side === "top";
             for (let i = 0; i < posAttr.count; i++) {
+                let y = posAttr.getY(i);
+                if (isTopExtension) {
+                    y = -y; // Invert Y for top side extensions
+                }
                 profilePoints.push(
-                    new THREE.Vector2(posAttr.getX(i), posAttr.getY(i)),
+                    new THREE.Vector2(posAttr.getX(i), y),
                 );
             }
 
@@ -2086,6 +2092,17 @@ export default class ExtrusionBuilder {
                 return [];
             }
 
+            // Check if this is a top side extension
+            const isExtension = !!options.isExtension;
+            const isTopExtension = isExtension && side === "top";
+
+            // Invert Y for top side extensions (both halfProfilePoints and lathePoints)
+            if (isTopExtension) {
+                halfProfilePoints.forEach((p) => {
+                    p.y = -p.y;
+                });
+            }
+
             // Lathe points derived from the same half-profile (radius, height)
             const lathePoints = halfProfilePoints.map(
                 (p) => new THREE.Vector2(Math.abs(p.x), p.y),
@@ -2179,7 +2196,9 @@ export default class ExtrusionBuilder {
 
                 geometry.computeVertexNormals();
                 geometry.normalizeNormals();
-                this._invertGeometryNormals(geometry);
+                if (!isExtension) {
+                    this._invertGeometryNormals(geometry);
+                }
 
                 const material = new THREE.MeshStandardMaterial({
                     color: new THREE.Color(color || "#cccccc"),
@@ -2253,7 +2272,7 @@ export default class ExtrusionBuilder {
                         null,
                         contourIsClockwise,
                         side,
-                        options.zOffset && options.zOffset !== 0,
+                        !!options.isExtension,
                         extensionHeight,
                         lathePoints,
                         0,
@@ -2302,6 +2321,13 @@ export default class ExtrusionBuilder {
                     innerHalf,
                 );
 
+                // Invert Y for top side extensions
+                if (isTopExtension) {
+                    innerProfilePoints.forEach((p) => {
+                        p.y = -p.y;
+                    });
+                }
+
                 if (innerProfilePoints && innerProfilePoints.length > 1) {
                     const curveSegments =
                         this.calculateAdaptiveCurveSegments(profile);
@@ -2324,6 +2350,9 @@ export default class ExtrusionBuilder {
                     if (innerGeometry) {
                         innerGeometry.computeVertexNormals();
                         innerGeometry.normalizeNormals();
+                        if (isExtension) {
+                            this._invertGeometryNormals(innerGeometry);
+                        }
 
                         const innerMaterial = new THREE.MeshStandardMaterial({
                             color: new THREE.Color(color || "#cccccc"),
@@ -2399,17 +2428,19 @@ export default class ExtrusionBuilder {
             // Contour and profile transformations
             invertZ: isBottom, // Invert Z coordinates
             rotateProfile: isBottom, // Rotate profile 180° around Y
+            invertExtensionProfile: isExtension && !isBottom, // Invert extension profile for top side only
 
             // Lathe transformations
-            invertLatheProfile: isBottom || isExtension, // Invert Y in lathe profile
-            invertLatheNormals: isBottom, // Invert lathe body winding for bottom only
+            invertLatheProfile: isBottom, // Invert Y in lathe profile only for bottom side
+            invertLatheNormals: isBottom || (isExtension && !isBottom), // Invert lathe body winding for bottom or top extensions
 
             // Cap winding (simplified - caps always use base winding for lathe)
             invertExtrusionCaps: !isBottom, // TOP needs inverted caps
 
             // Z positioning
             invertPositionZ: isBottom, // Invert position Z
-            addExtensionOffset: isBottom && isExtension, // Add height for bottom extensions
+            addExtensionOffset: isExtension, // Add height for all extensions (top and bottom)
+            invertExtensionOffset: isExtension && !isBottom, // Invert offset for top extensions
         };
     }
 
@@ -2918,7 +2949,11 @@ export default class ExtrusionBuilder {
             }
 
             if (flags.addExtensionOffset) {
-                translationZ += extensionHeight;
+                if (flags.invertExtensionOffset) {
+                    translationZ = translationZ;
+                } else {
+                    translationZ -= extensionHeight;
+                }
             }
 
             finalGeometry.translate(point.x, point.y, translationZ);
