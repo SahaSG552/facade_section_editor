@@ -333,8 +333,7 @@ export default class ExtrusionBuilder {
             });
 
             this.log.info(
-                `Group #${idx + 1} [${group.groupName}] - ${
-                    group.curves.length
+                `Group #${idx + 1} [${group.groupName}] - ${group.curves.length
                 } curves, ~${estimatedPoints} sample points (length=${totalLength.toFixed(
                     1,
                 )}mm)`,
@@ -351,14 +350,12 @@ export default class ExtrusionBuilder {
                         4,
                     )},${start.y.toFixed(4)}) end=(${end.x.toFixed(
                         4,
-                    )},${end.y.toFixed(4)}) length=${len.toFixed(6)}${
-                        degenerate ? " [DEGENERATE]" : ""
+                    )},${end.y.toFixed(4)}) length=${len.toFixed(6)}${degenerate ? " [DEGENERATE]" : ""
                     }`,
                 );
                 if (degenerate) {
                     this.log.warn(
-                        `    [DEGENERATE SEGMENT] Group ${idx + 1} Curve ${
-                            cidx + 1
+                        `    [DEGENERATE SEGMENT] Group ${idx + 1} Curve ${cidx + 1
                         } is zero-length and may cause artifacts.`,
                     );
                 }
@@ -508,8 +505,7 @@ export default class ExtrusionBuilder {
                 this.log &&
                     this.log.debug &&
                     this.log.debug(
-                        `Filtered out degenerate group [${group.groupName}]: ${
-                            group.curves.length
+                        `Filtered out degenerate group [${group.groupName}]: ${group.curves.length
                         } curves, length=${totalLength.toFixed(6)}mm`,
                     );
                 return false;
@@ -1037,8 +1033,7 @@ export default class ExtrusionBuilder {
         });
 
         this.log.debug(
-            `parsePathToCurves: Created ${curves.length} curves from ${
-                commands?.length || 0
+            `parsePathToCurves: Created ${curves.length} curves from ${commands?.length || 0
             } commands`,
         );
 
@@ -1239,8 +1234,7 @@ export default class ExtrusionBuilder {
                 const gap2D = prevEnd.distanceTo(curStart);
                 if (gap2D > 0.01) {
                     this.log.warn(
-                        `2D curve gap detected between curves ${
-                            i - 1
+                        `2D curve gap detected between curves ${i - 1
                         } and ${i}: ${gap2D.toFixed(6)}`,
                         {
                             prevEnd: { x: prevEnd.x, y: prevEnd.y },
@@ -1271,8 +1265,7 @@ export default class ExtrusionBuilder {
                 // This ensures continuous path for miter extrusions
                 if (gap > gapTolerance) {
                     this.log.debug(
-                        `Adding connector between curves ${
-                            i - 1
+                        `Adding connector between curves ${i - 1
                         } and ${i}, gap: ${gap.toFixed(6)}mm`,
                     );
                     path.add(new THREE.LineCurve3(prevEnd, curStart));
@@ -1795,8 +1788,8 @@ export default class ExtrusionBuilder {
                         cornerStyle === "round"
                             ? "round"
                             : cornerStyle === "miter"
-                              ? "miter"
-                              : "bevel",
+                                ? "miter"
+                                : "bevel",
                     cap: "butt",
                     limit: 10,
                     insert: false,
@@ -2131,9 +2124,9 @@ export default class ExtrusionBuilder {
                     const samples = isLine
                         ? 1
                         : Math.max(
-                              2,
-                              Math.ceil(len / this.arcDivisionCoefficient),
-                          );
+                            2,
+                            Math.ceil(len / this.arcDivisionCoefficient),
+                        );
                     const points = curve.getPoints(samples);
                     if (contourPoints.length === 0) {
                         contourPoints.push(...points);
@@ -2409,7 +2402,7 @@ export default class ExtrusionBuilder {
 
             // Lathe transformations
             invertLatheProfile: isBottom || isExtension, // Invert Y in lathe profile
-            invertLatheNormals: isBottom || isExtension, // Invert lathe body winding
+            invertLatheNormals: isBottom, // Invert lathe body winding for bottom only
 
             // Cap winding (simplified - caps always use base winding for lathe)
             invertExtrusionCaps: !isBottom, // TOP needs inverted caps
@@ -2788,11 +2781,11 @@ export default class ExtrusionBuilder {
                 lathePointsOverride && lathePointsOverride.length > 1
                     ? lathePointsOverride
                     : this.createLatheHalfProfilePoints(
-                          profile,
-                          null,
-                          profilePoints,
-                          flags.invertLatheProfile,
-                      );
+                        profile,
+                        null,
+                        profilePoints,
+                        flags.invertLatheProfile,
+                    );
 
             if (!lathePoints || lathePoints.length < 2) {
                 this.log.warn(
@@ -2847,25 +2840,25 @@ export default class ExtrusionBuilder {
                 // PARTIAL LATHE: Corner rounding using signed angle
                 this.log.info(
                     `Corner ${cornerNumber} (${color}) | ` +
-                        `prevDir: (${prevDir.x.toFixed(2)}, ${prevDir.y.toFixed(
-                            2,
-                        )}) → ${THREE.MathUtils.radToDeg(prevAngleXZ).toFixed(
-                            1,
-                        )}° | ` +
-                        `nextDir: (${nextDir.x.toFixed(2)}, ${nextDir.y.toFixed(
-                            2,
-                        )}) → ${THREE.MathUtils.radToDeg(nextAngleXZ).toFixed(
-                            1,
-                        )}° | ` +
-                        `angleDiff: ${THREE.MathUtils.radToDeg(
-                            angleDiff,
-                        ).toFixed(1)}° | ` +
-                        `phiStart: ${THREE.MathUtils.radToDeg(phiStart).toFixed(
-                            1,
-                        )}° | ` +
-                        `phiLength: ${THREE.MathUtils.radToDeg(
-                            phiLength,
-                        ).toFixed(1)}°`,
+                    `prevDir: (${prevDir.x.toFixed(2)}, ${prevDir.y.toFixed(
+                        2,
+                    )}) → ${THREE.MathUtils.radToDeg(prevAngleXZ).toFixed(
+                        1,
+                    )}° | ` +
+                    `nextDir: (${nextDir.x.toFixed(2)}, ${nextDir.y.toFixed(
+                        2,
+                    )}) → ${THREE.MathUtils.radToDeg(nextAngleXZ).toFixed(
+                        1,
+                    )}° | ` +
+                    `angleDiff: ${THREE.MathUtils.radToDeg(
+                        angleDiff,
+                    ).toFixed(1)}° | ` +
+                    `phiStart: ${THREE.MathUtils.radToDeg(phiStart).toFixed(
+                        1,
+                    )}° | ` +
+                    `phiLength: ${THREE.MathUtils.radToDeg(
+                        phiLength,
+                    ).toFixed(1)}°`,
                 );
             } else {
                 // FULL 360° LATHE
@@ -3338,8 +3331,7 @@ export default class ExtrusionBuilder {
                     this.log.debug(
                         `Adaptive half-profile: totalLength=${totalLength.toFixed(
                             2,
-                        )}mm, coefficient=${
-                            this.arcDivisionCoefficient
+                        )}mm, coefficient=${this.arcDivisionCoefficient
                         }, pointsCount=${pointsCount}`,
                     );
                 }
