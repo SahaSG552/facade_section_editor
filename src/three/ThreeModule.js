@@ -73,7 +73,7 @@ export default class ThreeModule extends BaseModule {
         // Track last panel/bits signature to skip redundant rebuilds
         this.lastPanelUpdateSignature = null;
 
-        // Panel side for bit operations: 'top' (front face) or 'bottom' (back face)
+        // Panel side for bit operations: always 'top' (front face) - bottom removed
         this.panelSide = "top";
 
         // Extrude mode is selected automatically per bit operation (VC → miter, others → round)
@@ -119,8 +119,8 @@ export default class ThreeModule extends BaseModule {
         // Add CSG mode toggle
         this.addCSGModeToggle();
 
-        // Add panel side toggle
-        this.addPanelSideToggle();
+        // Panel side toggle removed - always use top position
+        // this.addPanelSideToggle();
 
         // Removed test UI: extrude version selector and compare toggle
 
@@ -523,68 +523,8 @@ export default class ThreeModule extends BaseModule {
         this.csgModeToggle = container;
     }
 
-    addPanelSideToggle() {
-        const container = document.createElement("div");
-        container.style.position = "absolute";
-        container.style.top = "90px";
-        container.style.right = "10px";
-        container.style.padding = "8px";
-        container.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
-        container.style.border = "1px solid #ccc";
-        container.style.borderRadius = "4px";
-        container.style.zIndex = "100";
-        container.style.fontSize = "12px";
-        container.style.display = "flex";
-        container.style.alignItems = "center";
-        container.style.gap = "6px";
-
-        const label = document.createElement("label");
-        label.textContent = "Panel Side:";
-        label.style.userSelect = "none";
-
-        const select = document.createElement("select");
-        select.id = "panel-side-select";
-        select.style.cursor = "pointer";
-        select.style.padding = "2px 4px";
-        select.style.fontSize = "12px";
-
-        const optionTop = document.createElement("option");
-        optionTop.value = "top";
-        optionTop.textContent = "Top (Front)";
-
-        const optionBottom = document.createElement("option");
-        optionBottom.value = "bottom";
-        optionBottom.textContent = "Bottom (Back)";
-
-        select.appendChild(optionTop);
-        select.appendChild(optionBottom);
-        select.value = this.panelSide;
-
-        select.addEventListener("change", () => {
-            this.panelSide = select.value;
-            this.log.info(`Panel side changed to: ${this.panelSide}`);
-
-            // Trigger panel rebuild with new side
-            if (
-                window.panelWidth &&
-                window.panelHeight &&
-                window.panelThickness
-            ) {
-                this.updatePanel(
-                    window.panelWidth,
-                    window.panelHeight,
-                    window.panelThickness,
-                    window.bitsOnCanvas || [],
-                    window.panelAnchor || "top-left",
-                );
-            }
-        });
-
-        container.appendChild(label);
-        container.appendChild(select);
-        this.container.appendChild(container);
-        this.panelSideToggle = container;
-    }
+    // Panel side toggle removed - always use top (front) position only
+    // addPanelSideToggle() method removed as requested
 
     // addExtrudeVersionToggle removed: mode is selected automatically per operation
 
@@ -1381,7 +1321,7 @@ export default class ThreeModule extends BaseModule {
                         pathColor,
                         0, // zOffset = 0 for main bit
                         "miter", // Sharp corners
-                        this.panelSide, // Panel side: 'top' or 'bottom'
+                                "top", // Always use top panel side - bottom removed
                         { pathVisual: true }, // Enable path visualization
                     );
 
@@ -1433,7 +1373,7 @@ export default class ThreeModule extends BaseModule {
                                 "#FF0000", // Red color for extensions
                                 bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                                 "miter",
-                                this.panelSide, // Panel side: 'top' or 'bottom'
+                                "top", // Always use top panel side - bottom removed
                                 { pathVisual: false, isExtension: true }, // Disable path visualization for extensions
                             );
 
@@ -1895,7 +1835,7 @@ export default class ThreeModule extends BaseModule {
                 bit.color,
                 0, // zOffset = 0 for main bit
                 "round", // Half-profile with lathe corners
-                this.panelSide, // Panel side: 'top' or 'bottom'
+                                "top", // Always use top panel side - bottom removed
                 transformOptions,
             );
 
@@ -1935,7 +1875,7 @@ export default class ThreeModule extends BaseModule {
                     "#FF0000", // Red color for extensions
                     bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                     "round",
-                    this.panelSide, // Panel side: 'top' or 'bottom'
+                                    "top", // Always use top panel side - bottom removed
                     { ...transformOptions, pathVisual: false, isExtension: true }, // Disable path visualization for extensions
                 );
 

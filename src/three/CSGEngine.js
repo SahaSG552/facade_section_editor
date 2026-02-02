@@ -5,6 +5,7 @@ import { LoggerFactory } from "../core/LoggerFactory.js";
 import { weldGeometry } from "../utils/utils.js";
 import { FaceIDGenerator } from "./FaceIDGenerator.js";
 import BREPVisualizer from "./BREPVisualizer.js";
+import BitGroupManager from "./BitGroupManager.js";
 
 /**
  * CSGEngine - Manages CSG (Constructive Solid Geometry) boolean operations
@@ -51,6 +52,9 @@ class CSGEngine {
         // References to other managers
         this.materialManager = null;
         this.computeWorldBBox = null; // Function reference from ThreeModule
+
+        // BitGroupManager for grouping bits before CSG
+        this.bitGroupManager = new BitGroupManager();
 
         // Manifold backend
         this.manifoldCSG = new ManifoldCSG(this.log);
@@ -135,6 +139,7 @@ class CSGEngine {
                 timestamp: Date.now(),
                 mode: this.useUnionBeforeSubtract ? "Union" : "Sequential",
                 totalBits: this.bitExtrudeMeshes.length,
+                usingBitGrouping: true,
             });
 
             if (!this.bitExtrudeMeshes.length) {
@@ -146,57 +151,22 @@ class CSGEngine {
                 return;
             }
 
-            // Cull non-intersecting bits first
-            const intersectingMeshes = this.filterIntersectingExtrudes(
-                this.panelBBox,
-            );
-
-            // Deduplicate by mesh identity (geometry uuid) to keep all separate bit parts
-            // For multi-part bits (segments + lathes), each part is kept as separate mesh
-            const uniqueIntersectingMeshes = [];
-            const seenByMesh = new Set();
-
-            for (let i = intersectingMeshes.length - 1; i >= 0; i--) {
-                const m = intersectingMeshes[i];
-                // Use geometry uuid to ensure each mesh is unique
-                // This allows multiple parts per bit (segments, lathes, etc.)
-                const key = m.geometry?.uuid ?? m.uuid;
-                if (!seenByMesh.has(key)) {
-                    seenByMesh.add(key);
-                    uniqueIntersectingMeshes.unshift(m);
-                }
-            }
-
-            // Sort meshes: segments first, then lathes
-            // This ensures proper order of CSG subtraction
-            uniqueIntersectingMeshes.sort((a, b) => {
-                const aIsLathe =
-                    a.userData?.isPartialLathe || a.userData?.isLatheJunction;
-                const bIsLathe =
-                    b.userData?.isPartialLathe || b.userData?.isLatheJunction;
-                // Segments (not lathe) come first, lathes come last
-                if (aIsLathe && !bIsLathe) return -1; // a is lathe, b is segment: b comes first
-                if (!aIsLathe && bIsLathe) return 1; // a is segment, b is lathe: a comes first
-                // Both same type, keep original order
-                return 0;
-            });
+            // Create bit groups first
+            this.log.info("Creating bit groups for CSG");
+            const bitGroups = this.bitGroupManager.createBitGroups(this.bitExtrudeMeshes);
+            
+            // Get all meshes from groups (no union operations)
+            const allGroupMeshes = this.bitGroupManager.getAllMeshes();
+            const intersectingGroups = this.bitGroupManager.filterIntersectingGroups(bitGroups, this.panelBBox);
 
             this.log.info("CSG subtraction order:", {
-                totalMeshes: uniqueIntersectingMeshes.length,
-                segmentsFirst: uniqueIntersectingMeshes.filter(
-                    (m) =>
-                        !m.userData?.isPartialLathe &&
-                        !m.userData?.isLatheJunction,
-                ).length,
-                lathesSecond: uniqueIntersectingMeshes.filter(
-                    (m) =>
-                        m.userData?.isPartialLathe ||
-                        m.userData?.isLatheJunction,
-                ).length,
+                totalGroups: bitGroups.length,
+                totalMeshes: intersectingGroups.length,
+                totalComponents: intersectingGroups.reduce((sum, mesh) => sum + (mesh.userData?.originalBitCount || 1), 0)
             });
 
             const csgSignature = this.buildCSGSignature(
-                uniqueIntersectingMeshes,
+                intersectingGroups,
             );
 
             // Check cache
@@ -212,9 +182,9 @@ class CSGEngine {
                 return;
             }
 
-            if (uniqueIntersectingMeshes.length === 0) {
+            if (intersectingGroups.length === 0) {
                 this.log.warn(
-                    "No intersecting bits with panel, skipping CSG subtraction",
+                    "No intersecting meshes with panel, skipping CSG subtraction",
                 );
                 this.lastCSGSignature = csgSignature;
                 this.csgActive = false;
@@ -226,15 +196,21 @@ class CSGEngine {
             const resultMaterial = this.createResultMaterial();
 
             if (this.useManifoldBackend) {
-                // Group meshes by bitIndex to ensure they share the same FaceID offset (Namespace)
-                // This merges components of the same operation (Main, Expansion, Phantom) into one selectable feature.
-                const featuredGroups = new Map();
-                for (const mesh of uniqueIntersectingMeshes) {
-                    const fid = mesh.userData?.bitIndex !== undefined ? `bit_${mesh.userData.bitIndex}` : mesh.uuid;
-                    if (!featuredGroups.has(fid)) featuredGroups.set(fid, []);
-                    featuredGroups.get(fid).push(mesh);
-                }
-                const groupedCutters = Array.from(featuredGroups.values());
+                // Use already grouped meshes from BitGroupManager
+                const groupedCutters = this.bitGroupManager.getBitGroups()
+                    .map(group => {
+                        // Extract all meshes from the group for Manifold
+                        const allMeshes = [];
+                        if (group.union && group.union.userData?.wasUnioned) {
+                            // Use the already unioned mesh if available
+                            allMeshes.push(group.union);
+                        } else {
+                            // Otherwise use individual components
+                            allMeshes.push(...group.bit, ...group.extensions, ...group.phantoms);
+                        }
+                        return allMeshes;
+                    })
+                    .filter(group => group.length > 0); // Filter out empty groups
 
                 const manifoldOutput = await this.runManifoldCSG(groupedCutters);
 
@@ -305,12 +281,12 @@ class CSGEngine {
                     }
 
                     this.log.info(
-                        `CSG applied via Manifold, processed ${uniqueIntersectingMeshes.length} intersecting bits`,
+                        `CSG applied via Manifold, processed ${intersectingGroups.length} bit groups with ${this.bitGroupManager.getBitGroups().reduce((sum, g) => sum + g.bit.length + g.extensions.length + g.phantoms.length, 0)} total components`,
                     );
                     this.log.info("CSG Operation End:", {
                         timestamp: Date.now(),
                         success: true,
-                        bitsProcessed: uniqueIntersectingMeshes.length,
+                        bitsProcessed: intersectingGroups.length,
                         backend: "manifold",
                     });
                     return;
@@ -341,10 +317,10 @@ class CSGEngine {
             let processed = 0;
 
             // MODE 2: Sequential subtraction (default/stable path)
-            this.log.info("Using SEQUENTIAL mode: subtracting bits one by one");
+            this.log.info("Using SEQUENTIAL mode: subtracting bit groups one by one");
             resultBrush = panelBrush;
 
-            for (const bitMesh of uniqueIntersectingMeshes) {
+            for (const groupMesh of intersectingGroups) {
                 try {
                     const weldedGeometry = weldGeometry(
                         bitMesh.geometry,
@@ -371,7 +347,7 @@ class CSGEngine {
                     processed++;
                 } catch (error) {
                     this.log.warn(
-                        `Error in sequential subtraction for bit ${processed}:`,
+                        `Error in sequential subtraction for bit group ${groupMesh.userData?.bitIndex || processed}:`,
                         error.message,
                     );
                     break;
@@ -397,12 +373,12 @@ class CSGEngine {
             this.showCSGResult();
 
             this.log.info(
-                `CSG applied successfully, processed ${processed} intersecting bits`,
+                `CSG applied successfully, processed ${processed} meshes`,
             );
             this.log.info("CSG Operation End:", {
                 timestamp: Date.now(),
                 success: true,
-                bitsProcessed: processed,
+                bitsProcessed: intersectingGroups.length,
             });
         } catch (error) {
             this.log.error("Error in applyCSGOperation:", error);
@@ -507,7 +483,7 @@ class CSGEngine {
     /**
      * Build signature of current CSG configuration for caching
      */
-    buildCSGSignature(bitMeshes = []) {
+    buildCSGSignature(meshes) {
         const panelSignature = {
             geometry: this.originalPanelGeometry?.uuid,
             position: this.originalPanelPosition
@@ -525,12 +501,15 @@ class CSGEngine {
                 : null,
         };
 
-        const bits = bitMeshes.map((mesh) => ({
-            geometry: mesh.geometry?.uuid,
-            position: mesh.position.toArray(),
-            rotation: [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z],
-            scale: mesh.scale.toArray(),
-            operation: mesh.userData?.operation,
+        const bits = meshes.map((mesh) => ({
+            bitIndex: mesh.userData?.bitIndex || 'unknown',
+            geometry: mesh.geometry?.uuid || 'no-geometry',
+            position: mesh.position ? mesh.position.toArray() : [0,0,0],
+            rotation: mesh.rotation ? [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z] : [0,0,0],
+            scale: mesh.scale ? mesh.scale.toArray() : [1,1,1],
+            componentCount: mesh.userData?.originalBitCount || 1,
+            wasUnioned: false, // No union operations
+            componentTypes: mesh.userData?.componentTypes || { bit: 1, extensions: 0, phantoms: 0 }
         }));
 
         return JSON.stringify({ panel: panelSignature, bits });
@@ -560,6 +539,48 @@ class CSGEngine {
                 intersecting.push(mesh);
             } else {
                 this.log.debug(`Bit mesh ${idx} culls out of panel bounds`);
+            }
+        });
+
+        return intersecting;
+    }
+
+    /**
+     * Filter bit groups that intersect with panel bounding box
+     */
+    filterIntersectingGroups(groups, panelBBox) {
+        if (!groups || !panelBBox) return [];
+
+        const intersecting = [];
+        groups.forEach((group, idx) => {
+            // Check if any component of group intersects
+            let intersects = false;
+            
+            // For unioned groups, just check the main mesh
+            const meshesToCheck = group.userData?.wasUnioned ? [group] : 
+                (group.bit && group.extensions && group.phantoms ? 
+                    [...group.bit, ...group.extensions, ...group.phantoms] : [group]);
+            
+            for (const mesh of meshesToCheck) {
+                if (!mesh || !mesh.geometry) continue;
+                
+                const bbox = this.computeWorldBBox(
+                    mesh.geometry,
+                    mesh.position,
+                    mesh.rotation,
+                    mesh.scale,
+                );
+
+                if (bbox.intersectsBox(panelBBox)) {
+                    intersects = true;
+                    break;
+                }
+            }
+
+            if (intersects) {
+                intersecting.push(group);
+            } else {
+                this.log.debug(`Bit group ${idx} (bitIndex: ${group.userData?.bitIndex}) culls out of panel bounds`);
             }
         });
 
@@ -668,6 +689,12 @@ class CSGEngine {
             this.partMesh.geometry?.dispose();
             this.partMesh.material?.dispose();
         }
+        
+        // Dispose BitGroupManager
+        if (this.bitGroupManager) {
+            this.bitGroupManager.dispose();
+        }
+        
         this.log.info("CSGEngine disposed");
     }
 
