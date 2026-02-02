@@ -1694,6 +1694,16 @@ export default class ThreeModule extends BaseModule {
                                 const isFullRemoval =
                                     bit.isFullRemoval || pocketOffset === 0;
 
+                                // Get extension info for filler calculation and extensions
+                                const bitDepth = bit.y || 0;
+                                const bitWidth = bit.bitData?.diameter || 10;
+                                const extensionInfo = 
+                                    bit.bitData?.extension ||
+                                    bit.extension ||
+                                    (bit.group && bit.group.__extension);
+                                const extensionHeight = (extensionInfo && extensionInfo.height > 0) ? extensionInfo.height : 0;
+                                const totalHeight = bitLength + extensionHeight;
+
                                 if (
                                     pocketWidth > diameter * 2 - 1 &&
                                     (phantomPathData || isFullRemoval)
@@ -1707,7 +1717,7 @@ export default class ThreeModule extends BaseModule {
                                                 ? null
                                                 : phantomPathData, // No hole for full removal
                                             diameter,
-                                            bitLength,
+                                            totalHeight, // Use total height (bit + extension)
                                             transformOptions,
                                         );
 
@@ -1738,6 +1748,125 @@ export default class ThreeModule extends BaseModule {
                                     this.log.warn(
                                         `PO bit ${bitIndex}: Cannot create filler - phantomPathData is missing (pocketOffset=${pocketOffset})`,
                                     );
+                                }
+
+                                // Create extensions for PO operations
+
+                                // Create extension for main PO bit (if bitDepth > 0 and mainPathData exists)
+                                if (bitDepth > 0 && mainPathData) {
+                                    // Get extension info for main PO bit
+                                    const extensionInfo = 
+                                        bit.bitData?.extension ||
+                                        bit.extension ||
+                                        (bit.group && bit.group.__extension);
+
+                                    if (extensionInfo && extensionInfo.height > 0) {
+                                        const extensionWidth = extensionInfo.width || bitWidth || 10;
+                                        const extensionHeight = extensionInfo.height;
+
+                                        this.log.info(`PO bit ${bitIndex}: Creating main bit extension`, {
+                                            bitDepth,
+                                            extensionWidth,
+                                            extensionHeight
+                                        });
+
+                                        const mainExtensionResult = this.extrusionBuilder.extrudeAlongPath(
+                                            this.extrusionBuilder.createExtensionProfile(extensionWidth, extensionHeight),
+                                            mainPathData, // Same path as main bit
+                                            "#FF0000", // Red color for main bit extension
+                                            bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
+                                            "round",
+                                            this.panelSide,
+                                            { ...transformOptions, pathVisual: false, isExtension: true },
+                                            { offset: diameter/2, cornerStyle: "miter" }, // No offset for extensions
+                                        );
+
+                                        let mainExtensionMeshes = [];
+                                        if (mainExtensionResult?.length > 0) {
+                                            const firstItem = mainExtensionResult[0];
+                                            if (firstItem instanceof THREE.Line || firstItem.type === "Line") {
+                                                mainExtensionMeshes = mainExtensionResult.slice(1);
+                                            } else {
+                                                mainExtensionMeshes = mainExtensionResult;
+                                            }
+                                        }
+
+                                        // Add main PO bit extension meshes
+                                        if (mainExtensionMeshes?.length > 0) {
+                                            mainExtensionMeshes.forEach((mesh) => {
+                                                mesh.userData.operation = "extension";
+                                                mesh.userData.bitIndex = bitIndex;
+                                                mesh.userData.isPOExtension = true;
+                                                mesh.userData.isPOMain = true;
+                                                this.bitExtrudeMeshes.push(mesh);
+
+                                                if (this.materialManager?.isEdgesEnabled()) {
+                                                    this.materialManager.addEdgeVisualization(mesh);
+                                                }
+                                            });
+                                            this.log.info(`PO bit ${bitIndex}: Added main bit extension: ${mainExtensionMeshes.length} meshes`);
+                                        }
+                                    }
+                                }
+
+                                // Create extension for phantom PO bit (if pocketOffset > 0, bitDepth > 0, and phantomPathData exists)
+                                if (pocketOffset > 0 && bitDepth > 0 && phantomPathData) {
+                                    // Get extension info from main bit (same extension applies to phantom)
+                                    const extensionInfo = 
+                                        bit.bitData?.extension ||
+                                        bit.extension ||
+                                        (bit.group && bit.group.__extension);
+
+                                    if (extensionInfo && extensionInfo.height > 0) {
+                                        const extensionWidth = extensionInfo.width || bitWidth || 10;
+                                        const extensionHeight = extensionInfo.height;
+
+                                        this.log.info(`PO bit ${bitIndex}: Creating phantom bit extension`, {
+                                            pocketOffset,
+                                            bitDepth,
+                                            extensionWidth,
+                                            extensionHeight
+                                        });
+
+                                        const phantomExtensionResult = this.extrusionBuilder.extrudeAlongPath(
+                                            this.extrusionBuilder.createExtensionProfile(extensionWidth, extensionHeight),
+                                            phantomPathData, // Same path as phantom bit
+                                            "#FFA500", // Orange color for phantom bit extension
+                                            bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
+                                            "miter",
+                                            this.panelSide,
+                                            { ...transformOptions, pathVisual: false, isExtension: true },
+                                            { offset: -diameter/2, cornerStyle: "miter" }, // No offset for extensions
+                                        );
+
+                                        let phantomExtensionMeshes = [];
+                                        if (phantomExtensionResult?.length > 0) {
+                                            const firstItem = phantomExtensionResult[0];
+                                            if (firstItem instanceof THREE.Line || firstItem.type === "Line") {
+                                                phantomExtensionMeshes = phantomExtensionResult.slice(1);
+                                            } else {
+                                                phantomExtensionMeshes = phantomExtensionResult;
+                                            }
+                                        }
+
+                                        // Add phantom PO bit extension meshes (semi-transparent)
+                                        if (phantomExtensionMeshes?.length > 0) {
+                                            phantomExtensionMeshes.forEach((mesh) => {
+                                                mesh.userData.operation = "extension";
+                                                mesh.userData.bitIndex = bitIndex;
+                                                mesh.userData.isPOExtension = true;
+                                                mesh.userData.isPOPhantom = true;
+                                                mesh.material.transparent = true;
+                                                mesh.material.opacity = 0.7;
+                                                this.bitExtrudeMeshes.push(mesh);
+
+                                                if (this.materialManager?.isEdgesEnabled()) {
+                                                    this.materialManager.addEdgeVisualization(mesh);
+                                                }
+                                            });
+                                            this.log.info(`PO bit ${bitIndex}: Added phantom bit extension: ${phantomExtensionMeshes.length} meshes`);
+                                        }
+                                    }
                                 }
                             }
                         }
