@@ -39,6 +39,9 @@ export default class SceneManager {
         // State
         this.cameraFitted = false;
         this.animationFrameId = null;
+
+        // ResizeObserver for container size changes
+        this.resizeObserver = null;
         this.stats = null;
 
         this.log.info("Created");
@@ -126,6 +129,9 @@ export default class SceneManager {
 
         // Handle window resize
         window.addEventListener("resize", this.onWindowResize.bind(this));
+
+        // Setup ResizeObserver for container size changes
+        this.setupResizeObserver();
 
         this.log.info("Initialized successfully");
     }
@@ -216,7 +222,30 @@ export default class SceneManager {
     }
 
     /**
-     * Handle window resize events
+     * Setup ResizeObserver for container size changes
+     */
+    setupResizeObserver() {
+        if (!this.container) return;
+
+        // Disconnect existing observer if any
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+        }
+
+        this.resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.target === this.container) {
+                    this.onWindowResize();
+                }
+            }
+        });
+
+        this.resizeObserver.observe(this.container);
+        this.log.debug("ResizeObserver setup for three-canvas-container");
+    }
+
+    /**
+     * Handle window resize
      */
     onWindowResize() {
         if (!this.container || !this.camera || !this.renderer) return;
@@ -314,6 +343,12 @@ export default class SceneManager {
         }
 
         window.removeEventListener("resize", this.onWindowResize.bind(this));
+
+        // Cleanup ResizeObserver
+        if (this.resizeObserver) {
+            this.resizeObserver.disconnect();
+            this.resizeObserver = null;
+        }
 
         this.log.info("Disposed");
     }

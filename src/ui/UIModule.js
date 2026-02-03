@@ -169,9 +169,7 @@ class UIModule extends BaseModule {
         const canvasModule = this.app?.getModule("canvas");
         if (!canvasModule || !canvasModule.canvasManager) return;
 
-        const canvasManager = canvasModule.canvasManager;
-        const oldWidth = canvasManager.canvasParameters.width;
-        const oldHeight = canvasManager.canvasParameters.height;
+        const canvasManager = canvasManager.canvasManager;
 
         // Update canvas parameters
         const canvas = document.getElementById("canvas");
@@ -180,15 +178,15 @@ class UIModule extends BaseModule {
         canvasManager.canvasParameters.height =
             canvas.getBoundingClientRect().height;
 
-        // Adjust pan to maintain relative position
-        canvasManager.panX =
-            (canvasManager.panX / oldWidth) *
-            canvasManager.canvasParameters.width;
-        canvasManager.panY =
-            (canvasManager.panY / oldHeight) *
-            canvasManager.canvasParameters.height;
-
         canvasManager.updateViewBox();
+
+        // Update Three.js canvas if active
+        const threeModule = this.app?.getModule("three");
+        if (threeModule && threeModule.sceneManager) {
+            setTimeout(() => {
+                threeModule.sceneManager.onWindowResize();
+            }, 50);
+        }
     }
 
     /**

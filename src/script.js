@@ -109,6 +109,10 @@ window.offsetContours = offsetContours;
 let leftPanelClickOutsideHandler = null;
 let rightPanelClickOutsideHandler = null;
 
+// Anchor position in scene coordinates (fixed, not recalculated on resize)
+let sceneAnchorX = null;
+let sceneAnchorY = null;
+
 /**
  * Initialize SVG canvas and managers
  * **PHASE 1 REFACTORING** - Simplified from 440 to ~300 lines with ManagerFactory
@@ -123,12 +127,18 @@ function initializeSVG() {
     // Check if CanvasManager already exists (from modular system)
     if (!mainCanvasManager) {
         // Calculate panel anchor position for grid alignment
-        const canvasSize = { width: 800, height: 600 };
-        const panelX = (canvasSize.width - panelWidth) / 2;
-        const panelY = (canvasSize.height - panelThickness) / 2;
+        const canvasRect = canvas.getBoundingClientRect();
+        const canvasWidth = canvasRect.width || 800;
+        const canvasHeight = canvasRect.height || 600;
+        const panelX = (canvasWidth - panelWidth) / 2;
+        const panelY = (canvasHeight - panelThickness) / 2;
         const anchorOffset = getPanelAnchorOffset();
         const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
         const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
+
+        // Store anchor position in scene coordinates (fixed, not recalculated on resize)
+        sceneAnchorX = gridAnchorX;
+        sceneAnchorY = gridAnchorY;
 
         // Create main canvas manager instance only if it doesn't exist
         mainCanvasManager = new CanvasManager({
@@ -546,6 +556,11 @@ function initializeSVG() {
         updateBitsSheet: updateBitsSheet,
     });
 
+    // Set scene anchor position (fixed, not recalculated on resize)
+    if (sceneAnchorX !== null && sceneAnchorY !== null) {
+        panelManager.setSceneAnchor(sceneAnchorX, sceneAnchorY);
+    }
+
     // Initialize SVG elements for panel manager
     panelManager.initializeSVGElements();
     // Sync panel element references for legacy helpers
@@ -623,11 +638,6 @@ function initializeSVG() {
         updatePhantomBits();
 
         if (showPart) updatePartShape();
-
-        // Update 3D view
-        if (window.threeModule) {
-            updateThreeView();
-        }
     }
 
     // Setup export/import buttons
@@ -689,20 +699,18 @@ function initializeSVG() {
 
 // Helper function to update canvas after panel toggle
 function updateCanvasAfterPanelToggle() {
-    const oldWidth = mainCanvasManager.canvasParameters.width;
-    const oldHeight = mainCanvasManager.canvasParameters.height;
     mainCanvasManager.canvasParameters.width =
         canvas.getBoundingClientRect().width;
     mainCanvasManager.canvasParameters.height =
         canvas.getBoundingClientRect().height;
-    // Adjust pan to maintain relative position
-    mainCanvasManager.panX =
-        (mainCanvasManager.panX / oldWidth) *
-        mainCanvasManager.canvasParameters.width;
-    mainCanvasManager.panY =
-        (mainCanvasManager.panY / oldHeight) *
-        mainCanvasManager.canvasParameters.height;
     mainCanvasManager.updateViewBox();
+
+    // Update Three.js canvas if active
+    if (threeModule && threeModule.sceneManager) {
+        setTimeout(() => {
+            threeModule.sceneManager.onWindowResize();
+        }, 50);
+    }
 }
 
 // Cycle panel anchor
@@ -728,18 +736,34 @@ function updateBitsForNewAnchor() {
     if (panelManager) {
         panelManager.updateBitsForNewAnchor(bitsOnCanvas);
     } else {
-        const panelX =
-            (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-        const panelY =
-            (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-        const oldAnchor =
-            panelAnchor === "top-left" ? "bottom-left" : "top-left";
-        const currentAnchorX = panelX;
-        const currentAnchorY =
-            oldAnchor === "top-left" ? panelY : panelY + panelThickness;
-        const newAnchorX = panelX;
-        const newAnchorY =
-            panelAnchor === "top-left" ? panelY : panelY + panelThickness;
+        const anchorOffset = getPanelAnchorOffset();
+        let currentAnchorX, currentAnchorY, newAnchorX, newAnchorY;
+
+        if (sceneAnchorX !== null && sceneAnchorY !== null) {
+            const oldAnchor =
+                panelAnchor === "top-left" ? "bottom-left" : "top-left";
+            const currentAnchorOffset = oldAnchor === "top-left"
+                ? { x: 0, y: 0 }
+                : { x: 0, y: panelThickness };
+
+            currentAnchorX = sceneAnchorX - gridSize / 2 + currentAnchorOffset.x;
+            currentAnchorY = sceneAnchorY - gridSize / 2 + currentAnchorOffset.y;
+            newAnchorX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+            newAnchorY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+        } else {
+            const panelX =
+                (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+            const panelY =
+                (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+            const oldAnchor =
+                panelAnchor === "top-left" ? "bottom-left" : "top-left";
+            currentAnchorX = panelX;
+            currentAnchorY =
+                oldAnchor === "top-left" ? panelY : panelY + panelThickness;
+            newAnchorX = panelX;
+            newAnchorY =
+                panelAnchor === "top-left" ? panelY : panelY + panelThickness;
+        }
 
         bitsOnCanvas.forEach((bit) => {
             const physicalX = currentAnchorX + bit.x;
@@ -788,14 +812,17 @@ function updatePanelShape() {
         panelManager.updatePanelShape();
     } else {
         // Fallback if panelManager not initialized yet
-        partSection.setAttribute(
-            "x",
-            (mainCanvasManager.canvasParameters.width - panelWidth) / 2
-        );
-        partSection.setAttribute(
-            "y",
-            (mainCanvasManager.canvasParameters.height - panelThickness) / 2
-        );
+        let panelX, panelY;
+        if (sceneAnchorX !== null && sceneAnchorY !== null) {
+            const anchorOffset = getPanelAnchorOffset();
+            panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+            panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+        } else {
+            panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+            panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+        }
+        partSection.setAttribute("x", panelX);
+        partSection.setAttribute("y", panelY);
         partSection.setAttribute("width", panelWidth);
         partSection.setAttribute("height", panelThickness);
         partSection.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
@@ -865,13 +892,9 @@ function updateBitsPositions() {
     if (panelManager) {
         panelManager.updateBitsPositions(bitsOnCanvas);
     } else {
-        const panelX =
-            (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-        const panelY =
-            (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
         const anchorOffset = getPanelAnchorOffset();
-        const anchorX = panelX + anchorOffset.x;
-        const anchorY = panelY + anchorOffset.y;
+        const anchorX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+        const anchorY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
 
         bitsOnCanvas.forEach((bit) => {
             const desiredAbsX = anchorX + (bit.x || 0);
@@ -1056,9 +1079,11 @@ async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = fa
     }
 
     if (window.threeModule) {
+        log.info(`[PO Input Change] Updating 3D view for bit ${index}, pocketOffset=${newPocketOffset.toFixed(2)}, isZeroWidth=${isZeroWidth}`);
         await updateThreeView();
         if (showPart) {
             window.threeModule.showBasePanel();
+            log.info(`[PO Input Change] Scheduling CSG for bit ${index}`);
             csgScheduler.schedule(true);
         }
     }
@@ -1132,9 +1157,15 @@ function updateOffsetContours() {
     window.offsetContours = offsetContours;
 
     // Always calculate relative to top anchor for consistent offset calculations
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    let panelX, panelY;
+    if (sceneAnchorX !== null && sceneAnchorY !== null) {
+        const anchorOffset = { x: 0, y: 0 };
+        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+    } else {
+        panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+        panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    }
     const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
     const anchorX = panelX + anchorOffset.x;
     const anchorY = panelY + anchorOffset.y;
@@ -1749,9 +1780,15 @@ async function updateCanvasBitsForBitId(bitId) {
 // Draw bit shape
 function drawBitShape(bit, groupName, createBitShapeElementFn) {
     updatePanelParams();
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    let panelX, panelY;
+    if (sceneAnchorX !== null && sceneAnchorY !== null) {
+        const anchorOffset = { x: 0, y: 0 };
+        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+    } else {
+        panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+        panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    }
     const centerX = panelX + panelWidth / 2;
     const centerY = panelY;
 
@@ -2336,9 +2373,15 @@ function transformYFromDisplay(displayY, anchorOffset) {
 // Helper function to get panel anchor coordinates
 function getPanelAnchorCoords() {
     if (panelManager) return panelManager.getPanelAnchorCoords();
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    let panelX, panelY;
+    if (sceneAnchorX !== null && sceneAnchorY !== null) {
+        const anchorOffset = getPanelAnchorOffset();
+        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+    } else {
+        panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+        panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    }
     const offset = getPanelAnchorOffset();
     return {
         x: panelX + offset.x,
@@ -2402,9 +2445,15 @@ function updatePartShape() {
     if (!showPart) {
         return partPath;
     }
-    const panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-    const panelY =
-        (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    let panelX, panelY;
+    if (sceneAnchorX !== null && sceneAnchorY !== null) {
+        const anchorOffset = { x: 0, y: 0 };
+        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+    } else {
+        panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+        panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+    }
 
     // **PHASE 2 REFACTORING** - Use BooleanOperationStrategy for boolean operations
     // Collect phantom bits for boolean operations
@@ -2814,12 +2863,15 @@ async function restoreBitPositions(positionsData) {
         if (bitData) {
             try {
                 // Create bit on canvas at the saved position
-                const panelX =
-                    (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-                const panelY =
-                    (mainCanvasManager.canvasParameters.height -
-                        panelThickness) /
-                    2;
+                let panelX, panelY;
+                if (sceneAnchorX !== null && sceneAnchorY !== null) {
+                    const anchorOffset = { x: 0, y: 0 };
+                    panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
+                    panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+                } else {
+                    panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
+                    panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
+                }
                 const centerX = panelX + panelWidth / 2;
                 const centerY = panelY + panelThickness / 2;
 
@@ -3092,11 +3144,12 @@ function setupViewToggle(threeModule) {
             }, 100);
         }
 
-        // Handle Three.js resize
+        // Three.js resize is handled automatically by ResizeObserver
+        // but we can add a small delay to ensure DOM updates are complete
         if (threeModule && (view === "3d" || view === "both")) {
             setTimeout(() => {
-                threeModule.onWindowResize();
-            }, 100);
+                threeModule.sceneManager.onWindowResize();
+            }, 50);
         }
 
         // Handle Paper.js resize

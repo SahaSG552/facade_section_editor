@@ -52,17 +52,26 @@ class CSGScheduler {
             return;
         }
 
+        this.log.debug(`CSGScheduler.schedule called with apply=${apply}, isDragging=${window.isDraggingBit}`);
+
         // Store latest arguments
         this.pendingArgs = { apply };
         eventBus.emit("csg:scheduled", { apply, delay: this.delay });
 
         // If already executing, the loop will check pendingArgs when done.
-        if (this.isExecuting) return;
+        if (this.isExecuting) {
+            this.log.debug("CSGScheduler: already executing, will check pending args after");
+            return;
+        }
 
         // If timer is running, let it run (it will pick up new pendingArgs).
-        if (this.timer) return;
+        if (this.timer) {
+            this.log.debug("CSGScheduler: timer already running");
+            return;
+        }
 
         // Start timer
+        this.log.debug(`CSGScheduler: starting timer with delay ${this.delay}ms`);
         this.timer = setTimeout(() => this.execute(), this.delay);
     }
 

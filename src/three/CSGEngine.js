@@ -94,7 +94,7 @@ class CSGEngine {
 
         // Block CSG during active drag to prevent broken topology
         if (window.isDraggingBit) {
-            this.log.info("CSG blocked: drag in progress");
+            this.log.info(`CSG blocked: drag in progress (queued=${apply})`);
             this.csgQueuedApply = apply;
             return;
         }
@@ -155,18 +155,26 @@ class CSGEngine {
             this.log.info("Creating bit groups for CSG");
             const bitGroups = this.bitGroupManager.createBitGroups(this.bitExtrudeMeshes);
             
-            // Get all meshes from groups (no union operations)
-            const allGroupMeshes = this.bitGroupManager.getAllMeshes();
+            // Get intersecting groups (filter works with groups now)
             const intersectingGroups = this.bitGroupManager.filterIntersectingGroups(bitGroups, this.panelBBox);
+
+            // Get all meshes from intersecting groups for CSG
+            const intersectingMeshes = [];
+            intersectingGroups.forEach(group => {
+                group.meshes.forEach(mesh => {
+                    intersectingMeshes.push(mesh);
+                });
+            });
 
             this.log.info("CSG subtraction order:", {
                 totalGroups: bitGroups.length,
-                totalMeshes: intersectingGroups.length,
-                totalComponents: intersectingGroups.reduce((sum, mesh) => sum + (mesh.userData?.originalBitCount || 1), 0)
+                intersectingGroups: intersectingGroups.length,
+                totalMeshes: intersectingMeshes.length,
+                totalComponents: intersectingMeshes.reduce((sum, mesh) => sum + (mesh.userData?.originalBitCount || 1), 0)
             });
 
             const csgSignature = this.buildCSGSignature(
-                intersectingGroups,
+                intersectingMeshes,
             );
 
             // Check cache
@@ -196,23 +204,22 @@ class CSGEngine {
             const resultMaterial = this.createResultMaterial();
 
             if (this.useManifoldBackend) {
-                // Use already grouped meshes from BitGroupManager
-                const groupedCutters = this.bitGroupManager.getBitGroups()
-                    .map(group => {
-                        // Extract all meshes from the group for Manifold
-                        const allMeshes = [];
-                        if (group.union && group.union.userData?.wasUnioned) {
-                            // Use the already unioned mesh if available
-                            allMeshes.push(group.union);
-                        } else {
-                            // Otherwise use individual components
-                            allMeshes.push(...group.bit, ...group.extensions, ...group.phantoms);
-                        }
-                        return allMeshes;
-                    })
-                    .filter(group => group.length > 0); // Filter out empty groups
+                // Extract all meshes from intersecting groups for Manifold
+                const intersectingCutters = [];
+                intersectingGroups.forEach(group => {
+                    // Extract all meshes from the group for Manifold
+                    const allMeshes = [];
+                    if (group.union && group.union.userData?.wasUnioned) {
+                        // Use the already unioned mesh if available
+                        allMeshes.push(group.union);
+                    } else {
+                        // Otherwise use individual components
+                        allMeshes.push(...group.bit, ...group.extensions, ...group.phantoms);
+                    }
+                    intersectingCutters.push(...allMeshes);
+                });
 
-                const manifoldOutput = await this.runManifoldCSG(groupedCutters);
+                const manifoldOutput = await this.runManifoldCSG([intersectingCutters]);
 
                 if (manifoldOutput?.geometry) {
                     const resultMesh = new THREE.Mesh(
@@ -281,7 +288,7 @@ class CSGEngine {
                     }
 
                     this.log.info(
-                        `CSG applied via Manifold, processed ${intersectingGroups.length} bit groups with ${this.bitGroupManager.getBitGroups().reduce((sum, g) => sum + g.bit.length + g.extensions.length + g.phantoms.length, 0)} total components`,
+                        `CSG applied via Manifold, processed ${intersectingGroups.length} intersecting groups with ${intersectingCutters.length} total meshes`,
                     );
                     this.log.info("CSG Operation End:", {
                         timestamp: Date.now(),
@@ -317,19 +324,19 @@ class CSGEngine {
             let processed = 0;
 
             // MODE 2: Sequential subtraction (default/stable path)
-            this.log.info("Using SEQUENTIAL mode: subtracting bit groups one by one");
+            this.log.info("Using SEQUENTIAL mode: subtracting all meshes one by one");
             resultBrush = panelBrush;
 
-            for (const groupMesh of intersectingGroups) {
+            for (const mesh of intersectingMeshes) {
                 try {
                     const weldedGeometry = weldGeometry(
-                        bitMesh.geometry,
+                        mesh.geometry,
                         this.manifoldCutterTolerance,
                     );
                     const bitBrush = new Brush(weldedGeometry);
-                    bitBrush.position.copy(bitMesh.position);
-                    bitBrush.rotation.copy(bitMesh.rotation);
-                    bitBrush.scale.copy(bitMesh.scale);
+                    bitBrush.position.copy(mesh.position);
+                    bitBrush.rotation.copy(mesh.rotation);
+                    bitBrush.scale.copy(mesh.scale);
                     bitBrush.updateMatrixWorld(true);
 
                     resultBrush = evaluator.evaluate(
@@ -340,14 +347,14 @@ class CSGEngine {
 
                     if (!resultBrush) {
                         this.log.warn(
-                            `Sequential subtraction failed at bit ${processed}`,
+                            `Sequential subtraction failed at mesh ${processed} (bit ${mesh.userData?.bitIndex || 'unknown'})`,
                         );
                         break;
                     }
                     processed++;
                 } catch (error) {
                     this.log.warn(
-                        `Error in sequential subtraction for bit group ${groupMesh.userData?.bitIndex || processed}:`,
+                        `Error in sequential subtraction for mesh ${processed} (bit ${mesh.userData?.bitIndex || 'unknown'}):`,
                         error.message,
                     );
                     break;
@@ -379,6 +386,7 @@ class CSGEngine {
                 timestamp: Date.now(),
                 success: true,
                 bitsProcessed: intersectingGroups.length,
+                meshesProcessed: processed,
             });
         } catch (error) {
             this.log.error("Error in applyCSGOperation:", error);

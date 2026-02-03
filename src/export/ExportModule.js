@@ -3871,8 +3871,8 @@ class DXFExporter {
         const vc = (A[0][0] * B[1] - A[1][0] * B[0]) / det;
 
         // Absolute center
-        const cx = uc + meanX;
-        const cy = vc + meanY;
+        let cx = uc + meanX;
+        let cy = vc + meanY;
 
         // Calculate radius as average distance
         let sumR = 0;

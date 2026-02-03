@@ -1,5 +1,7 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import eventBus from "../core/eventBus.js";
+import appState from "../state/AppState.js";
+//import { LoggerFactory } from "../core/LoggerFactory.js";
 
 /**
  * InteractionManager - Centralized handler for all canvas interactions
@@ -307,7 +309,9 @@ export default class InteractionManager {
             // Handle phantom bit dragging (X-axis only for PO operation)
             this.dragStarted = true;
 
-            // this.callbacks.getCsgScheduler?.()?.cancel();
+            // Block CSG during phantom drag to prevent broken topology
+            window.isDraggingBit = true;
+            this.callbacks.getCsgScheduler?.()?.cancel();
 
             const svgCoords = this.canvasManager.screenToSvg(
                 e.clientX,
@@ -383,9 +387,14 @@ export default class InteractionManager {
                     }
                 }
 
-                // Update extensions and inputs during drag
+                // Update extensions and inputs during drag (2D only)
                 this.callbacks.updateBitExtensions?.();
                 this.callbacks.updatePocketWidthInputs?.();
+                
+                // Block CSG during drag to prevent unwanted recalculations
+                if (!window.isDraggingBit) {
+                    window.isDraggingBit = true;
+                }
 
                 this.checkAutoScroll(e.clientX, e.clientY);
             }
@@ -453,15 +462,20 @@ export default class InteractionManager {
         this.stopAutoScroll();
 
         if (this.isDraggingPhantom) {
+            // Store index before clearing state
+            const phantomIndex = this.draggedPhantomIndex;
+            
             this.isDraggingPhantom = false;
             this.draggedPhantomIndex = null;
             this.dragStarted = false;
             this.canvas.style.cursor = "grab";
+            // Unblock CSG after phantom drag
+            window.isDraggingBit = false;
             try {
                 window.draggedPhantomIndex = null;
             } catch (e) { }
 
-            // Update everything after drag to show final state
+            // Update 2D visuals after drag to show final state
             this.callbacks.updateOffsetContours?.();
             this.callbacks.updatePhantomBits?.();
             this.callbacks.updatePocketWidthInputs?.();
@@ -471,13 +485,26 @@ export default class InteractionManager {
                 this.callbacks.updatePartShape?.();
             }
 
-            const threeModule = this.callbacks.getThreeModule?.();
-            if (threeModule) {
-                // Update 3D view with new pocket offset
-                this.callbacks.updateThreeView?.();
-                if (showPart) {
-                    threeModule.showBasePanel();
-                    this.callbacks.getCsgScheduler?.()?.schedule(true);
+            // Simulate handlePocketOffsetChange behavior for 3D
+            if (window.threeModule) {
+                this.log.debug(`[PO Phantom MouseUp] Simulating input change for bit ${phantomIndex}`);
+                
+                // Get the bit to read current pocketOffset
+                const bitsOnCanvas = this.callbacks.getBitsOnCanvas?.() || [];
+                const bit = bitsOnCanvas[phantomIndex];
+                if (bit && bit.operation === "PO") {
+                    const pocketOffset = bit.pocketOffset || 0;
+                    
+                    // Update 3D view (creates meshes) - same as input change
+                    this.callbacks.updateThreeView?.()?.then(() => {
+                        if (showPart) {
+                            window.threeModule.showBasePanel();
+                            this.log.debug(`[PO Phantom MouseUp] Scheduling CSG for bit ${phantomIndex}, pocketOffset=${pocketOffset.toFixed(2)}`);
+                            
+                            // Schedule CSG - same as input change
+                            this.callbacks.getCsgScheduler?.()?.schedule(true);
+                        }
+                    });
                 }
             }
         } else if (this.isDraggingBit) {

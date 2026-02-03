@@ -152,8 +152,11 @@ export default class BitGroupManager {
     filterIntersectingGroups(groups, panelBBox) {
         if (!groups || !panelBBox) return [];
 
-        const intersectingMeshes = [];
+        const intersectingGroups = [];
         groups.forEach(group => {
+            let groupIntersects = false;
+            
+            // Check if any mesh in this group intersects with the panel
             group.meshes.forEach(mesh => {
                 if (!mesh || !mesh.geometry) return;
                 
@@ -161,13 +164,18 @@ export default class BitGroupManager {
                 bbox.applyMatrix4(mesh.matrixWorld);
 
                 if (bbox.intersectsBox(panelBBox)) {
-                    intersectingMeshes.push(mesh);
+                    groupIntersects = true;
                 }
             });
+            
+            // If any mesh in the group intersects, include the entire group
+            if (groupIntersects) {
+                intersectingGroups.push(group);
+            }
         });
 
-        this.log.info(`Filtered to ${intersectingMeshes.length} intersecting meshes`);
-        return intersectingMeshes;
+        this.log.info(`Filtered to ${intersectingGroups.length} intersecting groups (from ${groups.length} total groups)`);
+        return intersectingGroups;
     }
 
     /**

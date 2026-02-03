@@ -662,14 +662,7 @@ class CanvasManager {
 
     // Изменение размера канваса (вызывается при resize окна)
     resize() {
-        const oldWidth = this.canvasParameters.width;
-        const oldHeight = this.canvasParameters.height;
-
         this.updateCanvasSize();
-
-        // Корректируем pan чтобы сохранить относительное положение
-        this.panX = (this.panX / oldWidth) * this.canvasParameters.width;
-        this.panY = (this.panY / oldHeight) * this.canvasParameters.height;
 
         this.updateViewBox();
     }

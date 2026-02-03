@@ -484,7 +484,7 @@ export default class ThreeModule extends BaseModule {
     addCSGModeToggle() {
         const container = document.createElement("div");
         container.style.position = "absolute";
-        container.style.top = "50px";
+        container.style.top = "80px";
         container.style.right = "10px";
         container.style.padding = "8px";
         container.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
@@ -662,9 +662,12 @@ export default class ThreeModule extends BaseModule {
                 mesh.material.dispose();
             });
             this.bitExtrudeMeshes.length = 0;
-            this.lastCSGSignature = null;
-            this.csgActive = false;
-            this.csgVisible = false;
+            // Don't reset CSG state during drag to prevent unwanted recalculations
+            if (!window.isDraggingBit) {
+                this.lastCSGSignature = null;
+                this.csgActive = false;
+                this.csgVisible = false;
+            }
             this.panelBBox = null;
 
             // Create panel geometry from partFront shape using SVGLoader
