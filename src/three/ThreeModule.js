@@ -113,9 +113,6 @@ export default class ThreeModule extends BaseModule {
         // Add minimal on-canvas controls (material + wireframe + edges)
         this.initMaterialControls();
 
-        // Add wireframe toggle button
-        this.addWireframeToggle();
-
         // Add CSG mode toggle
         this.addCSGModeToggle();
 
@@ -455,30 +452,6 @@ export default class ThreeModule extends BaseModule {
         } catch (e) {
             this.log.warn("Failed to init material controls:", e);
         }
-    }
-
-    addWireframeToggle() {
-        // Create toggle button in three-canvas-container
-        const toggleBtn = document.createElement("button");
-        toggleBtn.textContent = "Wireframe";
-        toggleBtn.style.position = "absolute";
-        toggleBtn.style.top = "10px";
-        toggleBtn.style.right = "10px";
-        toggleBtn.style.padding = "8px 16px";
-        toggleBtn.style.backgroundColor = "rgba(255, 255, 255, 0.9)";
-        toggleBtn.style.border = "1px solid #ccc";
-        toggleBtn.style.borderRadius = "4px";
-        toggleBtn.style.cursor = "pointer";
-        toggleBtn.style.zIndex = "100";
-        toggleBtn.style.fontSize = "12px";
-        toggleBtn.style.fontWeight = "500";
-
-        toggleBtn.addEventListener("click", () => {
-            this.toggleWireframe();
-        });
-
-        this.container.appendChild(toggleBtn);
-        this.wireframeToggleBtn = toggleBtn;
     }
 
     addCSGModeToggle() {

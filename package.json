@@ -32,6 +32,7 @@
   },
   "homepage": "https://github.com/SahaSG552/facade_section_editor#readme",
   "dependencies": {
+    "@mlightcad/three-viewcube": "^0.0.10",
     "earcut": "^3.0.2",
     "jsdom": "^27.3.0",
     "makerjs": "^0.17.6",

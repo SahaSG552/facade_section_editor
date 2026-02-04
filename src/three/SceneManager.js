@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { WebGPURenderer } from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import LoggerFactory from "../core/LoggerFactory.js";
+import ViewCubeGizmo from "./ViewCubeGizmo.js";
+
 
 /**
  * SceneManager
@@ -44,7 +46,16 @@ export default class SceneManager {
         this.resizeObserver = null;
         this.stats = null;
 
+        // ViewCube
+        this.viewCube = null;
+        this.targetQuaternion = null;
+        this.isTransitioning = false;
+        this.transitionDuration = 500; // ms
+        this.transitionStartTime = 0;
+        this.startQuaternion = new THREE.Quaternion();
+
         this.log.info("Created");
+
     }
 
     /**
@@ -130,7 +141,14 @@ export default class SceneManager {
         // Handle window resize
         window.addEventListener("resize", this.onWindowResize.bind(this));
 
+        // Initialize ViewCube
+        this.viewCube = new ViewCubeGizmo(this.camera, this.renderer);
+        window.addEventListener("viewcube-change", (e) => {
+            this.rotateCameraTo(e.detail.quaternion);
+        });
+
         // Setup ResizeObserver for container size changes
+
         this.setupResizeObserver();
 
         this.log.info("Initialized successfully");
@@ -302,12 +320,59 @@ export default class SceneManager {
     }
 
     /**
+     * Animate camera rotation to target orientation
+     */
+    rotateCameraTo(quaternion) {
+        if (this.isTransitioning) return;
+
+        this.targetQuaternion = quaternion.clone();
+        this.startQuaternion.copy(this.camera.quaternion);
+        this.isTransitioning = true;
+        this.transitionStartTime = performance.now();
+        
+        if (this.viewCube) this.viewCube.isTransitioning = true;
+        if (this.controls) this.controls.enabled = false;
+        
+        this.log.debug("Starting view transition");
+    }
+
+    /**
      * Render the scene (called each animation frame)
      */
     render() {
         if (this.stats) this.stats.begin();
 
+        // Handle camera transition
+        if (this.isTransitioning) {
+            const now = performance.now();
+            const elapsed = now - this.transitionStartTime;
+            let alpha = elapsed / this.transitionDuration;
+
+            if (alpha >= 1) {
+                alpha = 1;
+                this.isTransitioning = false;
+                if (this.viewCube) this.viewCube.isTransitioning = false;
+                if (this.controls) this.controls.enabled = true;
+                this.log.debug("View transition complete");
+            }
+
+            // Smoothstep easing
+            const t = alpha * alpha * (3 - 2 * alpha);
+            
+            // Interpolate rotation
+            this.camera.quaternion.slerpQuaternions(this.startQuaternion, this.targetQuaternion, t);
+            
+            // Update camera position while maintaining distance to target
+            if (this.controls) {
+                const distance = this.camera.position.distanceTo(this.controls.target);
+                const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion);
+                this.camera.position.copy(this.controls.target).add(direction.multiplyScalar(distance));
+                this.controls.update();
+            }
+        }
+
         // Smooth background transition
+
         if (this.scene && this.scene.background) {
             this.currentBackgroundColor.lerp(this.targetBackgroundColor, this.backgroundColorLerpFactor);
             this.scene.background.copy(this.currentBackgroundColor);
@@ -323,14 +388,25 @@ export default class SceneManager {
             this.renderer.render(this.scene, this.camera);
         }
 
+        // Update and render ViewCube
+        if (this.viewCube) {
+            this.viewCube.update();
+        }
+
         if (this.stats) this.stats.end();
     }
+
 
     /**
      * Dispose of resources
      */
     dispose() {
+        if (this.viewCube) {
+            this.viewCube.dispose();
+        }
+
         if (this.controls) {
+
             this.controls.dispose();
         }
 
