@@ -134,12 +134,9 @@ export default class SceneManager {
         // Add grid helper
         this.addGridHelper();
 
-        // Add axes helper
-        const axesHelper = new THREE.AxesHelper(200);
-        this.scene.add(axesHelper);
-
         // Handle window resize
         window.addEventListener("resize", this.onWindowResize.bind(this));
+
 
         // Initialize ViewCube
         this.viewCube = new ViewCubeGizmo(this.camera, this.renderer);
@@ -203,16 +200,25 @@ export default class SceneManager {
     addGridHelper() {
         const gridSize = 1000;
         const gridDivisions = 50;
-        const gridHelper = new THREE.GridHelper(
+        this.gridHelper = new THREE.GridHelper(
             gridSize,
             gridDivisions,
             0x888888,
             0xcccccc
         );
-        gridHelper.position.y = 0;
-        this.scene.add(gridHelper);
+        this.gridHelper.position.y = 0;
+        this.scene.add(this.gridHelper);
         this.log.info("Grid helper added");
     }
+
+    toggleGrid() {
+        if (this.gridHelper) {
+            this.gridHelper.visible = !this.gridHelper.visible;
+            return this.gridHelper.visible;
+        }
+        return false;
+    }
+
 
     /**
      * Fit camera to panel dimensions

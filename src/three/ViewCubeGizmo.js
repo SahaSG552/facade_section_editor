@@ -291,6 +291,17 @@ export default class ViewCubeGizmo {
         this.cube = new ViewCube(2, 0.2, true, COLORS.MAIN, COLORS.OUTLINE);
         this.scene.add(this.cube);
         
+        // Add AxesHelper at the corner
+        const axesSize = 2.5; 
+        this.axesHelper = new THREE.AxesHelper(axesSize);
+        // Position at bottom-left-back corner with offset
+        // Cube is size 2 (extents -1 to 1). 
+        // We place origin of axes at -1 (corner) minus a bit.
+        this.axesHelper.position.set(-1.1, -1.1, -1.1);
+        
+        // Custom colors for better visibility if needed (default is RGB)
+        this.cube.add(this.axesHelper);
+
         this.raycaster = new THREE.Raycaster();
         this.mouse = new THREE.Vector2();
         

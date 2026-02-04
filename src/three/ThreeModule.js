@@ -113,7 +113,11 @@ export default class ThreeModule extends BaseModule {
         // Add minimal on-canvas controls (material + wireframe + edges)
         this.initMaterialControls();
 
+        // Add Grid Toggle
+        this.addGridToggle();
+
         // Add CSG mode toggle
+
         this.addCSGModeToggle();
 
         // Panel side toggle removed - always use top position
@@ -454,7 +458,36 @@ export default class ThreeModule extends BaseModule {
         }
     }
 
+    addGridToggle() {
+        const btn = document.createElement("button");
+        btn.textContent = "#";
+        btn.title = "Toggle Grid";
+        btn.style.position = "absolute";
+        btn.style.bottom = "10px";
+        btn.style.left = "10px";
+        btn.style.width = "30px";
+        btn.style.height = "30px";
+        btn.style.background = "rgba(200, 255, 200, 0.9)"; // Default active (grid is added by default)
+        btn.style.border = "1px solid #ccc";
+        btn.style.borderRadius = "4px";
+        btn.style.cursor = "pointer";
+        btn.style.zIndex = "100";
+        btn.style.fontWeight = "bold";
+        btn.style.fontSize = "16px";
+        btn.style.display = "flex";
+        btn.style.alignItems = "center";
+        btn.style.justifyContent = "center";
+        
+        btn.addEventListener("click", () => {
+            const isVisible = this.sceneManager.toggleGrid();
+            btn.style.background = isVisible ? "rgba(200, 255, 200, 0.9)" : "rgba(255, 255, 255, 0.9)";
+        });
+        
+        this.container.appendChild(btn);
+    }
+
     addCSGModeToggle() {
+
         const container = document.createElement("div");
         container.style.position = "absolute";
         container.style.top = "80px";
