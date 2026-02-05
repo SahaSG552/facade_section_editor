@@ -588,6 +588,7 @@ export default class ThreeModule extends BaseModule {
         thickness,
         bits = [],
         panelAnchor = "top-left",
+        changedBitIds = null
     ) {
         if (!this.enabled) {
             this.log.debug("Skip updatePanel: 3D disabled");
@@ -605,6 +606,7 @@ export default class ThreeModule extends BaseModule {
                 thickness,
                 bits,
                 panelAnchor,
+                changedBitIds
             };
             return;
         }
@@ -619,7 +621,10 @@ export default class ThreeModule extends BaseModule {
                 panelAnchor,
             );
 
-            if (this.lastPanelUpdateSignature === nextSignature) {
+            // If partial update requested but signature matches, we might skip.
+            // But if changedBitIds is set, something surely changed.
+            // Unless signature logic is flawed. Assuming it's good.
+            if (this.lastPanelUpdateSignature === nextSignature && !changedBitIds) {
                 this.log.debug(
                     "Panel signature unchanged, skipping 3D rebuild",
                 );
@@ -632,6 +637,8 @@ export default class ThreeModule extends BaseModule {
                 height,
                 thickness,
                 bits: bits.length,
+                partial: !!changedBitIds,
+                changedBits: changedBitIds
             });
 
             // Clear all edge visualizations before removing meshes
@@ -639,181 +646,240 @@ export default class ThreeModule extends BaseModule {
                 this.materialManager.clearAllEdges();
             }
 
-            // Remove all meshes
-            if (this.panelMesh) {
-                this.scene.remove(this.panelMesh);
-                // Only dispose if we haven't saved this as original (for toggle support)
-                if (this.panelMesh.geometry !== this.originalPanelGeometry) {
-                    this.panelMesh.geometry?.dispose();
+            // If full update (no changedBitIds), remove everything
+            if (!changedBitIds) {
+                // Remove all meshes
+                if (this.panelMesh) {
+                    this.scene.remove(this.panelMesh);
+                    // Only dispose if we haven't saved this as original (for toggle support)
+                    if (this.panelMesh.geometry !== this.originalPanelGeometry) {
+                        this.panelMesh.geometry?.dispose();
+                    }
+                    if (this.panelMesh.material !== this.originalPanelMaterial) {
+                        this.panelMesh.material?.dispose();
+                    }
+                    this.panelMesh = null;
                 }
-                if (this.panelMesh.material !== this.originalPanelMaterial) {
-                    this.panelMesh.material?.dispose();
+                if (this.partMesh) {
+                    this.partMesh.visible = false;
                 }
-                this.panelMesh = null;
+                this.bitPathMeshes.forEach((mesh) => {
+                    if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
+                    this.scene.remove(mesh);
+                    mesh.geometry.dispose();
+                    mesh.material.dispose();
+                });
+                this.bitPathMeshes.length = 0;
+                this.bitExtrudeMeshes.forEach((mesh) => {
+                    if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
+                    this.scene.remove(mesh);
+                    mesh.geometry.dispose();
+                    mesh.material.dispose();
+                });
+                this.bitExtrudeMeshes.length = 0;
+                // Don't reset CSG state during drag to prevent unwanted recalculations
+                if (!window.isDraggingBit) {
+                    this.lastCSGSignature = null;
+                    this.csgActive = false;
+                    this.csgVisible = false;
+                }
+                this.panelBBox = null;
+
+                // Recreate panel geometry (Full update logic)
+                // ... (Existing logic for creating panelMesh)
+                // Since I cannot easily split the huge function in one go without context, 
+                // I will duplicate the panel creation logic or structure it to only run if !changedBitIds
+            } else {
+                // PARTIAL UPDATE
+                // 1. Remove meshes for changed bits
+                const idsToRemove = Array.isArray(changedBitIds) ? changedBitIds : [changedBitIds];
+                
+                // Helper to check if mesh belongs to changed bit
+                const shouldRemove = (mesh) => {
+                    return idsToRemove.includes(mesh.userData.bitId);
+                };
+
+                // Filter and remove bitPathMeshes
+                for (let i = this.bitPathMeshes.length - 1; i >= 0; i--) {
+                    const mesh = this.bitPathMeshes[i];
+                    if (shouldRemove(mesh)) {
+                         if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
+                        this.scene.remove(mesh);
+                        mesh.geometry.dispose();
+                        mesh.material.dispose();
+                        this.bitPathMeshes.splice(i, 1);
+                    }
+                }
+
+                // Filter and remove bitExtrudeMeshes
+                for (let i = this.bitExtrudeMeshes.length - 1; i >= 0; i--) {
+                    const mesh = this.bitExtrudeMeshes[i];
+                    if (shouldRemove(mesh)) {
+                         if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
+                        this.scene.remove(mesh);
+                        mesh.geometry.dispose();
+                        mesh.material.dispose();
+                        this.bitExtrudeMeshes.splice(i, 1);
+                    }
+                }
+                
+                // Ensure panelMesh exists (it should)
+                if (!this.panelMesh) {
+                    // Fallback to full update if panel missing
+                    this.log.warn("Panel mesh missing during partial update, forcing full update");
+                    return this.updatePanel(width, height, thickness, bits, panelAnchor, null);
+                }
             }
-            if (this.partMesh) {
-                this.partMesh.visible = false;
-            }
-            this.bitPathMeshes.forEach((mesh) => {
-                if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
-                this.scene.remove(mesh);
-                mesh.geometry.dispose();
-                mesh.material.dispose();
-            });
-            this.bitPathMeshes.length = 0;
-            this.bitExtrudeMeshes.forEach((mesh) => {
-                if (this.materialManager) this.materialManager.removeEdgeVisualization(mesh);
-                this.scene.remove(mesh);
-                mesh.geometry.dispose();
-                mesh.material.dispose();
-            });
-            this.bitExtrudeMeshes.length = 0;
-            // Don't reset CSG state during drag to prevent unwanted recalculations
-            if (!window.isDraggingBit) {
-                this.lastCSGSignature = null;
-                this.csgActive = false;
-                this.csgVisible = false;
-            }
-            this.panelBBox = null;
 
-            // Create panel geometry from partFront shape using SVGLoader
-            const partFront = document.getElementById("part-front");
-            const partFrontBBox = this.getSafePartFrontBBox(
-                partFront,
-                width,
-                height,
-                thickness,
-            );
-            let geometry;
+            // Create panel geometry ONLY if full update
+            if (!changedBitIds) {
+                const partFront = document.getElementById("part-front");
+                const partFrontBBox = this.getSafePartFrontBBox(
+                    partFront,
+                    width,
+                    height,
+                    thickness,
+                );
+                let geometry;
 
-            // Check if shape was manually edited (has data attribute or flag)
-            // For now, always try to get bbox to ensure 3D matches actual shape
-            width = partFrontBBox.width || width;
-            height = partFrontBBox.height || height;
-            this.log.debug("Effective panel dimensions for 3D:", {
-                width,
-                height,
-                partFrontBBox,
-            });
+                // Check if shape was manually edited (has data attribute or flag)
+                // For now, always try to get bbox to ensure 3D matches actual shape
+                width = partFrontBBox.width || width;
+                height = partFrontBBox.height || height;
+                this.log.debug("Effective panel dimensions for 3D:", {
+                    width,
+                    height,
+                    partFrontBBox,
+                });
 
-            this.log.info("Creating panel geometry:", {
-                partFrontFound: !!partFront,
-                svgLoaderAvailable: typeof SVGLoader !== "undefined",
-                partFrontTagName: partFront?.tagName,
-                width,
-                height,
-                usingFallbackBBox: !this.isBBoxValid(partFrontBBox),
-            });
+                this.log.info("Creating panel geometry:", {
+                    partFrontFound: !!partFront,
+                    svgLoaderAvailable: typeof SVGLoader !== "undefined",
+                    partFrontTagName: partFront?.tagName,
+                    width,
+                    height,
+                    usingFallbackBBox: !this.isBBoxValid(partFrontBBox),
+                });
 
-            if (partFront && typeof SVGLoader !== "undefined") {
-                try {
-                    // Get SVG data
-                    const svgData = new XMLSerializer().serializeToString(
-                        partFront,
-                    );
-                    this.log.debug(
-                        "SVG data (first 200 chars):",
-                        svgData.substring(0, 200),
-                    );
+                if (partFront && typeof SVGLoader !== "undefined") {
+                    try {
+                        // Get SVG data
+                        const svgData = new XMLSerializer().serializeToString(
+                            partFront,
+                        );
+                        this.log.debug(
+                            "SVG data (first 200 chars):",
+                            svgData.substring(0, 200),
+                        );
 
-                    const loader = new SVGLoader();
-                    const svgDoc = loader.parse(svgData);
+                        const loader = new SVGLoader();
+                        const svgDoc = loader.parse(svgData);
 
-                    this.log.debug("SVGLoader result:", {
-                        hasDoc: !!svgDoc,
-                        hasPaths: !!svgDoc?.paths,
-                        pathsCount: svgDoc?.paths?.length,
-                        arcDivisionCoefficient: this.arcDivisionCoefficient,
-                    });
+                        this.log.debug("SVGLoader result:", {
+                            hasDoc: !!svgDoc,
+                            hasPaths: !!svgDoc?.paths,
+                            pathsCount: svgDoc?.paths?.length,
+                            arcDivisionCoefficient: this.arcDivisionCoefficient,
+                        });
 
-                    if (svgDoc && svgDoc.paths && svgDoc.paths.length > 0) {
-                        // Get first path (partFront shape)
-                        const path = svgDoc.paths[0];
+                        if (svgDoc && svgDoc.paths && svgDoc.paths.length > 0) {
+                            // Get first path (partFront shape)
+                            const path = svgDoc.paths[0];
 
-                        if (path.toShapes) {
-                            const shapes = path.toShapes(true);
+                            if (path.toShapes) {
+                                const shapes = path.toShapes(true);
 
-                            if (shapes && shapes.length > 0) {
-                                // Get partFront bbox to center and scale
-                                const centerX =
-                                    partFrontBBox.x + partFrontBBox.width / 2;
-                                const centerY =
-                                    partFrontBBox.y + partFrontBBox.height / 2;
+                                if (shapes && shapes.length > 0) {
+                                    // Get partFront bbox to center and scale
+                                    const centerX =
+                                        partFrontBBox.x + partFrontBBox.width / 2;
+                                    const centerY =
+                                        partFrontBBox.y + partFrontBBox.height / 2;
 
-                                // Use real dimensions from bbox (source of truth)
-                                const realWidth = partFrontBBox.width;
-                                const realHeight = partFrontBBox.height;
+                                    // Use real dimensions from bbox (source of truth)
+                                    const realWidth = partFrontBBox.width;
+                                    const realHeight = partFrontBBox.height;
 
-                                // Use first shape
-                                const shape = shapes[0];
+                                    // Use first shape
+                                    const shape = shapes[0];
 
-                                // Calculate curveSegments based on total arc length
-                                let totalArcLength = 0;
-                                if (shape.curves) {
-                                    shape.curves.forEach((curve) => {
-                                        if (
-                                            curve.type === "EllipseCurve" ||
-                                            curve.isEllipseCurve
-                                        ) {
-                                            totalArcLength += curve.getLength();
-                                        }
+                                    // Calculate curveSegments based on total arc length
+                                    let totalArcLength = 0;
+                                    if (shape.curves) {
+                                        shape.curves.forEach((curve) => {
+                                            if (
+                                                curve.type === "EllipseCurve" ||
+                                                curve.isEllipseCurve
+                                            ) {
+                                                totalArcLength += curve.getLength();
+                                            }
+                                        });
+                                    }
+
+                                    // curveSegments controls divisions for all curves in ExtrudeGeometry
+                                    const curveSegments =
+                                        totalArcLength > 0
+                                            ? Math.max(
+                                                12,
+                                                Math.ceil(
+                                                    totalArcLength /
+                                                    this
+                                                        .arcDivisionCoefficient,
+                                                ),
+                                            )
+                                            : 12;
+
+                                    this.log.info("Panel arc approximation:", {
+                                        totalArcLength,
+                                        coefficient: this.arcDivisionCoefficient,
+                                        curveSegments,
                                     });
+
+                                    // Extrude shape to create 3D panel
+                                    const extrudeSettings = {
+                                        depth: thickness,
+                                        bevelEnabled: false,
+                                        curveSegments: curveSegments, // This controls arc smoothness
+                                    };
+                                    geometry = new THREE.ExtrudeGeometry(
+                                        shape,
+                                        extrudeSettings,
+                                    );
+
+                                    // Transform to correct position and orientation
+                                    // SVGLoader creates shape in XY plane with Y down
+                                    // We need: X=width (left-right), Y=height (up-down), Z=thickness (depth)
+
+                                    // 1. Translate to origin (center)
+                                    geometry.translate(-centerX, -centerY, 0);
+
+                                    // 2. Rotate 180° around X to flip Y (SVG Y down -> Three.js Y up)
+                                    geometry.rotateX(Math.PI);
+
+                                    // 3. Center vertically at Y = realHeight/2 (using bbox height, not parameter)
+                                    geometry.translate(0, realHeight / 2, 0);
+
+                                    this.log.info(
+                                        "Created panel from SVGLoader with",
+                                        shapes.length,
+                                        "shape(s), real dimensions:",
+                                        realWidth,
+                                        "x",
+                                        realHeight,
+                                    );
+                                } else {
+                                    this.log.warn(
+                                        "No shapes from SVGLoader, using box geometry",
+                                    );
+                                    geometry = new THREE.BoxGeometry(
+                                        width,
+                                        height,
+                                        thickness,
+                                    );
                                 }
-
-                                // curveSegments controls divisions for all curves in ExtrudeGeometry
-                                const curveSegments =
-                                    totalArcLength > 0
-                                        ? Math.max(
-                                            12,
-                                            Math.ceil(
-                                                totalArcLength /
-                                                this
-                                                    .arcDivisionCoefficient,
-                                            ),
-                                        )
-                                        : 12;
-
-                                this.log.info("Panel arc approximation:", {
-                                    totalArcLength,
-                                    coefficient: this.arcDivisionCoefficient,
-                                    curveSegments,
-                                });
-
-                                // Extrude shape to create 3D panel
-                                const extrudeSettings = {
-                                    depth: thickness,
-                                    bevelEnabled: false,
-                                    curveSegments: curveSegments, // This controls arc smoothness
-                                };
-                                geometry = new THREE.ExtrudeGeometry(
-                                    shape,
-                                    extrudeSettings,
-                                );
-
-                                // Transform to correct position and orientation
-                                // SVGLoader creates shape in XY plane with Y down
-                                // We need: X=width (left-right), Y=height (up-down), Z=thickness (depth)
-
-                                // 1. Translate to origin (center)
-                                geometry.translate(-centerX, -centerY, 0);
-
-                                // 2. Rotate 180° around X to flip Y (SVG Y down -> Three.js Y up)
-                                geometry.rotateX(Math.PI);
-
-                                // 3. Center vertically at Y = realHeight/2 (using bbox height, not parameter)
-                                geometry.translate(0, realHeight / 2, 0);
-
-                                this.log.info(
-                                    "Created panel from SVGLoader with",
-                                    shapes.length,
-                                    "shape(s), real dimensions:",
-                                    realWidth,
-                                    "x",
-                                    realHeight,
-                                );
                             } else {
                                 this.log.warn(
-                                    "No shapes from SVGLoader, using box geometry",
+                                    "Path has no toShapes method, using box geometry",
                                 );
                                 geometry = new THREE.BoxGeometry(
                                     width,
@@ -823,7 +889,7 @@ export default class ThreeModule extends BaseModule {
                             }
                         } else {
                             this.log.warn(
-                                "Path has no toShapes method, using box geometry",
+                                "No paths from SVGLoader, using box geometry",
                             );
                             geometry = new THREE.BoxGeometry(
                                 width,
@@ -831,80 +897,73 @@ export default class ThreeModule extends BaseModule {
                                 thickness,
                             );
                         }
+                    } catch (error) {
+                        this.log.error("Error using SVGLoader:", error);
+                        geometry = new THREE.BoxGeometry(width, height, thickness);
+                    }
+                } else {
+                    if (!partFront) {
+                        this.log.warn(
+                            "partFront element not found, using box geometry",
+                        );
                     } else {
                         this.log.warn(
-                            "No paths from SVGLoader, using box geometry",
-                        );
-                        geometry = new THREE.BoxGeometry(
-                            width,
-                            height,
-                            thickness,
+                            "SVGLoader not available, using box geometry",
                         );
                     }
-                } catch (error) {
-                    this.log.error("Error using SVGLoader:", error);
                     geometry = new THREE.BoxGeometry(width, height, thickness);
                 }
-            } else {
-                if (!partFront) {
-                    this.log.warn(
-                        "partFront element not found, using box geometry",
-                    );
-                } else {
-                    this.log.warn(
-                        "SVGLoader not available, using box geometry",
-                    );
-                }
-                geometry = new THREE.BoxGeometry(width, height, thickness);
+
+                const material = this.materialManager.createMaterial(
+                    this.materialManager.getCurrentMaterialKey(),
+                );
+                this.panelMesh = new THREE.Mesh(geometry, material);
+                this.panelMesh.castShadow = true;
+                this.panelMesh.receiveShadow = true;
+                this.panelMesh.position.set(0, 0, thickness / 2);
+                this.basePanelMesh = this.panelMesh;
+
+                // Initialize material manager with mesh references
+                this.materialManager.initialize(
+                    this.panelMesh,
+                    this.partMesh,
+                    this.scene,
+                    this.bitExtrudeMeshes,
+                );
+
+                // Save original panel data on first creation (before any CSG)
+                this.originalPanelGeometry = this.panelMesh.geometry.clone();
+                this.originalPanelMaterial = this.panelMesh.material.clone();
+                this.originalPanelPosition = this.panelMesh.position.clone();
+                this.originalPanelRotation = this.panelMesh.rotation.clone();
+                this.originalPanelScale = this.panelMesh.scale.clone();
+                this.panelBBox = this.computeWorldBBox(
+                    this.originalPanelGeometry,
+                    this.originalPanelPosition,
+                    this.originalPanelRotation,
+                    this.originalPanelScale,
+                );
+
+                // Initialize CSG engine with panel data and utilities
+                this.csgEngine.initialize({
+                    scene: this.scene,
+                    panelMesh: this.panelMesh,
+                    bitExtrudeMeshes: this.bitExtrudeMeshes,
+                    bitPathMeshes: this.bitPathMeshes,
+                    originalPanelGeometry: this.originalPanelGeometry,
+                    originalPanelPosition: this.originalPanelPosition,
+                    originalPanelRotation: this.originalPanelRotation,
+                    originalPanelScale: this.originalPanelScale,
+                    materialManager: this.materialManager,
+                    computeWorldBBox: this.computeWorldBBox.bind(this),
+                });
+
+                this.log.debug("Original panel data saved at creation");
+                
+                this.scene.add(this.panelMesh);
             }
 
-            const material = this.materialManager.createMaterial(
-                this.materialManager.getCurrentMaterialKey(),
-            );
-            this.panelMesh = new THREE.Mesh(geometry, material);
-            this.panelMesh.castShadow = true;
-            this.panelMesh.receiveShadow = true;
-            this.panelMesh.position.set(0, 0, thickness / 2);
-            this.basePanelMesh = this.panelMesh;
-
-            // Initialize material manager with mesh references
-            this.materialManager.initialize(
-                this.panelMesh,
-                this.partMesh,
-                this.scene,
-                this.bitExtrudeMeshes,
-            );
-
-            // Save original panel data on first creation (before any CSG)
-            this.originalPanelGeometry = this.panelMesh.geometry.clone();
-            this.originalPanelMaterial = this.panelMesh.material.clone();
-            this.originalPanelPosition = this.panelMesh.position.clone();
-            this.originalPanelRotation = this.panelMesh.rotation.clone();
-            this.originalPanelScale = this.panelMesh.scale.clone();
-            this.panelBBox = this.computeWorldBBox(
-                this.originalPanelGeometry,
-                this.originalPanelPosition,
-                this.originalPanelRotation,
-                this.originalPanelScale,
-            );
-
-            // Initialize CSG engine with panel data and utilities
-            this.csgEngine.initialize({
-                scene: this.scene,
-                panelMesh: this.panelMesh,
-                bitExtrudeMeshes: this.bitExtrudeMeshes,
-                bitPathMeshes: this.bitPathMeshes,
-                originalPanelGeometry: this.originalPanelGeometry,
-                originalPanelPosition: this.originalPanelPosition,
-                originalPanelRotation: this.originalPanelRotation,
-                originalPanelScale: this.originalPanelScale,
-                materialManager: this.materialManager,
-                computeWorldBBox: this.computeWorldBBox.bind(this),
-            });
-
-            this.log.debug("Original panel data saved at creation");
-
-            // Create bit path extrusions
+            // Create bit path extrusions (Full or Partial)
             if (bits && bits.length > 0) {
                 await this.createBitPathExtrusions(
                     bits,
@@ -912,13 +971,29 @@ export default class ThreeModule extends BaseModule {
                     height,
                     thickness,
                     panelAnchor,
+                    changedBitIds // PASS FILTER
                 );
             }
 
-            // Adjust camera to fit panel
-            this.sceneManager.fitCameraToPanel(width, height, thickness);
+            // Adjust camera to fit panel (Only on full update or if needed)
+            if (!changedBitIds) {
+                this.sceneManager.fitCameraToPanel(width, height, thickness);
+            }
 
             // Add meshes to scene (will apply CSG later if needed)
+            // If partial, only add new meshes (createBitPathExtrusions adds them to arrays and scene if visual=true?)
+            // createBitPathExtrusions pushes to bitExtrudeMeshes/bitPathMeshes. 
+            // BUT it does NOT add to scene inside the function? 
+            // Wait, looking at original code...
+            // createBitPathExtrusions does NOT add to scene. It just pushes to arrays.
+            // Original code:
+            // this.scene.add(this.panelMesh);
+            // this.bitPathMeshes.forEach(mesh => this.scene.add(mesh));
+            
+            // So I need to ensure new meshes are added to scene.
+            // Since I removed OLD meshes from scene for partial update, I need to add NEW ones.
+            // Or simpler: iterate all meshes and ensure they are in scene?
+            
             this.log.info("Adding panel mesh and bit meshes to scene", {
                 bitPathLinesCount: this.bitPathMeshes.length,
                 bitExtrudeMeshesCount: this.bitExtrudeMeshes.length,
@@ -926,25 +1001,21 @@ export default class ThreeModule extends BaseModule {
                 showPart: window.showPart,
             });
 
-            this.scene.add(this.panelMesh);
-
             // Only add bit meshes if they should be visible
-            // In Part view, they will be hidden by applyCSGOperation()
             if (window.bitsVisible !== false) {
-                this.log.info("Adding bit meshes to scene", {
-                    bitPathLines: this.bitPathMeshes.length,
-                    bitExtrudes: this.bitExtrudeMeshes.length,
-                });
                 this.bitPathMeshes.forEach((mesh) => {
-                    this.scene.add(mesh);
+                    if (!mesh.parent) { // Check if already added
+                        this.scene.add(mesh);
+                    }
                     mesh.visible = !window.showPart;
                 });
                 this.bitExtrudeMeshes.forEach((mesh) => {
-                    this.scene.add(mesh);
+                    if (!mesh.parent) {
+                        this.scene.add(mesh);
+                    }
                     mesh.visible = !window.showPart;
                 });
             } else {
-                this.log.debug("Bits not visible, hiding bit meshes");
                 this.bitPathMeshes.forEach((mesh) => {
                     mesh.visible = false;
                 });
@@ -971,6 +1042,7 @@ export default class ThreeModule extends BaseModule {
                     queued.thickness,
                     queued.bits,
                     queued.panelAnchor,
+                    queued.changedBitIds
                 );
             }
         }
@@ -989,6 +1061,7 @@ export default class ThreeModule extends BaseModule {
         panelHeight,
         panelThickness,
         panelAnchor,
+        changedBitIds = null
     ) {
         // Deduplicate incoming bits by their SVG group reference to avoid duplicates
         const seenGroups = new Set();
@@ -1004,9 +1077,16 @@ export default class ThreeModule extends BaseModule {
         // Keep for naming during export
         this.lastUniqueBits = uniqueBits;
 
+        // Determine which bits to process
+        const bitsToProcess = changedBitIds 
+            ? (Array.isArray(changedBitIds) ? changedBitIds : [changedBitIds])
+            : null;
+
         this.log.info("Creating bit path extrusions", {
             bitsCount: bits.length,
             uniqueBitsCount: uniqueBits.length,
+            partial: !!bitsToProcess,
+            changedBits: bitsToProcess
         });
 
         // Get offset contours from the main canvas
@@ -1039,12 +1119,19 @@ export default class ThreeModule extends BaseModule {
         });
 
         for (const [bitIndex, bit] of uniqueBits.entries()) {
+            // Skip if partial update and this bit is not in the changed list
+            if (bitsToProcess && !bitsToProcess.includes(bit.bitData?.id)) {
+                this.log.debug(`Skipping bit ${bitIndex} (ID: ${bit.bitData?.id}) - not in changed list`);
+                continue;
+            }
+
             this.log.info(`Processing bit ${bitIndex}:`, {
                 x: bit.x,
                 y: bit.y,
                 operation: bit.operation,
                 name: bit.name,
                 bitData: bit.bitData,
+                bitId: bit.bitData?.id
             });
 
             const isVC = (bit.operation || "").toUpperCase() === "VC";
@@ -1345,6 +1432,7 @@ export default class ThreeModule extends BaseModule {
                             const pathLine = firstItem;
                             bitMeshes = bitResult.slice(1);
                             pathLine.userData.bitIndex = bitIndex;
+                            pathLine.userData.bitId = bit.bitData?.id;
                             pathLine.userData.pass = passIndex;
                             this.bitPathMeshes.push(pathLine);
                         } else {
@@ -1431,6 +1519,7 @@ export default class ThreeModule extends BaseModule {
                             mesh.userData.operation =
                                 bit.operation || "subtract";
                             mesh.userData.bitIndex = bitIndex;
+                            mesh.userData.bitId = bit.bitData?.id;
                             mesh.userData.pass = passIndex;
                             mesh.userData.isPhantom = !isMainBit;
 
@@ -1469,6 +1558,7 @@ export default class ThreeModule extends BaseModule {
                         extensionMeshes.forEach((mesh) => {
                             mesh.userData.operation = "extension";
                             mesh.userData.bitIndex = bitIndex;
+                            mesh.userData.bitId = bit.bitData?.id;
                             mesh.userData.pass = passIndex;
                             this.bitExtrudeMeshes.push(mesh);
 
@@ -1570,6 +1660,7 @@ export default class ThreeModule extends BaseModule {
                                 // Add path visualization if available
                                 if (mainPathLine) {
                                     mainPathLine.userData.bitIndex = bitIndex;
+                                    mainPathLine.userData.bitId = bit.bitData?.id;
                                     mainPathLine.userData.isPOMain = true;
                                     this.bitPathMeshes.push(mainPathLine);
                                 }
@@ -1580,6 +1671,7 @@ export default class ThreeModule extends BaseModule {
                                         mesh.userData.operation =
                                             bit.operation || "subtract";
                                         mesh.userData.bitIndex = bitIndex;
+                                        mesh.userData.bitId = bit.bitData?.id;
                                         mesh.userData.isPOMain = true;
                                         this.bitExtrudeMeshes.push(mesh);
 
@@ -1645,6 +1737,7 @@ export default class ThreeModule extends BaseModule {
                                         if (phantomPathLine) {
                                             phantomPathLine.userData.bitIndex =
                                                 bitIndex;
+                                            phantomPathLine.userData.bitId = bit.bitData?.id;
                                             phantomPathLine.userData.isPOPhantom = true;
                                             phantomPathLine.material.transparent = true;
                                             phantomPathLine.material.opacity = 0.5;
@@ -1660,6 +1753,7 @@ export default class ThreeModule extends BaseModule {
                                                     bit.operation || "subtract";
                                                 mesh.userData.bitIndex =
                                                     bitIndex;
+                                                mesh.userData.bitId = bit.bitData?.id;
                                                 mesh.userData.isPOPhantom = true;
                                                 mesh.material.transparent = true;
                                                 mesh.material.opacity = 0.3;
@@ -1735,6 +1829,7 @@ export default class ThreeModule extends BaseModule {
                                             mesh.userData.operation =
                                                 "subtract"; // Force subtract for CSG
                                             mesh.userData.bitIndex = bitIndex;
+                                            mesh.userData.bitId = bit.bitData?.id;
                                             mesh.userData.isPOFiller = true;
                                             mesh.userData.isFullRemoval =
                                                 isFullRemoval;
@@ -1805,6 +1900,7 @@ export default class ThreeModule extends BaseModule {
                                             mainExtensionMeshes.forEach((mesh) => {
                                                 mesh.userData.operation = "extension";
                                                 mesh.userData.bitIndex = bitIndex;
+                                                mesh.userData.bitId = bit.bitData?.id;
                                                 mesh.userData.isPOExtension = true;
                                                 mesh.userData.isPOMain = true;
                                                 this.bitExtrudeMeshes.push(mesh);
@@ -1863,6 +1959,7 @@ export default class ThreeModule extends BaseModule {
                                             phantomExtensionMeshes.forEach((mesh) => {
                                                 mesh.userData.operation = "extension";
                                                 mesh.userData.bitIndex = bitIndex;
+                                                mesh.userData.bitId = bit.bitData?.id;
                                                 mesh.userData.isPOExtension = true;
                                                 mesh.userData.isPOPhantom = true;
                                                 mesh.material.transparent = true;
@@ -1988,6 +2085,7 @@ export default class ThreeModule extends BaseModule {
                     const pathLine = firstItem;
                     bitMeshes = bitResult.slice(1);
                     pathLine.userData.bitIndex = bitIndex;
+                    pathLine.userData.bitId = bit.bitData?.id;
                     this.bitPathMeshes.push(pathLine);
                 } else {
                     bitMeshes = bitResult;
@@ -2049,6 +2147,7 @@ export default class ThreeModule extends BaseModule {
                 bitMeshes.forEach((mesh) => {
                     mesh.userData.operation = bit.operation || "subtract";
                     mesh.userData.bitIndex = bitIndex;
+                    mesh.userData.bitId = bit.bitData?.id;
                     this.bitExtrudeMeshes.push(mesh);
                     this.log.debug(
                         `[SCENE] Added mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`,
@@ -2071,6 +2170,7 @@ export default class ThreeModule extends BaseModule {
                     extensionMeshes.forEach((mesh) => {
                         mesh.userData.operation = "extension";
                         mesh.userData.bitIndex = bitIndex;
+                        mesh.userData.bitId = bit.bitData?.id;
                         this.bitExtrudeMeshes.push(mesh);
                         this.log.debug(
                             `[SCENE] Added extension mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`,

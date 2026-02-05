@@ -182,7 +182,7 @@ export class UpdatePipeline {
         if (this.config.updateThreeView && window.threeModule) {
             this.deferCall(() => {
                 if (this.updateThreeView) {
-                    this.updateThreeView();
+                    this.updateThreeView(bitId);
                 }
             }, 48); // ~3 frames
         }

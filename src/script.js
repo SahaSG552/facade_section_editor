@@ -1080,7 +1080,7 @@ async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = fa
 
     if (window.threeModule) {
         log.info(`[PO Input Change] Updating 3D view for bit ${index}, pocketOffset=${newPocketOffset.toFixed(2)}, isZeroWidth=${isZeroWidth}`);
-        await updateThreeView();
+        await updateThreeView(bit.bitData?.id);
         if (showPart) {
             window.threeModule.showBasePanel();
             log.info(`[PO Input Change] Scheduling CSG for bit ${index}`);
@@ -1751,7 +1751,7 @@ async function updateCanvasBitsForBitId(bitId) {
 
     // Update 3D view immediately after profile paths are updated
     if (window.threeModule) {
-        await updateThreeView();
+        await updateThreeView(bitId);
         // If in Part view, show base panel and debounce CSG recalculation
         if (showPart) {
             window.threeModule.showBasePanel();
@@ -1768,7 +1768,7 @@ async function updateCanvasBitsForBitId(bitId) {
 
     // Update 3D view
     if (window.threeModule) {
-        await updateThreeView();
+        await updateThreeView(bitId);
         // If in Part view, show base panel and debounce CSG recalculation
         if (showPart) {
             window.threeModule.showBasePanel();
@@ -1830,7 +1830,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
 
     // Update 3D view and CSG
     if (window.threeModule) {
-        updateThreeView();
+        updateThreeView(newBit.bitData?.id);
         if (showPart) {
             window.threeModule.showBasePanel();
             csgScheduler.schedule(true);
@@ -1862,7 +1862,7 @@ async function handleOperationChange(index, newOperation) {
     }
 
     if (window.threeModule) {
-        await updateThreeView();
+        await updateThreeView(bit.bitData?.id);
         if (showPart) {
             window.threeModule.showBasePanel();
             csgScheduler.schedule(true);
@@ -1895,7 +1895,7 @@ function handleColorChange(index, newColor) {
     updatePhantomBits();
 
     if (window.threeModule) {
-        updateThreeView();
+        updateThreeView(bit.bitData?.id);
     }
 }
 
@@ -1944,7 +1944,7 @@ function deleteBitFromCanvas(index) {
 
     // Update 3D view
     if (window.threeModule) {
-        updateThreeView();
+        updateThreeView(bit.bitData?.id);
         // If in Part view, trigger CSG recalculation
         if (showPart) {
             window.threeModule.showBasePanel();
@@ -1984,7 +1984,7 @@ async function cycleAlignment(index) {
 
     // Update 3D view
     if (window.threeModule) {
-        updateThreeView();
+        updateThreeView(bit.bitData?.id);
 
         if (showPart) {
             window.threeModule.showBasePanel();
@@ -2027,6 +2027,8 @@ async function updateBitPosition(index, newX, newY) {
     }
 
     // If this bit is selected and there are multiple selections, move all selected bits by the same delta
+    const changedBitIds = [bit.bitData?.id];
+
     if (selectedBitIndices.includes(index) && selectedBitIndices.length > 1) {
         const oldX = bit.x;
         const oldY = bit.y;
@@ -2053,6 +2055,10 @@ async function updateBitPosition(index, newX, newY) {
                 );
                 selectedBit.x = selectedNewX;
                 selectedBit.y = selectedNewY;
+
+                if (selectedBit.bitData?.id) {
+                    changedBitIds.push(selectedBit.bitData.id);
+                }
             }
         });
 
@@ -2104,7 +2110,7 @@ async function updateBitPosition(index, newX, newY) {
 
     // Update 3D view
     if (window.threeModule) {
-        await updateThreeView();
+        await updateThreeView(changedBitIds);
         // If in Part view, show base panel and schedule CSG recalculation
         if (showPart) {
             //window.threeModule.showBasePanel();
@@ -3199,7 +3205,7 @@ function setupViewToggle(threeModule) {
 }
 
 // Function to update Three.js view with current panel and bits data
-async function updateThreeView() {
+async function updateThreeView(changedBitIds = null) {
     const threeModule = window.threeModule;
     if (!threeModule) return;
     if (!appState.is3DActive()) {
@@ -3216,7 +3222,8 @@ async function updateThreeView() {
         realHeight,
         panelThickness,
         bitsOnCanvas,
-        panelAnchor
+        panelAnchor,
+        changedBitIds
     );
 }
 
