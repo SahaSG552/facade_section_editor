@@ -286,6 +286,7 @@ export default class ExtrusionBuilder {
         // Can be changed from console: extrusionBuilder.arcDivisionCoefficient = 5
         this.arcDivisionCoefficient = 5; // 1 sample point per 5mm of arc length
         this.latheDivisionCoefficient = 0.5; // 1 sample point per 5mm of arc length
+        this.arcAngleStep = 2; // Degrees per segment for Arc (A) commands
 
         this.log.info("Created");
     }
@@ -971,13 +972,13 @@ export default class ExtrusionBuilder {
                                 deltaAngle += 2 * Math.PI;
                             deltaAngle = deltaAngle % (2 * Math.PI);
                             // Step 5: Sample arc as polyline
-                            const arcLen = Math.abs(
-                                deltaAngle * ((rxAbs + ryAbs) / 2),
-                            );
+                            // User requested angle-based segmentation for consistency across concentric arcs
+                            const angleDeg = THREE.MathUtils.radToDeg(Math.abs(deltaAngle));
                             const numPoints = Math.max(
-                                16,
-                                Math.ceil(arcLen / this.arcDivisionCoefficient),
+                                2,
+                                Math.ceil(angleDeg / (this.arcAngleStep || 5))
                             );
+                            
                             let prevPoint = new THREE.Vector3(px, py, 0);
                             for (let i = 1; i <= numPoints; i++) {
                                 const t = i / numPoints;
