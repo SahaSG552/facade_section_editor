@@ -287,6 +287,7 @@ export default class ExtrusionBuilder {
         this.arcDivisionCoefficient = 5; // 1 sample point per 5mm of arc length
         this.latheDivisionCoefficient = 0.5; // 1 sample point per 5mm of arc length
         this.arcAngleStep = 5; // Degrees per segment for Arc (A) commands
+        this.arcSegmentationMode = 'length'; // 'length' or 'angle'
         this.profileOverlap = 0.01; // Overlap added to profile width to prevent gaps (mm)
 
         this.log.info("Created");
@@ -973,12 +974,24 @@ export default class ExtrusionBuilder {
                                 deltaAngle += 2 * Math.PI;
                             deltaAngle = deltaAngle % (2 * Math.PI);
                             // Step 5: Sample arc as polyline
-                            // User requested angle-based segmentation for consistency across concentric arcs
-                            const angleDeg = THREE.MathUtils.radToDeg(Math.abs(deltaAngle));
-                            const numPoints = Math.max(
-                                2,
-                                Math.ceil(angleDeg / (this.arcAngleStep || 5))
-                            );
+                            let numPoints;
+                            if (this.arcSegmentationMode === 'angle') {
+                                // Angle-based segmentation (consistent across radii)
+                                const angleDeg = THREE.MathUtils.radToDeg(Math.abs(deltaAngle));
+                                numPoints = Math.max(
+                                    2,
+                                    Math.ceil(angleDeg / (this.arcAngleStep || 5))
+                                );
+                            } else {
+                                // Arc-length based segmentation (smoother for large radii) - DEFAULT
+                                const arcLen = Math.abs(
+                                    deltaAngle * ((rxAbs + ryAbs) / 2),
+                                );
+                                numPoints = Math.max(
+                                    16,
+                                    Math.ceil(arcLen / this.arcDivisionCoefficient),
+                                );
+                            }
                             
                             let prevPoint = new THREE.Vector3(px, py, 0);
                             for (let i = 1; i <= numPoints; i++) {
