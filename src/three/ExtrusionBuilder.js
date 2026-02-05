@@ -286,7 +286,8 @@ export default class ExtrusionBuilder {
         // Can be changed from console: extrusionBuilder.arcDivisionCoefficient = 5
         this.arcDivisionCoefficient = 5; // 1 sample point per 5mm of arc length
         this.latheDivisionCoefficient = 0.5; // 1 sample point per 5mm of arc length
-        this.arcAngleStep = 2; // Degrees per segment for Arc (A) commands
+        this.arcAngleStep = 5; // Degrees per segment for Arc (A) commands
+        this.profileOverlap = 0.01; // Overlap added to profile width to prevent gaps (mm)
 
         this.log.info("Created");
     }
@@ -1926,18 +1927,54 @@ export default class ExtrusionBuilder {
                 curveSegments,
             );
 
+            // Apply overlap scaling to profile geometry to prevent gaps
+            if (this.profileOverlap > 0) {
+                const pos = profileGeometry.attributes.position;
+                let minX = Infinity, maxX = -Infinity;
+                
+                // 1. Calculate bounds
+                for (let i = 0; i < pos.count; i++) {
+                    const x = pos.getX(i);
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                }
+                
+                const width = maxX - minX;
+                if (width > 1e-6) {
+                    const centerX = (minX + maxX) / 2;
+                    const halfWidth = width / 2;
+                    const scaleFactor = (halfWidth + this.profileOverlap) / halfWidth;
+                    
+                    // 2. Apply scale from center
+                    for (let i = 0; i < pos.count; i++) {
+                        const x = pos.getX(i);
+                        const scaledX = centerX + (x - centerX) * scaleFactor;
+                        pos.setX(i, scaledX);
+                    }
+                    pos.needsUpdate = true;
+                    this.log.debug(`Applied profile overlap scale: ${scaleFactor.toFixed(4)} (width: ${width.toFixed(2)} -> ${(width + this.profileOverlap*2).toFixed(2)})`);
+                }
+            }
+
             // Extract points from geometry
             const posAttr = profileGeometry.attributes.position;
             const profilePoints = [];
+            const geometryPoints = []; // Raw points for geometry generation (scaled)
             const isExtension = !!options.isExtension;
             const isTopExtension = isExtension && side === "top";
             for (let i = 0; i < posAttr.count; i++) {
-                let y = posAttr.getY(i);
+                const x = posAttr.getX(i);
+                const rawY = posAttr.getY(i);
+                
+                // Store raw scaled points for geometry generation
+                geometryPoints.push(new THREE.Vector2(x, rawY));
+
+                let y = rawY;
                 if (isTopExtension) {
                     y = -y; // Invert Y for top side extensions
                 }
                 profilePoints.push(
-                    new THREE.Vector2(posAttr.getX(i), y),
+                    new THREE.Vector2(x, y),
                 );
             }
 
@@ -1992,6 +2029,10 @@ export default class ExtrusionBuilder {
                 curveSegments,
                 flags.invertExtrusionCaps,
                 side,
+                {
+                    profilePointsOverride: geometryPoints, // Use scaled points
+                    profileClosed: true
+                }
             );
 
             if (!geometry) {
@@ -2092,6 +2133,23 @@ export default class ExtrusionBuilder {
                     "Round extrusion: not enough half-profile points",
                 );
                 return [];
+            }
+
+            // Apply overlap scaling to half-profile points
+            if (this.profileOverlap > 0) {
+                // Find max absolute X (since points are normalized to center=0)
+                let maxAbsX = 0;
+                for (const p of halfProfilePoints) {
+                    if (Math.abs(p.x) > maxAbsX) maxAbsX = Math.abs(p.x);
+                }
+
+                if (maxAbsX > 1e-6) {
+                    const scaleFactor = (maxAbsX + this.profileOverlap) / maxAbsX;
+                    for (const p of halfProfilePoints) {
+                        p.x *= scaleFactor;
+                    }
+                    // this.log.debug(`Applied profile overlap to round extrusion: scale=${scaleFactor.toFixed(4)}`);
+                }
             }
 
             // Check if this is a top side extension
@@ -2323,6 +2381,20 @@ export default class ExtrusionBuilder {
                     null,
                     innerHalf,
                 );
+
+                // Apply overlap scaling to inner half points
+                if (this.profileOverlap > 0) {
+                    let maxAbsX = 0;
+                    for (const p of innerProfilePoints) {
+                        if (Math.abs(p.x) > maxAbsX) maxAbsX = Math.abs(p.x);
+                    }
+                    if (maxAbsX > 1e-6) {
+                        const scaleFactor = (maxAbsX + this.profileOverlap) / maxAbsX;
+                        for (const p of innerProfilePoints) {
+                            p.x *= scaleFactor;
+                        }
+                    }
+                }
 
                 // Invert Y for top side extensions
                 if (isTopExtension || isBottomExtension) {
