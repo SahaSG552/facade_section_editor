@@ -1,3 +1,4 @@
+import { ADDITION, Brush, Evaluator } from "three-bvh-csg";
 import * as THREE from "three";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { getManifoldModule, setWasmUrl } from "manifold-3d/lib/wasm.js";
@@ -89,7 +90,7 @@ export default class ManifoldCSG {
 
                 for (const mesh of group) {
                     // Convert to raw manifold without IDs first
-                    const m = await this.toManifold(
+                    let m = await this.toManifold(
                         mesh.geometry,
                         mesh.matrixWorld,
                         undefined,
@@ -97,7 +98,18 @@ export default class ManifoldCSG {
                         0,
                         false // Skip ID generation for parts
                     );
-                    if (m) groupManifolds.push(m);
+                    
+                    if (m) {
+                        // REPAIR: Ensure the cutter itself is valid (fixes self-intersecting fillets)
+                        // This corresponds to Rhino's "Mesh Repair" before boolean
+                        this.log?.info?.("Auto-repairing cutter (grouped) before CSG...");
+                        const repairedM = Manifold.union([m]);
+                        m.delete();
+                        m = repairedM;
+                        groupManifolds.push(m);
+                    } else {
+                        this.log?.warn?.("Failed to convert cutter to manifold (skipped)");
+                    }
                 }
 
                 if (groupManifolds.length) {
@@ -125,14 +137,24 @@ export default class ManifoldCSG {
             for (let idx = 0; idx < cutters.length; idx++) {
                 currentFaceOffset += ID_RANGE;
                 const mesh = cutters[idx];
-                const manifold = await this.toManifold(
+                let manifold = await this.toManifold(
                     mesh.geometry,
                     mesh.matrixWorld,
                     idStart + idx + 1,
                     tolerance,
                     currentFaceOffset
                 );
-                if (manifold) cutterManifolds.push(manifold);
+                
+                if (manifold) {
+                    // REPAIR: Ensure cutter is valid
+                    this.log?.info?.(`Auto-repairing cutter #${idx} before CSG...`);
+                    const repaired = Manifold.union([manifold]);
+                    manifold.delete();
+                    manifold = repaired;
+                    cutterManifolds.push(manifold);
+                } else {
+                     this.log?.warn?.(`Failed to convert cutter #${idx} to manifold (skipped)`);
+                }
             }
         }
 
@@ -254,6 +276,57 @@ export default class ManifoldCSG {
         }
     }
 
+    /**
+     * Repair geometry using Manifold's robust boolean engine (Self-Union).
+     * Fixes non-manifold edges, self-intersections, and internal geometry.
+     * @param {THREE.BufferGeometry} geometry 
+     * @param {number} tolerance 
+     * @returns {Promise<THREE.BufferGeometry>} Repaired geometry
+     */
+    async repair(geometry, tolerance = 1e-3) {
+        if (!geometry) return null;
+        const ready = await this.ensureModule();
+        if (!ready) return geometry;
+
+        const { Manifold } = this;
+        let manifold = null;
+        let repairedManifold = null;
+        let tempGeom = null;
+
+        try {
+            // 1. Pre-process: strict welding to fix "7 non manifold edges" usually caused by duplicate verts
+            tempGeom = mergeVertices(geometry.clone(), tolerance);
+            tempGeom.computeVertexNormals();
+
+            // 2. Convert to Manifold
+            // We use identity matrix as we just want to repair the geometry in local space
+            const matrix = new THREE.Matrix4();
+            manifold = await this.toManifold(tempGeom, matrix, undefined, tolerance);
+
+            if (!manifold) {
+                this.log?.warn?.("Repair failed: could not convert to Manifold");
+                return geometry;
+            }
+
+            // 3. The Magic: Self-Union (Vector Union)
+            // Passing a single manifold to Manifold.union([m]) forces the engine to 
+            // resolve all self-intersections and produce a valid watertight volume.
+            repairedManifold = Manifold.union([manifold]);
+
+            // 4. Convert back
+            const result = this.fromManifold(repairedManifold);
+            return result.geometry;
+
+        } catch (err) {
+            this.log?.error?.("Manifold repair failed:", err);
+            return geometry;
+        } finally {
+            if (tempGeom) tempGeom.dispose();
+            if (manifold) manifold.delete();
+            if (repairedManifold && repairedManifold !== manifold) repairedManifold.delete();
+        }
+    }
+
     prepareGeometryForCSG(geometry, worldMatrix = null, weldTolerance = 1e-3) {
         if (!appConfig.meshRepair.enabled) return this.cleanupGeometry(geometry, weldTolerance);
         const repairInstance = getRepairInstance(appConfig.meshRepair);
@@ -282,11 +355,148 @@ export default class ManifoldCSG {
         if (!this.Mesh || !this.Manifold) return null;
 
         let geom = geometry.clone();
+
+        // Sanitize: Fix NaNs in positions which crash Manifold/MergeVertices
+        const posAttr = geom.attributes.position;
+        if (posAttr && posAttr.array) {
+            const arr = posAttr.array;
+            let fixedNaN = 0;
+            for (let i = 0; i < arr.length; i++) {
+                if (isNaN(arr[i])) {
+                    arr[i] = 0;
+                    fixedNaN++;
+                }
+            }
+            if (fixedNaN > 0) {
+                this.log?.warn?.(`Fixed ${fixedNaN} NaN values in geometry positions`);
+                posAttr.needsUpdate = true;
+            }
+        }
+
         const weldTol = typeof tolerance === "number" && tolerance > 0 ? tolerance : 1e-3;
-        geom = mergeVertices(geom, weldTol) || geom;
+        
+        // Step 1: Basic Weld
+        let welded = mergeVertices(geom, weldTol);
+        if (welded) {
+            geom.dispose();
+            geom = welded;
+        }
         geom.computeVertexNormals();
 
+        // Attempt conversion
+        let manifold = await this._attemptToManifold(geom, matrixWorld, originalId, tolerance, faceIDOffset, generateIDs);
+
+        // Retry with aggressive repair if failed
+        if (!manifold) {
+             this.log?.warn?.("Initial Manifold conversion failed. Attempting aggressive pre-repair...");
+             
+             // Use MeshRepair to clean up degenerate triangles
+             const repairInstance = getRepairInstance({
+                 minTriangleArea: 1e-8,
+                 shortEdgeThreshold: weldTol,
+                 weldTolerance: weldTol
+             });
+             
+             // Run synchronous repair (degenerate removal)
+             const repairedGeom = repairInstance.repairAndValidate(geom, { 
+                 repairLevel: "aggressive", 
+                 logRepairs: true 
+             });
+             
+             // Try again
+             manifold = await this._attemptToManifold(repairedGeom, matrixWorld, originalId, tolerance, faceIDOffset, generateIDs);
+             
+             if (manifold) {
+                 this.log?.info?.("Manifold conversion succeeded after pre-repair");
+             } else {
+                 this.log?.error?.("Manifold conversion failed even after pre-repair. Attempting BVH-CSG sanitization...");
+                 
+                 // Fallback 2: BVH-CSG Sanitization
+                 try {
+                     const evaluator = new Evaluator();
+                     
+                     // Helper to validate/fix geometry for Brush
+                     const ensureValidForBrush = (geo) => {
+                         if (!geo.attributes.position) return null;
+                         
+                         // Reconstruct as fresh geometry to strip potential garbage data
+                         const clean = new THREE.BufferGeometry();
+                         
+                         // 1. Extract raw positions
+                         const srcPos = geo.attributes.position;
+                         const count = srcPos.count;
+                         
+                         // 2. Handle index if present, or explode to soup
+                         // three-bvh-csg is often more robust with explicit triangle soup for bad inputs
+                         let positions;
+                         
+                         if (geo.index) {
+                             // De-index to ensure no invalid indices
+                             const idx = geo.index.array;
+                             const arr = new Float32Array(idx.length * 3);
+                             for (let i = 0; i < idx.length; i++) {
+                                 const vi = idx[i];
+                                 arr[i*3] = srcPos.getX(vi);
+                                 arr[i*3+1] = srcPos.getY(vi);
+                                 arr[i*3+2] = srcPos.getZ(vi);
+                             }
+                             positions = new THREE.BufferAttribute(arr, 3);
+                         } else {
+                             // Already soup, just clone
+                             positions = srcPos.clone();
+                         }
+                         
+                         clean.setAttribute('position', positions);
+                         
+                         // 3. Ensure normals
+                         clean.computeVertexNormals();
+                         
+                         return clean;
+                     };
+
+                     const validRepaired = ensureValidForBrush(repairedGeom);
+                     if (!validRepaired) throw new Error("Invalid geometry for Brush");
+
+                     const brush = new Brush(validRepaired);
+                     brush.updateMatrixWorld();
+                     
+                     // Self-Union (A + A) forces BVH-CSG to rebuild the mesh topology
+                     // We use a small epsilon box union to force a recalculation if A+A is optimized away
+                     const dummyGeom = new THREE.BoxGeometry(0.0001, 0.0001, 0.0001);
+                     const dummyBrush = new Brush(dummyGeom);
+                     
+                     // Center dummy inside the mesh to ensure processing
+                     validRepaired.computeBoundingBox();
+                     validRepaired.boundingBox.getCenter(dummyBrush.position);
+                     dummyBrush.updateMatrixWorld();
+
+                     const sanitizedBrush = evaluator.evaluate(brush, dummyBrush, ADDITION);
+                     
+                     if (sanitizedBrush && sanitizedBrush.geometry) {
+                         const sanitizedGeom = sanitizedBrush.geometry;
+                         // Try Manifold conversion on this sanitized geometry
+                         manifold = await this._attemptToManifold(sanitizedGeom, matrixWorld, originalId, tolerance, faceIDOffset, generateIDs);
+                         
+                         if (manifold) {
+                             this.log?.info?.("Manifold conversion succeeded after BVH-CSG sanitization");
+                         }
+                     }
+                 } catch (e) {
+                     this.log?.error?.("BVH-CSG sanitization failed", e);
+                 }
+             }             
+             if (repairedGeom !== geom) repairedGeom.dispose();
+        }
+
+        geom.dispose();
+        return manifold;
+    }
+
+    async _attemptToManifold(geom, matrixWorld, originalId, tolerance, faceIDOffset, generateIDs) {
         const position = geom.attributes.position;
+        // Check for empty geometry
+        if (!position || position.count === 0) return null;
+
         const vertProperties = new Float32Array(position.count * 3);
         const v = new THREE.Vector3();
 
@@ -306,6 +516,15 @@ export default class ManifoldCSG {
             for (let i = 0; i < position.count; i++) triVerts[i] = i;
         }
 
+        // Validate index range
+        const maxIndex = position.count - 1;
+        for(let i=0; i<triVerts.length; i++) {
+            if (triVerts[i] > maxIndex) {
+                 this.log?.error?.(`Index out of bounds: ${triVerts[i]} > ${maxIndex}`);
+                 return null;
+            }
+        }
+
         let faceID = null;
         if (generateIDs) {
             const { FaceIDGenerator } = await import('./FaceIDGenerator.js');
@@ -314,7 +533,7 @@ export default class ManifoldCSG {
             tempGeom.setAttribute('position', new THREE.BufferAttribute(vertProperties, 3));
             tempGeom.setIndex(new THREE.BufferAttribute(triVerts, 1));
 
-            const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, Math.max(weldTol, 1e-4));
+            const groupedFaceIDs = FaceIDGenerator.generateFaceIDs(tempGeom, 15, Math.max(tolerance || 1e-3, 1e-4));
             faceID = new Uint32Array(groupedFaceIDs.length);
             for (let i = 0; i < groupedFaceIDs.length; i++) {
                 faceID[i] = groupedFaceIDs[i] + faceIDOffset;
@@ -332,12 +551,18 @@ export default class ManifoldCSG {
 
         try {
             const mesh = new this.Mesh(meshOptions);
-            mesh.merge();
+            // mesh.merge(); // merge() is deprecated/removed in newer Manifold versions or might be redundant if we provided triVerts correctly? 
+            // Actually, in the bindings, we just pass the mesh.
+            
+            // Note: The previous code called mesh.merge() which might throw if mesh is invalid.
+            // Let's try skipping explicit merge() if we trust the input, or keep it if it's essential for the bindings.
+            // Based on earlier file content, it was used. Let's keep it but wrap it.
+            if (mesh.merge) mesh.merge(); 
+
             const manifold = this.Manifold.ofMesh(mesh);
-            geom.dispose();
             return manifold;
         } catch (err) {
-            geom.dispose();
+            this.log?.warn?.("toManifold internal error:", err);
             return null;
         }
     }

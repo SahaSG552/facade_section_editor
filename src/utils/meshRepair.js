@@ -216,6 +216,26 @@ export class MeshRepair {
     }
 
     /**
+     * Async version of repair that uses Manifold for aggressive repairs
+     * @param {THREE.BufferGeometry} geometry 
+     * @param {Object} options 
+     * @param {ManifoldCSG} manifoldCSGInstance - Required for aggressive repair
+     */
+    async repairAndValidateAsync(geometry, options = {}, manifoldCSGInstance = null) {
+        const config = { ...this.config, ...options };
+        
+        // If aggressive and we have Manifold, use it!
+        if (config.repairLevel === "aggressive" && manifoldCSGInstance) {
+             this.log.info("Using Manifold for aggressive mesh repair");
+             const repaired = await manifoldCSGInstance.repair(geometry, config.weldTolerance);
+             return repaired;
+        }
+
+        // Fallback to synchronous standard repair
+        return this.repairAndValidate(geometry, options);
+    }
+
+    /**
      * Prepare geometry for CSG operations (comprehensive cleanup)
      * @param {THREE.BufferGeometry} geometry
      * @param {THREE.Matrix4} worldMatrix - Optional world transform

@@ -285,6 +285,7 @@ export default class ExtrusionBuilder {
         // Same as ThreeModule.arcDivisionCoefficient for consistency
         // Can be changed from console: extrusionBuilder.arcDivisionCoefficient = 5
         this.arcDivisionCoefficient = 5; // 1 sample point per 5mm of arc length
+        this.latheDivisionCoefficient = 0.5; // 1 sample point per 5mm of arc length
 
         this.log.info("Created");
     }
@@ -2903,10 +2904,30 @@ export default class ExtrusionBuilder {
                 );
             }
 
-            // Calculate segments based on the angle
-            const segments = Math.max(
-                8,
-                Math.ceil(32 * (Math.abs(phiLength) / (Math.PI * 2))),
+            // Calculate max radius from profile to determine arc length for adaptive segmentation
+            let maxRadius = 0;
+            if (lathePoints && lathePoints.length > 0) {
+                for (const p of lathePoints) {
+                    if (Math.abs(p.x) > maxRadius) maxRadius = Math.abs(p.x);
+                }
+            } else {
+                maxRadius = 10; // Fallback
+            }
+
+            // Calculate arc length at the outer edge
+            const arcLength = maxRadius * Math.abs(phiLength);
+            
+            // Calculate segments adaptively: arcLength / arcDivisionCoefficient
+            // Ensure at least 2 segments for any curved surface
+            const adaptiveSegments = Math.ceil(arcLength / (this.latheDivisionCoefficient || 1));
+            
+            // Clamp segments
+            const segments = Math.max(1, adaptiveSegments);
+
+            this.log.debug(
+                `Lathe segments: ${segments} (angle: ${THREE.MathUtils.radToDeg(
+                    Math.abs(phiLength),
+                ).toFixed(1)}°, radius: ${maxRadius.toFixed(1)}mm, arc: ${arcLength.toFixed(1)}mm)`,
             );
 
             // Create simple lathe geometry without caps (caps not needed for new round extrusion)

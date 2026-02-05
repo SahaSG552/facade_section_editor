@@ -413,14 +413,46 @@ class CSGEngine {
                 this.originalPanelScale,
             );
 
-            return await this.manifoldCSG.subtract({
-                panelGeometry: this.originalPanelGeometry,
+            // AUTO-REPAIR:
+            // The panel geometry comes from ExtrudeGeometry which might have
+            // self-intersections or non-manifold edges (7 non-manifold edges reported).
+            // We proactively repair it using Manifold's self-union before the main subtraction.
+            let validPanelGeometry = this.originalPanelGeometry;
+            let wasRepaired = false;
+            
+            if (this.useManifoldBackend) {
+                // 1. Repair Panel
+                this.log.info("Running pre-CSG mesh repair on panel...");
+                const repaired = await this.manifoldCSG.repair(this.originalPanelGeometry, this.manifoldTolerance);
+                if (repaired && repaired !== this.originalPanelGeometry) {
+                    this.log.info("Panel repaired successfully");
+                    validPanelGeometry = repaired;
+                    wasRepaired = true;
+                }
+                
+                // 2. Note on Cutters:
+                // Cutters (bits) are auto-repaired inside ManifoldCSG.subtract() 
+                // using the same Manifold.union([m]) technique. 
+                // This ensures that even if a cutter has self-intersecting fillets (common issue),
+                // it becomes a valid solid before subtraction.
+                this.log.info("Cutter repair strategy: Auto-repair active inside subtract pipeline");
+            }
+
+            const result = await this.manifoldCSG.subtract({
+                panelGeometry: validPanelGeometry,
                 panelMatrix,
                 cutters: bitMeshes,
                 tolerance: this.manifoldTolerance,
                 cutterTolerance: this.manifoldCutterTolerance, // Pass cutter tolerance
                 simplifyTolerance: this.manifoldSimplifyTolerance,
             });
+
+            // Cleanup repaired geometry if it was created temporarily
+            if (wasRepaired && validPanelGeometry) {
+                validPanelGeometry.dispose();
+            }
+
+            return result;
         } catch (err) {
             this.log.warn("runManifoldCSG error", err);
             return null;
