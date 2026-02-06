@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { Wireframe } from "three/addons/lines/webgpu/Wireframe.js";
+import { WireframeGeometry2 } from "three/addons/lines/WireframeGeometry2.js";
+import { Line2NodeMaterial } from "three/webgpu";
 import { LoggerFactory } from "../core/LoggerFactory.js";
 import { SemanticEdgesGeometry } from "./SemanticEdgesGeometry.js";
 
@@ -87,6 +90,9 @@ class MaterialManager {
         this.partMesh = null;
         this.bitExtrudeMeshes = [];
         this.scene = null;
+        this.renderer = null;
+        this.isWebGPURenderer = false;
+        this.lineMaterialResolution = new THREE.Vector2();
 
         // Original panel material for restoration
         this.originalPanelMaterial = null;
@@ -107,11 +113,15 @@ class MaterialManager {
     /**
      * Initialize with references to meshes and scene
      */
-    initialize(panelMesh, partMesh, scene, bitExtrudeMeshes = []) {
+    initialize(panelMesh, partMesh, scene, bitExtrudeMeshes = [], renderer = null) {
         this.panelMesh = panelMesh;
         this.partMesh = partMesh;
         this.scene = scene;
         this.bitExtrudeMeshes = bitExtrudeMeshes;
+        this.renderer = renderer;
+        this.isWebGPURenderer = !!(
+            this.renderer && (this.renderer.isWebGPURenderer || this.renderer.isWebGPU)
+        );
         this.log.info("MaterialManager initialized");
     }
 
@@ -167,6 +177,26 @@ class MaterialManager {
                 if (mesh.userData.transparent !== undefined) newMat.transparent = mesh.userData.transparent;
                 if (mesh.userData.opacity !== undefined) newMat.opacity = mesh.userData.opacity;
 
+                if (entry.edgesType === "wireframe") {
+                    newMat.transparent = true;
+                    newMat.opacity = 0;
+                    newMat.depthWrite = false;
+                    newMat.colorWrite = false;
+                    mesh.userData.wireframeHidden = true;
+                } else {
+                    newMat.colorWrite = true;
+                    if (mesh.userData.transparent === undefined) {
+                        newMat.transparent = false;
+                    }
+                    if (mesh.userData.opacity === undefined) {
+                        newMat.opacity = 1;
+                    }
+                    if (!newMat.transparent) {
+                        newMat.depthWrite = true;
+                    }
+                    delete mesh.userData.wireframeHidden;
+                }
+
                 // If highlighted, we update the BACKUP material, not the active one
                 if (isHighlighted) {
                     if (mesh.userData.defaultMaterial) mesh.userData.defaultMaterial.dispose();
@@ -179,7 +209,12 @@ class MaterialManager {
 
             } else if (mesh.isGroup) {
                 mesh.traverse(child => {
-                    if (child.isMesh && child.type === 'FACE') { // Handle BREP structures
+                    if (
+                        child.isMesh &&
+                        !child.userData?.isEdge &&
+                        child.type !== 'EDGE' &&
+                        child.type !== 'Wireframe'
+                    ) {
                         const isHighlighted = !!child.userData.defaultMaterial;
 
                         let targetColor;
@@ -198,6 +233,25 @@ class MaterialManager {
                         // Persistence of transparency/opacity
                         if (child.userData.transparent !== undefined) newMat.transparent = child.userData.transparent;
                         if (child.userData.opacity !== undefined) newMat.opacity = child.userData.opacity;
+
+                        if (entry.edgesType === "wireframe") {
+                            newMat.transparent = true;
+                            newMat.opacity = 0;
+                            newMat.depthWrite = false;
+                            newMat.colorWrite = false;
+                            child.userData.wireframeHidden = true;
+                        } else {
+                            newMat.colorWrite = true;
+                            if (child.userData.transparent === undefined) {
+                                newMat.transparent = false;
+                            }
+                            if (child.userData.opacity === undefined) {
+                                newMat.opacity = 1;
+                            }
+                            if (!newMat.transparent) {
+                                newMat.depthWrite = true;
+                            }
+                        }
 
                         if (isHighlighted) {
                             if (child.userData.defaultMaterial) child.userData.defaultMaterial.dispose();
@@ -220,6 +274,14 @@ class MaterialManager {
 
         if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
             this.bitExtrudeMeshes.forEach(mesh => applyToMesh(mesh));
+        }
+
+        if (entry.edgesType === "wireframe") {
+            this.ensureWireframeFaceHidden();
+            this.updateWireframeEdgeColors();
+        } else {
+            this.restoreWireframeFaceVisibility(true);
+            this.updateAllEdgesStyle();
         }
 
         this.log.info("Material mode changed to:", modeKey, "Edges type:", entry.edgesType);
@@ -280,10 +342,33 @@ class MaterialManager {
         // Add requested edges
         try {
             let edgesGeometry;
+            const edgeColor = type === "wireframe"
+                ? this.getMeshBaseColor(object)
+                : this.edgesColor;
 
             // Determine geometry type
             if (type === 'wireframe') {
-                // Use WireframeGeometry for full triangle wireframe
+                if (this.isWebGPURenderer) {
+                    const wireframeGeometry = new WireframeGeometry2(object.geometry);
+                    const wireframeMaterial = new Line2NodeMaterial({
+                        color: edgeColor.getHex(),
+                        linewidth: this.edgesWidth,
+                        transparent: false,
+                        opacity: 1,
+                    });
+
+                    const wireframe = new Wireframe(wireframeGeometry, wireframeMaterial);
+                    wireframe.userData.isEdge = true;
+                    wireframe.userData.isWireframeEdge = true;
+                    wireframe.userData.edgeOwner = object;
+
+                    object.add(wireframe);
+                    object.userData.edgeLines = wireframe;
+                    wireframe.visible = true;
+                    return;
+                }
+
+                // Use WireframeGeometry for full triangle wireframe (WebGL fallback)
                 edgesGeometry = new THREE.WireframeGeometry(object.geometry);
             } else if (type === 'brep' || type === 'dashedHidden') {
                 // Try enabling Semantic Edges if metadata exists (faceID check)
@@ -350,15 +435,17 @@ class MaterialManager {
                 const lineSegments = new THREE.LineSegments(
                     edgesGeometry,
                     new THREE.LineBasicMaterial({
-                        color: this.edgesColor,
+                        color: edgeColor,
                         linewidth: this.edgesWidth,
-                        transparent: true,
-                        opacity: 0.6,
+                        transparent: false,
+                        opacity: 1,
                     })
                 );
 
                 // Tag it so we can find it later for style updates
                 lineSegments.userData.isEdge = true;
+                lineSegments.userData.isWireframeEdge = type === "wireframe";
+                lineSegments.userData.edgeOwner = object;
 
                 object.add(lineSegments);
                 object.userData.edgeLines = lineSegments;
@@ -435,11 +522,14 @@ class MaterialManager {
      */
     updateAllEdgesStyle() {
         const updateObject = (obj) => {
-            if (obj.isLineSegments && obj.userData && obj.userData.isEdge) {
-                if (obj.material) {
-                    obj.material.color.copy(this.edgesColor);
-                    obj.material.linewidth = this.edgesWidth;
+            if (obj.userData && obj.userData.isEdge && obj.material) {
+                if (this.currentMaterialKey === "wireframe" && obj.userData.isWireframeEdge) {
+                    this.updateWireframeEdgeColor(obj);
+                } else {
+                    if (obj.material.color) obj.material.color.copy(this.edgesColor);
                 }
+                if (obj.material.linewidth !== undefined) obj.material.linewidth = this.edgesWidth;
+                this.updateLineMaterialResolution(obj.material);
             }
             if (obj.children) {
                 obj.children.forEach(updateObject);
@@ -447,6 +537,43 @@ class MaterialManager {
         };
 
         if (this.scene) this.scene.traverse(updateObject);
+    }
+
+    getMeshBaseColor(mesh) {
+        if (!mesh) return this.currentPanelColor;
+        if (mesh.userData && mesh.userData.baseColor) {
+            return new THREE.Color(mesh.userData.baseColor);
+        }
+        if (mesh.material && mesh.material.color) {
+            return mesh.material.color.clone();
+        }
+        return this.currentPanelColor;
+    }
+
+    updateWireframeEdgeColor(edgeObject) {
+        const owner = edgeObject.userData?.edgeOwner || edgeObject.parent;
+        const color = this.getMeshBaseColor(owner);
+        if (edgeObject.material && edgeObject.material.color) {
+            edgeObject.material.color.copy(color);
+        }
+    }
+
+    updateWireframeEdgeColors() {
+        if (!this.scene) return;
+        this.scene.traverse((obj) => {
+            if (obj.userData && obj.userData.isWireframeEdge) {
+                this.updateWireframeEdgeColor(obj);
+            }
+        });
+    }
+
+    updateLineMaterialResolution(material) {
+        if (!material || !material.resolution || !this.renderer) return;
+        this.renderer.getSize(this.lineMaterialResolution);
+        material.resolution.set(
+            Math.max(1, this.lineMaterialResolution.x),
+            Math.max(1, this.lineMaterialResolution.y)
+        );
     }
 
     /**
@@ -494,6 +621,18 @@ class MaterialManager {
         }
 
         this.updateEdgesForMesh(mesh, type);
+    }
+
+    rebuildEdgesForAll() {
+        const currentMode = this.materialRegistry[this.currentMaterialKey];
+        const type = currentMode ? (currentMode.edgesType || "standard") : "standard";
+
+        this.updateEdgesForMesh(this.panelMesh, type);
+        this.updateEdgesForMesh(this.partMesh, type);
+
+        if (this.bitExtrudeMeshes && Array.isArray(this.bitExtrudeMeshes)) {
+            this.bitExtrudeMeshes.forEach((mesh) => this.updateEdgesForMesh(mesh, type));
+        }
     }
 
     /**
@@ -591,7 +730,12 @@ class MaterialManager {
         this.currentPanelColor.lerp(this.targetPanelColor, this.colorLerpFactor);
 
         // Apply to panel mesh if it exists and has a color property
-        if (this.panelMesh && this.panelMesh.material && this.panelMesh.material.color) {
+        if (
+            this.panelMesh &&
+            !this.panelMesh.userData.defaultMaterial &&
+            this.panelMesh.material &&
+            this.panelMesh.material.color
+        ) {
             // Apply color to panel mesh
             if (Array.isArray(this.panelMesh.material)) {
                 this.panelMesh.material.forEach(mat => {
@@ -630,6 +774,70 @@ class MaterialManager {
                 }
             }
         }
+
+        if (this.currentMaterialKey === "wireframe") {
+            this.updateWireframeEdgeColors();
+            this.ensureWireframeFaceHidden();
+        }
+    }
+
+    ensureWireframeFaceHidden() {
+        if (!this.scene) return;
+        this.scene.traverse((object) => {
+            if (!object.isMesh) return;
+            if (object.userData && object.userData.isEdge) return;
+            if (object.type === "EDGE" || object.type === "Wireframe") return;
+
+            const apply = (mat) => {
+                if (!mat) return;
+                mat.transparent = true;
+                mat.opacity = 0;
+                mat.depthWrite = false;
+                mat.colorWrite = false;
+            };
+
+            if (Array.isArray(object.material)) {
+                object.material.forEach(apply);
+            } else {
+                apply(object.material);
+            }
+
+            object.userData.wireframeHidden = true;
+        });
+    }
+
+    restoreWireframeFaceVisibility(forceAll = false) {
+        if (!this.scene) return;
+        this.scene.traverse((object) => {
+            if (!object.isMesh) return;
+            if (!forceAll && (!object.userData || !object.userData.wireframeHidden)) return;
+            if (object.userData && object.userData.isEdge) return;
+            if (object.type === "EDGE" || object.type === "Wireframe") return;
+
+            const apply = (mat) => {
+                if (!mat) return;
+                mat.colorWrite = true;
+                if (object.userData.transparent === undefined) {
+                    mat.transparent = false;
+                }
+                if (object.userData.opacity === undefined) {
+                    mat.opacity = 1;
+                }
+                if (!mat.transparent) {
+                    mat.depthWrite = true;
+                }
+            };
+
+            if (Array.isArray(object.material)) {
+                object.material.forEach(apply);
+            } else {
+                apply(object.material);
+            }
+
+            if (object.userData) {
+                delete object.userData.wireframeHidden;
+            }
+        });
     }
 }
 

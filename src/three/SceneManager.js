@@ -156,7 +156,6 @@ export default class SceneManager {
      */
     initializeSelectionManager(selectionManager) {
         this.selectionManager = selectionManager;
-        this.selectionManager.enable();
     }
 
     /**

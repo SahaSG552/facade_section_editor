@@ -35,6 +35,8 @@ export default class ThreeModule extends BaseModule {
         this.extrusionBuilder = new ExtrusionBuilder();
         this.stlExporter = new STLExporter(this.log);
         this.lastValidPartFrontBBox = null;
+        this.selectionEnabledWanted = false;
+        this.selectionToggle = null;
 
         // Arc approximation control for panel shape
         // arcDivisionCoefficient: segments = arcLength / coefficient
@@ -292,6 +294,7 @@ export default class ThreeModule extends BaseModule {
             select.value = this.materialManager.getCurrentMaterialKey();
             select.addEventListener("change", () => {
                 this.materialManager.setMaterialMode(select.value);
+                this.applySelectionState();
             });
 
             // Toggle wireframe logic delegated to MaterialManager, but button here if needed.
@@ -320,6 +323,25 @@ export default class ThreeModule extends BaseModule {
             wfLabel.appendChild(wfText);
             */
 
+            // Select toggle
+            const selectLabel = document.createElement("label");
+            selectLabel.style.display = "flex";
+            selectLabel.style.alignItems = "center";
+            selectLabel.style.gap = "4px";
+            const selectToggle = document.createElement("input");
+            selectToggle.type = "checkbox";
+            selectToggle.checked = this.selectionEnabledWanted;
+            selectToggle.title = "Toggle Selection";
+            selectToggle.addEventListener("change", () => {
+                this.selectionEnabledWanted = selectToggle.checked;
+                this.applySelectionState();
+            });
+            const selectText = document.createElement("span");
+            selectText.textContent = "Select";
+            selectLabel.appendChild(selectToggle);
+            selectLabel.appendChild(selectText);
+            this.selectionToggle = selectToggle;
+
             // Export to STL button
             const exportBtn = document.createElement("button");
             exportBtn.textContent = "📥 STL";
@@ -337,6 +359,7 @@ export default class ThreeModule extends BaseModule {
             });
 
             row1.appendChild(select);
+            row1.appendChild(selectLabel);
             // row1.appendChild(wfLabel); // Hiding wireframe for cleaner UI as per request
             row1.appendChild(exportBtn);
 
@@ -453,9 +476,61 @@ export default class ThreeModule extends BaseModule {
             this.container.style.position = "relative";
             this.container.appendChild(wrap);
             this.materialControls = { wrap, select, exportBtn };
+            this.applySelectionState();
         } catch (e) {
             this.log.warn("Failed to init material controls:", e);
         }
+    }
+
+    applySelectionState() {
+        const isWireframe =
+            this.materialManager?.getCurrentMaterialKey?.() === "wireframe";
+
+        if (this.selectionToggle) {
+            this.selectionToggle.disabled = isWireframe;
+            this.selectionToggle.checked = !isWireframe && this.selectionEnabledWanted;
+        }
+
+        if (isWireframe) {
+            this.setSelectionEnabled(false);
+            return;
+        }
+
+        this.setSelectionEnabled(this.selectionEnabledWanted);
+    }
+
+    setSelectionEnabled(enabled) {
+        if (!this.selectionManager) return;
+        if (enabled) {
+            this.selectionManager.enable();
+        } else {
+            this.selectionManager.disable();
+        }
+        this.refreshSelectionTargets();
+    }
+
+    refreshSelectionTargets() {
+        if (!this.selectionManager) return;
+        const isWireframe =
+            this.materialManager?.getCurrentMaterialKey?.() === "wireframe";
+        if (isWireframe) {
+            this.selectionManager.setTargetMesh(null);
+            this.selectionManager.setTargetMeshes([]);
+            return;
+        }
+
+        if (this.csgEngine?.csgVisible && this.csgEngine.partMesh) {
+            this.selectionManager.setTargetMesh(this.csgEngine.partMesh);
+            return;
+        }
+
+        const targets = [];
+        if (this.panelMesh) targets.push(this.panelMesh);
+        if (this.bitExtrudeMeshes && this.bitExtrudeMeshes.length) {
+            targets.push(...this.bitExtrudeMeshes);
+        }
+
+        this.selectionManager.setTargetMeshes(targets);
     }
 
     addGridToggle() {
@@ -519,7 +594,7 @@ export default class ThreeModule extends BaseModule {
             // Invalidate cache to force recalculation
             // Reapply CSG if currently in Part view
             if (window.showPart && this.bitExtrudeMeshes.length > 0) {
-                this.csgEngine.applyCSGOperation(true);
+                this.applyCSGOperation(true);
             }
         });
 
@@ -921,6 +996,8 @@ export default class ThreeModule extends BaseModule {
                 this.panelMesh.castShadow = true;
                 this.panelMesh.receiveShadow = true;
                 this.panelMesh.position.set(0, 0, thickness / 2);
+                this.panelMesh.name = "Panel";
+                this.panelMesh.userData.selectionType = "panel";
                 this.basePanelMesh = this.panelMesh;
 
                 // Initialize material manager with mesh references
@@ -929,6 +1006,7 @@ export default class ThreeModule extends BaseModule {
                     this.partMesh,
                     this.scene,
                     this.bitExtrudeMeshes,
+                    this.sceneManager.renderer,
                 );
 
                 // Save original panel data on first creation (before any CSG)
@@ -1023,6 +1101,12 @@ export default class ThreeModule extends BaseModule {
                     mesh.visible = false;
                 });
             }
+
+            if (this.materialManager) {
+                this.materialManager.rebuildEdgesForAll();
+            }
+
+            this.refreshSelectionTargets();
 
             // Mark existing CSG mesh as stale (will be recomputed on demand)
             this.lastPanelUpdateSignature = nextSignature;
@@ -2702,20 +2786,19 @@ export default class ThreeModule extends BaseModule {
         this.sceneManager.onWindowResize();
     }
 
+    setMaterialMode(modeKey) {
+        if (!this.materialManager) return;
+        this.materialManager.setMaterialMode(modeKey);
+        this.applySelectionState();
+    }
+
     /**
      * Apply CSG operation - delegate to CSG engine
      */
     async applyCSGOperation(apply) {
         await this.csgEngine.applyCSGOperation(apply);
 
-        // Update selection manager with the new (or current) mesh
-        if (this.selectionManager) {
-            if (apply && this.csgEngine.partMesh) {
-                this.selectionManager.setTargetMesh(this.csgEngine.partMesh);
-            } else {
-                this.selectionManager.setTargetMesh(null);
-            }
-        }
+        this.refreshSelectionTargets();
     }
 
     /**

@@ -20,6 +20,7 @@ export default class SelectionManager {
         this.mouse = new THREE.Vector2();
 
         this.targetMesh = null; // The CSG result partMesh
+        this.targetMeshes = [];
         this.isEnabled = false;
 
         // Highlight Overlay
@@ -40,6 +41,7 @@ export default class SelectionManager {
 
         // State
         this.hoveredID = null;
+        this.hoveredObject = null;
 
         // Event bindings
         this._onMouseMove = this.onMouseMove.bind(this);
@@ -75,11 +77,18 @@ export default class SelectionManager {
      */
     setTargetMesh(mesh) {
         this.targetMesh = mesh;
+        this.targetMeshes = [];
+        this.clearHighlight();
+    }
+
+    setTargetMeshes(meshes) {
+        this.targetMeshes = Array.isArray(meshes) ? meshes.filter(Boolean) : [];
+        this.targetMesh = null;
         this.clearHighlight();
     }
 
     onMouseMove(event) {
-        if (!this.targetMesh || !this.targetMesh.visible) {
+        if ((!this.targetMesh || !this.targetMesh.visible) && this.targetMeshes.length === 0) {
             this.clearHighlight();
             return;
         }
@@ -88,7 +97,7 @@ export default class SelectionManager {
         this.raycaster.setFromCamera(this.mouse, this.camera);
 
         // Allow recursive raycast to hit children of Group (Face/Edge objects)
-        const intersects = this.raycaster.intersectObject(this.targetMesh, true);
+        const intersects = this.getIntersections();
 
         if (intersects.length > 0) {
             // Find the first relevant hit (skip helpers if any)
@@ -101,12 +110,25 @@ export default class SelectionManager {
 
             const object = hit.object;
 
+            if (this.targetMeshes.length > 0) {
+                const selectable = this.resolveSelectableObject(object);
+                if (selectable && this.currentHighlight !== selectable) {
+                    this.clearHighlight();
+                    this.highlightObject(selectable);
+                    const info = this.getObjectInfo(selectable);
+                    this.hoveredID = info.id;
+                    this.hoveredObject = selectable;
+                }
+                return;
+            }
+
             // STRATEGY 1: BREP Object (Face/Edge class)
             if (object.type === 'FACE' || object.type === 'EDGE') {
                 if (this.currentHighlight !== object) {
                     this.clearHighlight();
                     this.highlightObject(object);
                     this.hoveredID = object.faceID || object.name; // Use faceID or name
+                    this.hoveredObject = object;
                 }
                 return;
             }
@@ -121,6 +143,7 @@ export default class SelectionManager {
                     this.clearHighlight(); // Clear any previous BREP highlight or mesh highlight
                     this.hoveredID = id;
                     this.updateHighlight(id); // Legacy highlighting
+                    this.hoveredObject = object;
                 }
             }
         } else {
@@ -158,9 +181,9 @@ export default class SelectionManager {
     }
 
     onClick(event) {
-        if (this.hoveredID !== null) {
-            this.log.info("Clicked Part ID:", this.hoveredID);
-            // You can add selection logic here (e.g. firing an event)
+        if (this.hoveredObject) {
+            const info = this.getObjectInfo(this.hoveredObject);
+            this.log.info("Clicked selection:", info);
         }
     }
 
@@ -282,10 +305,8 @@ export default class SelectionManager {
 
     clearHighlight() {
         // 1. Clear BREP object highlight
-        if (this.currentHighlight && (this.currentHighlight.type === 'FACE' || this.currentHighlight.type === 'EDGE')) {
-            if (this.currentHighlight.userData.defaultMaterial) {
-                this.currentHighlight.material = this.currentHighlight.userData.defaultMaterial;
-            }
+        if (this.currentHighlight && this.currentHighlight.userData.defaultMaterial) {
+            this.currentHighlight.material = this.currentHighlight.userData.defaultMaterial;
         }
 
         // 2. Clear Legacy highlight mesh
@@ -295,5 +316,50 @@ export default class SelectionManager {
 
         this.currentHighlight = null;
         this.hoveredID = null;
+        this.hoveredObject = null;
+    }
+
+    getIntersections() {
+        if (this.targetMeshes.length > 0) {
+            return this.raycaster.intersectObjects(this.targetMeshes, true);
+        }
+        if (this.targetMesh) {
+            return this.raycaster.intersectObject(this.targetMesh, true);
+        }
+        return [];
+    }
+
+    resolveSelectableObject(object) {
+        if (!object) return null;
+        let current = object;
+        while (current) {
+            if (this.targetMeshes.includes(current)) return current;
+            current = current.parent;
+        }
+        return object;
+    }
+
+    getObjectInfo(object) {
+        const info = {
+            id: null,
+            name: object?.name || null,
+            type: object?.userData?.selectionType || object?.type || null,
+            bitId: object?.userData?.bitId ?? null,
+            bitIndex: object?.userData?.bitIndex ?? null,
+            bitName: object?.userData?.bitName || null,
+        };
+
+        if (info.bitId != null || info.bitIndex != null) {
+            info.id = info.bitId != null ? info.bitId : info.bitIndex;
+            if (!info.name) info.name = info.bitName || `Bit ${info.bitIndex ?? ""}`.trim();
+            info.type = info.type || "bit";
+        } else if (object?.type === "FACE" || object?.type === "EDGE") {
+            info.id = object.faceID || object.name || null;
+            info.type = object.type;
+        } else if (!info.name) {
+            info.name = "Mesh";
+        }
+
+        return info;
     }
 }
