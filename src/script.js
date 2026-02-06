@@ -73,6 +73,7 @@ let shankVisible = appConfig.ui.shankVisible;
 // **PHASE 1 REFACTORING** - Use bitRegistry instead of direct array
 // bitsOnCanvas is now accessed via bitRegistry.bits
 let bitsOnCanvas = bitRegistry.bits; // Reference to registry bits array
+let operationCounter = 0;
 
 // Canvas manager instance
 let mainCanvasManager;
@@ -104,6 +105,45 @@ let offsetContours = [];
 
 // Make offsetContours globally accessible for ThreeModule
 window.offsetContours = offsetContours;
+
+function isBitVisible(bit) {
+    return bit?.isVisible !== false;
+}
+
+function getVisibleBits(bits = bitsOnCanvas) {
+    return bits.filter((bit) => isBitVisible(bit));
+}
+
+function filterVisibleChangedBitIds(changedBitIds) {
+    if (!changedBitIds) return null;
+    const ids = Array.isArray(changedBitIds)
+        ? changedBitIds
+        : [changedBitIds];
+    const visibleIds = new Set(
+        getVisibleBits()
+            .map((bit) => bit.bitData?.id)
+            .filter((id) => id !== undefined && id !== null)
+    );
+    return ids.filter((id) => visibleIds.has(id));
+}
+
+function scheduleCsgIfNeeded(changedBitIds = null) {
+    if (!showPart) return;
+    if (!changedBitIds) {
+        csgScheduler.schedule(true);
+        return;
+    }
+    const visibleChanged = filterVisibleChangedBitIds(changedBitIds);
+    if (visibleChanged && visibleChanged.length > 0) {
+        csgScheduler.schedule(true);
+    }
+}
+
+function syncBitGroupVisibility(bit) {
+    if (!bit?.group) return;
+    const shouldShow = bitsVisible && isBitVisible(bit);
+    bit.group.style.display = shouldShow ? "block" : "none";
+}
 
 // Event handlers
 let leftPanelClickOutsideHandler = null;
@@ -476,6 +516,11 @@ function initializeSVG() {
         onChangeOperation: handleOperationChange,
         onChangeColor: handleColorChange,
         onDeleteBit: deleteBitFromCanvas,
+        onCopyBit: copyBitFromCanvas,
+        onCopyAllBits: copyAllBitsOnCanvas,
+        onToggleVisibility: toggleBitVisibility,
+        onHideAllBits: hideAllBitsOnCanvas,
+        onDeleteAllBits: deleteAllBitsFromCanvas,
         onReorderBits: reorderBits,
         onClearSelection: clearBitSelection,
     });
@@ -877,12 +922,12 @@ function updatePanelParams() {
 
         // Update 3D view if it's visible
         if (window.threeModule) {
-            updateThreeView();
-            // If in Part view, trigger CSG recalculation
-            if (showPart) {
-                window.threeModule.showBasePanel();
-                csgScheduler.schedule(true);
-            }
+            updateThreeView().then((didUpdate) => {
+                if (showPart && didUpdate) {
+                    window.threeModule.showBasePanel();
+                    scheduleCsgIfNeeded();
+                }
+            });
         }
     }
 }
@@ -971,7 +1016,7 @@ function updateBitExtensions() {
     if (!extensionCalculator || !mainCanvasManager) return;
     const phantomsLayer = mainCanvasManager.getLayer("phantoms");
     extensionCalculator.updateExtensions({
-        bitsOnCanvas,
+        bitsOnCanvas: getVisibleBits(),
         phantomsLayer,
     });
 }
@@ -1003,7 +1048,7 @@ function updatePhantomBits() {
     const anchorCoords = getPanelAnchorCoords();
 
     phantomBitCalculator.updatePhantoms({
-        bitsOnCanvas,
+        bitsOnCanvas: getVisibleBits(),
         phantomsLayer,
         anchorCoords,
     });
@@ -1080,11 +1125,11 @@ async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = fa
 
     if (window.threeModule) {
         log.info(`[PO Input Change] Updating 3D view for bit ${index}, pocketOffset=${newPocketOffset.toFixed(2)}, isZeroWidth=${isZeroWidth}`);
-        await updateThreeView(bit.bitData?.id);
-        if (showPart) {
+        const didUpdate = await updateThreeView(bit.bitData?.id);
+        if (showPart && didUpdate) {
             window.threeModule.showBasePanel();
             log.info(`[PO Input Change] Scheduling CSG for bit ${index}`);
-            csgScheduler.schedule(true);
+            scheduleCsgIfNeeded(bit.bitData?.id);
         }
     }
 }
@@ -1184,7 +1229,7 @@ function updateOffsetContours() {
     window.offsetCalculator = offsetCalculator;
     window.convertToTopAnchorCoordinates = convertToTopAnchorCoordinates;
 
-    bitsOnCanvas.forEach((bit, index) => {
+    getVisibleBits().forEach((bit, index) => {
         if (bit.operation === "VC") {
             // Convert bit coordinates to top anchor coordinates for calculations
             const topAnchorCoords = convertToTopAnchorCoordinates(bit);
@@ -1751,11 +1796,10 @@ async function updateCanvasBitsForBitId(bitId) {
 
     // Update 3D view immediately after profile paths are updated
     if (window.threeModule) {
-        await updateThreeView(bitId);
-        // If in Part view, show base panel and debounce CSG recalculation
-        if (showPart) {
+        const didUpdate = await updateThreeView(bitId);
+        if (showPart && didUpdate) {
             window.threeModule.showBasePanel();
-            csgScheduler.schedule(true);
+            scheduleCsgIfNeeded(bitId);
         }
     }
 
@@ -1768,11 +1812,10 @@ async function updateCanvasBitsForBitId(bitId) {
 
     // Update 3D view
     if (window.threeModule) {
-        await updateThreeView(bitId);
-        // If in Part view, show base panel and debounce CSG recalculation
-        if (showPart) {
+        const didUpdate = await updateThreeView(bitId);
+        if (showPart && didUpdate) {
             window.threeModule.showBasePanel();
-            csgScheduler.schedule(true);
+            scheduleCsgIfNeeded(bitId);
         }
     }
 }
@@ -1801,12 +1844,14 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
     bitsLayer.appendChild(g);
 
     bitRegistry.counter++;
+    operationCounter += 1;
 
     const x = centerX - panelX;
     const y = centerY - panelY;
 
     const newBit = {
         number: bitRegistry.counter,
+        operationNumber: operationCounter,
         name: bit.name,
         x: x,
         y: y,
@@ -1819,6 +1864,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
         bitData: bit,
         groupName: groupName, // store the group name for updates
         pocketOffset: 0, // Initialize pocketOffset for PO operations
+        isVisible: true,
     };
     bitsOnCanvas.push(newBit);
     // Assign profile path to the new bit
@@ -1830,11 +1876,12 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
 
     // Update 3D view and CSG
     if (window.threeModule) {
-        updateThreeView(newBit.bitData?.id);
-        if (showPart) {
-            window.threeModule.showBasePanel();
-            csgScheduler.schedule(true);
-        }
+        updateThreeView(newBit.bitData?.id).then((didUpdate) => {
+            if (showPart && didUpdate) {
+                window.threeModule.showBasePanel();
+                scheduleCsgIfNeeded(newBit.bitData?.id);
+            }
+        });
     }
 }
 
@@ -1862,10 +1909,10 @@ async function handleOperationChange(index, newOperation) {
     }
 
     if (window.threeModule) {
-        await updateThreeView(bit.bitData?.id);
-        if (showPart) {
+        const didUpdate = await updateThreeView(bit.bitData?.id);
+        if (showPart && didUpdate) {
             window.threeModule.showBasePanel();
-            csgScheduler.schedule(true);
+            scheduleCsgIfNeeded(bit.bitData?.id);
         }
     }
 }
@@ -1918,6 +1965,177 @@ function reorderBits(srcIndex, destIndex) {
     selectionManager.handleReorder(srcIndex, destIndex);
 }
 
+function createBitCopy(sourceBit) {
+    if (!sourceBit || !bitsManager) return null;
+
+    const bitDataWithDisplayColor = {
+        ...sourceBit.bitData,
+        fillColor: sourceBit.color,
+    };
+
+    const shapeGroup = bitsManager.createBitShapeElement(
+        bitDataWithDisplayColor,
+        sourceBit.groupName,
+        sourceBit.baseAbsX,
+        sourceBit.baseAbsY,
+        false
+    );
+
+    const g = document.createElementNS(svgNS, "g");
+    g.appendChild(shapeGroup);
+    bitsLayer.appendChild(g);
+
+    bitRegistry.counter++;
+    operationCounter += 1;
+
+    const newBit = {
+        number: bitRegistry.counter,
+        operationNumber: operationCounter,
+        name: sourceBit.name,
+        x: sourceBit.x,
+        y: sourceBit.y,
+        alignment: sourceBit.alignment,
+        operation: sourceBit.operation,
+        color: sourceBit.color,
+        group: g,
+        baseAbsX: sourceBit.baseAbsX,
+        baseAbsY: sourceBit.baseAbsY,
+        bitData: sourceBit.bitData,
+        groupName: sourceBit.groupName,
+        pocketOffset: sourceBit.pocketOffset || 0,
+        isFullRemoval: sourceBit.isFullRemoval || false,
+        isVisible: sourceBit.isVisible !== false,
+    };
+
+    const anchorCoords = getPanelAnchorCoords();
+    const dx = anchorCoords.x + newBit.x - newBit.baseAbsX;
+    const dy = anchorCoords.y + newBit.y - newBit.baseAbsY;
+    g.setAttribute("transform", `translate(${dx}, ${dy})`);
+    syncBitGroupVisibility(newBit);
+
+    bitsManager.assignProfilePathsToBits([newBit]);
+
+    return newBit;
+}
+
+async function copyBitFromCanvas(index) {
+    if (index < 0 || index >= bitsOnCanvas.length) return;
+
+    const sourceBit = bitsOnCanvas[index];
+    const newBit = createBitCopy(sourceBit);
+    if (!newBit) return;
+
+    const insertIndex = index + 1;
+    bitsOnCanvas.splice(insertIndex, 0, newBit);
+    selectionManager.handleInsert(insertIndex);
+
+    updateBitsSheet();
+    redrawBitsOnCanvas();
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
+
+    if (window.threeModule) {
+        const didUpdate = await updateThreeView(newBit.bitData?.id);
+        if (showPart && didUpdate) {
+            window.threeModule.showBasePanel();
+            scheduleCsgIfNeeded(newBit.bitData?.id);
+        }
+    }
+}
+
+async function copyAllBitsOnCanvas() {
+    if (bitsOnCanvas.length === 0) {
+        alert("No bits to copy.");
+        return;
+    }
+
+    const originalBits = [...bitsOnCanvas];
+    let insertOffset = 0;
+    const changedIds = new Set();
+
+    originalBits.forEach((bit, index) => {
+        const newBit = createBitCopy(bit);
+        if (!newBit) return;
+        const insertIndex = index + insertOffset + 1;
+        bitsOnCanvas.splice(insertIndex, 0, newBit);
+        selectionManager.handleInsert(insertIndex);
+        insertOffset += 1;
+        if (newBit.bitData?.id) {
+            changedIds.add(newBit.bitData.id);
+        }
+    });
+
+    updateBitsSheet();
+    redrawBitsOnCanvas();
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
+
+    if (window.threeModule) {
+        const didUpdate = await updateThreeView([...changedIds]);
+        if (showPart && didUpdate) {
+            window.threeModule.showBasePanel();
+            scheduleCsgIfNeeded([...changedIds]);
+        }
+    }
+}
+
+async function toggleBitVisibility(index) {
+    const bit = bitsOnCanvas[index];
+    if (!bit) return;
+
+    bit.isVisible = !isBitVisible(bit);
+    syncBitGroupVisibility(bit);
+
+    updateBitsSheet();
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
+
+    if (window.threeModule) {
+        const didUpdate = await updateThreeView();
+        if (showPart && didUpdate) {
+            window.threeModule.showBasePanel();
+            scheduleCsgIfNeeded();
+        }
+    }
+}
+
+async function hideAllBitsOnCanvas() {
+    if (bitsOnCanvas.length === 0) {
+        alert("No bits to hide.");
+        return;
+    }
+
+    bitsOnCanvas.forEach((bit) => {
+        bit.isVisible = false;
+        syncBitGroupVisibility(bit);
+    });
+
+    updateBitsSheet();
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
+
+    if (window.threeModule) {
+        const didUpdate = await updateThreeView();
+        if (showPart && didUpdate) {
+            window.threeModule.showBasePanel();
+            scheduleCsgIfNeeded();
+        }
+    }
+}
+
+function deleteAllBitsFromCanvas() {
+    if (bitsOnCanvas.length === 0) {
+        alert("No bits to delete.");
+        return;
+    }
+
+    clearAllBits();
+}
+
 // Delete bit from canvas
 function deleteBitFromCanvas(index) {
     if (index < 0 || index >= bitsOnCanvas.length) return;
@@ -1944,12 +2162,12 @@ function deleteBitFromCanvas(index) {
 
     // Update 3D view
     if (window.threeModule) {
-        updateThreeView(bit.bitData?.id);
-        // If in Part view, trigger CSG recalculation
-        if (showPart) {
-            window.threeModule.showBasePanel();
-            csgScheduler.schedule(true);
-        }
+        updateThreeView(bit.bitData?.id).then((didUpdate) => {
+            if (showPart && didUpdate) {
+                window.threeModule.showBasePanel();
+                scheduleCsgIfNeeded(bit.bitData?.id);
+            }
+        });
     }
 }
 
@@ -1984,11 +2202,11 @@ async function cycleAlignment(index) {
 
     // Update 3D view
     if (window.threeModule) {
-        updateThreeView(bit.bitData?.id);
+        const didUpdate = await updateThreeView(bit.bitData?.id);
 
-        if (showPart) {
+        if (showPart && didUpdate) {
             window.threeModule.showBasePanel();
-            csgScheduler.schedule(true);
+            scheduleCsgIfNeeded(bit.bitData?.id);
         }
     }
 }
@@ -2110,12 +2328,10 @@ async function updateBitPosition(index, newX, newY) {
 
     // Update 3D view
     if (window.threeModule) {
-        await updateThreeView(changedBitIds);
-        // If in Part view, show base panel and schedule CSG recalculation
-        if (showPart) {
-            //window.threeModule.showBasePanel();
+        const didUpdate = await updateThreeView(changedBitIds);
+        if (showPart && didUpdate) {
             log.debug("CSG recalculation after table input");
-            csgScheduler.schedule(true);
+            scheduleCsgIfNeeded(changedBitIds);
         }
     }
 }
@@ -2129,6 +2345,7 @@ function redrawBitsOnCanvas() {
         bit.number = index + 1; // Update bit number
         // append group (contains shape and transform)
         bitsLayer.appendChild(bit.group);
+        syncBitGroupVisibility(bit);
 
         // Remove existing anchor points
         bit.group
@@ -2424,7 +2641,8 @@ function updateTableCoordinates(bitIndex, newX, newY) {
         window.threeModule.showBasePanel();
         // Schedule CSG recalculation
         log.debug("CSG recalculation after table input");
-        csgScheduler.schedule(true);
+        const changedId = bitsOnCanvas[bitIndex]?.bitData?.id;
+        scheduleCsgIfNeeded(changedId);
     }
 
     const sheetBody = document.getElementById("bits-sheet-body");
@@ -2479,7 +2697,7 @@ function updatePartShape() {
     // Pass panel dimensions in options for maker.js engine
     const result = booleanOperationStrategy.calculateResultPolygon(
         panelSection,
-        bitsOnCanvas,
+        getVisibleBits(),
         phantomBits,
         {
             panelWidth: panelWidth,
@@ -2523,14 +2741,15 @@ function toggleBitsVisibility() {
         bitsBtn.title = "Hide Bits";
 
         // Also respect shank visibility
-        if (!shankVisible) {
-            bitsOnCanvas.forEach((bit) => {
+        bitsOnCanvas.forEach((bit) => {
+            syncBitGroupVisibility(bit);
+            if (!shankVisible) {
                 const shankShape = bit.group?.querySelector(".shank-shape");
                 if (shankShape) {
                     shankShape.style.display = "none";
                 }
-            });
-        }
+            }
+        });
     } else {
         // Hide bits and phantom bits
         bitsLayer.style.display = "none";
@@ -2617,11 +2836,11 @@ async function togglePartView() {
     // Update 3D view and apply CSG logic
     if (window.threeModule) {
         // Always update 3D view with current panel/bits data first
-        await updateThreeView();
+        const didUpdate = await updateThreeView();
 
         // Then apply or remove CSG based on showPart flag
-        if (showPart) {
-            csgScheduler.schedule(true);
+        if (showPart && didUpdate) {
+            scheduleCsgIfNeeded();
         } else {
             window.threeModule.showBasePanel();
         }
@@ -2766,6 +2985,8 @@ function saveBitPositions() {
         alignment: bit.alignment,
         operation: bit.operation,
         color: bit.color,
+        operationNumber: bit.operationNumber,
+        isVisible: bit.isVisible !== false,
         pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
         isFullRemoval: bit.isFullRemoval || false, // Save isFullRemoval flag for PO operations
     }));
@@ -2783,6 +3004,8 @@ function saveBitPositionsAs() {
         alignment: bit.alignment,
         operation: bit.operation,
         color: bit.color,
+        operationNumber: bit.operationNumber,
+        isVisible: bit.isVisible !== false,
         pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
         isFullRemoval: bit.isFullRemoval || false, // Save isFullRemoval flag for PO operations
     }));
@@ -2894,6 +3117,13 @@ async function restoreBitPositions(positionsData) {
                 bitsLayer.appendChild(g);
 
                 bitRegistry.counter++;
+                let operationNumber = pos.operationNumber;
+                if (!operationNumber) {
+                    operationCounter += 1;
+                    operationNumber = operationCounter;
+                } else {
+                    operationCounter = Math.max(operationCounter, operationNumber);
+                }
 
                 // Ensure operation is valid for the group
                 const validOperations = getOperationsForGroup(groupName);
@@ -2904,6 +3134,7 @@ async function restoreBitPositions(positionsData) {
 
                 const newBit = {
                     number: bitRegistry.counter,
+                    operationNumber: operationNumber,
                     name: bitData.name,
                     x: pos.x,
                     y: pos.y,
@@ -2917,6 +3148,7 @@ async function restoreBitPositions(positionsData) {
                     groupName: groupName,
                     pocketOffset: pos.pocketOffset || 0, // Restore pocketOffset for PO operations
                     isFullRemoval: pos.isFullRemoval || false, // Restore isFullRemoval flag for PO operations
+                    isVisible: pos.isVisible !== false,
                 };
 
                 bitsOnCanvas.push(newBit);
@@ -2931,6 +3163,7 @@ async function restoreBitPositions(positionsData) {
                 const dx = absX - centerX;
                 const dy = absY - centerY;
                 g.setAttribute("transform", `translate(${dx}, ${dy})`);
+                syncBitGroupVisibility(newBit);
             } catch (error) {
                 console.error(`Error restoring bit ${pos.id}:`, error);
             }
@@ -2961,6 +3194,8 @@ function clearAllBits() {
 
     bitsOnCanvas = [];
     bitRegistry.counter = 0;
+    operationCounter = 0;
+    operationCounter = 0;
 
     // Clear localStorage
     localStorage.removeItem("bits_positions");
@@ -3125,11 +3360,10 @@ function setupViewToggle(threeModule) {
 
         // Update 3D view with current data if switching to 3D or both
         if (threeModule && (view === "3d" || view === "both")) {
-            updateThreeView().then(() => {
-                // If Part view was active in 2D, apply CSG in 3D
-                if (showPart) {
+            updateThreeView().then((didUpdate) => {
+                if (showPart && didUpdate) {
                     log.debug("Part view active, scheduling CSG");
-                    csgScheduler.schedule(true);
+                    scheduleCsgIfNeeded();
                 }
             });
         }
@@ -3207,10 +3441,17 @@ function setupViewToggle(threeModule) {
 // Function to update Three.js view with current panel and bits data
 async function updateThreeView(changedBitIds = null) {
     const threeModule = window.threeModule;
-    if (!threeModule) return;
+    if (!threeModule) return false;
     if (!appState.is3DActive()) {
         log.debug("Skip updateThreeView: 3D inactive");
-        return;
+        return false;
+    }
+
+    const visibleBits = getVisibleBits();
+    const visibleChangedBitIds = filterVisibleChangedBitIds(changedBitIds);
+    if (changedBitIds && (!visibleChangedBitIds || visibleChangedBitIds.length === 0)) {
+        log.debug("Skip updateThreeView: changed bits hidden");
+        return false;
     }
 
     // Get real dimensions from partFront bbox (source of truth)
@@ -3221,10 +3462,14 @@ async function updateThreeView(changedBitIds = null) {
         realWidth,
         realHeight,
         panelThickness,
-        bitsOnCanvas,
+        visibleBits,
         panelAnchor,
-        changedBitIds
+        visibleChangedBitIds && visibleChangedBitIds.length > 0
+            ? visibleChangedBitIds
+            : null
     );
+
+    return true;
 }
 
 // Function to sync SVG data to Paper.js canvas
@@ -3243,8 +3488,9 @@ function syncSVGtoPaper() {
         }
 
         // 2. Add bits to Paper.js
-        if (bitsOnCanvas && bitsOnCanvas.length > 0) {
-            bitsOnCanvas.forEach((bit) => {
+        const visibleBits = getVisibleBits();
+        if (visibleBits.length > 0) {
+            visibleBits.forEach((bit) => {
                 paperCanvasManager.addBit({
                     id: bit.id,
                     x: bit.x,
@@ -3294,7 +3540,7 @@ function setupMaterialSelector() {
         const mode = e.target.value;
         window.threeModule.setMaterialMode(mode);
         if (window.showPart) {
-            csgScheduler.schedule(true);
+            scheduleCsgIfNeeded();
         } else {
             window.threeModule.showBasePanel();
         }

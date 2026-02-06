@@ -41,6 +41,13 @@ class SelectionManager {
         this.onSelectionChange();
     }
 
+    handleInsert(index) {
+        this.selectedIndices = this.selectedIndices.map((selectedIndex) =>
+            selectedIndex >= index ? selectedIndex + 1 : selectedIndex
+        );
+        this.onSelectionChange();
+    }
+
     handleReorder(srcIndex, destIndex) {
         this.selectedIndices = this.selectedIndices.map((selectedIndex) => {
             if (selectedIndex === srcIndex) {
@@ -52,6 +59,13 @@ class SelectionManager {
             }
             return selectedIndex;
         });
+        this.onSelectionChange();
+    }
+
+    handleInsert(index) {
+        this.selectedIndices = this.selectedIndices.map((selectedIndex) =>
+            selectedIndex >= index ? selectedIndex + 1 : selectedIndex
+        );
         this.onSelectionChange();
     }
 

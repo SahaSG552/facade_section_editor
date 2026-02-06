@@ -29,11 +29,11 @@ export default class SelectionManager {
             color: '#FFD700', // Gold
             emissive: '#FFD700', // Gold/Orange emissive for glow
             emissiveIntensity: 0.5,
-            transparent: true,
-            opacity: 0.5,
-            depthTest: false, // Always show on top
-            depthWrite: false,
-            side: THREE.DoubleSide,
+            transparent: false,
+            //opacity: 0.5,
+            //depthTest: false, // Always show on top
+            //depthWrite: false,
+            //side: THREE.DoubleSide,
         });
 
         // Edge Highlight (Optional, for crisp outline)

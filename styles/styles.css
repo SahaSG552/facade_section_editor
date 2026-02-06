@@ -756,7 +756,7 @@ html {
 #operations th:nth-child(1),
 #operations td:nth-child(1) {
   min-width: 15px;
-  width: 5%;
+  width: 4%;
 }
 
 #operations th:nth-child(2),
@@ -769,7 +769,7 @@ html {
 #operations th:nth-child(3),
 #operations td:nth-child(3) {
   min-width: 30px;
-  width: 33.34%;
+  width: 30%;
   text-align: left;
   padding-left: 8px;
 }
@@ -777,42 +777,83 @@ html {
 #operations th:nth-child(4),
 #operations td:nth-child(4) {
   min-width: 15px;
-  width: 13%;
+  width: 11%;
 }
 
 #operations th:nth-child(5),
 #operations td:nth-child(5) {
   min-width: 15px;
-  width: 13%;
+  width: 11%;
 }
 
 #operations th:nth-child(6),
 #operations td:nth-child(6) {
   min-width: 15px;
-  width: 8.33%;
+  width: 7%;
 }
 
 #operations th:nth-child(7),
 #operations td:nth-child(7) {
   min-width: 15px;
-  width: 8.33%;
+  width: 7%;
 }
 
 #operations th:nth-child(8),
 #operations td:nth-child(8) {
   min-width: 15px;
-  width: 8.33%;
+  width: 7%;
 }
 
 #operations th:nth-child(9),
 #operations td:nth-child(9) {
   min-width: 15px;
-  width: 8.33%;
+  width: 6%;
+}
+
+#operations th:nth-child(10),
+#operations td:nth-child(10) {
+  min-width: 15px;
+  width: 6%;
+}
+
+#operations th:nth-child(11),
+#operations td:nth-child(11) {
+  min-width: 15px;
+  width: 5%;
 }
 
 /* Highlight selected row */
 .selected-bit-row {
   background-color: hsl(var(--accent));
+}
+
+.bit-row-hidden {
+  opacity: 0.5;
+}
+
+.table-header-btn {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.table-header-btn:hover {
+  color: hsl(var(--accent-foreground));
+}
+
+.bit-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+}
+
+.bit-visibility-btn.is-hidden {
+  opacity: 0.6;
 }
 
 #operations td input {

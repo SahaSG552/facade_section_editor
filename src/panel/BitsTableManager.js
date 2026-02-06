@@ -42,6 +42,9 @@ class BitsTableManager {
     constructor(config) {
         this.sheetBody = document.getElementById("bits-sheet-body");
         this.rightMenu = document.getElementById("right-menu");
+        this.copyAllBtn = document.getElementById("bits-copy-all");
+        this.hideAllBtn = document.getElementById("bits-hide-all");
+        this.deleteAllBtn = document.getElementById("bits-delete-all");
 
         this.getAnchorOffset = config.getAnchorOffset;
         this.transformYForDisplay = config.transformYForDisplay;
@@ -61,6 +64,11 @@ class BitsTableManager {
             onChangeOperation: () => {},
             onChangeColor: () => {},
             onDeleteBit: () => {},
+            onCopyBit: () => {},
+            onCopyAllBits: () => {},
+            onToggleVisibility: () => {},
+            onHideAllBits: () => {},
+            onDeleteAllBits: () => {},
             onReorderBits: () => {},
             onClearSelection: () => {},
         };
@@ -68,6 +76,10 @@ class BitsTableManager {
         this.dragSrcRow = null;
         this.rightMenuAttached = false;
         this.boundRightMenuHandler = this.handleRightMenuClick.bind(this);
+        this.headerHandlersAttached = false;
+        this.boundCopyAllHandler = this.handleCopyAllClick.bind(this);
+        this.boundHideAllHandler = this.handleHideAllClick.bind(this);
+        this.boundDeleteAllHandler = this.handleDeleteAllClick.bind(this);
 
         if (config.callbacks) {
             this.setCallbacks(config.callbacks);
@@ -153,6 +165,7 @@ class BitsTableManager {
         });
 
         this.attachRightMenuHandler();
+        this.attachHeaderHandlers();
     }
 
     attachRightMenuHandler() {
@@ -172,6 +185,40 @@ class BitsTableManager {
         if (!isInteractiveElement) {
             this.callbacks.onClearSelection();
         }
+    }
+
+    attachHeaderHandlers() {
+        if (this.headerHandlersAttached) return;
+
+        if (this.copyAllBtn) {
+            this.copyAllBtn.addEventListener("click", this.boundCopyAllHandler);
+        }
+        if (this.hideAllBtn) {
+            this.hideAllBtn.addEventListener("click", this.boundHideAllHandler);
+        }
+        if (this.deleteAllBtn) {
+            this.deleteAllBtn.addEventListener(
+                "click",
+                this.boundDeleteAllHandler
+            );
+        }
+
+        this.headerHandlersAttached = true;
+    }
+
+    handleCopyAllClick(e) {
+        e.stopPropagation();
+        this.callbacks.onCopyAllBits();
+    }
+
+    handleHideAllClick(e) {
+        e.stopPropagation();
+        this.callbacks.onHideAllBits();
+    }
+
+    handleDeleteAllClick(e) {
+        e.stopPropagation();
+        this.callbacks.onDeleteAllBits();
     }
 
     createRow(bit, index, selectedIndices) {
@@ -195,7 +242,7 @@ class BitsTableManager {
         row.appendChild(dragCell);
 
         const numCell = document.createElement("td");
-        numCell.textContent = index + 1;
+        numCell.textContent = bit.operationNumber ?? index + 1;
         row.appendChild(numCell);
 
         const nameCell = document.createElement("td");
@@ -316,6 +363,35 @@ class BitsTableManager {
         colorCell.appendChild(colorInput);
         row.appendChild(colorCell);
 
+        const copyCell = document.createElement("td");
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "bit-action-btn";
+        copyBtn.textContent = "⧉";
+        copyBtn.title = "Copy bit";
+        copyBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.callbacks.onCopyBit(index);
+        });
+        copyCell.appendChild(copyBtn);
+        row.appendChild(copyCell);
+
+        const visibilityCell = document.createElement("td");
+        const visibilityBtn = document.createElement("button");
+        const isVisible = bit.isVisible !== false;
+        visibilityBtn.type = "button";
+        visibilityBtn.className = `bit-action-btn bit-visibility-btn${
+            isVisible ? "" : " is-hidden"
+        }`;
+        visibilityBtn.textContent = isVisible ? "◎" : "◉";
+        visibilityBtn.title = isVisible ? "Hide bit" : "Show bit";
+        visibilityBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.callbacks.onToggleVisibility(index);
+        });
+        visibilityCell.appendChild(visibilityBtn);
+        row.appendChild(visibilityCell);
+
         const delCell = document.createElement("td");
         const delBtn = document.createElement("button");
         delBtn.type = "button";
@@ -334,6 +410,10 @@ class BitsTableManager {
 
         if (selectedIndices.includes(index)) {
             row.classList.add("selected-bit-row");
+        }
+
+        if (bit.isVisible === false) {
+            row.classList.add("bit-row-hidden");
         }
 
         return row;
