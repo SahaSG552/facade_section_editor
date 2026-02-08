@@ -699,6 +699,26 @@ html {
   background-color: hsl(var(--secondary));
 }
 
+#lcs-btn {
+  margin-left: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  cursor: pointer;
+  border-radius: var(--radius);
+}
+
+#lcs-btn:hover {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
+}
+
+.lcs-row {
+  background-color: hsl(var(--muted));
+}
+
 /* ===== OPERATIONS LOG ===== */
 #operations-log {
   font-size: 11px;
@@ -838,6 +858,14 @@ html {
   font: inherit;
   cursor: pointer;
   padding: 0;
+}
+
+#bits-name-header {
+  cursor: pointer;
+}
+
+#bits-name-header:hover {
+  color: hsl(var(--accent-foreground));
 }
 
 .table-header-btn:hover {

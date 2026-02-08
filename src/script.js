@@ -74,6 +74,9 @@ let shankVisible = appConfig.ui.shankVisible;
 // bitsOnCanvas is now accessed via bitRegistry.bits
 let bitsOnCanvas = bitRegistry.bits; // Reference to registry bits array
 let operationCounter = 0;
+let lcsRows = [];
+let lcsCounter = 0;
+let operationsRows = [];
 
 // Canvas manager instance
 let mainCanvasManager;
@@ -99,6 +102,7 @@ let bitDataHelper;
 let svgElementFactory;
 let extensionCalculator;
 let phantomBitCalculator;
+let lcsIndicatorsLayer;
 
 // Offset contours for each bit
 let offsetContours = [];
@@ -143,6 +147,67 @@ function syncBitGroupVisibility(bit) {
     if (!bit?.group) return;
     const shouldShow = bitsVisible && isBitVisible(bit);
     bit.group.style.display = shouldShow ? "block" : "none";
+}
+
+function getLcsOffset(lcs) {
+    if (!lcs) return { x: 0, y: 0 };
+    return {
+        x: lcs.x || 0,
+        y: (lcs.side || "top") === "bottom" ? -(lcs.y || 0) : lcs.y || 0,
+    };
+}
+
+function getActiveLcsForInsert() {
+    ensureOperationsRows();
+    for (let i = operationsRows.length - 1; i >= 0; i -= 1) {
+        const row = operationsRows[i];
+        if (row?.rowType === "lcs") {
+            return row.lcs;
+        }
+    }
+    return null;
+}
+
+function ensureOperationsRows() {
+    if (operationsRows.length === 0) {
+        operationsRows = bitsOnCanvas.map((bit) => ({ rowType: "bit", bit }));
+        return;
+    }
+
+    operationsRows = operationsRows.filter((row) =>
+        row.rowType === "lcs" ? true : bitsOnCanvas.includes(row.bit)
+    );
+
+    bitsOnCanvas.forEach((bit) => {
+        const exists = operationsRows.some(
+            (row) => row.rowType === "bit" && row.bit === bit
+        );
+        if (!exists) {
+            operationsRows.push({ rowType: "bit", bit });
+        }
+    });
+}
+
+function buildTableRows() {
+    ensureOperationsRows();
+    let activeLcs = null;
+    let orderCounter = 0;
+
+    return operationsRows.map((row) => {
+        if (row.rowType === "lcs") {
+            activeLcs = row.lcs;
+            return { rowType: "lcs", lcs: row.lcs };
+        }
+
+        orderCounter += 1;
+        return {
+            rowType: "bit",
+            bit: row.bit,
+            bitIndex: bitsOnCanvas.indexOf(row.bit),
+            lcsOffset: getLcsOffset(activeLcs),
+            displayOrder: orderCounter,
+        };
+    });
 }
 
 // Event handlers
@@ -302,6 +367,10 @@ function initializeSVG() {
     panelAnchorIndicator.id = "panel-anchor-indicator";
     panelLayer.appendChild(panelAnchorIndicator);
 
+    lcsIndicatorsLayer = document.createElementNS(svgNS, "g");
+    lcsIndicatorsLayer.id = "lcs-indicators";
+    panelLayer.appendChild(lcsIndicatorsLayer);
+
     // Add zoom button event listeners
     document
         .getElementById("zoom-in-btn")
@@ -338,6 +407,10 @@ function initializeSVG() {
     const panelAnchorBtn = document.getElementById("panel-anchor-btn");
     panelAnchorBtn.appendChild(createpanelAnchorButton(panelAnchor));
     panelAnchorBtn.addEventListener("click", cyclePanelAnchor);
+    const lcsBtn = document.getElementById("lcs-btn");
+    if (lcsBtn) {
+        lcsBtn.addEventListener("click", addLcsRow);
+    }
 
     // Setup part button
     document
@@ -521,7 +594,11 @@ function initializeSVG() {
         onToggleVisibility: toggleBitVisibility,
         onHideAllBits: hideAllBitsOnCanvas,
         onDeleteAllBits: deleteAllBitsFromCanvas,
-        onReorderBits: reorderBits,
+        onChangeLcs: updateLcsRow,
+        onCopyLcs: copyLcsRow,
+        onDeleteLcs: deleteLcsRow,
+        onReorderRows: reorderRows,
+        onSelectAllBits: selectAllBits,
         onClearSelection: clearBitSelection,
     });
 
@@ -709,6 +786,9 @@ function initializeSVG() {
                             bitsManager.refreshBitGroups();
                             // Clear canvas and reload bits
                             bitsOnCanvas = [];
+                            operationsRows = operationsRows.filter(
+                                (row) => row.rowType === "lcs"
+                            );
                             updateBitsSheet();
                             redrawBitsOnCanvas();
                         } else {
@@ -832,6 +912,7 @@ function updateBitsForNewAnchor() {
     updateOffsetContours();
     updatePhantomBits();
     if (showPart) updatePartShape();
+    updateLcsIndicators();
 }
 
 // Update part front view
@@ -879,6 +960,7 @@ function updatePanelAnchorIndicator() {
     if (panelManager) {
         panelManager.updatePanelAnchorIndicator();
     }
+    updateLcsIndicators();
 }
 
 // Update grid anchor position
@@ -955,6 +1037,7 @@ function updateBitsPositions() {
     }
     redrawBitsOnCanvas();
     if (showPart) updatePartShape();
+    updateLcsIndicators();
 }
 
 // **PHASE 1 REFACTORING** - bitsOnCanvas and offsetContours are now defined above
@@ -1823,17 +1906,11 @@ async function updateCanvasBitsForBitId(bitId) {
 // Draw bit shape
 function drawBitShape(bit, groupName, createBitShapeElementFn) {
     updatePanelParams();
-    let panelX, panelY;
-    if (sceneAnchorX !== null && sceneAnchorY !== null) {
-        const anchorOffset = { x: 0, y: 0 };
-        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
-    } else {
-        panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
-        panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
-    }
-    const centerX = panelX + panelWidth / 2;
-    const centerY = panelY;
+    const anchorCoords = getPanelAnchorCoords();
+    const activeLcs = getActiveLcsForInsert();
+    const lcsOffset = getLcsOffset(activeLcs);
+    const centerX = anchorCoords.x + lcsOffset.x;
+    const centerY = anchorCoords.y + lcsOffset.y;
 
     // create shape at absolute coords, wrap in group so we can translate later
     const shape = createBitShapeElementFn(bit, groupName, centerX, centerY);
@@ -1846,8 +1923,8 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
     bitRegistry.counter++;
     operationCounter += 1;
 
-    const x = centerX - panelX;
-    const y = centerY - panelY;
+    const x = lcsOffset.x;
+    const y = lcsOffset.y;
 
     const newBit = {
         number: bitRegistry.counter,
@@ -1867,6 +1944,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
         isVisible: true,
     };
     bitsOnCanvas.push(newBit);
+    ensureOperationsRows();
     // Assign profile path to the new bit
     bitsManager.assignProfilePathsToBits([newBit]);
     updateBitsSheet();
@@ -1889,7 +1967,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
 function updateBitsSheet() {
     if (bitsTableManager) {
         bitsTableManager.render(
-            bitsOnCanvas,
+            buildTableRows(),
             selectionManager.getSelectedIndices()
         );
     }
@@ -1956,6 +2034,10 @@ function clearBitSelection() {
     selectionManager.clearSelection();
 }
 
+function selectAllBits() {
+    selectionManager.selectAll();
+}
+
 function reorderBits(srcIndex, destIndex) {
     if (srcIndex === destIndex) return;
 
@@ -1963,6 +2045,213 @@ function reorderBits(srcIndex, destIndex) {
     bitsOnCanvas.splice(destIndex, 0, removed);
 
     selectionManager.handleReorder(srcIndex, destIndex);
+}
+
+function reorderRows(srcIndex, destIndex) {
+    if (srcIndex === destIndex) return;
+    ensureOperationsRows();
+
+    const selectedBits = selectionManager
+        .getSelectedIndices()
+        .map((index) => bitsOnCanvas[index])
+        .filter(Boolean);
+
+    const [removed] = operationsRows.splice(srcIndex, 1);
+    operationsRows.splice(destIndex, 0, removed);
+
+    const orderedBits = operationsRows
+        .filter((row) => row.rowType === "bit")
+        .map((row) => row.bit);
+    bitsOnCanvas = orderedBits;
+    bitRegistry.bits = bitsOnCanvas;
+
+    selectionManager.clearSelection();
+    selectedBits.forEach((bit) => {
+        const newIndex = bitsOnCanvas.indexOf(bit);
+        if (newIndex >= 0) {
+            selectionManager.select(newIndex);
+        }
+    });
+
+    updateBitsSheet();
+    redrawBitsOnCanvas();
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
+
+    if (window.threeModule) {
+        updateThreeView().then((didUpdate) => {
+            if (showPart && didUpdate) {
+                window.threeModule.showBasePanel();
+                scheduleCsgIfNeeded();
+            }
+        });
+    }
+}
+
+function updateBitTransform(bit) {
+    const anchorCoords = getPanelAnchorCoords();
+    const dx = anchorCoords.x + bit.x - bit.baseAbsX;
+    const dy = anchorCoords.y + bit.y - bit.baseAbsY;
+    bit.group?.setAttribute("transform", `translate(${dx}, ${dy})`);
+}
+
+function getLcsOffsetForRowIndex(rowIndex) {
+    let activeLcs = null;
+    for (let i = 0; i <= rowIndex; i += 1) {
+        const row = operationsRows[i];
+        if (row?.rowType === "lcs") {
+            activeLcs = row.lcs;
+        }
+    }
+    return getLcsOffset(activeLcs);
+}
+
+function applyLcsDeltaFromRowIndex(rowIndex, delta) {
+    for (let i = rowIndex + 1; i < operationsRows.length; i += 1) {
+        const row = operationsRows[i];
+        if (row.rowType === "lcs") {
+            break;
+        }
+        if (row.rowType === "bit") {
+            row.bit.x += delta.x;
+            row.bit.y += delta.y;
+            updateBitTransform(row.bit);
+        }
+    }
+}
+
+function addLcsRow() {
+    lcsCounter += 1;
+    const lcs = {
+        id: lcsCounter,
+        number: lcsCounter,
+        x: 0,
+        y: 0,
+        color: "#ff3b3b",
+        side: "top",
+    };
+    lcsRows.push(lcs);
+    ensureOperationsRows();
+    operationsRows.push({ rowType: "lcs", lcs });
+    updateBitsSheet();
+    updateLcsIndicators();
+}
+
+function updateLcsRow(lcsId, updates) {
+    const rowIndex = operationsRows.findIndex(
+        (row) => row.rowType === "lcs" && row.lcs.id === lcsId
+    );
+    if (rowIndex < 0) return;
+    const lcs = operationsRows[rowIndex].lcs;
+
+    Object.assign(lcs, updates);
+
+    updateBitsSheet();
+    updateLcsIndicators();
+}
+
+function copyLcsRow(lcsId) {
+    const rowIndex = operationsRows.findIndex(
+        (row) => row.rowType === "lcs" && row.lcs.id === lcsId
+    );
+    if (rowIndex < 0) return;
+    const source = operationsRows[rowIndex].lcs;
+    lcsCounter += 1;
+    const clone = {
+        id: lcsCounter,
+        number: lcsCounter,
+        x: source.x,
+        y: source.y,
+        color: source.color,
+        side: source.side,
+    };
+    lcsRows.push(clone);
+    operationsRows.splice(rowIndex + 1, 0, { rowType: "lcs", lcs: clone });
+    updateBitsSheet();
+    updateLcsIndicators();
+}
+
+function deleteLcsRow(lcsId) {
+    const rowIndex = operationsRows.findIndex(
+        (row) => row.rowType === "lcs" && row.lcs.id === lcsId
+    );
+    if (rowIndex < 0) return;
+    const lcs = operationsRows[rowIndex].lcs;
+    operationsRows.splice(rowIndex, 1);
+    lcsRows = lcsRows.filter((row) => row.id !== lcs.id);
+    updateBitsSheet();
+    updateLcsIndicators();
+}
+
+function updateLcsIndicators() {
+    if (!lcsIndicatorsLayer) return;
+    lcsIndicatorsLayer.innerHTML = "";
+    const anchorCoords = getPanelAnchorCoords();
+    const crossSize = 3;
+    const thickness = getAdaptiveStrokeWidth();
+
+    lcsRows.forEach((lcs) => {
+        const offset = getLcsOffset(lcs);
+        const crossX = anchorCoords.x + offset.x;
+        const crossY = anchorCoords.y + offset.y;
+
+        const horizontal = document.createElementNS(svgNS, "line");
+        horizontal.setAttribute("x1", crossX - crossSize);
+        horizontal.setAttribute("y1", crossY);
+        horizontal.setAttribute("x2", crossX + crossSize);
+        horizontal.setAttribute("y2", crossY);
+        horizontal.setAttribute("stroke", lcs.color || "#ff3b3b");
+        horizontal.setAttribute("stroke-width", thickness);
+        lcsIndicatorsLayer.appendChild(horizontal);
+
+        const vertical = document.createElementNS(svgNS, "line");
+        vertical.setAttribute("x1", crossX);
+        vertical.setAttribute("y1", crossY - crossSize);
+        vertical.setAttribute("x2", crossX);
+        vertical.setAttribute("y2", crossY + crossSize);
+        vertical.setAttribute("stroke", lcs.color || "#ff3b3b");
+        vertical.setAttribute("stroke-width", thickness);
+        lcsIndicatorsLayer.appendChild(vertical);
+    });
+}
+
+function buildSavePayload() {
+    const savedPositions = bitsOnCanvas.map((bit) => ({
+        id: bit.bitData.id,
+        x: bit.x,
+        y: bit.y,
+        alignment: bit.alignment,
+        operation: bit.operation,
+        color: bit.color,
+        operationNumber: bit.operationNumber,
+        isVisible: bit.isVisible !== false,
+        pocketOffset: bit.pocketOffset || 0,
+        isFullRemoval: bit.isFullRemoval || false,
+    }));
+
+    const savedLcs = lcsRows.map((lcs) => ({
+        id: lcs.id,
+        number: lcs.number,
+        x: lcs.x || 0,
+        y: lcs.y || 0,
+        color: lcs.color || "#ff3b3b",
+        side: lcs.side || "top",
+    }));
+
+    const rowOrder = operationsRows.map((row) => {
+        if (row.rowType === "lcs") {
+            return { type: "lcs", id: row.lcs.id };
+        }
+        return { type: "bit", operationNumber: row.bit.operationNumber };
+    });
+
+    return {
+        version: 2,
+        bits: savedPositions,
+        lcsRows: savedLcs,
+        rowOrder: rowOrder,
+    };
 }
 
 function createBitCopy(sourceBit) {
@@ -2027,6 +2316,14 @@ async function copyBitFromCanvas(index) {
 
     const insertIndex = index + 1;
     bitsOnCanvas.splice(insertIndex, 0, newBit);
+    const rowIndex = operationsRows.findIndex(
+        (row) => row.rowType === "bit" && row.bit === sourceBit
+    );
+    if (rowIndex >= 0) {
+        operationsRows.splice(rowIndex + 1, 0, { rowType: "bit", bit: newBit });
+    } else {
+        operationsRows.push({ rowType: "bit", bit: newBit });
+    }
     selectionManager.handleInsert(insertIndex);
 
     updateBitsSheet();
@@ -2054,12 +2351,26 @@ async function copyAllBitsOnCanvas() {
     let insertOffset = 0;
     const changedIds = new Set();
 
+    ensureOperationsRows();
+
     originalBits.forEach((bit, index) => {
         const newBit = createBitCopy(bit);
         if (!newBit) return;
         const insertIndex = index + insertOffset + 1;
         bitsOnCanvas.splice(insertIndex, 0, newBit);
         selectionManager.handleInsert(insertIndex);
+
+        const rowIndex = operationsRows.findIndex(
+            (row) => row.rowType === "bit" && row.bit === bit
+        );
+        if (rowIndex >= 0) {
+            operationsRows.splice(rowIndex + 1, 0, {
+                rowType: "bit",
+                bit: newBit,
+            });
+        } else {
+            operationsRows.push({ rowType: "bit", bit: newBit });
+        }
         insertOffset += 1;
         if (newBit.bitData?.id) {
             changedIds.add(newBit.bitData.id);
@@ -2149,6 +2460,9 @@ function deleteBitFromCanvas(index) {
 
     // Remove from array
     bitsOnCanvas.splice(index, 1);
+    operationsRows = operationsRows.filter(
+        (row) => row.rowType !== "bit" || row.bit !== bit
+    );
 
     // Update selection indices via selection manager
     selectionManager.handleDelete(index);
@@ -2457,6 +2771,13 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
             ext.setAttribute("stroke-width", thickness);
         });
     }
+
+    if (lcsIndicatorsLayer) {
+        const lcsLines = lcsIndicatorsLayer.querySelectorAll("line");
+        lcsLines.forEach((line) => {
+            line.setAttribute("stroke-width", thickness);
+        });
+    }
 }
 
 function fitToScale() {
@@ -2645,21 +2966,30 @@ function updateTableCoordinates(bitIndex, newX, newY) {
         scheduleCsgIfNeeded(changedId);
     }
 
+    ensureOperationsRows();
     const sheetBody = document.getElementById("bits-sheet-body");
     const rows = sheetBody.querySelectorAll("tr");
+    const bit = bitsOnCanvas[bitIndex];
+    const rowIndex = operationsRows.findIndex(
+        (row) => row.rowType === "bit" && row.bit === bit
+    );
 
-    if (rows[bitIndex]) {
-        const cells = rows[bitIndex].querySelectorAll("td");
-        const anchorOffset = getAnchorOffset(bitsOnCanvas[bitIndex]);
+    if (rowIndex >= 0 && rows[rowIndex]) {
+        const cells = rows[rowIndex].querySelectorAll("td");
+        const anchorOffset = getAnchorOffset(bit);
+        const lcsOffset = getLcsOffsetForRowIndex(rowIndex);
         if (cells[3]) {
             // X column
             const xInput = cells[3].querySelector("input");
-            if (xInput) xInput.value = newX + anchorOffset.x;
+            if (xInput) xInput.value = newX - lcsOffset.x + anchorOffset.x;
         }
         if (cells[4]) {
             // Y column
             const yInput = cells[4].querySelector("input");
-            if (yInput) yInput.value = transformYForDisplay(newY, anchorOffset);
+            if (yInput) {
+                const relativeY = newY - lcsOffset.y;
+                yInput.value = transformYForDisplay(relativeY, anchorOffset);
+            }
         }
     }
 }
@@ -2892,7 +3222,10 @@ function initialize() {
             if (savedPositions) {
                 try {
                     const positionsData = JSON.parse(savedPositions);
-                    if (positionsData.length > 0) {
+                    const hasBits = Array.isArray(positionsData)
+                        ? positionsData.length > 0
+                        : (positionsData?.bits || []).length > 0;
+                    if (hasBits) {
                         const restoredCount = await restoreBitPositions(
                             positionsData
                         );
@@ -2978,39 +3311,16 @@ function logOperation(message) {
 
 // Save current bit positions to localStorage
 function saveBitPositions() {
-    const savedPositions = bitsOnCanvas.map((bit) => ({
-        id: bit.bitData.id,
-        x: bit.x,
-        y: bit.y,
-        alignment: bit.alignment,
-        operation: bit.operation,
-        color: bit.color,
-        operationNumber: bit.operationNumber,
-        isVisible: bit.isVisible !== false,
-        pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
-        isFullRemoval: bit.isFullRemoval || false, // Save isFullRemoval flag for PO operations
-    }));
+    const payload = buildSavePayload();
 
-    localStorage.setItem("bits_positions", JSON.stringify(savedPositions));
-    logOperation(`Saved ${savedPositions.length} bit positions`);
+    localStorage.setItem("bits_positions", JSON.stringify(payload));
+    logOperation(`Saved ${payload.bits.length} bit positions`);
 }
 
 // Save bit positions to JSON file
 function saveBitPositionsAs() {
-    const savedPositions = bitsOnCanvas.map((bit) => ({
-        id: bit.bitData.id,
-        x: bit.x,
-        y: bit.y,
-        alignment: bit.alignment,
-        operation: bit.operation,
-        color: bit.color,
-        operationNumber: bit.operationNumber,
-        isVisible: bit.isVisible !== false,
-        pocketOffset: bit.pocketOffset || 0, // Save pocketOffset for PO operations
-        isFullRemoval: bit.isFullRemoval || false, // Save isFullRemoval flag for PO operations
-    }));
-
-    const dataStr = JSON.stringify(savedPositions, null, 2);
+    const payload = buildSavePayload();
+    const dataStr = JSON.stringify(payload, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
 
     const link = document.createElement("a");
@@ -3021,7 +3331,7 @@ function saveBitPositionsAs() {
     document.body.removeChild(link);
 
     logOperation(
-        `Exported ${savedPositions.length} bit positions to JSON file`
+        `Exported ${payload.bits.length} bit positions to JSON file`
     );
 }
 
@@ -3061,6 +3371,11 @@ async function loadBitPositions() {
 
 // Restore bit positions from data
 async function restoreBitPositions(positionsData) {
+    const payload = Array.isArray(positionsData)
+        ? { bits: positionsData, lcsRows: [], rowOrder: [] }
+        : positionsData || { bits: [], lcsRows: [], rowOrder: [] };
+    const bitsData = payload.bits || [];
+
     // Clear current canvas
     bitsOnCanvas.forEach((bit) => {
         if (bit.group && bit.group.parentNode) {
@@ -3068,6 +3383,13 @@ async function restoreBitPositions(positionsData) {
         }
     });
     bitsOnCanvas = [];
+    operationsRows = [];
+    lcsRows = Array.isArray(payload.lcsRows) ? payload.lcsRows : [];
+    lcsCounter = lcsRows.reduce(
+        (maxId, row) => Math.max(maxId, row.id || 0),
+        0
+    );
+    selectionManager?.clearSelection?.();
 
     // Get all available bits
     const allBits = await getBits();
@@ -3075,7 +3397,7 @@ async function restoreBitPositions(positionsData) {
     let restoredCount = 0;
 
     // Restore positions
-    positionsData.forEach((pos, index) => {
+    bitsData.forEach((pos, index) => {
         // Find the bit data by ID
         let bitData = null;
         let groupName = null;
@@ -3152,6 +3474,7 @@ async function restoreBitPositions(positionsData) {
                 };
 
                 bitsOnCanvas.push(newBit);
+                operationsRows.push({ rowType: "bit", bit: newBit });
                 // Assign profile path to the restored bit
                 bitsManager.assignProfilePathsToBits([newBit]);
                 restoredCount++;
@@ -3171,6 +3494,36 @@ async function restoreBitPositions(positionsData) {
             console.warn(`Bit with ID ${pos.id} not found in available bits`);
         }
     });
+
+    if (Array.isArray(payload.rowOrder) && payload.rowOrder.length > 0) {
+        const lcsMap = new Map(lcsRows.map((lcs) => [lcs.id, lcs]));
+        const bitMap = new Map(
+            bitsOnCanvas.map((bit) => [bit.operationNumber, bit])
+        );
+        operationsRows = payload.rowOrder
+            .map((entry) => {
+                if (entry?.type === "lcs") {
+                    const lcs = lcsMap.get(entry.id);
+                    return lcs ? { rowType: "lcs", lcs } : null;
+                }
+                if (entry?.type === "bit") {
+                    const bit = bitMap.get(entry.operationNumber);
+                    return bit ? { rowType: "bit", bit } : null;
+                }
+                return null;
+            })
+            .filter(Boolean);
+        const remainingLcs = lcsRows.filter(
+            (lcs) => !operationsRows.some((row) => row.lcs === lcs)
+        );
+        const remainingBits = bitsOnCanvas.filter(
+            (bit) => !operationsRows.some((row) => row.bit === bit)
+        );
+        remainingLcs.forEach((lcs) => operationsRows.push({ rowType: "lcs", lcs }));
+        remainingBits.forEach((bit) => operationsRows.push({ rowType: "bit", bit }));
+    }
+
+    updateLcsIndicators();
 
     // Update table and canvas
     updateBitsSheet();
@@ -3195,7 +3548,8 @@ function clearAllBits() {
     bitsOnCanvas = [];
     bitRegistry.counter = 0;
     operationCounter = 0;
-    operationCounter = 0;
+    operationsRows = operationsRows.filter((row) => row.rowType === "lcs");
+    selectionManager?.clearSelection?.();
 
     // Clear localStorage
     localStorage.removeItem("bits_positions");

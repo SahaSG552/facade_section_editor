@@ -62,16 +62,20 @@ class SelectionManager {
         this.onSelectionChange();
     }
 
-    handleInsert(index) {
-        this.selectedIndices = this.selectedIndices.map((selectedIndex) =>
-            selectedIndex >= index ? selectedIndex + 1 : selectedIndex
-        );
-        this.onSelectionChange();
-    }
-
     select(index) {
         this.selectedIndices.push(index);
         this.highlightBit(index);
+    }
+
+    selectAll() {
+        this.selectedIndices.forEach((index) => this.resetBitHighlight(index));
+        this.selectedIndices = [];
+        const bits = this.getBits();
+        bits.forEach((_, index) => {
+            this.selectedIndices.push(index);
+            this.highlightBit(index);
+        });
+        this.onSelectionChange();
     }
 
     deselect(index) {

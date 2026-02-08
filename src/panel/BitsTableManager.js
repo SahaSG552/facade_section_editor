@@ -45,6 +45,7 @@ class BitsTableManager {
         this.copyAllBtn = document.getElementById("bits-copy-all");
         this.hideAllBtn = document.getElementById("bits-hide-all");
         this.deleteAllBtn = document.getElementById("bits-delete-all");
+        this.nameHeader = document.getElementById("bits-name-header");
 
         this.getAnchorOffset = config.getAnchorOffset;
         this.transformYForDisplay = config.transformYForDisplay;
@@ -69,8 +70,13 @@ class BitsTableManager {
             onToggleVisibility: () => {},
             onHideAllBits: () => {},
             onDeleteAllBits: () => {},
+            onChangeLcs: () => {},
+            onCopyLcs: () => {},
+            onDeleteLcs: () => {},
+            onReorderRows: () => {},
             onReorderBits: () => {},
             onClearSelection: () => {},
+            onSelectAllBits: () => {},
         };
 
         this.dragSrcRow = null;
@@ -155,12 +161,12 @@ class BitsTableManager {
         return builder.build();
     }
 
-    render(bits = [], selectedIndices = []) {
+    render(rows = [], selectedIndices = []) {
         if (!this.sheetBody) return;
 
         this.sheetBody.innerHTML = "";
-        bits.forEach((bit, index) => {
-            const row = this.createRow(bit, index, selectedIndices);
+        rows.forEach((rowData, index) => {
+            const row = this.createRow(rowData, index, selectedIndices);
             this.sheetBody.appendChild(row);
         });
 
@@ -202,6 +208,12 @@ class BitsTableManager {
                 this.boundDeleteAllHandler
             );
         }
+        if (this.nameHeader) {
+            this.nameHeader.addEventListener("click", (e) => {
+                e.stopPropagation();
+                this.callbacks.onSelectAllBits();
+            });
+        }
 
         this.headerHandlersAttached = true;
     }
@@ -221,14 +233,21 @@ class BitsTableManager {
         this.callbacks.onDeleteAllBits();
     }
 
-    createRow(bit, index, selectedIndices) {
+    createRow(rowData, index, selectedIndices) {
+        if (rowData?.rowType === "lcs") {
+            return this.createLcsRow(rowData, index);
+        }
+
+        const bit = rowData?.bit || rowData;
+        const lcsOffset = rowData?.lcsOffset || { x: 0, y: 0 };
+        const bitIndex = rowData?.bitIndex ?? index;
         const row = document.createElement("tr");
         row.setAttribute("data-index", index);
 
         row.addEventListener("click", (e) => {
             if (this.shouldIgnoreRowClick(e)) return;
             e.stopPropagation();
-            this.callbacks.onSelectBit(index);
+            this.callbacks.onSelectBit(bitIndex);
         });
 
         const dragCell = document.createElement("td");
@@ -242,7 +261,7 @@ class BitsTableManager {
         row.appendChild(dragCell);
 
         const numCell = document.createElement("td");
-        numCell.textContent = bit.operationNumber ?? index + 1;
+        numCell.textContent = rowData?.displayOrder ?? bitIndex + 1;
         row.appendChild(numCell);
 
         const nameCell = document.createElement("td");
@@ -269,13 +288,13 @@ class BitsTableManager {
         const xCell = document.createElement("td");
         const xInput = document.createElement("input");
         xInput.type = "text";
-        xInput.value = (bit.x || 0) + anchorOffset.x;
+        xInput.value = (bit.x || 0) - lcsOffset.x + anchorOffset.x;
         xInput.addEventListener("change", async () => {
             const val = this.evaluateMathExpression(xInput.value);
             xInput.value = val;
             const newAnchorX = parseFloat(val) || 0;
-            const newX = newAnchorX - anchorOffset.x;
-            await this.callbacks.onChangePosition(index, newX, bit.y);
+            const newX = newAnchorX - anchorOffset.x + lcsOffset.x;
+            await this.callbacks.onChangePosition(bitIndex, newX, bit.y);
         });
         xCell.appendChild(xInput);
         row.appendChild(xCell);
@@ -283,12 +302,14 @@ class BitsTableManager {
         const yCell = document.createElement("td");
         const yInput = document.createElement("input");
         yInput.type = "text";
-        yInput.value = this.transformYForDisplay(bit.y, anchorOffset);
+        const relativeY = (bit.y || 0) - lcsOffset.y;
+        yInput.value = this.transformYForDisplay(relativeY, anchorOffset);
         yInput.addEventListener("change", async () => {
             const val = this.evaluateMathExpression(yInput.value);
             yInput.value = val;
-            const newY = this.transformYFromDisplay(val, anchorOffset);
-            await this.callbacks.onChangePosition(index, bit.x, newY);
+            const newY =
+                this.transformYFromDisplay(val, anchorOffset) + lcsOffset.y;
+            await this.callbacks.onChangePosition(bitIndex, bit.x, newY);
         });
         yCell.appendChild(yInput);
         row.appendChild(yCell);
@@ -305,7 +326,7 @@ class BitsTableManager {
         );
         alignBtn.addEventListener("click", async (e) => {
             e.stopPropagation();
-            await this.callbacks.onCycleAlignment(index);
+            await this.callbacks.onCycleAlignment(bitIndex);
         });
         alignCell.appendChild(alignBtn);
         row.appendChild(alignCell);
@@ -341,7 +362,7 @@ class BitsTableManager {
         });
 
         opSelect.addEventListener("change", () => {
-            this.callbacks.onChangeOperation(index, opSelect.value);
+            this.callbacks.onChangeOperation(bitIndex, opSelect.value);
         });
 
         opCell.appendChild(opSelect);
@@ -357,7 +378,7 @@ class BitsTableManager {
         colorInput.style.cursor = "pointer";
 
         colorInput.addEventListener("input", () => {
-            this.callbacks.onChangeColor(index, colorInput.value);
+            this.callbacks.onChangeColor(bitIndex, colorInput.value);
         });
 
         colorCell.appendChild(colorInput);
@@ -371,7 +392,7 @@ class BitsTableManager {
         copyBtn.title = "Copy bit";
         copyBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            this.callbacks.onCopyBit(index);
+            this.callbacks.onCopyBit(bitIndex);
         });
         copyCell.appendChild(copyBtn);
         row.appendChild(copyCell);
@@ -387,7 +408,7 @@ class BitsTableManager {
         visibilityBtn.title = isVisible ? "Hide bit" : "Show bit";
         visibilityBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            this.callbacks.onToggleVisibility(index);
+            this.callbacks.onToggleVisibility(bitIndex);
         });
         visibilityCell.appendChild(visibilityBtn);
         row.appendChild(visibilityCell);
@@ -400,7 +421,7 @@ class BitsTableManager {
         delBtn.title = "Delete bit from canvas";
         delBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            this.callbacks.onDeleteBit(index);
+            this.callbacks.onDeleteBit(bitIndex);
         });
         delCell.appendChild(delBtn);
         row.appendChild(delCell);
@@ -408,13 +429,139 @@ class BitsTableManager {
         row.addEventListener("dragover", (e) => this.handleDragOver(e));
         row.addEventListener("drop", (e) => this.handleDrop(e, row));
 
-        if (selectedIndices.includes(index)) {
+        if (selectedIndices.includes(bitIndex)) {
             row.classList.add("selected-bit-row");
         }
 
         if (bit.isVisible === false) {
             row.classList.add("bit-row-hidden");
         }
+
+        return row;
+    }
+
+    createLcsRow(rowData, index) {
+        const lcs = rowData.lcs;
+        const row = document.createElement("tr");
+        row.classList.add("lcs-row");
+        row.setAttribute("data-index", index);
+
+        const dragCell = document.createElement("td");
+        dragCell.className = "drag-handle";
+        dragCell.draggable = true;
+        dragCell.textContent = "☰";
+        dragCell.addEventListener("dragstart", (e) =>
+            this.handleDragStart(e, row)
+        );
+        dragCell.addEventListener("dragend", (e) => this.handleDragEnd(e));
+        row.appendChild(dragCell);
+
+        const numCell = document.createElement("td");
+        numCell.textContent = "";
+        row.appendChild(numCell);
+
+        const nameCell = document.createElement("td");
+        const nameDiv = document.createElement("div");
+        nameDiv.textContent = `LCS ${lcs.number}`;
+        nameCell.appendChild(nameDiv);
+        row.appendChild(nameCell);
+
+        const xCell = document.createElement("td");
+        const xInput = document.createElement("input");
+        xInput.type = "text";
+        xInput.value = lcs.x || 0;
+        xInput.addEventListener("change", () => {
+            const val = this.evaluateMathExpression(xInput.value);
+            xInput.value = val;
+            const newX = parseFloat(val) || 0;
+            this.callbacks.onChangeLcs(lcs.id, { x: newX });
+        });
+        xCell.appendChild(xInput);
+        row.appendChild(xCell);
+
+        const yCell = document.createElement("td");
+        const yInput = document.createElement("input");
+        yInput.type = "text";
+        yInput.value = lcs.y || 0;
+        yInput.addEventListener("change", () => {
+            const val = this.evaluateMathExpression(yInput.value);
+            yInput.value = val;
+            const newY = parseFloat(val) || 0;
+            this.callbacks.onChangeLcs(lcs.id, { y: newY });
+        });
+        yCell.appendChild(yInput);
+        row.appendChild(yCell);
+
+        const alignCell = document.createElement("td");
+        alignCell.textContent = "";
+        row.appendChild(alignCell);
+
+        const opCell = document.createElement("td");
+        const opSelect = document.createElement("select");
+        opSelect.style.width = "100%";
+        opSelect.style.padding = "2px";
+        opSelect.style.border = "1px solid #ccc";
+        opSelect.style.borderRadius = "3px";
+        ["top", "bottom"].forEach((value) => {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = value;
+            if ((lcs.side || "top") === value) {
+                option.selected = true;
+            }
+            opSelect.appendChild(option);
+        });
+        opSelect.addEventListener("change", () => {
+            this.callbacks.onChangeLcs(lcs.id, { side: opSelect.value });
+        });
+        opCell.appendChild(opSelect);
+        row.appendChild(opCell);
+
+        const colorCell = document.createElement("td");
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorInput.value = lcs.color || "#ff3b3b";
+        colorInput.style.border = "1px solid #ccc";
+        colorInput.style.borderRadius = "3px";
+        colorInput.style.cursor = "pointer";
+        colorInput.addEventListener("change", () => {
+            this.callbacks.onChangeLcs(lcs.id, { color: colorInput.value });
+        });
+        colorCell.appendChild(colorInput);
+        row.appendChild(colorCell);
+
+        const copyCell = document.createElement("td");
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "bit-action-btn";
+        copyBtn.textContent = "⧉";
+        copyBtn.title = "Copy LCS";
+        copyBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.callbacks.onCopyLcs(lcs.id);
+        });
+        copyCell.appendChild(copyBtn);
+        row.appendChild(copyCell);
+
+        const visibilityCell = document.createElement("td");
+        visibilityCell.textContent = "";
+        row.appendChild(visibilityCell);
+
+        const delCell = document.createElement("td");
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "del-btn";
+        delBtn.textContent = "✕";
+        delBtn.title = "Delete LCS";
+        delBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            this.callbacks.onDeleteLcs(lcs.id);
+        });
+        delCell.appendChild(delBtn);
+        row.appendChild(delCell);
+
+        row.addEventListener("dragover", (e) => this.handleDragOver(e));
+        row.addEventListener("drop", (e) => this.handleDrop(e, row));
 
         return row;
     }
@@ -450,7 +597,7 @@ class BitsTableManager {
         const destIndex = parseInt(row.getAttribute("data-index"));
 
         if (srcIndex !== destIndex) {
-            this.callbacks.onReorderBits(srcIndex, destIndex);
+            this.callbacks.onReorderRows(srcIndex, destIndex);
         }
 
         return false;
