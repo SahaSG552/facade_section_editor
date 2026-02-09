@@ -11,6 +11,170 @@
 
 import paper from "paper";
 
+function createCompoundPathFromPathData(pathData) {
+    try {
+        return new paper.CompoundPath(pathData);
+    } catch (error) {
+        try {
+            return new paper.Path(pathData);
+        } catch (pathError) {
+            console.error("Failed to create Paper.js path from data:", pathError);
+            return null;
+        }
+    }
+}
+
+function ensureClosed(path) {
+    if (!path) return;
+    if (path.children && path.children.length > 0) {
+        path.children.forEach((child) => {
+            child.closed = true;
+        });
+    } else {
+        path.closed = true;
+    }
+}
+
+function getPathCentroid(path) {
+    if (!path) return null;
+
+    if (path.children && path.children.length > 0) {
+        let totalArea = 0;
+        let weightedX = 0;
+        let weightedY = 0;
+
+        path.children.forEach((child) => {
+            const area = Math.abs(child.area || 0);
+            if (area > 0 && child.position) {
+                totalArea += area;
+                weightedX += child.position.x * area;
+                weightedY += child.position.y * area;
+            }
+        });
+
+        if (totalArea > 0) {
+            return new paper.Point(weightedX / totalArea, weightedY / totalArea);
+        }
+    }
+
+    return path.position || null;
+}
+
+function distanceBetweenPoints(a, b) {
+    if (!a || !b) return Infinity;
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function selectByOverlap(path, referencePath) {
+    if (!path || !referencePath) return "";
+
+    const referenceCentroid = getPathCentroid(referencePath);
+    const centroidFallback = referenceCentroid || referencePath.position;
+    const minDistance = 1e-6;
+
+    if (path.children && path.children.length > 0) {
+        let bestScore = -Infinity;
+        let selected = null;
+        let nearest = null;
+        let nearestDistance = Infinity;
+
+        path.children.forEach((child) => {
+            const intersection = child.intersect(referencePath);
+            const area = Math.abs(intersection?.area || 0);
+            intersection?.remove?.();
+
+            if (centroidFallback) {
+                const distance = distanceBetweenPoints(
+                    child.position,
+                    centroidFallback
+                );
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = child;
+                }
+
+                if (area > 0) {
+                    const score = area / Math.max(distance, minDistance);
+                    if (score > bestScore) {
+                        bestScore = score;
+                        selected = child;
+                    }
+                }
+            } else if (area > 0) {
+                if (area > bestScore) {
+                    bestScore = area;
+                    selected = child;
+                }
+            }
+        });
+        const chosen = selected || nearest;
+        return chosen ? chosen.pathData : "";
+    }
+
+    const intersection = path.intersect(referencePath);
+    const area = Math.abs(intersection?.area || 0);
+    intersection?.remove?.();
+
+    if (area > 0) {
+        return path.pathData || "";
+    }
+
+    if (centroidFallback && path.position) {
+        return path.pathData || "";
+    }
+
+    return "";
+}
+
+export function resolveSelfIntersections(pathData, options = {}) {
+    if (!pathData) return "";
+
+    const tempCanvas = document.createElement("canvas");
+    paper.setup(tempCanvas);
+
+    try {
+        const subject = createCompoundPathFromPathData(pathData);
+        if (!subject) {
+            return "";
+        }
+
+        ensureClosed(subject);
+
+        let referencePath = null;
+        if (options.referencePathData) {
+            referencePath = createCompoundPathFromPathData(
+                options.referencePathData
+            );
+            if (referencePath) {
+                ensureClosed(referencePath);
+            }
+        }
+
+        const result = subject.unite(subject);
+        let cleaned = "";
+        if (referencePath) {
+            cleaned = selectByOverlap(result, referencePath);
+        }
+        if (!cleaned) {
+            cleaned = result?.pathData || "";
+        }
+
+        subject.remove();
+        referencePath?.remove?.();
+        result?.remove?.();
+
+        return cleaned;
+    } catch (error) {
+        console.error("Paper.js self-union failed:", error);
+        return "";
+    } finally {
+        paper.project.clear();
+        paper.project.remove();
+    }
+}
+
 /**
  * Извлечь path data из SVG элемента
  */

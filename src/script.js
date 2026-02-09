@@ -1291,6 +1291,7 @@ function updateOffsetContours() {
         arcTolerance: ARC_APPROX_TOLERANCE, // RMS tolerance (same as DXF export)
         exportModule: exportModule, // For parseSVGPathSegments and optimizeSegmentsToArcs
         forceReverseOutput: forceReverseOutput,
+        trimSelfIntersections: true,
     });
 
     // Make offsetCalculator and helper functions available globally for ThreeModule

@@ -7,6 +7,7 @@ import LoggerFactory from "../core/LoggerFactory.js";
 import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { approximatePath, segmentsToSVGPath } from "../utils/arcApproximation.js";
 import { buildFilletArc, getPathOrientation } from "../utils/fillet.js";
+import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 const EPSILON = 1e-6;
@@ -23,6 +24,7 @@ const EPSILON = 1e-6;
  * @property {boolean} [forceReverseOutput]
  * @property {number} [stitchTolerance]
  * @property {number} [outputPrecision]
+ * @property {boolean} [trimSelfIntersections]
  */
 
 function distance(a, b) {
@@ -876,6 +878,15 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
     );
 
     let path = segmentsToSVGPath(quantizedSegments);
+
+    if (options.trimSelfIntersections) {
+        const trimmed = resolveSelfIntersections(path, {
+            referencePathData: pathData,
+        });
+        if (trimmed) {
+            path = trimmed;
+        }
+    }
 
     if (options.useArcApproximation && options.exportModule) {
         const tolerance = options.arcTolerance || ARC_APPROX_TOLERANCE;

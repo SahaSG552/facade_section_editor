@@ -2316,6 +2316,7 @@ export default class ThreeModule extends BaseModule {
                     useArcApproximation: true,
                     exportModule,
                     forceReverseOutput: window?.forceReverseOffset !== false,
+                    trimSelfIntersections: true,
                 },
             );
 
@@ -2333,6 +2334,7 @@ export default class ThreeModule extends BaseModule {
                       exportModule,
                       forceReverseOutput:
                           window?.forceReverseOffset !== false,
+                        trimSelfIntersections: true,
                   })
                 : null;
 

@@ -1753,6 +1753,7 @@ export default class ExtrusionBuilder {
                     useArcApproximation: true,
                     exportModule,
                     forceReverseOutput: window?.forceReverseOffset !== false,
+                    trimSelfIntersections: true,
                 },
             );
 
