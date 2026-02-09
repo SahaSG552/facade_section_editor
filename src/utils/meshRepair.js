@@ -216,6 +216,16 @@ export class MeshRepair {
     }
 
     /**
+     * Detect self-intersections (public helper)
+     * @param {THREE.BufferGeometry} geometry
+     * @returns {number} count of detected intersections (0 or 1 for early exit)
+     */
+    detectSelfIntersections(geometry) {
+        const intersections = this._detectSelfIntersections(geometry);
+        return intersections.length;
+    }
+
+    /**
      * Async version of repair that uses Manifold for aggressive repairs
      * @param {THREE.BufferGeometry} geometry 
      * @param {Object} options 
@@ -603,23 +613,76 @@ export class MeshRepair {
      * Detect self-intersections using BVH
      */
     _detectSelfIntersections(geometry) {
+        if (!geometry) return [];
         if (!geometry.boundsTree) {
             geometry.computeBoundsTree();
         }
 
-        const intersections = [];
         const bvh = geometry.boundsTree;
+        if (!bvh?.bvhcast) {
+            this.log.warn("Self-intersection detection skipped: BVH not available");
+            return [];
+        }
 
-        // Use shapecast to detect self-intersections
-        // This is a simplified detection - full repair is complex
+        const indexArray = geometry.index ? geometry.index.array : null;
+        const maxChecks = this.config.selfIntersectionMaxChecks || 50000;
+        let checks = 0;
+        let hit = null;
+
+        const getTriIndices = (triIndex) => {
+            if (!indexArray) return null;
+            const base = triIndex * 3;
+            return [
+                indexArray[base],
+                indexArray[base + 1],
+                indexArray[base + 2],
+            ];
+        };
+
+        const sharesVertex = (triA, triB) => {
+            const a = getTriIndices(triA);
+            const b = getTriIndices(triB);
+            if (!a || !b) return false;
+            return (
+                a[0] === b[0] ||
+                a[0] === b[1] ||
+                a[0] === b[2] ||
+                a[1] === b[0] ||
+                a[1] === b[1] ||
+                a[1] === b[2] ||
+                a[2] === b[0] ||
+                a[2] === b[1] ||
+                a[2] === b[2]
+            );
+        };
+
         try {
-            geometry.boundsTree.shapecast({
-                intersectsBounds: (box, isLeaf, score, depth, nodeIndex) => {
-                    return true;
-                },
-                intersectsTriangle: (tri, triIndex, contained, depth) => {
-                    // Check if triangle intersects with other triangles
-                    // This is a placeholder - full implementation requires triangle-triangle tests
+            bvh.bvhcast(bvh, new THREE.Matrix4(), {
+                intersectsTriangles: (tri1, tri2, i1, i2) => {
+                    if (i1 === i2) return false;
+                    if (i1 > i2) return false; // avoid duplicate checks
+
+                    checks += 1;
+                    if (checks > maxChecks) {
+                        return true;
+                    }
+
+                    const triIndex1 = bvh.resolveTriangleIndex
+                        ? bvh.resolveTriangleIndex(i1)
+                        : i1;
+                    const triIndex2 = bvh.resolveTriangleIndex
+                        ? bvh.resolveTriangleIndex(i2)
+                        : i2;
+
+                    if (sharesVertex(triIndex1, triIndex2)) {
+                        return false;
+                    }
+
+                    if (tri1.intersectsTriangle(tri2, null, true)) {
+                        hit = { triIndex1, triIndex2 };
+                        return true;
+                    }
+
                     return false;
                 },
             });
@@ -627,7 +690,13 @@ export class MeshRepair {
             this.log.warn("Self-intersection detection failed:", error);
         }
 
-        return intersections;
+        if (checks > maxChecks) {
+            this.log.debug("Self-intersection scan hit max checks", {
+                maxChecks,
+            });
+        }
+
+        return hit ? [hit] : [];
     }
 
     /**

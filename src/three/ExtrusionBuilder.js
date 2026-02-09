@@ -12,8 +12,6 @@ import {
     computeBoundsTree,
     disposeBoundsTree,
 } from "three-mesh-bvh";
-import paper from "paper";
-import { PaperOffset } from "paperjs-offset";
 
 import LoggerFactory from "../core/LoggerFactory.js";
 import { approximatePath } from "../utils/arcApproximation.js";
@@ -1687,7 +1685,7 @@ export default class ExtrusionBuilder {
 
     /**
      * Modify path using offset
-     * For SVG paths: uses paper.js offset
+     * For SVG paths: uses custom offset
      * For THREE.js CurvePath: not supported (return original)
      * @private
      * @param {THREE.CurvePath|string} path - Original path
@@ -1706,19 +1704,20 @@ export default class ExtrusionBuilder {
                 cornerStyle,
             });
 
-            // If offset is 0, return original path
             if (offset === 0) {
                 this.log.debug("Offset is 0, returning original path");
                 return path;
             }
 
-            // Handle SVG path string with paper.js
             if (typeof path === "string") {
-                this.log.debug("Handling SVG path string with paper.js");
-                return this._modifySVGPathWithOffset(path, offset, cornerStyle);
+                this.log.debug("Handling SVG path string with custom offset");
+                return this._modifySVGPathWithOffset(
+                    path,
+                    offset,
+                    cornerStyle,
+                );
             }
 
-            // Handle THREE.js CurvePath - not supported, return original
             if (path instanceof THREE.CurvePath) {
                 this.log.warn(
                     "THREE.js CurvePath offset not supported, use SVG path string instead",
@@ -1726,10 +1725,7 @@ export default class ExtrusionBuilder {
                 return path;
             }
 
-            this.log.warn(
-                "Path modification: unsupported path type",
-                typeof path,
-            );
+            this.log.warn("Path modification: unsupported path type", typeof path);
             return null;
         } catch (error) {
             this.log.error("Error in _modifyPathWithOffset:", error);
@@ -1738,179 +1734,36 @@ export default class ExtrusionBuilder {
     }
 
     /**
-     * Modify SVG path string using paper.js offset
+     * Modify SVG path string using custom offset
      * @private
      */
     _modifySVGPathWithOffset(svgPathString, offset, cornerStyle) {
         try {
-            if (!window?.usePaperOffset) {
-                const exportModule =
-                    window?.dependencyContainer?.get?.("export") ||
-                    window?.app?.container?.get?.("export");
-                if (exportModule) {
-                    const customPath = calculateOffsetFromPathData(
-                        svgPathString,
-                        offset,
-                        {
-                            join: cornerStyle === "round" ? "round" : cornerStyle,
-                            cap: "butt",
-                            limit: 10,
-                            useArcApproximation: true,
-                            exportModule,
-                            forceReverseOutput:
-                                window?.forceReverseOffset !== false,
-                        }
-                    );
-                    if (customPath) {
-                        return customPath;
-                    }
-                }
-            }
+            const exportModule =
+                window?.dependencyContainer?.get?.("export") ||
+                window?.app?.container?.get?.("export");
 
-            // Check if paper.js is available
-            if (typeof paper === "undefined" || !paper.Path) {
-                this.log.warn("paper.js not available for path modification");
-                return svgPathString;
-            }
-
-            this.log.info("Starting SVG path modification:", {
+            const customPath = calculateOffsetFromPathData(
+                svgPathString,
                 offset,
-                cornerStyle,
-                pathLength: svgPathString.length,
-            });
-
-            // Create temporary canvas for paper.js if needed
-            let tempCanvas = null;
-            let tempScope = null;
-
-            if (!paper.project || !paper.project.activeLayer) {
-                tempCanvas = document.createElement("canvas");
-                tempScope = new paper.PaperScope();
-                tempScope.setup(tempCanvas);
-                this.log.debug("Created temporary paper.js scope");
-            }
-
-            // Use existing or temporary scope
-            const workingScope = tempScope || paper;
-
-            // Parse SVG path to paper.js path
-            let paperPath = new workingScope.Path(svgPathString);
-            if (
-                !paperPath ||
-                !paperPath.segments ||
-                paperPath.segments.length === 0
-            ) {
-                this.log.warn("Failed to parse SVG path");
-                if (tempCanvas) tempCanvas.remove();
-                return svgPathString;
-            }
-
-            this.log.debug("Parsed SVG to paper.js path:", {
-                segments: paperPath.segments.length,
-                closed: paperPath.closed,
-            });
-
-            // Close path if needed
-            const firstPoint = paperPath.firstSegment.point;
-            const lastPoint = paperPath.lastSegment.point;
-            if (firstPoint.getDistance(lastPoint) > 0.01) {
-                paperPath.closed = true;
-                this.log.debug("Path closed");
-            }
-
-            // Apply offset using PaperOffset library
-            let offsetPath;
-            if (offset !== 0) {
-                this.log.debug("Applying offset:", { offset, cornerStyle });
-
-                // PaperOffset expects outward positive; our negative means inward
-                const offsetResult = PaperOffset.offset(paperPath, -offset, {
-                    join:
-                        cornerStyle === "round"
-                            ? "round"
-                            : cornerStyle === "miter"
-                                ? "miter"
-                                : "bevel",
+                {
+                    join: cornerStyle === "round" ? "round" : cornerStyle,
                     cap: "butt",
                     limit: 10,
-                    insert: false,
-                });
+                    useArcApproximation: true,
+                    exportModule,
+                    forceReverseOutput: window?.forceReverseOffset !== false,
+                },
+            );
 
-                // PaperOffset may return Path or array
-                if (Array.isArray(offsetResult)) {
-                    offsetPath = offsetResult[0] || null;
-                    this.log.debug(
-                        "PaperOffset returned",
-                        offsetResult.length,
-                        "paths",
-                    );
-                } else {
-                    offsetPath = offsetResult || null;
-                }
-
-                if (!offsetPath) {
-                    this.log.warn("PaperOffset returned no paths");
-                }
-            } else {
-                offsetPath = paperPath;
-            }
-
-            if (!offsetPath) {
-                this.log.warn("paper.js offset failed");
-                paperPath.remove();
-                if (tempCanvas) tempCanvas.remove();
+            if (!customPath) {
+                this.log.warn("Custom offset failed, returning original SVG");
                 return svgPathString;
             }
 
-            this.log.debug("Offset applied successfully:", {
-                resultSegments: offsetPath.segments?.length,
-            });
-
-            // Get modified SVG path data
-            let modifiedSVG = offsetPath.pathData;
-
-            // Optional: convert Beziers → arcs using existing export pipeline
-            try {
-                const exportModule =
-                    window?.dependencyContainer?.get?.("export") ||
-                    window?.app?.container?.get?.("export");
-                if (exportModule) {
-                    const approximated = approximatePath(
-                        modifiedSVG,
-                        exportModule,
-                    );
-                    if (approximated) {
-                        modifiedSVG = approximated;
-                        this.log.debug(
-                            "Applied arc approximation to offset path",
-                        );
-                    }
-                }
-            } catch (e) {
-                this.log.warn("Arc approximation after offset failed", e);
-            }
-
-            this.log.info("SVG path modified with offset:", {
-                offset,
-                cornerStyle,
-                originalLength: svgPathString.length,
-                modifiedLength: modifiedSVG.length,
-                original: svgPathString.substring(0, 50) + "...",
-                modified: modifiedSVG.substring(0, 50) + "...",
-            });
-
-            // Clean up paper objects
-            offsetPath.remove();
-            paperPath.remove();
-            if (tempCanvas) {
-                tempScope?.remove();
-                tempCanvas.remove();
-                this.log.debug("Cleaned up temporary paper.js scope");
-            }
-
-            return modifiedSVG;
+            return customPath;
         } catch (error) {
-            this.log.error("Error in _modifySVGPathWithOffset:", error.message);
+            this.log.error("Error modifying SVG path:", error);
             return svgPathString;
         }
     }

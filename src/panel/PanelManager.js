@@ -290,7 +290,7 @@ class PanelManager {
 
     /**
      * Update part front view
-     * Прямоугольник с полукруглой аркой сверху для теста paperjs-offset с кривыми Безье
+    * Прямоугольник с полукруглой аркой сверху для теста оффсета с кривыми Безье
      */
     updatePartFront() {
         let panelX, panelY;

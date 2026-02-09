@@ -38,7 +38,6 @@
     "makerjs": "^0.17.6",
     "manifold-3d": "^3.3.2",
     "paper": "^0.12.18",
-    "paperjs-offset": "^1.0.8",
     "three": "^0.182.0",
     "three-bvh-csg": "^0.0.17",
     "three-mesh-bvh": "^0.9.4",

@@ -267,7 +267,6 @@ class LoggerFactory {
         CanvasManager: "TwoD",
         Script: "TwoD",
         PanelManager: "TwoD",
-        PaperOffsetProcessor: "TwoD",
         BooleanOperationStrategy: "TwoD",
         BitsManager: "TwoD",
         BitsTableManager: "TwoD",

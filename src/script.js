@@ -10,7 +10,6 @@ import BitsManager from "./panel/BitsManager.js";
 import BitsTableManager from "./panel/BitsTableManager.js";
 import SelectionManager from "./selection/SelectionManager.js";
 import ExportModule from "./export/ExportModule.js";
-import { PaperOffsetCalculator } from "./operations/PaperOffsetProcessor.js";
 import { CustomOffsetCalculator } from "./operations/CustomOffsetProcessor.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
 import { paperCalculateResultPolygon } from "./operations/PaperBooleanProcessor.js";
@@ -1205,7 +1204,7 @@ async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = fa
 
 // Update offset contours for all bits
 /**
- * Calculates and renders offset contours for all bits using Paper.js offset algorithm.
+ * Calculates and renders offset contours for all bits using the custom offset algorithm.
  *
  * This is the core function for displaying tool paths. It:
  * - Calculates offset paths for each bit based on operation type (AL, OU, IN, VC)
@@ -1226,7 +1225,7 @@ async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = fa
  *    - depth = (passes - pass) × bit.y / passes
  *    - offset = bit.x - depth × tan(angle/2)
  * 4. Work offset (display only): offset from full depth = bit.x - bit.y × tan(angle/2)
- * 5. Guard: if work offset distance ≈ 0, use original partFront path (avoids Paper.js error)
+ * 5. Guard: if work offset distance ≈ 0, use original partFront path (avoids zero-offset issues)
  *
  * **2D Display:**
  * - Base offset (pass 0): black dashed, always displayed
@@ -1286,11 +1285,8 @@ function updateOffsetContours() {
     const exportModule = app.getModule("export");
 
     // Create offset calculator with arc approximation enabled for consistency with DXF export
-    const OffsetCalculatorClass = window.usePaperOffset
-        ? PaperOffsetCalculator
-        : CustomOffsetCalculator;
     const forceReverseOutput = window.forceReverseOffset !== false;
-    const offsetCalculator = new OffsetCalculatorClass({
+    const offsetCalculator = new CustomOffsetCalculator({
         useArcApproximation: true, // Enable Bezier → Arc approximation
         arcTolerance: ARC_APPROX_TOLERANCE, // RMS tolerance (same as DXF export)
         exportModule: exportModule, // For parseSVGPathSegments and optimizeSegmentsToArcs

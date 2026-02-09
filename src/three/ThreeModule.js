@@ -2,8 +2,6 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import { ADDITION, Brush, Evaluator, SUBTRACTION } from "three-bvh-csg";
-import paper from "paper";
-import { PaperOffset } from "paperjs-offset";
 import BaseModule from "../core/BaseModule.js";
 import { LoggerFactory } from "../core/LoggerFactory.js";
 import eventBus from "../core/eventBus.js";
@@ -17,6 +15,7 @@ import STLExporter from "../export/STLExporter.js";
 import ColorUtils from "../utils/ColorUtils.js";
 import { getRepairInstance } from "../utils/meshRepair.js";
 import { appConfig } from "../config/AppConfig.js";
+import { calculateOffsetFromPathData } from "../operations/CustomOffsetProcessor.js";
 
 export default class ThreeModule extends BaseModule {
     constructor() {
@@ -2301,99 +2300,46 @@ export default class ThreeModule extends BaseModule {
         transformOptions,
     ) {
         try {
-            // Create temporary paper.js scope
-            const tempCanvas = document.createElement("canvas");
-            const tempScope = new paper.PaperScope();
-            tempScope.setup(tempCanvas);
-
             // Offset distances: inward for main, outward for phantom
             const offsetDist = diameter / 2;
+            const exportModule =
+                window?.dependencyContainer?.get?.("export") ||
+                window?.app?.container?.get?.("export");
 
-            // Parse and offset main path (inward)
-            const mainPath = new tempScope.Path(mainPathData);
-            mainPath.closed = true;
-            const mainOffsetResult = PaperOffset.offset(mainPath, -offsetDist, {
-                join: "miter",
-                cap: "butt",
-                limit: 10,
-                insert: false,
-            });
-            const mainOffset = Array.isArray(mainOffsetResult)
-                ? mainOffsetResult[0]
-                : mainOffsetResult;
+            const outerSVG = calculateOffsetFromPathData(
+                mainPathData,
+                -offsetDist,
+                {
+                    join: "miter",
+                    cap: "butt",
+                    limit: 10,
+                    useArcApproximation: true,
+                    exportModule,
+                    forceReverseOutput: window?.forceReverseOffset !== false,
+                },
+            );
 
-            if (!mainOffset) {
+            if (!outerSVG) {
                 this.log.warn("Failed to create main offset path for filler");
-                mainPath.remove();
-                tempScope.remove();
-                tempCanvas.remove();
                 return [];
             }
 
-            // Get SVG path data
-            let outerSVG = mainOffset.pathData;
-            let innerSVG = null;
+            const innerSVG = phantomPathData
+                ? calculateOffsetFromPathData(phantomPathData, offsetDist, {
+                      join: "miter",
+                      cap: "butt",
+                      limit: 10,
+                      useArcApproximation: true,
+                      exportModule,
+                      forceReverseOutput:
+                          window?.forceReverseOffset !== false,
+                  })
+                : null;
 
-            // Parse and offset phantom path only if provided (not in full removal mode)
-            let phantomPath = null;
-            let phantomOffset = null;
-
-            if (phantomPathData) {
-                phantomPath = new tempScope.Path(phantomPathData);
-                phantomPath.closed = true;
-                const phantomOffsetResult = PaperOffset.offset(
-                    phantomPath,
-                    offsetDist,
-                    {
-                        join: "miter",
-                        cap: "butt",
-                        limit: 10,
-                        insert: false,
-                    },
-                );
-                phantomOffset = Array.isArray(phantomOffsetResult)
-                    ? phantomOffsetResult[0]
-                    : phantomOffsetResult;
-
-                if (!phantomOffset) {
-                    this.log.warn(
-                        "Failed to create phantom offset path for filler",
-                    );
-                    mainPath.remove();
-                    if (phantomPath) phantomPath.remove();
-                    mainOffset.remove();
-                    tempScope.remove();
-                    tempCanvas.remove();
-                    return [];
-                }
-
-                innerSVG = phantomOffset.pathData;
+            if (phantomPathData && !innerSVG) {
+                this.log.warn("Failed to create phantom offset path for filler");
+                return [];
             }
-
-            // Apply arc approximation if available
-            try {
-                const exportModule =
-                    window?.dependencyContainer?.get?.("export") ||
-                    window?.app?.container?.get?.("export");
-                if (exportModule) {
-                    const { approximatePath } =
-                        await import("../utils/arcApproximation.js");
-                    outerSVG =
-                        approximatePath(outerSVG, exportModule) || outerSVG;
-                    innerSVG =
-                        approximatePath(innerSVG, exportModule) || innerSVG;
-                }
-            } catch (e) {
-                this.log.debug("Arc approximation skipped for filler", e);
-            }
-
-            // Clean up paper.js objects
-            mainPath.remove();
-            if (phantomPath) phantomPath.remove();
-            mainOffset.remove();
-            if (phantomOffset) phantomOffset.remove();
-            tempScope.remove();
-            tempCanvas.remove();
 
             // Parse SVG paths to THREE.js curves and transform to 3D
             const {
