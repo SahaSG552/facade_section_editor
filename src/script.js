@@ -11,6 +11,7 @@ import BitsTableManager from "./panel/BitsTableManager.js";
 import SelectionManager from "./selection/SelectionManager.js";
 import ExportModule from "./export/ExportModule.js";
 import { PaperOffsetCalculator } from "./operations/PaperOffsetProcessor.js";
+import { CustomOffsetCalculator } from "./operations/CustomOffsetProcessor.js";
 import { getOperationsForGroup } from "./data/bitsStore.js";
 import { paperCalculateResultPolygon } from "./operations/PaperBooleanProcessor.js";
 import LoggerFactory from "./core/LoggerFactory.js";
@@ -1302,11 +1303,19 @@ function updateOffsetContours() {
     const exportModule = app.getModule("export");
 
     // Create Paper.js offset calculator with arc approximation enabled for consistency with DXF export
-    const offsetCalculator = new PaperOffsetCalculator({
+    const OffsetCalculatorClass = window.usePaperOffset
+        ? PaperOffsetCalculator
+        : CustomOffsetCalculator;
+    const offsetCalculator = new OffsetCalculatorClass({
         useArcApproximation: true, // Enable Bezier → Arc approximation
         arcTolerance: ARC_APPROX_TOLERANCE, // RMS tolerance (same as DXF export)
         exportModule: exportModule, // For parseSVGPathSegments and optimizeSegmentsToArcs
+        forceReverseOutput: true,
     });
+
+    if (window.usePaperOffset && window.forceReverseOffset === undefined) {
+        window.forceReverseOffset = true;
+    }
 
     // Make offsetCalculator and helper functions available globally for ThreeModule
     window.offsetCalculator = offsetCalculator;

@@ -17,6 +17,7 @@ import { PaperOffset } from "paperjs-offset";
 
 import LoggerFactory from "../core/LoggerFactory.js";
 import { approximatePath } from "../utils/arcApproximation.js";
+import { calculateOffsetFromPathData } from "../operations/CustomOffsetProcessor.js";
 import { getRepairInstance } from "../utils/meshRepair.js";
 import { appConfig } from "../config/AppConfig.js";
 
@@ -1742,6 +1743,29 @@ export default class ExtrusionBuilder {
      */
     _modifySVGPathWithOffset(svgPathString, offset, cornerStyle) {
         try {
+            if (window?.useCustomOffset) {
+                const exportModule =
+                    window?.dependencyContainer?.get?.("export") ||
+                    window?.app?.container?.get?.("export");
+                if (exportModule) {
+                    const customPath = calculateOffsetFromPathData(
+                        svgPathString,
+                        offset,
+                        {
+                            join: cornerStyle === "round" ? "round" : cornerStyle,
+                            cap: "butt",
+                            limit: 10,
+                            useArcApproximation: true,
+                            exportModule,
+                            forceReverseOutput: true,
+                        }
+                    );
+                    if (customPath) {
+                        return customPath;
+                    }
+                }
+            }
+
             // Check if paper.js is available
             if (typeof paper === "undefined" || !paper.Path) {
                 this.log.warn("paper.js not available for path modification");
