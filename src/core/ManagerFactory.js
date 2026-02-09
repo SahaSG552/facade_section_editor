@@ -5,7 +5,6 @@
  */
 
 import CanvasManager from "../canvas/CanvasManager.js";
-import { PaperCanvasManager } from "../canvas/PaperCanvasManager.js";
 import BitsManager from "../panel/BitsManager.js";
 import BitsTableManager from "../panel/BitsTableManager.js";
 import SelectionManager from "../selection/SelectionManager.js";
@@ -50,19 +49,6 @@ export class ManagerFactory {
         });
     }
 
-    /**
-     * Create PaperCanvasManager for Paper.js rendering
-     * @param {HTMLElement} canvas
-     * @returns {PaperCanvasManager|null}
-     */
-    createPaperCanvasManager(canvas) {
-        try {
-            return new PaperCanvasManager(canvas);
-        } catch (error) {
-            console.warn("Paper.js not available:", error.message);
-            return null;
-        }
-    }
 
     /**
      * Create BitsManager for bit visual rendering
@@ -186,10 +172,7 @@ export class ManagerFactory {
             allCallbacks.onZoom
         );
 
-        // 2. Create Paper canvas manager
-        const paperCanvasManager = this.createPaperCanvasManager(canvas);
-
-        // 3. Create BitsManager (depends on canvasManager)
+        // 2. Create BitsManager (depends on canvasManager)
         const bitsManager = this.createBitsManager(canvasManager);
 
         // 4. Create SelectionManager (depends on bitsManager)
@@ -222,7 +205,6 @@ export class ManagerFactory {
 
         return {
             canvas: canvasManager,
-            paper: paperCanvasManager,
             bits: bitsManager,
             selection: selectionManager,
             interaction: interactionManager,

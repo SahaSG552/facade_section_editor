@@ -1743,7 +1743,7 @@ export default class ExtrusionBuilder {
      */
     _modifySVGPathWithOffset(svgPathString, offset, cornerStyle) {
         try {
-            if (window?.useCustomOffset) {
+            if (!window?.usePaperOffset) {
                 const exportModule =
                     window?.dependencyContainer?.get?.("export") ||
                     window?.app?.container?.get?.("export");
@@ -1757,7 +1757,8 @@ export default class ExtrusionBuilder {
                             limit: 10,
                             useArcApproximation: true,
                             exportModule,
-                            forceReverseOutput: true,
+                            forceReverseOutput:
+                                window?.forceReverseOffset !== false,
                         }
                     );
                     if (customPath) {

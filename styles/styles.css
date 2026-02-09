@@ -266,21 +266,6 @@ html {
   height: 100%;
 }
 
-#paper-canvas-container {
-  flex: 1;
-  display: none;
-  position: relative;
-  overflow: hidden;
-  background: hsl(var(--background));
-  min-height: 0;
-  border-left: 1px solid hsl(var(--border));
-}
-
-#paper-canvas-container canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
 
 #three-canvas-container canvas {
   width: 100%;
@@ -293,31 +278,11 @@ html {
   display: flex;
 }
 
-#app.view-2d #paper-canvas-container {
-  display: none;
-}
-
 #app.view-2d #three-canvas-container {
   display: none;
 }
 
-#app.view-2dp #canvas-container {
-  display: none;
-}
-
-#app.view-2dp #paper-canvas-container {
-  display: flex;
-}
-
-#app.view-2dp #three-canvas-container {
-  display: none;
-}
-
 #app.view-3d #canvas-container {
-  display: none;
-}
-
-#app.view-3d #paper-canvas-container {
   display: none;
 }
 
@@ -327,27 +292,9 @@ html {
   height: 100%;
 }
 
-#app.view-2d-2dp #canvas-container {
-  display: flex;
-  flex: 1;
-}
-
-#app.view-2d-2dp #paper-canvas-container {
-  display: flex;
-  flex: 1;
-}
-
-#app.view-2d-2dp #three-canvas-container {
-  display: none;
-}
-
 #app.view-both #canvas-container {
   display: flex;
   flex: 1;
-}
-
-#app.view-both #paper-canvas-container {
-  display: none;
 }
 
 #app.view-both #three-canvas-container {
@@ -1159,25 +1106,8 @@ html {
     flex: 1;
   }
 
-  #app.view-both #paper-canvas-container {
-    display: none;
-  }
-
   #app.view-both #three-canvas-container {
     display: none; /* On mobile, "Both" mode shows only 2D */
-  }
-
-  #app.view-2d-2dp #canvas-container {
-    display: flex;
-    flex: 1;
-  }
-
-  #app.view-2d-2dp #paper-canvas-container {
-    display: none;
-  }
-
-  #app.view-2d-2dp #three-canvas-container {
-    display: none;
   }
 
   /* Hide view toggle text on mobile, make buttons smaller */

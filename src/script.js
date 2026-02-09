@@ -20,7 +20,6 @@ import appState from "./state/AppState.js";
 import csgScheduler from "./scheduling/CSGScheduler.js";
 import InteractionManager from "./interaction/InteractionManager.js";
 import PanelManager from "./panel/PanelManager.js";
-import { PaperCanvasManager } from "./canvas/PaperCanvasManager.js";
 import SVGElementFactory from "./canvas/SVGElementFactory.js";
 import ExtensionCalculator from "./bits/ExtensionCalculator.js";
 import PhantomBitCalculator from "./bits/PhantomBitCalculator.js";
@@ -81,7 +80,6 @@ let operationsRows = [];
 
 // Canvas manager instance
 let mainCanvasManager;
-let paperCanvasManager;
 let bitsManager;
 let bitsTableManager;
 let interactionManager;
@@ -295,19 +293,6 @@ function initializeSVG() {
         resizeObserver.observe(canvas);
     }
 
-    // Initialize Paper.js canvas manager
-    if (!paperCanvasManager) {
-        try {
-            paperCanvasManager = new PaperCanvasManager("paper-canvas");
-            window.paperCanvasManager = paperCanvasManager;
-            log.info("Paper.js canvas initialized");
-
-            // Run demo to show capabilities
-            // paperCanvasManager.demo(); // Uncomment to run demo
-        } catch (error) {
-            log.error("Failed to initialize Paper.js canvas:", error);
-        }
-    }
 
     // **PHASE 1 REFACTORING** - Initialize coordinate helper after mainCanvasManager is ready
     if (!panelCoordinateHelper) {
@@ -1296,26 +1281,21 @@ function updateOffsetContours() {
         panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     }
     const anchorOffset = { x: 0, y: 0 }; // Always use top anchor for calculations
-    const anchorX = panelX + anchorOffset.x;
-    const anchorY = panelY + anchorOffset.y;
 
     // Get ExportModule for arc approximation
     const exportModule = app.getModule("export");
 
-    // Create Paper.js offset calculator with arc approximation enabled for consistency with DXF export
+    // Create offset calculator with arc approximation enabled for consistency with DXF export
     const OffsetCalculatorClass = window.usePaperOffset
         ? PaperOffsetCalculator
         : CustomOffsetCalculator;
+    const forceReverseOutput = window.forceReverseOffset !== false;
     const offsetCalculator = new OffsetCalculatorClass({
         useArcApproximation: true, // Enable Bezier → Arc approximation
         arcTolerance: ARC_APPROX_TOLERANCE, // RMS tolerance (same as DXF export)
         exportModule: exportModule, // For parseSVGPathSegments and optimizeSegmentsToArcs
-        forceReverseOutput: true,
+        forceReverseOutput: forceReverseOutput,
     });
-
-    if (window.usePaperOffset && window.forceReverseOffset === undefined) {
-        window.forceReverseOffset = true;
-    }
 
     // Make offsetCalculator and helper functions available globally for ThreeModule
     window.offsetCalculator = offsetCalculator;
@@ -1358,7 +1338,7 @@ function updateOffsetContours() {
                         ? topAnchorCoords.x // Pass 0: base offset
                         : offsets[offsets.length - passIndex]; // Pass 1+: reverse order
 
-                // Calculate offset contour using Paper.js (preserves Bezier curves)
+                // Calculate offset contour using the selected offset engine
                 const offsetData = offsetCalculator.calculateOffsetFromSVG(
                     partFront,
                     offsetDistance
@@ -1428,7 +1408,7 @@ function updateOffsetContours() {
                     `[VC] Work offset = 0, using original partFront contour`
                 );
             } else {
-                // Use Paper.js direct SVG import to preserve Bezier curves
+                // Use offset engine to preserve curves
                 workOffsetData = offsetCalculator.calculateOffsetFromSVG(
                     partFront,
                     workOffsetDistance
@@ -1611,7 +1591,7 @@ function updateOffsetContours() {
             }
             // AL uses bit.x as is
 
-            // Use Paper.js offset calculator (preserves Bezier curves)
+            // Use offset calculator (preserves Bezier curves)
             const offsetData = offsetCalculator.calculateOffsetFromSVG(
                 partFront,
                 offsetDistance
@@ -3680,12 +3660,10 @@ async function initializeModularSystem() {
     }
 }
 
-// Setup view toggle buttons (2D/2Dp/3D/2D-2Dp/Both)
+// Setup view toggle buttons (2D/3D/Both)
 function setupViewToggle(threeModule) {
     const view2DBtn = document.getElementById("view-2d");
-    const view2DpBtn = document.getElementById("view-2dp");
     const view3DBtn = document.getElementById("view-3d");
-    const view2D2DpBtn = document.getElementById("view-2d-2dp");
     const viewBothBtn = document.getElementById("view-both");
     const appContainer = document.getElementById("app");
 
@@ -3693,7 +3671,7 @@ function setupViewToggle(threeModule) {
 
     // Function to update active button state
     function updateActiveButton(activeBtn) {
-        [view2DBtn, view2DpBtn, view3DBtn, view2D2DpBtn, viewBothBtn].forEach(
+        [view2DBtn, view3DBtn, viewBothBtn].forEach(
             (btn) => {
                 btn.classList.remove("active");
             }
@@ -3705,16 +3683,12 @@ function setupViewToggle(threeModule) {
     function switchView(view) {
         currentView = view;
 
-        // Map UI view to appState viewMode (2dp and 2d-2dp map to 2d for gating)
         const mode = view === "3d" ? "3d" : view === "both" ? "both" : "2d";
         appState.setViewMode(mode);
 
         // Remove all view classes
         appContainer.classList.remove(
-            "view-2d",
-            "view-2dp",
             "view-3d",
-            "view-2d-2dp",
             "view-both"
         );
 
@@ -3729,12 +3703,6 @@ function setupViewToggle(threeModule) {
                     scheduleCsgIfNeeded();
                 }
             });
-        }
-
-        // Update Paper.js view if switching to 2dp or 2d-2dp
-        if (paperCanvasManager && (view === "2dp" || view === "2d-2dp")) {
-            // Синхронизируем данные из SVG в Paper.js
-            syncSVGtoPaper();
         }
 
         // Handle resize for canvas managers
@@ -3755,14 +3723,6 @@ function setupViewToggle(threeModule) {
             }, 50);
         }
 
-        // Handle Paper.js resize
-        if (paperCanvasManager && (view === "2dp" || view === "2d-2dp")) {
-            setTimeout(() => {
-                if (paperCanvasManager.view) {
-                    paperCanvasManager.view.update();
-                }
-            }, 100);
-        }
     }
 
     // 2D view button (SVG)
@@ -3771,22 +3731,10 @@ function setupViewToggle(threeModule) {
         updateActiveButton(view2DBtn);
     });
 
-    // 2Dp view button (Paper.js)
-    view2DpBtn.addEventListener("click", () => {
-        switchView("2dp");
-        updateActiveButton(view2DpBtn);
-    });
-
     // 3D view button
     view3DBtn.addEventListener("click", () => {
         switchView("3d");
         updateActiveButton(view3DBtn);
-    });
-
-    // 2D + 2Dp views button
-    view2D2DpBtn.addEventListener("click", () => {
-        switchView("2d-2dp");
-        updateActiveButton(view2D2DpBtn);
     });
 
     // Both views button (2D + 3D)
@@ -3835,51 +3783,6 @@ async function updateThreeView(changedBitIds = null) {
     return true;
 }
 
-// Function to sync SVG data to Paper.js canvas
-function syncSVGtoPaper() {
-    if (!paperCanvasManager) return;
-
-    log.info("Syncing SVG → Paper.js...");
-
-    try {
-        // Clear existing Paper.js content
-        paperCanvasManager.clear();
-
-        // 1. Create panel in Paper.js
-        if (panelWidth && panelThickness) {
-            paperCanvasManager.createPanel(panelWidth, 0, panelThickness);
-        }
-
-        // 2. Add bits to Paper.js
-        const visibleBits = getVisibleBits();
-        if (visibleBits.length > 0) {
-            visibleBits.forEach((bit) => {
-                paperCanvasManager.addBit({
-                    id: bit.id,
-                    x: bit.x,
-                    y: bit.y,
-                    diameter: bit.diameter || bit.width || 10,
-                });
-            });
-        }
-
-        // 3. Create offset contours (если они есть в SVG)
-        if (paperCanvasManager.panelPath) {
-            // Примеры offset для демонстрации
-            paperCanvasManager.createOffset(paperCanvasManager.panelPath, -2);
-            paperCanvasManager.createOffset(paperCanvasManager.panelPath, 2);
-        }
-
-        // 4. Fit to view
-        setTimeout(() => {
-            paperCanvasManager.fitToView();
-        }, 100);
-
-        log.info("SVG → Paper.js sync complete");
-    } catch (error) {
-        log.error("Failed to sync SVG to Paper.js:", error);
-    }
-}
 
 function setupMaterialSelector() {
     const select = document.getElementById("material-select");

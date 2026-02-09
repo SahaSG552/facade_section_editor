@@ -272,7 +272,6 @@ class LoggerFactory {
         BitsManager: "TwoD",
         BitsTableManager: "TwoD",
         SelectionManager: "TwoD",
-        PaperCanvasManager: "TwoD",
         CSGScheduler: "CSG",
     };
 

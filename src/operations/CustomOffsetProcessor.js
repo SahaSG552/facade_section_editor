@@ -11,6 +11,20 @@ import { buildFilletArc, getPathOrientation } from "../utils/fillet.js";
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 const EPSILON = 1e-6;
 
+/**
+ * @typedef {Object} CustomOffsetOptions
+ * @property {"miter"|"bevel"|"round"} [join]
+ * @property {"butt"|"round"} [cap]
+ * @property {number} [limit]
+ * @property {"all"|"inner"|"outer"} [cornerSelection]
+ * @property {boolean} [useArcApproximation]
+ * @property {number} [arcTolerance]
+ * @property {Object} [exportModule]
+ * @property {boolean} [forceReverseOutput]
+ * @property {number} [stitchTolerance]
+ * @property {number} [outputPrecision]
+ */
+
 function distance(a, b) {
     return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
 }
@@ -785,7 +799,7 @@ function normalizeArcAngles(segment) {
  * Calculate offset for SVG path data using custom geometry.
  * @param {string} pathData - SVG path data
  * @param {number} offset - Offset distance (same sign convention as PaperOffsetProcessor)
- * @param {Object} options - Offset options
+ * @param {CustomOffsetOptions} options - Offset options
  * @returns {string} SVG path data
  */
 export function calculateOffsetFromPathData(pathData, offset, options = {}) {
@@ -875,7 +889,7 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
  * Calculate offset for SVG element.
  * @param {SVGElement} svgElement - SVG element (path, rect, polygon)
  * @param {number} offset - Offset distance
- * @param {Object} options - Offset options
+ * @param {CustomOffsetOptions} options - Offset options
  * @returns {string} SVG path data
  */
 export function calculateOffsetFromSVG(svgElement, offset, options = {}) {
@@ -897,6 +911,9 @@ export function calculateOffsetFromSVG(svgElement, offset, options = {}) {
  * Custom offset calculator with a PaperOffset-compatible API.
  */
 export class CustomOffsetCalculator {
+    /**
+     * @param {CustomOffsetOptions} options
+     */
     constructor(options = {}) {
         this.options = options;
     }
