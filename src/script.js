@@ -3010,7 +3010,6 @@ function updatePartShape() {
     const panelSection = document.getElementById("panel-section");
 
     // Use BooleanOperationStrategy to calculate result polygon
-    // Pass panel dimensions in options for maker.js engine
     const result = booleanOperationStrategy.calculateResultPolygon(
         panelSection,
         getVisibleBits(),

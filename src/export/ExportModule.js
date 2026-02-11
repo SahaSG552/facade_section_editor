@@ -74,8 +74,6 @@ class ExportModule extends BaseModule {
  * Exports SVG elements to DXF format for CAD systems
  */
 
-const makerjs = require("makerjs");
-
 class DXFExporter {
     constructor() {
         this.dxfContent = [];

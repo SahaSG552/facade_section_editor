@@ -44,7 +44,6 @@ src/
 ├── utils/
 │   ├── utils.js            # General utility functions
 │   ├── offsetCalculator.js # V-Carve offset calculations
-│   ├── makerProcessor.js   # Polygon processing
 │   └── dxfExporter.js      # DXF format handling
 └── app/
     └── main.js             # Application entry point

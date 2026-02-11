@@ -85,8 +85,7 @@ All public methods must have JSDoc with:
 ### External Dependencies
 - **Three.js**: 3D visualization with BVH-CSG
 - **manifold-3d**: Geometric processing and CSG operations
-- **Paper.js**: 2D path processing and offset calculations
-- **Maker.js**: Path processing and DXF export
+- **Paper.js**: 2D path processing and offset calculations and DXF export
 
 ### Cross-Module Communication
 - **Event Bus**: Global events for application state changes
