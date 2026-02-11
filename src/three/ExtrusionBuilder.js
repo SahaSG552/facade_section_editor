@@ -275,16 +275,13 @@ export default class ExtrusionBuilder {
         this.edgeMatcher = new MeshEdgeMatcher(0.001);
 
         // Public configuration for adaptive curve segmentation
-        // Can be changed from console: extrusionBuilder.curveSegmentCoefficient = 3
         this.curveSegmentCoefficient = 0.5; // segments per mm
         this.curveSegmentMin = 16;
         this.curveSegmentMax = 64;
 
-        // Arc approximation coefficient: samples = arcLength / coefficient
-        // Same as ThreeModule.arcDivisionCoefficient for consistency
-        // Can be changed from console: extrusionBuilder.arcDivisionCoefficient = 5
-        this.arcDivisionCoefficient = 5; // 1 sample point per 5mm of arc length
-        this.latheDivisionCoefficient = 0.5; // 1 sample point per 5mm of arc length
+        // Arc and lathe approximation coefficients (adjustable from console)
+        this.arcDivisionCoefficient = 5; // Arc/curve sampling: 1 point per 5mm
+        this.latheDivisionCoefficient = 0.5; // Lathe sampling: 1 segment per 0.5mm arc length
         this.arcAngleStep = 5; // Degrees per segment for Arc (A) commands
         this.arcSegmentationMode = 'length'; // 'length' or 'angle'
         this.profileOverlap = 0.01; // Overlap added to profile width to prevent gaps (mm)
@@ -1955,12 +1952,44 @@ export default class ExtrusionBuilder {
     }
 
     /**
-     * Internal: Create round extrusion with half-profile (outer side) and partial lathe junctions
+     * Internal: Create round extrusion with half-profile (outer side) and partial lathe junctions.
+     * 
+     * For junctions with angles ≥ 2°: creates partial lathe geometry for smooth transitions.
+     * For micro-angles < 2°: skips lathe and directly merges vertices to avoid self-intersection.
+     * 
      * @private
      */
     _extrudeRound(profile, pathOrString, color, side = "top", options = {}) {
         try {
             let path;
+
+            // Helper: Get precise curve tangent at parameter t for junction angle calculation
+            const getCurveTangent = (curve, t) => {
+                if (curve && typeof curve.getTangent === "function") {
+                    const tangent = curve.getTangent(t);
+                    if (tangent && tangent.lengthSq() > 1e-12) {
+                        return tangent.clone().normalize();
+                    }
+                }
+
+                // Fallback: numerical derivative with small epsilon
+                if (!curve || typeof curve.getPoint !== "function") {
+                    return new THREE.Vector3(1, 0, 0);
+                }
+
+                const eps = 1e-4;
+                const t0 = Math.max(0, Math.min(1, t - eps));
+                const t1 = Math.max(0, Math.min(1, t + eps));
+                const p0 = curve.getPoint(t0);
+                const p1 = curve.getPoint(t1);
+                const delta = new THREE.Vector3().subVectors(p1, p0);
+
+                if (delta.lengthSq() < 1e-12) {
+                    return new THREE.Vector3(1, 0, 0);
+                }
+
+                return delta.normalize();
+            };
 
             if (typeof pathOrString === "string") {
                 const pathCurves = this.parsePathToCurves(pathOrString);
@@ -2170,6 +2199,8 @@ export default class ExtrusionBuilder {
                 mesh.userData.groupIndex = groupIndex;
                 mesh.userData.groupType = group.type;
                 mesh.userData.halfProfile = outsideHalf;
+                mesh.userData.contourPointCount = contourPoints.length;
+                mesh.userData.profilePointCount = halfProfilePoints.length;
 
                 allMeshes.push(mesh);
             }
@@ -2203,44 +2234,57 @@ export default class ExtrusionBuilder {
                         currentGroup.curves[currentGroup.curves.length - 1];
                     const firstCurve = nextGroup.curves[0];
 
-                    const t1 = 0.9;
-                    const t2 = 0.1;
-                    const prevPoint = lastCurve.getPoint(t1);
-                    const nextPoint = firstCurve.getPoint(t2);
-                    const prevDir = new THREE.Vector3()
-                        .subVectors(junction.point, prevPoint)
-                        .normalize();
-                    const nextDir = new THREE.Vector3()
-                        .subVectors(nextPoint, junction.point)
-                        .normalize();
+                    const prevDir = getCurveTangent(lastCurve, 1);
+                    const nextDir = getCurveTangent(firstCurve, 0);
 
-                    const latheResult = this.createPartialLatheAtJunction(
-                        profile,
-                        junction.point,
-                        prevDir,
-                        nextDir,
-                        color,
-                        i,
-                        true,
-                        null,
-                        contourIsClockwise,
-                        side,
-                        !!options.isExtension,
-                        extensionHeight,
-                        lathePoints,
-                        0,
-                        false,
+                    // Calculate angle between segment directions for micro-angle detection
+                    const angleBetween = Math.acos(
+                        Math.max(-1, Math.min(1, prevDir.dot(nextDir)))
                     );
+                    
+                    // Micro-angle threshold: ~2° - below this, skip lathe to avoid self-intersection
+                    const MICRO_ANGLE_THRESHOLD = THREE.MathUtils.degToRad(2);
+                    
+                    if (angleBetween < MICRO_ANGLE_THRESHOLD) {
+                        // Micro-angle detected: skip lathe creation and merge vertices directly
+                        this.log.debug(
+                            `Junction ${i}: micro-angle (${THREE.MathUtils.radToDeg(
+                                angleBetween,
+                            ).toFixed(2)}°) - merging profile vertices instead of lathe`,
+                        );
+                        junction.isMicroAngle = true;
+                        junction.prevGroupIndex = groupIndex;
+                        junction.nextGroupIndex = groupIndex + 1;
+                    } else {
+                        // Regular lathe for larger angles
+                        const latheResult = this.createPartialLatheAtJunction(
+                            profile,
+                            junction.point,
+                            prevDir,
+                            nextDir,
+                            color,
+                            i,
+                            true,
+                            null,
+                            contourIsClockwise,
+                            side,
+                            !!options.isExtension,
+                            extensionHeight,
+                            lathePoints,
+                            0,
+                            false,
+                        );
 
-                    if (latheResult && latheResult.mesh) {
-                        const latheMesh = latheResult.mesh;
-                        latheMesh.userData.isBitPart = true;
-                        latheMesh.userData.isLatheCorner = true;
-                        latheMesh.userData.isPartialLathe = true;
-                        latheMesh.userData.junctionAfterGroup =
-                            junction.groupIndex;
-                        latheMesh.userData.halfProfile = outsideHalf;
-                        allMeshes.push(latheMesh);
+                        if (latheResult && latheResult.mesh) {
+                            const latheMesh = latheResult.mesh;
+                            latheMesh.userData.isBitPart = true;
+                            latheMesh.userData.isLatheCorner = true;
+                            latheMesh.userData.isPartialLathe = true;
+                            latheMesh.userData.junctionAfterGroup =
+                                junction.groupIndex;
+                            latheMesh.userData.halfProfile = outsideHalf;
+                            allMeshes.push(latheMesh);
+                        }
                     }
                 }
             }
@@ -2341,6 +2385,30 @@ export default class ExtrusionBuilder {
                         innerMesh.userData.halfProfile = innerHalf;
                         innerMesh.userData.isMergedInnerHalf = true;
                         allMeshes.push(innerMesh);
+                    }
+                }
+            }
+
+            // Merge profile vertices at micro-angle junctions for seamless connection
+            const microAngleJunctions = junctionPoints.filter(j => j.isMicroAngle);
+            if (microAngleJunctions.length > 0) {
+                this.log.debug(
+                    `Merging vertices at ${microAngleJunctions.length} micro-angle junction(s)`,
+                );
+                
+                for (const junction of microAngleJunctions) {
+                    const prevMesh = allMeshes.find(
+                        m => m.userData.groupIndex === junction.prevGroupIndex,
+                    );
+                    const nextMesh = allMeshes.find(
+                        m => m.userData.groupIndex === junction.nextGroupIndex,
+                    );
+                    
+                    if (prevMesh && nextMesh && prevMesh.geometry && nextMesh.geometry) {
+                        const merged = this._mergeMicroAngleVertices(prevMesh, nextMesh);
+                        this.log.debug(
+                            `  Junction ${junction.prevGroupIndex}→${junction.nextGroupIndex}: merged ${merged} vertices`,
+                        );
                     }
                 }
             }
@@ -3091,6 +3159,142 @@ export default class ExtrusionBuilder {
      * @param {string} half - "left" or "right"
      * @returns {Array<THREE.Vector2>}
      */
+    /**
+     * Merge vertices at micro-angle junction between two extrusion meshes.
+     * 
+     * When the angle between two adjacent segments is very small (< 2°), creating a lathe
+     * at the junction can cause self-intersecting geometry and non-manifold edges.
+     * Instead, this method directly merges the last profile slice of the previous segment
+     * with the first profile slice of the next segment by averaging their positions.
+     * 
+     * Uses nearest-neighbor matching with 1mm tolerance to handle slight profile misalignments.
+     * 
+     * @private
+     * @param {THREE.Mesh} prevMesh - Previous segment mesh (with userData.contourPointCount and profilePointCount)
+     * @param {THREE.Mesh} nextMesh - Next segment mesh (with userData.contourPointCount and profilePointCount)
+     * @returns {number} Number of successfully merged vertex pairs
+     */
+    _mergeMicroAngleVertices(prevMesh, nextMesh) {
+        try {
+            const profileCount = prevMesh.userData.profilePointCount || 0;
+            if (profileCount < 2) {
+                this.log.warn("Cannot merge micro-angle vertices: profilePointCount not set");
+                return 0;
+            }
+
+            const prevGeom = prevMesh.geometry;
+            const nextGeom = nextMesh.geometry;
+            const prevPos = prevGeom.attributes.position;
+            const nextPos = nextGeom.attributes.position;
+
+            const prevContourCount = prevMesh.userData.contourPointCount || 0;
+            const nextContourCount = nextMesh.userData.contourPointCount || 0;
+
+            if (prevContourCount < 1 || nextContourCount < 1) {
+                this.log.warn("Cannot merge: contourPointCount not set");
+                return 0;
+            }
+
+            // Last profile slice of prevMesh: vertices from (prevContourCount - 1) * profileCount
+            const prevSliceStart = (prevContourCount - 1) * profileCount;
+            
+            // First profile slice of nextMesh: vertices from 0 to profileCount
+            const nextSliceStart = 0;
+
+            // Update matrices to get world positions
+            prevMesh.updateMatrixWorld(true);
+            nextMesh.updateMatrixWorld(true);
+
+            const v1 = new THREE.Vector3();
+            const v2 = new THREE.Vector3();
+            const avgPos = new THREE.Vector3();
+            const invPrev = new THREE.Matrix4().copy(prevMesh.matrixWorld).invert();
+            const invNext = new THREE.Matrix4().copy(nextMesh.matrixWorld).invert();
+
+            let mergedCount = 0;
+            const tolerance = 1.0; // 1.0mm tolerance for micro-angle vertex matching
+
+            // Collect world positions for both slices
+            const prevSlicePositions = [];
+            const nextSlicePositions = [];
+
+            for (let i = 0; i < profileCount; i++) {
+                const prevIdx = prevSliceStart + i;
+                const nextIdx = nextSliceStart + i;
+
+                if (prevIdx < prevPos.count && nextIdx < nextPos.count) {
+                    const p1 = new THREE.Vector3()
+                        .fromBufferAttribute(prevPos, prevIdx)
+                        .applyMatrix4(prevMesh.matrixWorld);
+                    const p2 = new THREE.Vector3()
+                        .fromBufferAttribute(nextPos, nextIdx)
+                        .applyMatrix4(nextMesh.matrixWorld);
+                    
+                    prevSlicePositions.push({ index: prevIdx, pos: p1 });
+                    nextSlicePositions.push({ index: nextIdx, pos: p2 });
+                }
+            }
+
+            if (prevSlicePositions.length !== nextSlicePositions.length) {
+                this.log.warn(`Profile slice size mismatch: prev=${prevSlicePositions.length}, next=${nextSlicePositions.length}`);
+                return 0;
+            }
+
+            // Match and merge vertices by finding closest pairs
+            const matched = new Set();
+            
+            for (let i = 0; i < prevSlicePositions.length; i++) {
+                const prevItem = prevSlicePositions[i];
+                let bestDist = Infinity;
+                let bestIdx = -1;
+
+                // Find closest unmatched vertex in next slice
+                for (let j = 0; j < nextSlicePositions.length; j++) {
+                    if (matched.has(j)) continue;
+                    
+                    const nextItem = nextSlicePositions[j];
+                    const dist = prevItem.pos.distanceTo(nextItem.pos);
+                    
+                    if (dist < bestDist && dist < tolerance) {
+                        bestDist = dist;
+                        bestIdx = j;
+                    }
+                }
+
+                if (bestIdx >= 0) {
+                    const nextItem = nextSlicePositions[bestIdx];
+                    matched.add(bestIdx);
+
+                    // Average position in world space
+                    avgPos.addVectors(prevItem.pos, nextItem.pos).multiplyScalar(0.5);
+
+                    // Convert back to local space and update
+                    const localPrev = avgPos.clone().applyMatrix4(invPrev);
+                    const localNext = avgPos.clone().applyMatrix4(invNext);
+
+                    prevPos.setXYZ(prevItem.index, localPrev.x, localPrev.y, localPrev.z);
+                    nextPos.setXYZ(nextItem.index, localNext.x, localNext.y, localNext.z);
+
+                    mergedCount++;
+                }
+            }
+
+            if (mergedCount > 0) {
+                prevPos.needsUpdate = true;
+                nextPos.needsUpdate = true;
+                prevGeom.computeVertexNormals();
+                nextGeom.computeVertexNormals();
+                prevGeom.normalizeNormals();
+                nextGeom.normalizeNormals();
+            }
+
+            return mergedCount;
+        } catch (error) {
+            this.log.error("Error merging micro-angle vertices:", error.message);
+            return 0;
+        }
+    }
+
     /**
      * Calculate centroid of profile points
      * @private

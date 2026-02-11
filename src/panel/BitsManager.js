@@ -259,7 +259,7 @@ export default class BitsManager {
                 // Fillet cutter: cylindrical part + fillet profile
                 // For R-type cutters: ensure minimum flat value of 0.2 to avoid sharp point issues
                 // User-entered value is preserved for UI display, but minimum 0.2 is used for geometry
-                const effectiveFlat = Math.max(bit.flat || 0, 0.2);
+                const effectiveFlat = Math.max(bit.flat || 0, 0);
                 arcRad = bit.cornerRadius;
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
