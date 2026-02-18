@@ -9,6 +9,7 @@ import {
 import CanvasManager from "../canvas/CanvasManager.js";
 import { evaluateMathExpression } from "../utils/utils.js";
 import { getSVGBounds } from "../canvas/zoomUtils.js";
+import variablesManager from "../data/VariablesManager.js";
 
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -190,6 +191,36 @@ export default class BitsManager {
         return svg;
     }
 
+    // Validate all numeric parameters for bit shape
+    validateBitShapeParams(bit, groupName) {
+        const required = ['diameter', 'length'];
+        const typeSpecific = {
+            conical: ['angle'],
+            ball: ['height'],
+            fillet: ['height', 'cornerRadius', 'flat'],
+            bull: ['height', 'cornerRadius', 'flat']
+        };
+        
+        // Check base required params
+        for (const param of required) {
+            const val = bit[param];
+            if (val === undefined || val === null || isNaN(val) || !isFinite(val)) {
+                return false;
+            }
+        }
+        
+        // Check type-specific params
+        const specific = typeSpecific[groupName] || [];
+        for (const param of specific) {
+            const val = bit[param];
+            if (val === undefined || val === null || isNaN(val) || !isFinite(val)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
     // Create bit shape element based on parameters
     createBitShapeElement(
         bit,
@@ -204,14 +235,12 @@ export default class BitsManager {
         const group = document.createElementNS(svgNS, "g");
 
         let bitShape;
-        // Радиус дуги (формула через хорду и стрелу подъёма)
-        let A = { x: x + bit.diameter / 2, y: y - bit.height };
-        let B = { x: x - bit.diameter / 2, y: y - bit.height };
-        let arcRad =
-            bit.height / 2 +
-            (this.distancePtToPt(A, B) * this.distancePtToPt(A, B)) /
-                (8 * bit.height);
-
+        
+        // Validate ALL required parameters before creating any SVG elements
+        if (!bit || !this.validateBitShapeParams(bit, groupName)) {
+            return group; // Return empty group - don't create invalid paths
+        }
+        
         // Get the fill color with proper opacity
         const fillColor = this.getBitFillColor(bit, isSelected);
 
@@ -224,12 +253,14 @@ export default class BitsManager {
                 bitShape.setAttribute("height", bit.length);
                 bitShape.setAttribute("fill", fillColor);
                 break;
-            case "conical":
+            case "conical": {
                 const oppositeAngle = bit.angle;
                 const hypotenuse = bit.diameter;
                 const height =
                     (hypotenuse / 2) *
                     (1 / Math.tan(this.angleToRad(oppositeAngle / 2)));
+                // Validate calculated height
+                if (isNaN(height) || !isFinite(height)) return group;
                 const points = [
                     `${x},${y}`,
                     `${x - hypotenuse / 2},${y - height}`,
@@ -241,7 +272,17 @@ export default class BitsManager {
                 bitShape.setAttribute("points", points);
                 bitShape.setAttribute("fill", fillColor);
                 break;
-            case "ball":
+            }
+            case "ball": {
+                // Радиус дуги (формула через хорду и стрелу подъёма)
+                const A = { x: x + bit.diameter / 2, y: y - bit.height };
+                const B = { x: x - bit.diameter / 2, y: y - bit.height };
+                const arcRad =
+                    bit.height / 2 +
+                    (this.distancePtToPt(A, B) * this.distancePtToPt(A, B)) /
+                        (8 * bit.height);
+                // Validate arc radius
+                if (isNaN(arcRad) || !isFinite(arcRad) || arcRad <= 0) return group;
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
                     "d",
@@ -255,12 +296,13 @@ export default class BitsManager {
                 );
                 bitShape.setAttribute("fill", fillColor);
                 break;
-            case "fillet":
+            }
+            case "fillet": {
                 // Fillet cutter: cylindrical part + fillet profile
-                // For R-type cutters: ensure minimum flat value of 0.2 to avoid sharp point issues
-                // User-entered value is preserved for UI display, but minimum 0.2 is used for geometry
                 const effectiveFlat = Math.max(bit.flat || 0, 0);
-                arcRad = bit.cornerRadius;
+                const arcRad = bit.cornerRadius;
+                // Validate arc radius
+                if (isNaN(arcRad) || !isFinite(arcRad) || arcRad <= 0) return group;
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
                     "d",
@@ -274,9 +316,12 @@ export default class BitsManager {
                 );
                 bitShape.setAttribute("fill", fillColor);
                 break;
-            case "bull":
+            }
+            case "bull": {
                 // Bull-nose cutter: cylindrical part + bullnose profile
-                arcRad = bit.cornerRadius;
+                const arcRad = bit.cornerRadius;
+                // Validate arc radius
+                if (isNaN(arcRad) || !isFinite(arcRad) || arcRad <= 0) return group;
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
                     "d",
@@ -290,6 +335,7 @@ export default class BitsManager {
                 );
                 bitShape.setAttribute("fill", fillColor);
                 break;
+            }
         }
 
         if (bitShape) {
@@ -542,72 +588,222 @@ export default class BitsManager {
         return null;
     }
 
+    // Helper method to evaluate a field value (handles formulas and variables)
+    evaluateFieldValue(value, variableValues = {}) {
+        if (!value || !value.trim()) return null;
+        
+        const trimmed = value.trim();
+        
+        // Check if it's a simple number
+        const num = parseFloat(trimmed);
+        if (!isNaN(num) && isFinite(num)) {
+            return num;
+        }
+        
+        // Check if it contains variable references {varName}
+        let expression = trimmed;
+        if (/\{[a-zA-Z][a-zA-Z0-9]*\}/.test(trimmed)) {
+            expression = trimmed.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+                const varValue = variableValues[varName];
+                if (varValue !== undefined && !isNaN(varValue)) {
+                    return varValue;
+                }
+                return "0"; // Default to 0 if variable not found
+            });
+        }
+        
+        // Try to evaluate the expression
+        try {
+            const result = evaluateMathExpression(expression);
+            if (!isNaN(result) && isFinite(result)) {
+                return result;
+            }
+        } catch (e) {
+            // Evaluation failed
+        }
+        
+        return null;
+    }
+
+    // Helper method to collect variable values from form with dependency resolution
+    collectVariableValues(form, groupName) {
+        const values = {};
+        const rawExpressions = {};
+        const fieldToVarMap = {
+            diameter: "d",
+            length: "l", 
+            shankDiameter: "sd",
+            totalLength: "tl",
+            toolnumber: "tn",
+            angle: "a",
+            height: "h",
+            cornerRadius: "cr",
+            flat: "f",
+        };
+        
+        // First pass: collect all raw values (numbers and expressions) from standard fields
+        Object.keys(fieldToVarMap).forEach(fieldId => {
+            const input = form.querySelector(`#bit-${fieldId}`);
+            if (input && input.value.trim()) {
+                const varName = fieldToVarMap[fieldId];
+                const value = input.value.trim();
+                rawExpressions[varName] = value;
+                
+                // If it's a simple number, store it immediately
+                const num = parseFloat(value);
+                if (!isNaN(num) && isFinite(num) && value === num.toString()) {
+                    values[varName] = num;
+                }
+            }
+        });
+        
+        // Collect custom variable values if groupName is provided
+        if (groupName) {
+            const customVars = variablesManager.getCustomVariables(groupName);
+            customVars.forEach(v => {
+                const input = form.querySelector(`#bit-${v.varName}`);
+                if (input && input.value.trim()) {
+                    const value = input.value.trim();
+                    rawExpressions[v.varName] = value;
+                    
+                    // If it's a simple number, store it immediately
+                    const num = parseFloat(value);
+                    if (!isNaN(num) && isFinite(num) && value === num.toString()) {
+                        values[v.varName] = num;
+                    }
+                }
+            });
+        }
+        
+        // Resolve dependencies - multiple passes until no more changes
+        let changed = true;
+        let iterations = 0;
+        const maxIterations = 10; // Prevent infinite loops
+        
+        while (changed && iterations < maxIterations) {
+            changed = false;
+            iterations++;
+            
+            Object.keys(rawExpressions).forEach(varName => {
+                // Skip if already resolved
+                if (values[varName] !== undefined) return;
+                
+                let expression = rawExpressions[varName];
+                
+                // Replace variable references {varName} with their resolved values
+                expression = expression.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, refVar) => {
+                    if (values[refVar] !== undefined) {
+                        return values[refVar];
+                    }
+                    return match; // Keep reference if not yet resolved
+                });
+                
+                // Check if all variables were resolved
+                const hasUnresolvedVars = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(expression);
+                
+                if (!hasUnresolvedVars) {
+                    // Try to evaluate
+                    try {
+                        const result = evaluateMathExpression(expression);
+                        if (!isNaN(result) && isFinite(result)) {
+                            values[varName] = result;
+                            changed = true;
+                        }
+                    } catch (e) {
+                        // Evaluation failed, try again next iteration
+                    }
+                }
+            });
+        }
+        
+        return values;
+    }
+
     // Helper method to collect bit parameters from form
     collectBitParameters(form, groupName) {
         const name = form.querySelector("#bit-name").value.trim();
-        const diameter = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-diameter").value),
+        
+        // Collect variable values for formula evaluation (pass groupName for custom vars)
+        const variableValues = this.collectVariableValues(form, groupName);
+        
+        // Evaluate required fields
+        const diameter = this.evaluateFieldValue(
+            form.querySelector("#bit-diameter")?.value,
+            variableValues
         );
-        const length = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-length").value),
+        const length = this.evaluateFieldValue(
+            form.querySelector("#bit-length")?.value,
+            variableValues
         );
         const toolNumber = parseInt(
-            evaluateMathExpression(form.querySelector("#bit-toolnumber").value),
-            10,
+            this.evaluateFieldValue(form.querySelector("#bit-toolnumber")?.value, variableValues) || 1,
+            10
         );
 
         // Color picker is now in the toolbar, not in the form
         const colorInput = document.querySelector("#bit-color");
         const color = colorInput ? colorInput.value : "#cccccc";
+        
         let bitParams = {
             name,
-            diameter,
-            length,
-            toolNumber,
             fillColor: color,
         };
+        
+        // Only add numeric values
+        if (diameter !== null && !isNaN(diameter)) bitParams.diameter = diameter;
+        if (length !== null && !isNaN(length)) bitParams.length = length;
+        if (!isNaN(toolNumber)) bitParams.toolNumber = toolNumber;
 
-        // Add shank parameters if present
-        const shankDiameterStr =
-            form.querySelector("#bit-shankDiameter")?.value;
-        if (shankDiameterStr) {
-            const shankDiameter = parseFloat(
-                evaluateMathExpression(shankDiameterStr),
-            );
-            if (!isNaN(shankDiameter)) bitParams.shankDiameter = shankDiameter;
+        // Add shank parameters if present and valid
+        const shankDiameter = this.evaluateFieldValue(
+            form.querySelector("#bit-shankDiameter")?.value,
+            variableValues
+        );
+        if (shankDiameter !== null && !isNaN(shankDiameter)) {
+            bitParams.shankDiameter = shankDiameter;
         }
 
-        const totalLengthStr = form.querySelector("#bit-totalLength")?.value;
-        if (totalLengthStr) {
-            const totalLength = parseFloat(
-                evaluateMathExpression(totalLengthStr),
-            );
-            if (!isNaN(totalLength)) bitParams.totalLength = totalLength;
+        const totalLength = this.evaluateFieldValue(
+            form.querySelector("#bit-totalLength")?.value,
+            variableValues
+        );
+        if (totalLength !== null && !isNaN(totalLength)) {
+            bitParams.totalLength = totalLength;
         }
 
         // Add group-specific parameters
         if (groupName === "conical") {
-            bitParams.angle = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-angle").value),
+            const angle = this.evaluateFieldValue(
+                form.querySelector("#bit-angle")?.value,
+                variableValues
             );
+            if (angle !== null && !isNaN(angle)) bitParams.angle = angle;
         }
         if (groupName === "ball") {
-            bitParams.height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value),
+            const height = this.evaluateFieldValue(
+                form.querySelector("#bit-height")?.value,
+                variableValues
             );
+            if (height !== null && !isNaN(height)) bitParams.height = height;
         }
         if (groupName === "fillet" || groupName === "bull") {
-            bitParams.height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value),
+            const height = this.evaluateFieldValue(
+                form.querySelector("#bit-height")?.value,
+                variableValues
             );
-            bitParams.cornerRadius = parseFloat(
-                evaluateMathExpression(
-                    form.querySelector("#bit-cornerRadius").value,
-                ),
+            if (height !== null && !isNaN(height)) bitParams.height = height;
+            
+            const cornerRadius = this.evaluateFieldValue(
+                form.querySelector("#bit-cornerRadius")?.value,
+                variableValues
             );
-            bitParams.flat = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-flat").value),
+            if (cornerRadius !== null && !isNaN(cornerRadius)) bitParams.cornerRadius = cornerRadius;
+            
+            const flat = this.evaluateFieldValue(
+                form.querySelector("#bit-flat")?.value,
+                variableValues
             );
+            if (flat !== null && !isNaN(flat)) bitParams.flat = flat;
         }
 
         return bitParams;
@@ -615,111 +811,182 @@ export default class BitsManager {
 
     // Helper method to validate bit parameters
     validateBitParameters(form, groupName) {
-        const name = form.querySelector("#bit-name").value.trim();
+        const name = form.querySelector("#bit-name")?.value?.trim();
         if (!name) return false;
 
-        const diameter = form.querySelector("#bit-diameter")?.value;
+        // Check required fields have values (not empty)
+        const diameter = form.querySelector("#bit-diameter")?.value?.trim();
         if (!diameter) return false;
 
-        const length = form.querySelector("#bit-length")?.value;
+        const length = form.querySelector("#bit-length")?.value?.trim();
         if (!length) return false;
 
-        const toolNumber = form.querySelector("#bit-toolnumber")?.value;
+        const toolNumber = form.querySelector("#bit-toolnumber")?.value?.trim();
         if (!toolNumber) return false;
 
+        // Check type-specific required fields
         if (groupName === "conical") {
-            const angle = form.querySelector("#bit-angle")?.value;
+            const angle = form.querySelector("#bit-angle")?.value?.trim();
             if (!angle) return false;
         }
 
         if (groupName === "ball") {
-            const height = form.querySelector("#bit-height")?.value;
+            const height = form.querySelector("#bit-height")?.value?.trim();
             if (!height) return false;
         }
 
         if (groupName === "fillet" || groupName === "bull") {
-            const height = form.querySelector("#bit-height")?.value;
-            const cornerRadius = form.querySelector("#bit-cornerRadius")?.value;
-            const flat = form.querySelector("#bit-flat")?.value;
+            const height = form.querySelector("#bit-height")?.value?.trim();
+            const cornerRadius = form.querySelector("#bit-cornerRadius")?.value?.trim();
+            const flat = form.querySelector("#bit-flat")?.value?.trim();
             if (!height || !cornerRadius || !flat) return false;
         }
+
+        // Now check if we can actually evaluate the values for drawing (pass groupName for custom vars)
+        const variableValues = this.collectVariableValues(form, groupName);
+        
+        const evaluatedDiameter = this.evaluateFieldValue(diameter, variableValues);
+        const evaluatedLength = this.evaluateFieldValue(length, variableValues);
+        
+        // Must have valid diameter and length for drawing
+        if (evaluatedDiameter === null || evaluatedLength === null) return false;
+        if (evaluatedDiameter <= 0 || evaluatedLength <= 0) return false;
 
         return true;
     }
 
     // Helper method to build bit payload for saving
     buildBitPayload(form, groupName) {
-        const diameter = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-diameter").value),
-        );
-        const length = parseFloat(
-            evaluateMathExpression(form.querySelector("#bit-length").value),
-        );
-        const toolNumber =
-            parseInt(
-                evaluateMathExpression(
-                    form.querySelector("#bit-toolnumber").value,
-                ),
-                10,
-            ) || 1;
+        // Get resolved variable values (pass groupName for custom vars)
+        const variableValues = this.collectVariableValues(form, groupName);
+        
+        // Helper to get raw value from input
+        const getRawValue = (fieldId) => {
+            const input = form.querySelector(`#bit-${fieldId}`);
+            return input ? input.value.trim() : "";
+        };
+        
+        // Helper to get evaluated value
+        const getEvaluatedValue = (fieldId, varName) => {
+            const raw = getRawValue(fieldId);
+            if (!raw) return null;
+            
+            // Simple number
+            const num = parseFloat(raw);
+            if (!isNaN(num) && isFinite(num) && raw === num.toString()) {
+                return num;
+            }
+            
+            // Use resolved variable value if available
+            if (varName && variableValues[varName] !== undefined) {
+                return variableValues[varName];
+            }
+            
+            // Try to evaluate
+            return this.evaluateFieldValue(raw, variableValues);
+        };
+        
+        // Helper to evaluate name with variables
+        const evaluateName = (rawName) => {
+            if (!rawName) return "";
+            
+            // Replace variable references {varName} with their values
+            let evaluated = rawName.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+                if (variableValues[varName] !== undefined) {
+                    return variableValues[varName];
+                }
+                return match; // Keep original if variable not found
+            });
+            
+            return evaluated;
+        };
 
         // Color picker is now in the toolbar, not in the form
         const colorInput = document.querySelector("#bit-color");
         const color = colorInput ? colorInput.value : "#cccccc";
+        
+        // Get raw name and evaluated name
+        const rawName = form.querySelector("#bit-name").value.trim();
+        const evaluatedName = evaluateName(rawName);
+        
         const payload = {
-            name: form.querySelector("#bit-name").value.trim(),
-            diameter,
-            length,
-            toolNumber,
+            name: evaluatedName || rawName,
             fillColor: color,
+            toolNumber: parseInt(getEvaluatedValue("toolnumber", "tn")) || 1,
         };
-
-        // Add optional shank parameters
-        const shankDiameterStr =
-            form.querySelector("#bit-shankDiameter")?.value;
-        if (shankDiameterStr) {
-            const shankDiameter = parseFloat(
-                evaluateMathExpression(shankDiameterStr),
-            );
-            if (!isNaN(shankDiameter)) payload.shankDiameter = shankDiameter;
+        
+        // Store raw name if it contains variables
+        if (rawName !== evaluatedName && /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(rawName)) {
+            payload.rawName = rawName;
         }
 
-        const totalLengthStr = form.querySelector("#bit-totalLength")?.value;
-        if (totalLengthStr) {
-            const totalLength = parseFloat(
-                evaluateMathExpression(totalLengthStr),
-            );
-            if (!isNaN(totalLength)) payload.totalLength = totalLength;
-        }
+        // Store raw values (formulas) for future editing
+        const rawValues = {};
+        const fieldToVarMap = {
+            diameter: "d",
+            length: "l", 
+            shankDiameter: "sd",
+            totalLength: "tl",
+            angle: "a",
+            height: "h",
+            cornerRadius: "cr",
+            flat: "f",
+        };
+        
+        // Collect raw values - store empty string if empty, not skip
+        Object.keys(fieldToVarMap).forEach(fieldId => {
+            const raw = getRawValue(fieldId);
+            rawValues[fieldId] = raw; // Always store, even if empty
+        });
+        
+        // Store raw values in payload
+        payload.rawValues = rawValues;
 
-        // Add group-specific parameters
+        // Store evaluated numeric values for geometry - use 0 if empty/invalid
+        const diameter = getEvaluatedValue("diameter", "d");
+        const length = getEvaluatedValue("length", "l");
+        
+        payload.diameter = diameter !== null ? diameter : 0;
+        payload.length = length !== null ? length : 0;
+
+        // Add optional shank parameters - store 0 if empty
+        const shankDiameter = getEvaluatedValue("shankDiameter", "sd");
+        payload.shankDiameter = shankDiameter !== null ? shankDiameter : 0;
+
+        const totalLength = getEvaluatedValue("totalLength", "tl");
+        payload.totalLength = totalLength !== null ? totalLength : 0;
+
+        // Add group-specific parameters - store 0 if empty
         if (groupName === "conical") {
-            const angle = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-angle").value),
-            );
-            payload.angle = angle;
+            const angle = getEvaluatedValue("angle", "a");
+            payload.angle = angle !== null ? angle : 0;
         }
         if (groupName === "ball") {
-            const height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value),
-            );
-            payload.height = height;
+            const height = getEvaluatedValue("height", "h");
+            payload.height = height !== null ? height : 0;
         }
         if (groupName === "fillet" || groupName === "bull") {
-            const height = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-height").value),
-            );
-            payload.height = height;
-            const cornerRadius = parseFloat(
-                evaluateMathExpression(
-                    form.querySelector("#bit-cornerRadius").value,
-                ),
-            );
-            payload.cornerRadius = cornerRadius;
-            const flat = parseFloat(
-                evaluateMathExpression(form.querySelector("#bit-flat").value),
-            );
-            payload.flat = flat;
+            const height = getEvaluatedValue("height", "h");
+            payload.height = height !== null ? height : 0;
+            
+            const cornerRadius = getEvaluatedValue("cornerRadius", "cr");
+            payload.cornerRadius = cornerRadius !== null ? cornerRadius : 0;
+            
+            const flat = getEvaluatedValue("flat", "f");
+            payload.flat = flat !== null ? flat : 0;
+        }
+        
+        // Store custom variable values
+        const customVars = variablesManager.getCustomVariables(groupName);
+        const customValues = {};
+        customVars.forEach(v => {
+            const input = form.querySelector(`#bit-${v.varName}`);
+            if (input) {
+                customValues[v.varName] = input.value.trim();
+            }
+        });
+        if (Object.keys(customValues).length > 0) {
+            payload.customValues = customValues;
         }
 
         return payload;
@@ -730,21 +997,35 @@ export default class BitsManager {
         this.openBitModal(groupName, null);
     }
 
-    // Unified create/edit modal
+    // Unified create/edit modal with new flex grid layout
     openBitModal(groupName, bit = null) {
         const isEdit = !!bit;
-        const defaultToolNumber =
-            bit && bit.toolNumber !== undefined ? bit.toolNumber : 1;
-        const defaultDiameter = bit ? bit.diameter : "";
-        const defaultLength = bit ? bit.length : "";
-        const defaultAngle = bit ? bit.angle : "";
-        const defaultHeight = bit ? bit.height : "";
-        const defaultCornerRadius = bit ? bit.cornerRadius : "";
-        const defaultFlat = bit ? bit.flat : "";
-        const defaultShankDiameter = bit ? bit.shankDiameter : "";
-        const defaultTotalLength = bit ? bit.totalLength : "";
-        const defaultColor = bit && bit.fillColor ? bit.fillColor : "#cccccc";
-        const defaultName = bit ? bit.name : "";
+        
+        // Use rawValues if available (formulas), otherwise fall back to numeric values
+        const rawVals = bit?.rawValues || {};
+        const customVals = bit?.customValues || {};
+        
+        // Use rawName if available, otherwise use name
+        const displayName = bit?.rawName || bit?.name || "";
+        
+        const defaultValues = {
+            name: displayName,
+            diameter: rawVals.diameter !== undefined ? rawVals.diameter : (bit ? bit.diameter : ""),
+            length: rawVals.length !== undefined ? rawVals.length : (bit ? bit.length : ""),
+            shankDiameter: rawVals.shankDiameter !== undefined ? rawVals.shankDiameter : (bit ? bit.shankDiameter : ""),
+            totalLength: rawVals.totalLength !== undefined ? rawVals.totalLength : (bit ? bit.totalLength : ""),
+            angle: rawVals.angle !== undefined ? rawVals.angle : (bit ? bit.angle : ""),
+            height: rawVals.height !== undefined ? rawVals.height : (bit ? bit.height : ""),
+            cornerRadius: rawVals.cornerRadius !== undefined ? rawVals.cornerRadius : (bit ? bit.cornerRadius : ""),
+            flat: rawVals.flat !== undefined ? rawVals.flat : (bit ? bit.flat : ""),
+            toolNumber: bit && bit.toolNumber !== undefined ? bit.toolNumber : 1,
+            color: bit && bit.fillColor ? bit.fillColor : "#cccccc",
+            customValues: customVals,
+        };
+
+        // Get variables for this bit type
+        const variables = variablesManager.getVariablesForType(groupName);
+        const customVariables = variablesManager.getCustomVariables(groupName);
 
         const modal = document.createElement("div");
         modal.className = "modal";
@@ -753,102 +1034,322 @@ export default class BitsManager {
       <h2>${isEdit ? "Edit Bit" : "New Bit Parameters"}</h2>
       <div class="modal-body">
         <form id="bit-form" class="bit-form">
-          <label for="bit-name">Name:</label>
-          <input type="text" id="bit-name" required value="${defaultName}">
-          ${this.getGroupSpecificInputs(groupName, {
-              diameter: defaultDiameter,
-              length: defaultLength,
-              shankDiameter: defaultShankDiameter,
-              totalLength: defaultTotalLength,
-              angle: defaultAngle,
-              height: defaultHeight,
-              cornerRadius: defaultCornerRadius,
-              flat: defaultFlat,
-          })}
-          
-          <label for="bit-toolnumber">Tool Number:</label>
-          <input type="number" id="bit-toolnumber" min="1" step="1" value="${defaultToolNumber}" required>
+          <div class="bit-form-grid" id="bit-form-grid">
+            ${this.generateFormRows(groupName, defaultValues, variables)}
+          </div>
+          <button type="button" class="add-field-btn" id="add-custom-field-btn">
+            + Add Custom Field
+          </button>
         </form>
         <div id="bit-preview" class="bit-preview">
-          <svg id="bit-preview-canvas" width="200" height="200"></svg>
+          <svg id="bit-preview-canvas" width="400" height="400"></svg>
           <div id="preview-toolbar">
-          <button id="preview-zoom-in" title="Zoom In">+</button>
-          <button id="preview-zoom-out" title="Zoom Out">-</button>
-          <button id="preview-fit" title="Fit to Scale">Fit</button>
-          <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
-          <input type="color" id="bit-color" value="${defaultColor}" title="Bit Color">
+            <button id="preview-zoom-in" title="Zoom In">+</button>
+            <button id="preview-zoom-out" title="Zoom Out">-</button>
+            <button id="preview-fit" title="Fit to Scale">Fit</button>
+            <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
+            <input type="color" id="bit-color" value="${defaultValues.color}" title="Bit Color">
           </div>
         </div>
-
-        </div>
-    <div class="button-group">
+      </div>
+      <div class="button-group">
         <button type="button" id="cancel-btn">Cancel</button>
         <button type="submit" form="bit-form">OK</button>
-    </div>
+      </div>
     </div>
   `;
 
         document.body.appendChild(modal);
-
         const form = modal.querySelector("#bit-form");
-
-        // Function to check if all required parameters are filled
-        function checkBitParametersFilled() {
-            const name = form.querySelector("#bit-name").value.trim();
-            if (!name) return false;
-
-            const diameter = form.querySelector("#bit-diameter")?.value;
-            if (!diameter) return false;
-
-            const length = form.querySelector("#bit-length")?.value;
-            if (!length) return false;
-
-            const toolNumber = form.querySelector("#bit-toolnumber")?.value;
-            if (!toolNumber) return false;
-
-            if (groupName === "conical") {
-                const angle = form.querySelector("#bit-angle")?.value;
-                if (!angle) return false;
-            }
-
-            if (groupName === "ball") {
-                const height = form.querySelector("#bit-height")?.value;
-                if (!height) return false;
-            }
-
-            if (groupName === "fillet" || groupName === "bull") {
-                const height = form.querySelector("#bit-height")?.value;
-                const cornerRadius =
-                    form.querySelector("#bit-cornerRadius")?.value;
-                const flat = form.querySelector("#bit-flat")?.value;
-                if (!height || !cornerRadius || !flat) return false;
-            }
-
-            return true;
-        }
+        const formGrid = modal.querySelector("#bit-form-grid");
 
         // Preview canvas manager
         let previewCanvasManager;
-        let previewZoomInitialized = false; // Track if initial zoom has been set
+        let previewZoomInitialized = false;
 
-        // Initialize preview canvas with CanvasManager
+        // Initialize preview canvas with larger size
         const initializePreviewCanvas = () => {
             previewCanvasManager = new CanvasManager({
                 canvas: modal.querySelector("#bit-preview-canvas"),
-                width: 200,
-                height: 200,
+                width: 400,
+                height: 400,
                 enableZoom: true,
                 enablePan: true,
                 enableGrid: true,
                 enableMouseEvents: true,
-                gridSize: 10, // 1mm = 10px in preview
+                gridSize: 10,
                 initialZoom: 1,
-                initialPanX: 100,
-                initialPanY: 100,
-                layers: ["grid", "bits"],
+                gridAnchorX: 200,  // Use gridAnchorX instead of initialPanX
+                gridAnchorY: 200,  // Use gridAnchorY instead of initialPanY
+                layers: ["grid", "bits", "overlay"],
                 onZoom: (zoomLevel) => {
                     updatePreviewStrokeWidths(zoomLevel);
                 },
+            });
+        };
+
+        // Function to update stroke widths in preview
+        function updatePreviewStrokeWidths(zoomLevel = previewCanvasManager?.zoomLevel) {
+            if (!zoomLevel || !previewCanvasManager) return;
+            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
+
+            const previewBitsLayer = previewCanvasManager.getLayer("bits");
+            const bitShape = previewBitsLayer?.querySelector(".bit-shape");
+            const shankShape = previewBitsLayer?.querySelector(".shank-shape");
+            if (bitShape) bitShape.setAttribute("stroke-width", thickness);
+            if (shankShape) shankShape.setAttribute("stroke-width", thickness);
+        }
+
+        // Function to draw anchor cross and axis line
+        const drawAnchorAndAxis = (bitParams, bitShape) => {
+            const overlayLayer = previewCanvasManager.getLayer("overlay");
+            if (!overlayLayer) return;
+            
+            // Clear previous overlay
+            overlayLayer.innerHTML = "";
+
+            // Get the actual bit shape bounds to find the bottom center
+            let anchorX = previewCanvasManager.panX || 200;
+            let anchorY = previewCanvasManager.panY || 200;
+            let topY = anchorY - 50; // Default axis line length
+
+            if (bitShape) {
+                try {
+                    const bounds = getSVGBounds(bitShape);
+                    if (bounds && isFinite(bounds.centerX) && isFinite(bounds.maxY)) {
+                        anchorX = bounds.centerX;
+                        anchorY = bounds.maxY; // Bottom of the bit
+                        topY = bounds.minY - 5; // 5px above the top
+                    }
+                } catch (e) {
+                    console.warn("Failed to get SVG bounds:", e);
+                }
+            }
+
+            // Validate values
+            if (!isFinite(anchorX)) anchorX = 200;
+            if (!isFinite(anchorY)) anchorY = 200;
+            if (!isFinite(topY)) topY = anchorY - 50;
+
+            // Calculate adaptive stroke width based on zoom
+            const zoom = previewCanvasManager.zoomLevel || 1;
+            const axisStrokeWidth = Math.max(0.3, 0.5 / Math.sqrt(zoom));
+            const crossStrokeWidth = Math.max(0.5, 1 / Math.sqrt(zoom));
+            const crossSize = Math.max(3, 5 / Math.sqrt(zoom));
+
+            // Draw axis line (dashed gray vertical line)
+            const axisLine = document.createElementNS(svgNS, "line");
+            axisLine.setAttribute("x1", anchorX);
+            axisLine.setAttribute("y1", anchorY);
+            axisLine.setAttribute("x2", anchorX);
+            axisLine.setAttribute("y2", topY);
+            axisLine.setAttribute("stroke", "gray");
+            axisLine.setAttribute("stroke-width", axisStrokeWidth);
+            axisLine.setAttribute("stroke-dasharray", `${3/zoom},${3/zoom}`);
+            axisLine.classList.add("bit-preview-axis");
+            overlayLayer.appendChild(axisLine);
+
+            // Draw anchor cross (red cross at bottom center)
+            const crossGroup = document.createElementNS(svgNS, "g");
+            crossGroup.classList.add("bit-preview-anchor");
+
+            const hLine = document.createElementNS(svgNS, "line");
+            hLine.setAttribute("x1", anchorX - crossSize);
+            hLine.setAttribute("y1", anchorY);
+            hLine.setAttribute("x2", anchorX + crossSize);
+            hLine.setAttribute("y2", anchorY);
+            hLine.setAttribute("stroke", "red");
+            hLine.setAttribute("stroke-width", crossStrokeWidth);
+            crossGroup.appendChild(hLine);
+
+            const vLine = document.createElementNS(svgNS, "line");
+            vLine.setAttribute("x1", anchorX);
+            vLine.setAttribute("y1", anchorY - crossSize);
+            vLine.setAttribute("x2", anchorX);
+            vLine.setAttribute("y2", anchorY + crossSize);
+            vLine.setAttribute("stroke", "red");
+            vLine.setAttribute("stroke-width", crossStrokeWidth);
+            crossGroup.appendChild(vLine);
+
+            overlayLayer.appendChild(crossGroup);
+        };
+
+        // Function to update bit preview
+        const updateBitPreview = () => {
+            const previewBitsLayer = previewCanvasManager.getLayer("bits");
+            previewBitsLayer.innerHTML = "";
+
+            if (!this.validateBitParameters(form, groupName)) {
+                const text = document.createElementNS(svgNS, "text");
+                text.setAttribute("x", previewCanvasManager.panX);
+                text.setAttribute("y", previewCanvasManager.panY + 10);
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("font-size", "14");
+                text.setAttribute("fill", "#999");
+                text.textContent = "Fill all parameters";
+                previewBitsLayer.appendChild(text);
+                drawAnchorAndAxis(null);
+                return;
+            }
+
+            const bitParams = this.collectBitParameters(form, groupName);
+
+            // Calculate bounds for positioning
+            const tempGroup = this.createBitShapeElement(bitParams, groupName, 0, 0, true);
+            const bounds = getSVGBounds(tempGroup);
+
+            // Validate bounds
+            if (!bounds || bounds.width <= 0 || bounds.height <= 0 || 
+                !isFinite(bounds.width) || !isFinite(bounds.height)) {
+                const text = document.createElementNS(svgNS, "text");
+                text.setAttribute("x", previewCanvasManager.panX);
+                text.setAttribute("y", previewCanvasManager.panY + 10);
+                text.setAttribute("text-anchor", "middle");
+                text.setAttribute("font-size", "14");
+                text.setAttribute("fill", "#999");
+                text.textContent = "Invalid parameters";
+                previewBitsLayer.appendChild(text);
+                drawAnchorAndAxis(null);
+                return;
+            }
+
+            // Calculate initial zoom level to fit bit within preview area
+            if (!previewZoomInitialized) {
+                const availableWidth = 400 - 60;
+                const availableHeight = 400 - 60;
+                const zoomX = availableWidth / bounds.width;
+                const zoomY = availableHeight / bounds.height;
+                const zoomLevel = Math.min(zoomX, zoomY);
+
+                // Ensure zoom level is valid
+                if (isFinite(zoomLevel) && zoomLevel > 0) {
+                    previewCanvasManager.zoomLevel = zoomLevel;
+                } else {
+                    previewCanvasManager.zoomLevel = 1;
+                }
+                previewCanvasManager.updateViewBox();
+                previewZoomInitialized = true;
+            }
+
+            const strokeWidth = Math.max(0.1, 0.5 / Math.sqrt(previewCanvasManager.zoomLevel));
+
+            // Create bit shape centered at pan position
+            const shape = this.createBitShapeElement(
+                bitParams,
+                groupName,
+                previewCanvasManager.panX - bounds.centerX,
+                previewCanvasManager.panY - bounds.centerY,
+                true,
+                true,
+                strokeWidth,
+            );
+
+            previewBitsLayer.appendChild(shape);
+            
+            // Draw anchor and axis - pass the actual shape element
+            drawAnchorAndAxis(bitParams, shape);
+
+            // Update formula results
+            updateFormulaResults();
+        };
+
+        // Function to update formula results display
+        const updateFormulaResults = () => {
+            // Use the same dependency resolution as collectVariableValues (pass groupName for custom vars)
+            const variableValues = this.collectVariableValues(form, groupName);
+            
+            const fieldToVarMap = {
+                diameter: "d",
+                length: "l", 
+                shankDiameter: "sd",
+                totalLength: "tl",
+                toolnumber: "tn",
+                angle: "a",
+                height: "h",
+                cornerRadius: "cr",
+                flat: "f",
+            };
+
+            // Evaluate and show results for each row
+            const rows = formGrid.querySelectorAll(".bit-form-row");
+            rows.forEach(row => {
+                const input = row.querySelector("input");
+                const resultEl = row.querySelector(".formula-result");
+                if (!input || !resultEl) return;
+
+                const value = input.value.trim();
+                if (!value) {
+                    resultEl.textContent = "";
+                    resultEl.classList.remove("visible");
+                    return;
+                }
+
+                // Get the field ID
+                const fieldId = input.id.replace("bit-", "");
+                
+                // Special handling for name field - show evaluated name
+                if (fieldId === "name") {
+                    const hasVariableRef = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(value);
+                    if (hasVariableRef) {
+                        // Evaluate name with variables
+                        let evaluated = value.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+                            if (variableValues[varName] !== undefined) {
+                                return variableValues[varName];
+                            }
+                            return match;
+                        });
+                        
+                        if (evaluated !== value) {
+                            resultEl.textContent = `= ${evaluated}`;
+                            resultEl.classList.add("visible");
+                        } else {
+                            resultEl.textContent = "";
+                            resultEl.classList.remove("visible");
+                        }
+                    } else {
+                        resultEl.textContent = "";
+                        resultEl.classList.remove("visible");
+                    }
+                    return;
+                }
+
+                // Check if value contains a formula (has {varName} or math expression)
+                const hasVariableRef = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(value);
+                const hasMathOps = /[+\-*/()]/.test(value) && !/^\d*\.?\d*$/.test(value);
+
+                if (!hasVariableRef && !hasMathOps) {
+                    // Plain number, no result needed
+                    resultEl.textContent = "";
+                    resultEl.classList.remove("visible");
+                    return;
+                }
+
+                // Get the variable name for this field - check both standard and custom fields
+                let varName = fieldToVarMap[fieldId];
+                
+                // If not in standard mapping, check if it's a custom variable (fieldId IS the varName)
+                if (!varName) {
+                    varName = fieldId;
+                }
+                
+                // Check if we have a resolved value for this variable
+                if (variableValues[varName] !== undefined) {
+                    const resolved = variableValues[varName];
+                    const numValue = parseFloat(value);
+                    
+                    // Show result if it's different from the raw input
+                    if (isNaN(numValue) || Math.abs(resolved - numValue) > 0.0001) {
+                        resultEl.textContent = `= ${resolved.toFixed(2)}`;
+                        resultEl.classList.add("visible");
+                    } else {
+                        resultEl.textContent = "";
+                        resultEl.classList.remove("visible");
+                    }
+                } else {
+                    // Variable not resolved (circular dependency or missing reference)
+                    resultEl.textContent = "?";
+                    resultEl.classList.add("visible");
+                }
             });
         };
 
@@ -865,33 +1366,17 @@ export default class BitsManager {
 
         const previewFitToScale = () => {
             if (this.validateBitParameters(form, groupName)) {
-                const tempBitParams = this.collectBitParameters(
-                    form,
-                    groupName,
-                );
-
-                // Create temp group to get bounds
-                const tempGroup = this.createBitShapeElement(
-                    tempBitParams,
-                    groupName,
-                    0,
-                    0,
-                    true,
-                );
-                const bounds = getSVGBounds(tempGroup);
-
-                // Use CanvasManager's fitToSVGElement method
-                previewCanvasManager.fitToSVGElement(tempGroup, 5);
+                const tempBitParams = this.collectBitParameters(form, groupName);
+                const tempGroup = this.createBitShapeElement(tempBitParams, groupName, 0, 0, true);
+                previewCanvasManager.fitToSVGElement(tempGroup, 20);
             } else {
-                // Reset to default
                 previewCanvasManager.zoomLevel = 1;
-                previewCanvasManager.panX = 100;
-                previewCanvasManager.panY = 100;
+                previewCanvasManager.panX = 200;
+                previewCanvasManager.panY = 200;
                 previewCanvasManager.updateViewBox();
             }
-
             updatePreviewStrokeWidths();
-            updateBitPreview(); // Need to update position after fit
+            updateBitPreview();
         };
 
         const togglePreviewGrid = () => {
@@ -901,184 +1386,91 @@ export default class BitsManager {
         // Initialize preview canvas
         initializePreviewCanvas();
 
-        // Event listeners are handled by CanvasManager
+        // Add event listeners for zoom buttons
+        modal.querySelector("#preview-zoom-in").addEventListener("click", () => {
+            previewZoomIn();
+        });
 
-        // Function to update stroke widths in preview based on zoom level
-        function updatePreviewStrokeWidths(
-            zoomLevel = previewCanvasManager?.zoomLevel,
-        ) {
-            if (!zoomLevel || !previewCanvasManager) return;
-            const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
-
-            // Update stroke width for the bit and shank shapes
-            const previewBitsLayer = previewCanvasManager.getLayer("bits");
-            const bitShape = previewBitsLayer?.querySelector(".bit-shape");
-            const shankShape = previewBitsLayer?.querySelector(".shank-shape");
-            if (bitShape) {
-                bitShape.setAttribute("stroke-width", thickness);
-            }
-            if (shankShape) {
-                shankShape.setAttribute("stroke-width", thickness);
-            }
-        }
-
-        // Function to update bit preview using canvas functions
-        const updateBitPreview = () => {
-            // Clear bits layer
-            const previewBitsLayer = previewCanvasManager.getLayer("bits");
-            previewBitsLayer.innerHTML = ""; // Always clear first
-
-            if (!this.validateBitParameters(form, groupName)) {
-                // Show placeholder text if parameters are not complete
-                const text = document.createElementNS(svgNS, "text");
-                text.setAttribute("x", previewCanvasManager.panX);
-                text.setAttribute("y", previewCanvasManager.panY + 10);
-                text.setAttribute("text-anchor", "middle");
-                text.setAttribute("font-size", "14");
-                text.setAttribute("fill", "#999");
-                text.textContent = "Заполните все параметры";
-                previewBitsLayer.appendChild(text);
-                return;
-            }
-
-            const bitParams = this.collectBitParameters(form, groupName);
-
-            // Calculate bounds for positioning
-            const tempGroup = this.createBitShapeElement(
-                bitParams,
-                groupName,
-                0,
-                0,
-                true,
-            );
-            const bounds = getSVGBounds(tempGroup);
-
-            // Calculate initial zoom level to fit bit within preview area (only once)
-            if (!previewZoomInitialized) {
-                const availableWidth = 200 - 40; // 20px padding on each side
-                const availableHeight = 200 - 40; // 20px padding on each side
-
-                // Calculate zoom level to fit bit (maximize zoom to fill the canvas)
-                const zoomX = availableWidth / bounds.width;
-                const zoomY = availableHeight / bounds.height;
-                const zoomLevel = Math.min(zoomX, zoomY);
-
-                // Set initial zoom for preview (pan stays at center)
-                previewCanvasManager.zoomLevel = zoomLevel;
-                previewCanvasManager.updateViewBox();
-                previewZoomInitialized = true;
-            }
-
-            // Calculate stroke width based on zoom level
-            const strokeWidth = Math.max(
-                0.1,
-                0.5 / Math.sqrt(previewCanvasManager.zoomLevel),
-            );
-
-            // Create bit shape centered at pan position
-            const shape = this.createBitShapeElement(
-                bitParams,
-                groupName,
-                previewCanvasManager.panX - bounds.centerX,
-                previewCanvasManager.panY - bounds.centerY,
-                true, // isSelected = true for modal preview
-                true, // includeShank = true
-                strokeWidth, // pass calculated stroke width
-            );
-
-            previewBitsLayer.appendChild(shape);
-        };
-
-        // Preview zoom event handlers
-        modal
-            .querySelector("#preview-zoom-in")
-            .addEventListener("click", () => {
-                previewZoomIn();
-                updateBitPreview();
-            });
-
-        modal
-            .querySelector("#preview-zoom-out")
-            .addEventListener("click", () => {
-                previewZoomOut();
-                updateBitPreview();
-            });
+        modal.querySelector("#preview-zoom-out").addEventListener("click", () => {
+            previewZoomOut();
+        });
 
         modal.querySelector("#preview-fit").addEventListener("click", () => {
             previewFitToScale();
         });
 
-        modal
-            .querySelector("#preview-toggle-grid")
-            .addEventListener("click", () => {
-                togglePreviewGrid();
-                //updateBitPreview();
-            });
-
-        // Add math evaluation on blur for all text inputs
-        const inputs = form.querySelectorAll('input[type="text"]');
-        inputs.forEach((input) => {
-            input.addEventListener("blur", () => {
-                input.value = evaluateMathExpression(input.value);
-            });
-            // Update preview on input change
-            input.addEventListener("input", updateBitPreview);
+        modal.querySelector("#preview-toggle-grid").addEventListener("click", () => {
+            togglePreviewGrid();
         });
 
-        // Update preview on number input change
-        const numberInputs = form.querySelectorAll('input[type="number"]');
-        numberInputs.forEach((input) => {
-            input.addEventListener("input", updateBitPreview);
-            previewFitToScale();
-        });
+        // Add input event listeners
+        const addInputListeners = () => {
+            const inputs = formGrid.querySelectorAll("input");
+            inputs.forEach((input) => {
+                // Don't replace input value on blur - keep the formula
+                // Just update the preview and formula results
+                input.addEventListener("input", () => {
+                    updateBitPreview();
+                    updateFormulaResults();
+                });
+            });
+        };
 
-        // Update preview on color input change
+        addInputListeners();
+
+        // Color input listener
         const colorInput = modal.querySelector("#bit-color");
         colorInput.addEventListener("input", updateBitPreview);
+
+        // Add custom field button
+        modal.querySelector("#add-custom-field-btn").addEventListener("click", () => {
+            this.openAddCustomFieldModal(groupName, formGrid, () => {
+                addInputListeners();
+                updateBitPreview();
+            });
+        });
+
+        // Add delete field listeners
+        const addDeleteListeners = () => {
+            const deleteButtons = formGrid.querySelectorAll(".delete-field-btn:not(:disabled)");
+            deleteButtons.forEach((btn) => {
+                btn.addEventListener("click", (e) => {
+                    const row = e.target.closest(".bit-form-row");
+                    const varId = row?.dataset?.varId;
+                    if (varId && variablesManager.removeCustomVariable(groupName, varId)) {
+                        row.remove();
+                        updateBitPreview();
+                    }
+                });
+            });
+        };
+
+        addDeleteListeners();
 
         // Update canvas bit in real-time for edit operations
         if (isEdit && bit) {
             const updateCanvasBit = () => {
-                // Collect current parameters from form and update canvas bit
-                const currentParams = this.collectBitParameters(
-                    form,
-                    groupName,
-                );
+                const currentParams = this.collectBitParameters(form, groupName);
                 if (this.onUpdateCanvasBitWithParams) {
-                    this.onUpdateCanvasBitWithParams(
-                        bit.id,
-                        currentParams,
-                        groupName,
-                    );
+                    this.onUpdateCanvasBitWithParams(bit.id, currentParams, groupName);
                 }
             };
 
-            // Update canvas when ANY parameter changes (not just shank)
-            const allInputs = form.querySelectorAll(
-                'input[type="text"], input[type="number"]',
-            );
-            const colorInput = modal.querySelector("#bit-color");
-
-            allInputs.forEach((input) => {
-                input.addEventListener("input", updateCanvasBit);
-            });
-
-            if (colorInput) {
-                colorInput.addEventListener("input", updateCanvasBit);
-            }
+            formGrid.addEventListener("input", updateCanvasBit);
+            colorInput.addEventListener("input", updateCanvasBit);
         }
 
         // Initial preview update
         updateBitPreview();
         previewFitToScale();
+
+        // Form submit handler
         form.addEventListener("submit", async (e) => {
             e.preventDefault();
             const name = form.querySelector("#bit-name").value.trim();
 
             if (await this.isBitNameDuplicate(name, isEdit ? bit?.id : null)) {
-                alert(
-                    "A bit with this name already exists. Please choose a different name.",
-                );
+                alert("A bit with this name already exists. Please choose a different name.");
                 return;
             }
 
@@ -1099,8 +1491,209 @@ export default class BitsManager {
             this.refreshBitGroups();
         });
 
-        const cancelBtn = modal.querySelector("#cancel-btn");
-        cancelBtn.addEventListener("click", () => {
+        // Cancel button
+        modal.querySelector("#cancel-btn").addEventListener("click", () => {
+            document.body.removeChild(modal);
+        });
+    }
+
+    // Generate form rows for flex grid layout
+    generateFormRows(groupName, defaultValues, variables) {
+        let rows = "";
+
+        // Name field (always first) - supports variables like R{cr}
+        rows += `
+            <div class="bit-form-row" data-field="name">
+                <label for="bit-name">Name:</label>
+                <div class="input-wrapper">
+                    <input type="text" id="bit-name" required value="${defaultValues.name}">
+                    <div class="formula-result name-result"></div>
+                </div>
+                <button type="button" class="delete-field-btn" disabled style="visibility:hidden;">×</button>
+            </div>
+        `;
+
+        // Common fields
+        const fieldConfigs = [
+            { id: "diameter", label: "Diameter", varName: "d", required: true, default: defaultValues.diameter },
+            { id: "length", label: "Length", varName: "l", required: true, default: defaultValues.length },
+            { id: "shankDiameter", label: "Shank Diameter", varName: "sd", required: false, default: defaultValues.shankDiameter },
+            { id: "totalLength", label: "Total Length", varName: "tl", required: false, default: defaultValues.totalLength },
+        ];
+
+        // Type-specific fields
+        if (groupName === "conical") {
+            fieldConfigs.push({ id: "angle", label: "Angle", varName: "a", required: true, default: defaultValues.angle });
+        }
+        if (groupName === "ball") {
+            fieldConfigs.push({ id: "height", label: "Height", varName: "h", required: true, default: defaultValues.height });
+        }
+        if (groupName === "fillet" || groupName === "bull") {
+            fieldConfigs.push({ id: "height", label: "Height", varName: "h", required: true, default: defaultValues.height });
+            fieldConfigs.push({ id: "cornerRadius", label: "Corner Radius", varName: "cr", required: true, default: defaultValues.cornerRadius });
+            fieldConfigs.push({ id: "flat", label: "Flat", varName: "f", required: true, default: defaultValues.flat });
+        }
+
+        // Tool number
+        fieldConfigs.push({ id: "toolnumber", label: "Tool Number", varName: "tn", required: true, default: defaultValues.toolNumber, type: "text" });
+
+    // Generate rows for each field - all have 3 columns, delete button hidden for default fields
+        fieldConfigs.forEach(config => {
+            const varInfo = variables.find(v => v.varName === config.varName);
+            const varDisplay = varInfo ? `<span class="var-name">{${config.varName}}</span>` : "";
+            const inputType = config.type || "text";
+            
+            rows += `
+                <div class="bit-form-row" data-field="${config.id}">
+                    <label for="bit-${config.id}">${config.label}:${varDisplay}</label>
+                    <div class="input-wrapper">
+                        <input type="${inputType}" id="bit-${config.id}" ${config.required ? "required" : ""} value="${config.default}" ${config.type === "number" ? 'min="1" step="1"' : ""}>
+                        <div class="formula-result"></div>
+                    </div>
+                    <button type="button" class="delete-field-btn" disabled style="visibility:hidden;">×</button>
+                </div>
+            `;
+        });
+
+        // Add custom variable rows - delete button is visible
+        const customVars = variablesManager.getCustomVariables(groupName);
+        customVars.forEach(v => {
+            // Use saved customValue if available, otherwise use defaultValue
+            const savedValue = defaultValues.customValues?.[v.varName];
+            const fieldValue = savedValue !== undefined ? savedValue : (v.defaultValue || "");
+            rows += `
+                <div class="bit-form-row" data-field="${v.varName}" data-var-id="${v.id}">
+                    <label for="bit-${v.varName}">${v.name}:<span class="var-name">{${v.varName}}</span></label>
+                    <div class="input-wrapper">
+                        <input type="text" id="bit-${v.varName}" value="${fieldValue}">
+                        <div class="formula-result"></div>
+                    </div>
+                    <button type="button" class="delete-field-btn visible" title="Delete custom field">×</button>
+                </div>
+            `;
+        });
+
+        return rows;
+    }
+
+    // Open modal to add custom field
+    openAddCustomFieldModal(groupName, formGrid, onUpdate) {
+        const availableVars = variablesManager.getAvailableCustomVariables(groupName);
+        
+        const modal = document.createElement("div");
+        modal.className = "custom-field-modal";
+        modal.innerHTML = `
+            <div class="custom-field-modal-content">
+                <h3>Add Custom Field</h3>
+                <div class="field-row">
+                    <label for="custom-field-select">Select existing or create new:</label>
+                    <select id="custom-field-select">
+                        <option value="">-- Create new field --</option>
+                        ${availableVars.map(v => `<option value="${v.varName}" data-name="${v.name}" data-default="${v.defaultValue}" data-unit="${v.unit}">${v.name} ({${v.varName}}) - from ${v.sourceType}</option>`).join("")}
+                    </select>
+                </div>
+                <div id="new-field-fields">
+                    <div class="field-row">
+                        <label for="custom-field-name">Field Name:</label>
+                        <input type="text" id="custom-field-name" placeholder="e.g., Tip Radius">
+                    </div>
+                    <div class="field-row">
+                        <label for="custom-field-var">Variable Name:</label>
+                        <input type="text" id="custom-field-var" placeholder="e.g., tr" maxlength="3">
+                    </div>
+                    <div class="field-row">
+                        <label for="custom-field-default">Default Value:</label>
+                        <input type="text" id="custom-field-default" placeholder="e.g., 0">
+                    </div>
+                </div>
+                <div class="button-group">
+                    <button type="button" id="custom-field-cancel">Cancel</button>
+                    <button type="button" id="custom-field-add">Add</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const select = modal.querySelector("#custom-field-select");
+        const newFieldFields = modal.querySelector("#new-field-fields");
+        const nameInput = modal.querySelector("#custom-field-name");
+        const varInput = modal.querySelector("#custom-field-var");
+        const defaultInput = modal.querySelector("#custom-field-default");
+
+        // Toggle new field fields based on selection
+        select.addEventListener("change", () => {
+            if (select.value) {
+                newFieldFields.style.display = "none";
+                const option = select.options[select.selectedIndex];
+                nameInput.value = option.dataset.name || "";
+                varInput.value = select.value;
+                defaultInput.value = option.dataset.default || "";
+            } else {
+                newFieldFields.style.display = "block";
+                nameInput.value = "";
+                varInput.value = "";
+                defaultInput.value = "";
+            }
+        });
+
+        // Add button
+        modal.querySelector("#custom-field-add").addEventListener("click", () => {
+            const name = nameInput.value.trim();
+            const varName = varInput.value.trim().toLowerCase();
+            const defaultValue = defaultInput.value.trim();
+
+            if (!name || !varName) {
+                alert("Please enter field name and variable name");
+                return;
+            }
+
+            if (!/^[a-z][a-z0-9]*$/.test(varName)) {
+                alert("Variable name must start with a letter and contain only lowercase letters and numbers");
+                return;
+            }
+
+            const newVar = variablesManager.addCustomVariable(groupName, {
+                name,
+                varName,
+                defaultValue: parseFloat(defaultValue) || 0,
+                unit: "",
+            });
+
+            if (newVar) {
+                // Add new row to form
+                const row = document.createElement("div");
+                row.className = "bit-form-row";
+                row.dataset.field = varName;
+                row.dataset.varId = newVar.id;
+                row.innerHTML = `
+                    <label for="bit-${varName}">${name}:<span class="var-name">{${varName}}</span></label>
+                    <div class="input-wrapper">
+                        <input type="text" id="bit-${varName}" value="${defaultValue}">
+                        <div class="formula-result"></div>
+                    </div>
+                    <button type="button" class="delete-field-btn" title="Delete custom field">×</button>
+                `;
+                formGrid.appendChild(row);
+
+                // Add delete listener
+                row.querySelector(".delete-field-btn").addEventListener("click", (e) => {
+                    if (variablesManager.removeCustomVariable(groupName, newVar.id)) {
+                        row.remove();
+                        if (onUpdate) onUpdate();
+                    }
+                });
+
+                if (onUpdate) onUpdate();
+            } else {
+                alert(`Variable {${varName}} already exists for this bit type`);
+            }
+
+            document.body.removeChild(modal);
+        });
+
+        // Cancel button
+        modal.querySelector("#custom-field-cancel").addEventListener("click", () => {
             document.body.removeChild(modal);
         });
     }

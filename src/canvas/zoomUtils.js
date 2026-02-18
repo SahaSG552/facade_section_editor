@@ -219,10 +219,32 @@ export function zoomToSVGElement(canvasManager, svgElement, padding = 20) {
  * Gets the bounding box dimensions and center point of an SVG element or group.
  *
  * @param {SVGElement} svgElement - The SVG element to measure.
- * @returns {Object} An object with width, height, centerX, and centerY properties.
+ * @returns {Object} An object with width, height, centerX, centerY, minX, minY, maxX, maxY properties.
  */
 export function getSVGBounds(svgElement) {
-    // Create a temporary SVG container to attach the element for getBBox to work
+    // If element is already attached to an SVG, use it directly
+    const ownerSvg = svgElement.ownerSVGElement;
+    
+    if (ownerSvg) {
+        // Element is already in DOM, use getBBox directly
+        try {
+            const bbox = svgElement.getBBox();
+            return {
+                width: bbox.width || 0,
+                height: bbox.height || 0,
+                centerX: (bbox.x || 0) + (bbox.width || 0) / 2,
+                centerY: (bbox.y || 0) + (bbox.height || 0) / 2,
+                minX: bbox.x || 0,
+                minY: bbox.y || 0,
+                maxX: (bbox.x || 0) + (bbox.width || 0),
+                maxY: (bbox.y || 0) + (bbox.height || 0),
+            };
+        } catch (e) {
+            console.warn("getSVGBounds: getBBox failed on attached element:", e);
+        }
+    }
+    
+    // Element is not attached, create a temporary SVG container
     const tempSvg = document.createElementNS(
         "http://www.w3.org/2000/svg",
         "svg"
@@ -232,18 +254,43 @@ export function getSVGBounds(svgElement) {
     tempSvg.style.top = "-9999px";
     tempSvg.style.width = "1px";
     tempSvg.style.height = "1px";
-    tempSvg.appendChild(svgElement);
+    tempSvg.setAttribute("viewBox", "0 0 1000 1000");
+    
+    // Clone the element instead of moving it
+    const clonedElement = svgElement.cloneNode(true);
+    tempSvg.appendChild(clonedElement);
     document.body.appendChild(tempSvg);
 
-    const bbox = svgElement.getBBox();
+    let bbox;
+    try {
+        bbox = clonedElement.getBBox();
+    } catch (e) {
+        console.warn("getSVGBounds: getBBox failed on cloned element:", e);
+        // If getBBox fails, return default values
+        document.body.removeChild(tempSvg);
+        return {
+            width: 0,
+            height: 0,
+            centerX: 0,
+            centerY: 0,
+            minX: 0,
+            minY: 0,
+            maxX: 0,
+            maxY: 0,
+        };
+    }
 
     // Clean up
     document.body.removeChild(tempSvg);
 
     return {
-        width: bbox.width,
-        height: bbox.height,
-        centerX: bbox.x + bbox.width / 2,
-        centerY: bbox.y + bbox.height / 2,
+        width: bbox.width || 0,
+        height: bbox.height || 0,
+        centerX: (bbox.x || 0) + (bbox.width || 0) / 2,
+        centerY: (bbox.y || 0) + (bbox.height || 0) / 2,
+        minX: bbox.x || 0,
+        minY: bbox.y || 0,
+        maxX: (bbox.x || 0) + (bbox.width || 0),
+        maxY: (bbox.y || 0) + (bbox.height || 0),
     };
 }
