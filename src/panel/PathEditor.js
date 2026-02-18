@@ -1,162 +1,598 @@
 /**
- * PathEditor - SVG Path Editor with syntax highlighting
- * Features:
- * - Each command on a new line
- * - Shift+Enter for new line
- * - Variable support {varName} with formula evaluation
- * - Real-time syntax highlighting
- * - Auto-reverse path to clockwise direction
- * - Drag-and-drop line reordering
+ * PathEditor - SVG Path Editor with table-based row editing
+ * 
+ * Key design principles:
+ * - Each line is displayed as a flex row with individual cells per argument
+ * - First cell = SVG command (clickable to change)
+ * - Remaining cells = individual parameters (clickable to edit)
+ * - Formulas/variables preserved in storage, evaluated for output
+ * - Autocomplete suggestions for commands and variables
  */
 
 import { evaluateMathExpression } from "../utils/utils.js";
+
+// Valid SVG path commands with their argument counts and labels
+const SVG_COMMAND_DEFS = {
+    'M': { args: ['x', 'y'], label: 'Move to' },
+    'L': { args: ['x', 'y'], label: 'Line to' },
+    'H': { args: ['x'], label: 'Horizontal line' },
+    'V': { args: ['y'], label: 'Vertical line' },
+    'C': { args: ['x1', 'y1', 'x2', 'y2', 'x', 'y'], label: 'Cubic bezier' },
+    'S': { args: ['x2', 'y2', 'x', 'y'], label: 'Smooth cubic bezier' },
+    'Q': { args: ['x1', 'y1', 'x', 'y'], label: 'Quadratic bezier' },
+    'T': { args: ['x', 'y'], label: 'Smooth quadratic bezier' },
+    'A': { args: ['rx', 'ry', 'angle', 'large', 'sweep', 'x', 'y'], label: 'Arc' },
+    'Z': { args: [], label: 'Close path' },
+};
+
+const SVG_COMMANDS = new Set([...Object.keys(SVG_COMMAND_DEFS), ...Object.keys(SVG_COMMAND_DEFS).map(c => c.toLowerCase())]);
 
 export default class PathEditor {
     constructor(options = {}) {
         this.container = options.container;
         this.hiddenInput = options.hiddenInput;
+        this.rawHiddenInput = options.rawHiddenInput;
         this.onChange = options.onChange || (() => {});
         this.variableValues = options.variableValues || {};
+        this.getVariableList = options.getVariableList || (() => []);
         
         this.element = null;
         this.lines = [];
         this.draggedLine = null;
-        this.dragOverLine = null;
         
         this.init();
     }
     
     init() {
-        // Create editor container
         this.element = document.createElement('div');
         this.element.className = 'path-editor-container';
         this.element.innerHTML = `
-            <div class="path-editor-lines" id="path-editor-lines"></div>
-            <div class="path-editor-input-wrapper">
-                <input type="text" class="path-editor-input" id="path-editor-input" placeholder="Type path command (e.g., M 0 0, L 10 5, Z)...">
+            <div class="path-editor-lines"></div>
+            <div class="path-editor-input-area">
+                <div class="path-editor-input-row">
+                    <input type="text" class="path-editor-input" placeholder="Type command (M, L, H, V, C, S, Q, T, A, Z) or click suggestions below...">
+                    <button type="button" class="path-editor-add-btn" title="Add line">+</button>
+                </div>
+                <div class="path-editor-suggestions"></div>
             </div>
         `;
         
         this.container.appendChild(this.element);
         
-        this.linesContainer = this.element.querySelector('#path-editor-lines');
-        this.input = this.element.querySelector('#path-editor-input');
+        this.linesContainer = this.element.querySelector('.path-editor-lines');
+        this.input = this.element.querySelector('.path-editor-input');
+        this.addBtn = this.element.querySelector('.path-editor-add-btn');
+        this.suggestionsEl = this.element.querySelector('.path-editor-suggestions');
         
         this.bindEvents();
+        this.renderSuggestions();
     }
     
     bindEvents() {
-        // Input handling
         this.input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
             if (e.key === 'Enter') {
                 e.preventDefault();
-                this.addLine(this.input.value.trim());
-                this.input.value = '';
-                
-                // Shift+Enter adds line and keeps focus for more input
-                if (!e.shiftKey) {
-                    // Regular Enter - could trigger "done" behavior
-                }
+                this.tryAddLine();
             }
         });
         
-        // Real-time preview as user types
         this.input.addEventListener('input', () => {
-            this.highlightInputPreview();
+            this.renderSuggestions();
         });
         
-        // Paste handling
+        this.addBtn.addEventListener('click', () => {
+            this.tryAddLine();
+        });
+        
         this.input.addEventListener('paste', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             const text = e.clipboardData.getData('text/plain');
-            
-            // Split by newlines and add each as a separate line
             const lines = text.split(/[\n\r]+/).filter(l => l.trim());
             lines.forEach(line => this.addLine(line.trim()));
         });
     }
     
-    // Set variable values for evaluation
-    setVariableValues(values) {
-        this.variableValues = values || {};
-        this.rehighlightAll();
-        // Update hidden input with newly evaluated path
-        this.updateHiddenInput();
-        // Notify parent that path has changed (for preview update)
-        this.onChange(this.getEvaluatedPath());
+    // Try to add a line from the input field
+    tryAddLine() {
+        const text = this.input.value.trim();
+        if (text) {
+            if (this.addLine(text)) {
+                this.input.value = '';
+                this.renderSuggestions();
+            }
+        }
     }
     
-    // Add a new line (command)
+    // Render command/variable suggestions below input
+    renderSuggestions() {
+        const inputVal = this.input.value.trim().toUpperCase();
+        const parts = this.splitBySpaces(this.input.value.trim());
+        const hasCmd = parts.length > 0 && parts[0].length === 1 && SVG_COMMANDS.has(parts[0]);
+        
+        let html = '';
+        
+        if (!hasCmd) {
+            // Show command suggestions
+            html += '<div class="path-suggestions-group">';
+            html += '<span class="path-suggestions-label">Commands:</span>';
+            Object.entries(SVG_COMMAND_DEFS).forEach(([cmd, def]) => {
+                const active = inputVal === cmd ? ' active' : '';
+                html += `<button class="path-suggestion-btn cmd-btn${active}" data-cmd="${cmd}" title="${def.label}">${cmd}</button>`;
+            });
+            html += '</div>';
+        } else {
+            // Show variable suggestions for the current argument position
+            const cmd = parts[0].toUpperCase();
+            const def = SVG_COMMAND_DEFS[cmd];
+            if (def && def.args.length > 0) {
+                const argIndex = parts.length - 1; // current arg being typed (0 = cmd, 1 = first arg)
+                const argLabel = def.args[argIndex - 1] || def.args[def.args.length - 1];
+                
+                // Show remaining args hint
+                const remainingArgs = def.args.slice(parts.length - 1);
+                if (remainingArgs.length > 0) {
+                    html += '<div class="path-suggestions-group">';
+                    html += `<span class="path-suggestions-label">Next: <em>${remainingArgs[0]}</em></span>`;
+                    html += '</div>';
+                }
+                
+                // Show variable suggestions
+                const vars = this.getAvailableVariables();
+                if (vars.length > 0) {
+                    html += '<div class="path-suggestions-group">';
+                    html += '<span class="path-suggestions-label">Variables:</span>';
+                    vars.forEach(v => {
+                        const val = this.variableValues[v.varName];
+                        const valStr = val !== undefined ? ` = ${val}` : '';
+                        html += `<button class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.name}${valStr}">{${v.varName}}</button>`;
+                    });
+                    html += '</div>';
+                }
+            }
+        }
+        
+        this.suggestionsEl.innerHTML = html;
+        
+        // Bind suggestion button events
+        this.suggestionsEl.querySelectorAll('.cmd-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const cmd = btn.dataset.cmd;
+                this.input.value = cmd + ' ';
+                this.input.focus();
+                this.renderSuggestions();
+            });
+        });
+        
+        this.suggestionsEl.querySelectorAll('.var-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const varName = btn.dataset.var;
+                const current = this.input.value;
+                // Add variable reference at end
+                if (current.endsWith(' ') || current === '') {
+                    this.input.value = current + `{${varName}}`;
+                } else {
+                    this.input.value = current + ` {${varName}}`;
+                }
+                this.input.focus();
+                this.renderSuggestions();
+            });
+        });
+    }
+    
+    // Get available variables (from variableValues + any registered list)
+    getAvailableVariables() {
+        const vars = [];
+        const seen = new Set();
+        
+        // From variableValues object
+        Object.keys(this.variableValues).forEach(varName => {
+            if (!seen.has(varName)) {
+                seen.add(varName);
+                vars.push({ varName, name: varName, value: this.variableValues[varName] });
+            }
+        });
+        
+        return vars;
+    }
+    
+    // Set variable values for evaluation (does NOT modify stored text)
+    setVariableValues(values) {
+        this.variableValues = values || {};
+        // Re-render all lines to update evaluated values display
+        this.lines.forEach(line => this.rerenderLine(line));
+        this.updateHiddenInput();
+        this.onChange(this.getEvaluatedPath());
+        // Update suggestions
+        this.renderSuggestions();
+    }
+    
+    // Parse a line into command + parameter tokens
+    parseLine(text) {
+        if (!text || !text.trim()) return null;
+        
+        const trimmed = text.trim();
+        const parts = this.splitBySpaces(trimmed);
+        
+        if (parts.length === 0) return null;
+        
+        const firstPart = parts[0];
+        if (firstPart.length === 1 && SVG_COMMANDS.has(firstPart)) {
+            const cmd = firstPart.toUpperCase();
+            return {
+                cmd: firstPart,
+                cmdUpper: cmd,
+                params: parts.slice(1),
+                def: SVG_COMMAND_DEFS[cmd] || { args: [], label: '' }
+            };
+        }
+        
+        return null;
+    }
+    
+    // Split string by spaces, keeping {varName} together
+    splitBySpaces(text) {
+        const parts = [];
+        let current = '';
+        let braceDepth = 0;
+        
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (char === '{') { braceDepth++; current += char; }
+            else if (char === '}') { braceDepth--; current += char; }
+            else if (char === ' ' && braceDepth === 0) {
+                if (current.trim()) parts.push(current.trim());
+                current = '';
+            } else {
+                current += char;
+            }
+        }
+        if (current.trim()) parts.push(current.trim());
+        return parts;
+    }
+    
+    // Evaluate a single parameter token
+    evaluateToken(token) {
+        if (!token || !token.trim()) return '0';
+        
+        let expr = token.trim();
+        
+        // Replace variable references
+        expr = expr.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+            const value = this.variableValues[varName];
+            if (value !== undefined && !isNaN(Number(value))) return String(value);
+            return '0';
+        });
+        
+        // Simple number check
+        const num = parseFloat(expr);
+        if (!isNaN(num) && isFinite(num)) {
+            // Check if the whole string is just this number
+            if (expr.trim().replace(/\s/g, '') === String(num)) return String(num);
+        }
+        
+        // Math expression
+        try {
+            const result = evaluateMathExpression(expr);
+            if (result !== null && result !== undefined && !isNaN(Number(result)) && isFinite(Number(result))) {
+                return String(Math.round(Number(result) * 1000000) / 1000000);
+            }
+        } catch (e) {}
+        
+        return '0';
+    }
+    
+    // Evaluate a full line
+    evaluateLine(text) {
+        if (!text || !text.trim()) return '';
+        const parsed = this.parseLine(text);
+        if (!parsed) return '';
+        const { cmd, params } = parsed;
+        if (cmd.toUpperCase() === 'Z') return cmd;
+        const evaluatedParams = params.map(p => this.evaluateToken(p));
+        return cmd + ' ' + evaluatedParams.join(' ');
+    }
+    
+    // Add a new line - returns true if successful
     addLine(text) {
-        if (!text) return;
+        if (!text || !text.trim()) return false;
+        
+        const parsed = this.parseLine(text);
+        if (!parsed) {
+            this.input.style.borderColor = 'red';
+            setTimeout(() => { this.input.style.borderColor = ''; }, 1000);
+            return false;
+        }
         
         const lineData = {
             id: Date.now() + Math.random(),
-            text: text,
+            text: text.trim(),
             element: null
         };
         
+        this.lines.push(lineData);
+        const lineEl = this.createLineElement(lineData);
+        lineData.element = lineEl;
+        // Now that lineData.element is set, add drag handlers
+        const numEl = lineEl.querySelector('.path-line-number');
+        if (numEl) this.addDragHandlers(numEl, lineData);
+        this.linesContainer.appendChild(lineEl);
+        
+        this.updateLineNumbers();
+        this.updateHiddenInput();
+        this.onChange(this.getEvaluatedPath());
+        return true;
+    }
+    
+    // Create the DOM element for a line (flex row with cells)
+    createLineElement(lineData) {
         const lineEl = document.createElement('div');
         lineEl.className = 'path-line';
         lineEl.dataset.id = lineData.id;
-        lineEl.innerHTML = `
-            <span class="path-line-number" draggable="true" title="Drag to reorder">${this.lines.length + 1}</span>
-            <span class="path-line-content">${this.highlightSyntax(text)}</span>
-            <button class="path-line-delete" title="Delete line">×</button>
-        `;
         
-        // Delete button
-        lineEl.querySelector('.path-line-delete').addEventListener('click', () => {
-            this.removeLine(lineData.id);
-        });
+        // Build cells WITHOUT drag handlers (lineData.element not set yet)
+        this.buildLineCells(lineEl, lineData, false);
         
-        // Click to edit
-        lineEl.querySelector('.path-line-content').addEventListener('click', () => {
-            this.editLine(lineData.id);
-        });
-        
-        // Add to DOM first
-        this.linesContainer.appendChild(lineEl);
-        lineData.element = lineEl;
-        this.lines.push(lineData);
-        
-        // Drag and drop handlers - after element is in DOM
-        const lineNumber = lineEl.querySelector('.path-line-number');
-        if (lineNumber) {
-            this.addDragHandlers(lineNumber, lineData);
-        }
-        
-        this.updateHiddenInput();
-        this.onChange(this.getPath());
+        return lineEl;
     }
     
-    // Add drag and drop handlers to line number
-    addDragHandlers(lineNumber, lineData) {
-        lineNumber.addEventListener('dragstart', (e) => {
+    // Build/rebuild the cells inside a line element
+    // addDragHandlers: false when called before lineData.element is set
+    buildLineCells(lineEl, lineData, addDrag = true) {
+        lineEl.innerHTML = '';
+        
+        const parsed = this.parseLine(lineData.text);
+        if (!parsed) return;
+        
+        const { cmd, cmdUpper, params, def } = parsed;
+        
+        // Line number (drag handle)
+        const numEl = document.createElement('span');
+        numEl.className = 'path-line-number';
+        numEl.draggable = true;
+        numEl.title = 'Drag to reorder';
+        numEl.textContent = this.lines.indexOf(lineData) + 1;
+        lineEl.appendChild(numEl);
+        
+        // Command cell
+        const cmdCell = document.createElement('span');
+        cmdCell.className = 'path-cell path-cell-cmd';
+        cmdCell.title = def.label || cmd;
+        cmdCell.textContent = cmd;
+        cmdCell.addEventListener('click', () => this.editCmdCell(lineData, cmdCell));
+        lineEl.appendChild(cmdCell);
+        
+        // Parameter cells
+        const expectedArgs = def.args;
+        const maxCells = Math.max(params.length, expectedArgs.length);
+        
+        for (let i = 0; i < maxCells; i++) {
+            const paramVal = params[i] || '';
+            const argLabel = expectedArgs[i] || `arg${i+1}`;
+            
+            const cell = document.createElement('span');
+            cell.className = 'path-cell path-cell-param';
+            cell.dataset.argIndex = i;
+            cell.dataset.argLabel = argLabel;
+            cell.title = argLabel;
+            
+            // Show raw value with evaluated result if different
+            const evaluated = paramVal ? this.evaluateToken(paramVal) : '';
+            const hasFormula = paramVal && paramVal !== evaluated;
+            
+            if (paramVal) {
+                cell.innerHTML = `<span class="cell-raw">${this.escapeHtml(paramVal)}</span>`;
+                if (hasFormula) {
+                    cell.innerHTML += `<span class="cell-eval">=${evaluated}</span>`;
+                }
+            } else {
+                cell.innerHTML = `<span class="cell-placeholder">${argLabel}</span>`;
+                cell.classList.add('cell-empty');
+            }
+            
+            cell.addEventListener('click', () => this.editParamCell(lineData, cell, i, argLabel));
+            lineEl.appendChild(cell);
+        }
+        
+        // Delete button
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'path-line-delete';
+        delBtn.title = 'Delete line';
+        delBtn.textContent = '×';
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.removeLine(lineData.id);
+        });
+        lineEl.appendChild(delBtn);
+        
+        // Drag handlers - only add if lineData.element is set
+        if (addDrag && lineData.element) {
+            this.addDragHandlers(numEl, lineData);
+        }
+    }
+    
+    // Re-render a line's cells (after variable values change)
+    rerenderLine(lineData) {
+        if (lineData.element) {
+            this.buildLineCells(lineData.element, lineData);
+        }
+    }
+    
+    // Edit the command cell
+    editCmdCell(lineData, cmdCell) {
+        const parsed = this.parseLine(lineData.text);
+        if (!parsed) return;
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'path-cell-input cmd-input';
+        input.value = parsed.cmd;
+        input.maxLength = 1;
+        
+        // Show command dropdown
+        const dropdown = document.createElement('div');
+        dropdown.className = 'path-cell-dropdown';
+        Object.entries(SVG_COMMAND_DEFS).forEach(([c, def]) => {
+            const opt = document.createElement('button');
+            opt.className = 'path-dropdown-opt';
+            opt.textContent = `${c} - ${def.label}`;
+            opt.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                input.value = c;
+                this.finishCmdEdit(lineData, input.value, input, dropdown);
+            });
+            dropdown.appendChild(opt);
+        });
+        
+        cmdCell.innerHTML = '';
+        cmdCell.appendChild(input);
+        cmdCell.appendChild(dropdown);
+        input.focus();
+        input.select();
+        
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            dropdown.remove();
+            this.finishCmdEdit(lineData, input.value, input, null);
+        };
+        
+        input.addEventListener('blur', finish);
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+            else if (e.key === 'Escape') { finished = true; this.rerenderLine(lineData); }
+            else if (e.key === 'Tab') { e.preventDefault(); input.blur(); }
+        });
+    }
+    
+    finishCmdEdit(lineData, newCmd, input, dropdown) {
+        if (dropdown) dropdown.remove();
+        const newCmdUpper = newCmd.trim().toUpperCase();
+        if (newCmdUpper.length === 1 && SVG_COMMANDS.has(newCmdUpper)) {
+            const parsed = this.parseLine(lineData.text);
+            const params = parsed ? parsed.params : [];
+            lineData.text = newCmdUpper + (params.length > 0 ? ' ' + params.join(' ') : '');
+        }
+        this.rerenderLine(lineData);
+        this.updateHiddenInput();
+        this.onChange(this.getEvaluatedPath());
+    }
+    
+    // Edit a parameter cell
+    editParamCell(lineData, cell, argIndex, argLabel) {
+        const parsed = this.parseLine(lineData.text);
+        if (!parsed) return;
+        
+        const currentVal = parsed.params[argIndex] || '';
+        
+        const wrapper = document.createElement('div');
+        wrapper.className = 'path-cell-edit-wrapper';
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'path-cell-input';
+        input.value = currentVal;
+        input.placeholder = argLabel;
+        
+        // Variable suggestions dropdown
+        const vars = this.getAvailableVariables();
+        let dropdown = null;
+        if (vars.length > 0) {
+            dropdown = document.createElement('div');
+            dropdown.className = 'path-cell-dropdown';
+            vars.forEach(v => {
+                const val = this.variableValues[v.varName];
+                const valStr = val !== undefined ? ` = ${val}` : '';
+                const opt = document.createElement('button');
+                opt.className = 'path-dropdown-opt var-opt';
+                opt.textContent = `{${v.varName}}${valStr}`;
+                opt.title = v.name || v.varName;
+                opt.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    // Insert variable at cursor or append
+                    const start = input.selectionStart;
+                    const end = input.selectionEnd;
+                    const before = input.value.substring(0, start);
+                    const after = input.value.substring(end);
+                    input.value = before + `{${v.varName}}` + after;
+                    input.focus();
+                    input.setSelectionRange(start + v.varName.length + 2, start + v.varName.length + 2);
+                });
+                dropdown.appendChild(opt);
+            });
+            wrapper.appendChild(dropdown);
+        }
+        
+        wrapper.appendChild(input);
+        
+        cell.innerHTML = '';
+        cell.appendChild(wrapper);
+        input.focus();
+        input.select();
+        
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            if (dropdown) dropdown.remove();
+            this.finishParamEdit(lineData, argIndex, input.value);
+        };
+        
+        input.addEventListener('blur', finish);
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+            else if (e.key === 'Escape') { finished = true; this.rerenderLine(lineData); }
+            else if (e.key === 'Tab') {
+                e.preventDefault();
+                finish();
+                // Move to next cell
+                const nextCell = cell.nextElementSibling;
+                if (nextCell && nextCell.classList.contains('path-cell-param')) {
+                    nextCell.click();
+                }
+            }
+        });
+    }
+    
+    finishParamEdit(lineData, argIndex, newVal) {
+        const parsed = this.parseLine(lineData.text);
+        if (!parsed) { this.rerenderLine(lineData); return; }
+        
+        const params = [...parsed.params];
+        // Extend params array if needed
+        while (params.length <= argIndex) params.push('0');
+        params[argIndex] = newVal.trim() || '0';
+        
+        lineData.text = parsed.cmd + ' ' + params.join(' ');
+        this.rerenderLine(lineData);
+        this.updateHiddenInput();
+        this.onChange(this.getEvaluatedPath());
+    }
+    
+    // Drag and drop
+    addDragHandlers(numEl, lineData) {
+        numEl.addEventListener('dragstart', (e) => {
             this.draggedLine = lineData;
             lineData.element.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', lineData.id.toString());
+            e.dataTransfer.setData('text/plain', String(lineData.id));
         });
         
-        lineNumber.addEventListener('dragend', () => {
-            if (this.draggedLine) {
-                this.draggedLine.element.classList.remove('dragging');
-            }
+        numEl.addEventListener('dragend', () => {
+            if (this.draggedLine) this.draggedLine.element.classList.remove('dragging');
             this.draggedLine = null;
-            this.dragOverLine = null;
-            // Remove all drag-over classes
             this.lines.forEach(l => l.element.classList.remove('drag-over'));
         });
         
-        // Make the whole line a drop target
         lineData.element.addEventListener('dragover', (e) => {
             e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            
             if (this.draggedLine && this.draggedLine.id !== lineData.id) {
                 lineData.element.classList.add('drag-over');
-                this.dragOverLine = lineData;
             }
         });
         
@@ -167,39 +603,25 @@ export default class PathEditor {
         lineData.element.addEventListener('drop', (e) => {
             e.preventDefault();
             lineData.element.classList.remove('drag-over');
-            
             if (this.draggedLine && this.draggedLine.id !== lineData.id) {
                 this.reorderLines(this.draggedLine, lineData);
             }
         });
     }
     
-    // Reorder lines after drag and drop
     reorderLines(draggedLine, targetLine) {
-        const draggedIndex = this.lines.indexOf(draggedLine);
-        const targetIndex = this.lines.indexOf(targetLine);
-        
-        if (draggedIndex === -1 || targetIndex === -1) return;
-        
-        // Remove dragged line from array
-        this.lines.splice(draggedIndex, 1);
-        
-        // Insert at new position
-        this.lines.splice(targetIndex, 0, draggedLine);
-        
-        // Rebuild DOM
+        const di = this.lines.indexOf(draggedLine);
+        const ti = this.lines.indexOf(targetLine);
+        if (di === -1 || ti === -1) return;
+        this.lines.splice(di, 1);
+        this.lines.splice(ti, 0, draggedLine);
         this.linesContainer.innerHTML = '';
-        this.lines.forEach((line, index) => {
-            this.linesContainer.appendChild(line.element);
-            const numEl = line.element.querySelector('.path-line-number');
-            if (numEl) numEl.textContent = index + 1;
-        });
-        
+        this.lines.forEach(line => this.linesContainer.appendChild(line.element));
+        this.updateLineNumbers();
         this.updateHiddenInput();
-        this.onChange(this.getPath());
+        this.onChange(this.getEvaluatedPath());
     }
     
-    // Remove a line
     removeLine(id) {
         const index = this.lines.findIndex(l => l.id === id);
         if (index !== -1) {
@@ -207,410 +629,77 @@ export default class PathEditor {
             this.lines.splice(index, 1);
             this.updateLineNumbers();
             this.updateHiddenInput();
-            this.onChange(this.getPath());
+            this.onChange(this.getEvaluatedPath());
         }
     }
     
-    // Edit a line
-    editLine(id) {
-        const lineData = this.lines.find(l => l.id === id);
-        if (!lineData) return;
-        
-        // Replace line content with input
-        const contentEl = lineData.element.querySelector('.path-line-content');
-        const originalText = lineData.text;
-        
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'path-line-edit-input';
-        input.value = originalText;
-        
-        contentEl.innerHTML = '';
-        contentEl.appendChild(input);
-        input.focus();
-        input.select();
-        
-        const finishEdit = () => {
-            const newText = input.value.trim();
-            if (newText) {
-                lineData.text = newText;
-                contentEl.innerHTML = this.highlightSyntax(newText);
-                this.updateHiddenInput();
-                this.onChange(this.getPath());
-            } else {
-                // Empty - remove line
-                this.removeLine(id);
-            }
-        };
-        
-        input.addEventListener('blur', finishEdit);
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                input.blur();
-            } else if (e.key === 'Escape') {
-                input.value = originalText;
-                input.blur();
-            }
-        });
-    }
-    
-    // Update line numbers after deletion
     updateLineNumbers() {
         this.lines.forEach((line, index) => {
-            const numEl = line.element.querySelector('.path-line-number');
+            const numEl = line.element?.querySelector('.path-line-number');
             if (numEl) numEl.textContent = index + 1;
         });
     }
     
-    // Highlight syntax for a single line
-    highlightSyntax(text) {
-        if (!text) return '';
-        
-        // Escape HTML
-        let escaped = text
-            .replace(/&/g, '&')
-            .replace(/</g, '<')
-            .replace(/>/g, '>');
-        
-        // Highlight variable references {varName}
-        escaped = escaped.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, 
-            '<span class="path-var">{$1}</span>');
-        
-        // Highlight commands (M, L, H, V, C, S, Q, T, A, Z)
-        escaped = escaped.replace(/\b([MLHVCSQTAZmlhvcsqtaz])\b/g, 
-            '<span class="path-cmd">$1</span>');
-        
-        // Highlight numbers (including negative and decimals)
-        escaped = escaped.replace(/(-?\d+\.?\d*)/g, 
-            '<span class="path-num">$1</span>');
-        
-        // Highlight commas
-        escaped = escaped.replace(/,/g, '<span class="path-comma">,</span>');
-        
-        return escaped;
+    escapeHtml(text) {
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
     
-    // Highlight input preview as user types
-    highlightInputPreview() {
-        const text = this.input.value.trim();
-        // Could show a preview tooltip here
-    }
-    
-    // Re-highlight all lines (e.g., after variable values change)
-    rehighlightAll() {
-        this.lines.forEach(line => {
-            const contentEl = line.element.querySelector('.path-line-content');
-            if (contentEl && !contentEl.querySelector('input')) {
-                contentEl.innerHTML = this.highlightSyntax(line.text);
-            }
-        });
-    }
-    
-    // Update hidden input with path data (evaluated path with formulas computed)
     updateHiddenInput() {
-        if (this.hiddenInput) {
-            this.hiddenInput.value = this.getEvaluatedPath();
-        }
+        if (this.hiddenInput) this.hiddenInput.value = this.getEvaluatedPath();
+        if (this.rawHiddenInput) this.rawHiddenInput.value = this.getPath();
     }
     
-    // Get the full path string
     getPath() {
         return this.lines.map(l => l.text).join(' ');
     }
     
-    // Get evaluated path with variables replaced and expressions evaluated
     getEvaluatedPath() {
-        return this.lines.map(l => this.evaluateLine(l.text)).join(' ');
+        return this.lines.map(l => this.evaluateLine(l.text)).filter(l => l).join(' ');
     }
     
-    // Evaluate a single line, replacing variables and computing expressions
-    evaluateLine(text) {
-        if (!text) return '';
-        
-        // Extract the command letter
-        const cmdMatch = text.match(/^([MLHVCSQTAZmlhvcsqtaz])/);
-        if (!cmdMatch) return text;
-        
-        const cmd = cmdMatch[1];
-        const paramsStr = text.slice(1).trim();
-        
-        // Split parameters while preserving negative signs and expressions
-        const tokens = this.tokenizeParams(paramsStr);
-        
-        // Evaluate each token as a mathematical expression
-        const evaluatedTokens = tokens.map(token => {
-            // First replace variables in the token
-            let evaluated = token.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
-                const value = this.variableValues[varName];
-                if (value !== undefined && !isNaN(value)) {
-                    return value;
-                }
-                return '0'; // Default to 0 if variable not found
-            });
-            
-            const result = this.evaluateExpression(evaluated);
-            return result;
-        });
-        
-        return cmd + ' ' + evaluatedTokens.join(' ');
-    }
-    
-    // Tokenize parameters, keeping expressions together
-    tokenizeParams(paramsStr) {
-        const tokens = [];
-        let current = '';
-        let parenDepth = 0;
-        let i = 0;
-        
-        while (i < paramsStr.length) {
-            const char = paramsStr[i];
-            
-            if (char === '(') {
-                parenDepth++;
-                current += char;
-                i++;
-            } else if (char === ')') {
-                parenDepth--;
-                current += char;
-                i++;
-            } else if ((char === ' ' || char === ',') && parenDepth === 0) {
-                if (current.trim()) {
-                    tokens.push(current.trim());
-                }
-                current = '';
-                i++;
-            } else if (char === '-' && parenDepth === 0) {
-                // Handle minus sign - could be:
-                // 1. Negative number at start of new token
-                // 2. Subtraction operator (part of expression)
-                
-                if (current === '') {
-                    // Start of a new token - could be negative number or expression
-                    // Check if previous token is a complete number
-                    if (tokens.length > 0) {
-                        const prevToken = tokens[tokens.length - 1];
-                        // If prev token is a simple number, this is a new negative token
-                        const prevNum = parseFloat(prevToken);
-                        if (!isNaN(prevNum) && isFinite(prevNum) && 
-                            (prevToken === prevNum.toString() || prevToken === (-prevNum).toString())) {
-                            // Previous is a simple number, start new token
-                            current = char;
-                        } else {
-                            // Previous is an expression, this is subtraction
-                            current = char;
-                        }
-                    } else {
-                        // First token, must be negative
-                        current = char;
-                    }
-                } else {
-                    // In the middle of a token - this is subtraction
-                    current += char;
-                }
-                i++;
-            } else {
-                current += char;
-                i++;
-            }
-        }
-        
-        if (current.trim()) {
-            tokens.push(current.trim());
-        }
-        
-        return tokens;
-    }
-    
-    // Evaluate a mathematical expression
-    evaluateExpression(expr) {
-        if (!expr) return '0';
-        
-        // Trim the expression
-        expr = expr.trim();
-        
-        // Check if it's a simple number (including negative)
-        const num = parseFloat(expr);
-        if (!isNaN(num) && isFinite(num)) {
-            // Check if the whole expression is just this number
-            // Handle both positive and negative numbers
-            if (expr === String(num) || expr === num.toString()) {
-                return String(num);
-            }
-        }
-        
-        // Try to evaluate as math expression
-        try {
-            const result = evaluateMathExpression(expr);
-            if (!isNaN(result) && isFinite(result)) {
-                // Round to reasonable precision
-                const rounded = Math.round(result * 1000000) / 1000000;
-                return String(rounded);
-            }
-        } catch (e) {
-            // Expression evaluation failed - log for debugging
-            console.warn('Expression evaluation failed:', expr, e);
-        }
-        
-        return '0'; // Return 0 if evaluation fails to avoid NaN
-    }
-    
-    // Set the path from a string
     setPath(pathString) {
         this.clear();
-        
         if (!pathString) return;
-        
-        // Split into commands
-        const commands = pathString.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi) || [];
-        commands.forEach(cmd => {
-            this.addLine(cmd.trim());
-        });
+        const commands = this.splitPathIntoCommands(pathString);
+        commands.forEach(cmd => { if (cmd.trim()) this.addLine(cmd.trim()); });
     }
     
-    // Clear all lines
+    splitPathIntoCommands(pathString) {
+        const commands = [];
+        let current = '';
+        let i = 0;
+        while (i < pathString.length) {
+            const char = pathString[i];
+            if (SVG_COMMANDS.has(char)) {
+                const prevChar = i > 0 ? pathString[i - 1] : '';
+                const isAfterSpace = !prevChar || prevChar === ' ' || prevChar === '\n' || prevChar === '\r';
+                if (i === 0 || isAfterSpace) {
+                    if (current.trim()) commands.push(current.trim());
+                    current = char;
+                    i++;
+                    continue;
+                }
+            }
+            current += char;
+            i++;
+        }
+        if (current.trim()) commands.push(current.trim());
+        return commands;
+    }
+    
     clear() {
-        this.lines.forEach(l => l.element.remove());
+        this.lines.forEach(l => { if (l.element?.parentNode) l.element.remove(); });
         this.lines = [];
-        this.updateHiddenInput();
+        if (this.hiddenInput) this.hiddenInput.value = '';
+        if (this.rawHiddenInput) this.rawHiddenInput.value = '';
     }
     
-    // Check if path is clockwise
-    isClockwise() {
-        const path = this.getEvaluatedPath();
-        const points = this.extractPoints(path);
-        
-        if (points.length < 3) return true;
-        
-        // Calculate signed area (shoelace formula)
-        let area = 0;
-        for (let i = 0; i < points.length; i++) {
-            const j = (i + 1) % points.length;
-            area += points[i].x * points[j].y;
-            area -= points[j].x * points[i].y;
-        }
-        
-        return area < 0; // Negative area = clockwise
-    }
-    
-    // Extract points from path for direction calculation
-    extractPoints(path) {
-        const points = [];
-        const commands = path.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi) || [];
-        
-        let currentX = 0, currentY = 0;
-        
-        commands.forEach(cmd => {
-            const type = cmd[0].toUpperCase();
-            const params = cmd.slice(1).trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n));
-            
-            switch (type) {
-                case 'M':
-                case 'L':
-                    if (params.length >= 2) {
-                        currentX = params[0];
-                        currentY = params[1];
-                        points.push({ x: currentX, y: currentY });
-                    }
-                    break;
-                case 'H':
-                    if (params.length >= 1) {
-                        currentX = params[0];
-                        points.push({ x: currentX, y: currentY });
-                    }
-                    break;
-                case 'V':
-                    if (params.length >= 1) {
-                        currentY = params[0];
-                        points.push({ x: currentX, y: currentY });
-                    }
-                    break;
-                case 'C':
-                    if (params.length >= 6) {
-                        currentX = params[4];
-                        currentY = params[5];
-                        points.push({ x: currentX, y: currentY });
-                    }
-                    break;
-                case 'S':
-                case 'Q':
-                    if (params.length >= 4) {
-                        currentX = params[2];
-                        currentY = params[3];
-                        points.push({ x: currentX, y: currentY });
-                    }
-                    break;
-                case 'A':
-                    if (params.length >= 7) {
-                        currentX = params[5];
-                        currentY = params[6];
-                        points.push({ x: currentX, y: currentY });
-                    }
-                    break;
-            }
-        });
-        
-        return points;
-    }
-    
-    // Reverse path direction (counter-clockwise to clockwise or vice versa)
-    reversePath() {
-        if (this.lines.length < 2) return;
-        
-        // Get all commands and reverse them
-        const reversedLines = [];
-        
-        // Start from the end, reverse each segment
-        for (let i = this.lines.length - 1; i >= 0; i--) {
-            const line = this.lines[i];
-            const type = line.text[0].toUpperCase();
-            
-            if (type === 'Z') continue; // Skip Z, we'll add it at the end
-            
-            const params = line.text.slice(1).trim().split(/[\s,]+/).filter(p => p);
-            
-            // For M and L, just reverse the order
-            if (type === 'M' || type === 'L') {
-                reversedLines.push(line.text);
-            } else if (type === 'H') {
-                // H x -> L x currentY (need to track position)
-                reversedLines.push(line.text);
-            } else if (type === 'V') {
-                // V y -> L currentX y
-                reversedLines.push(line.text);
-            } else {
-                reversedLines.push(line.text);
-            }
-        }
-        
-        // Swap M and final L positions
-        if (reversedLines.length >= 2) {
-            const firstM = reversedLines.find(l => l[0].toUpperCase() === 'M');
-            const lastL = reversedLines[reversedLines.length - 1];
-            
-            // The new M should be at the position of the last L
-            // And the last command should go to the original M position
-        }
-        
-        // Clear and rebuild
-        this.clear();
-        reversedLines.forEach(l => this.addLine(l));
-        this.addLine('Z');
-        
-        this.updateHiddenInput();
-        this.onChange(this.getPath());
-    }
-    
-    // Ensure path is clockwise (reverse if needed)
-    ensureClockwise() {
-        if (!this.isClockwise()) {
-            this.reversePath();
-        }
-    }
-    
-    // Destroy the editor
     destroy() {
-        this.element.remove();
+        if (this.element?.parentNode) this.element.remove();
         this.lines = [];
     }
 }

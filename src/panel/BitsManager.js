@@ -1031,11 +1031,15 @@ export default class BitsManager {
             payload.flat = flat !== null ? flat : 0;
         }
         
-        // Profile type: store profilePath
+        // Profile type: store profilePath (evaluated) and rawProfilePath (with formulas)
         if (groupName === "profile") {
             const profilePathInput = form.querySelector("#bit-profilePath");
             if (profilePathInput && profilePathInput.value.trim()) {
                 payload.profilePath = profilePathInput.value.trim();
+            }
+            const rawProfilePathInput = form.querySelector("#bit-rawProfilePath");
+            if (rawProfilePathInput && rawProfilePathInput.value.trim()) {
+                payload.rawProfilePath = rawProfilePathInput.value.trim();
             }
         }
         
@@ -1082,6 +1086,7 @@ export default class BitsManager {
             cornerRadius: rawVals.cornerRadius !== undefined ? rawVals.cornerRadius : (bit ? bit.cornerRadius : ""),
             flat: rawVals.flat !== undefined ? rawVals.flat : (bit ? bit.flat : ""),
             profilePath: bit ? bit.profilePath : "",
+            rawProfilePath: bit ? (bit.rawProfilePath || bit.profilePath) : "", // raw path with formulas
             toolNumber: bit && bit.toolNumber !== undefined ? bit.toolNumber : 1,
             color: bit && bit.fillColor ? bit.fillColor : "#cccccc",
             customValues: customVals,
@@ -1490,20 +1495,23 @@ export default class BitsManager {
         if (groupName === "profile" && pathEditorContainer && profilePathInput) {
             // Get variable values for the path editor
             const getVariableValues = () => this.collectVariableValues(form, groupName);
+            const rawProfilePathInput = modal.querySelector("#bit-rawProfilePath");
             
             // Create PathEditor instance
             pathEditorInstance = new PathEditor({
                 container: pathEditorContainer,
-                hiddenInput: profilePathInput,
+                hiddenInput: profilePathInput,           // evaluated path (for rendering)
+                rawHiddenInput: rawProfilePathInput,     // raw path with formulas (for saving)
                 onChange: (path) => {
                     updateBitPreview();
                 },
                 variableValues: getVariableValues()
             });
             
-            // Set initial path if editing existing bit
-            if (defaultValues.profilePath) {
-                pathEditorInstance.setPath(defaultValues.profilePath);
+            // Set initial path - prefer rawProfilePath (has formulas), fallback to profilePath
+            const initialPath = defaultValues.rawProfilePath || defaultValues.profilePath;
+            if (initialPath) {
+                pathEditorInstance.setPath(initialPath);
             }
             
             // Update variable values when form inputs change
@@ -1526,6 +1534,19 @@ export default class BitsManager {
             this.openAddCustomFieldModal(groupName, formGrid, () => {
                 addInputListeners();
                 updateBitPreview();
+                // Update PathEditor variables when new custom field is added
+                if (pathEditorInstance) {
+                    pathEditorInstance.setVariableValues(this.collectVariableValues(form, groupName));
+                }
+                // Add listener to update PathEditor when new field value changes
+                if (pathEditorInstance) {
+                    formGrid.querySelectorAll("input").forEach(input => {
+                        // Remove old listener by replacing with new one (simple approach)
+                        input.addEventListener("input", () => {
+                            pathEditorInstance.setVariableValues(this.collectVariableValues(form, groupName));
+                        });
+                    });
+                }
             });
         });
 
@@ -1675,12 +1696,14 @@ export default class BitsManager {
         // Profile-specific field: profilePath (at the end, full-width)
         if (groupName === "profile") {
             const profilePathValue = defaultValues.profilePath || "";
+            const rawProfilePathValue = defaultValues.rawProfilePath || profilePathValue;
             rows += `
                 <div class="bit-form-row profile-path-row" data-field="profilePath">
                     <label for="bit-profilePath">Profile Path:</label>
                     <div class="input-wrapper profile-path-wrapper">
                         <div id="path-editor-container"></div>
                         <input type="hidden" id="bit-profilePath" value="${profilePathValue}">
+                        <input type="hidden" id="bit-rawProfilePath" value="${rawProfilePathValue}">
                     </div>
                     <button type="button" class="delete-field-btn" disabled style="visibility:hidden;">×</button>
                 </div>

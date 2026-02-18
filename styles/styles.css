@@ -1445,6 +1445,385 @@ html {
   font-style: italic;
 }
 
+/* ===== NEW PATH EDITOR (table-based) ===== */
+.path-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.path-editor-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background-color: hsl(var(--input));
+  padding: 3px;
+}
+
+.path-line {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: background-color 0.15s;
+  min-height: 26px;
+}
+
+.path-line:hover {
+  background-color: hsl(var(--accent));
+}
+
+.path-line-number {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  min-width: 16px;
+  text-align: right;
+  user-select: none;
+  cursor: grab;
+  padding: 2px 3px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.path-line-number:hover {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.path-line-number:active {
+  cursor: grabbing;
+}
+
+/* Command cell */
+.path-cell-cmd {
+  background-color: rgba(230, 57, 70, 0.12);
+  color: #e63946;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.path-cell-cmd:hover {
+  background-color: rgba(230, 57, 70, 0.25);
+  border-color: rgba(230, 57, 70, 0.4);
+}
+
+.dark .path-cell-cmd {
+  background-color: rgba(255, 107, 107, 0.15);
+  color: #ff6b6b;
+}
+
+/* Parameter cell */
+.path-cell-param {
+  background-color: rgba(42, 157, 143, 0.08);
+  color: hsl(var(--foreground));
+  font-size: 11px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  min-width: 24px;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.path-cell-param:hover {
+  background-color: rgba(42, 157, 143, 0.2);
+  border-color: rgba(42, 157, 143, 0.4);
+}
+
+.path-cell-param.cell-empty {
+  background-color: rgba(0, 0, 0, 0.04);
+  border-style: dashed;
+  border-color: hsl(var(--border));
+}
+
+.dark .path-cell-param {
+  background-color: rgba(78, 205, 196, 0.1);
+}
+
+.dark .path-cell-param.cell-empty {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* Raw value in cell */
+.cell-raw {
+  color: hsl(var(--foreground));
+}
+
+/* Evaluated result in cell */
+.cell-eval {
+  color: hsl(var(--primary));
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+/* Placeholder text in empty cell */
+.cell-placeholder {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-style: italic;
+}
+
+/* Delete button */
+.path-line-delete {
+  opacity: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.path-line:hover .path-line-delete {
+  opacity: 1;
+}
+
+.path-line-delete:hover {
+  background-color: rgba(230, 57, 70, 0.15);
+  color: #e63946;
+}
+
+/* Drag states */
+.path-line.dragging {
+  opacity: 0.4;
+}
+
+.path-line.drag-over {
+  border-top: 2px solid hsl(var(--primary));
+}
+
+/* Input area */
+.path-editor-input-area {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.path-editor-input-row {
+  display: flex;
+  gap: 4px;
+}
+
+.path-editor-input {
+  flex: 1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 5px 8px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.path-editor-input:focus {
+  border-color: hsl(var(--primary));
+}
+
+.path-editor-input::placeholder {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+}
+
+.path-editor-add-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  cursor: pointer;
+  border-radius: var(--radius);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.path-editor-add-btn:hover {
+  opacity: 0.85;
+}
+
+/* Suggestions area */
+.path-editor-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.path-suggestions-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.path-suggestions-label {
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.path-suggestions-label em {
+  color: hsl(var(--primary));
+  font-style: normal;
+  font-weight: 600;
+}
+
+.path-suggestion-btn {
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.path-suggestion-btn:hover {
+  background-color: hsl(var(--accent));
+}
+
+.path-suggestion-btn.cmd-btn {
+  color: #e63946;
+  border-color: rgba(230, 57, 70, 0.3);
+  background-color: rgba(230, 57, 70, 0.06);
+  font-weight: 600;
+}
+
+.path-suggestion-btn.cmd-btn:hover,
+.path-suggestion-btn.cmd-btn.active {
+  background-color: rgba(230, 57, 70, 0.18);
+  border-color: rgba(230, 57, 70, 0.5);
+}
+
+.path-suggestion-btn.var-btn {
+  color: #9b59b6;
+  border-color: rgba(155, 89, 182, 0.3);
+  background-color: rgba(155, 89, 182, 0.06);
+}
+
+.path-suggestion-btn.var-btn:hover {
+  background-color: rgba(155, 89, 182, 0.18);
+  border-color: rgba(155, 89, 182, 0.5);
+}
+
+.dark .path-suggestion-btn.cmd-btn {
+  color: #ff6b6b;
+}
+
+.dark .path-suggestion-btn.var-btn {
+  color: #bb8fce;
+}
+
+/* Cell edit input */
+.path-cell-input {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid hsl(var(--primary));
+  border-radius: 3px;
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+  outline: none;
+  min-width: 40px;
+  max-width: 120px;
+}
+
+.path-cell-input.cmd-input {
+  max-width: 30px;
+  text-align: center;
+  font-weight: 700;
+  color: #e63946;
+}
+
+/* Cell edit wrapper with dropdown */
+.path-cell-edit-wrapper {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+}
+
+/* Dropdown for cell editing */
+.path-cell-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 200;
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 140px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px;
+}
+
+.path-dropdown-opt {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  border: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+  border-radius: 3px;
+  text-align: left;
+  transition: background-color 0.1s;
+  white-space: nowrap;
+}
+
+.path-dropdown-opt:hover {
+  background-color: hsl(var(--accent));
+}
+
+.path-dropdown-opt.var-opt {
+  color: #9b59b6;
+}
+
+.dark .path-dropdown-opt.var-opt {
+  color: #bb8fce;
+}
+
 /* ===== CUSTOM FIELD MODAL ===== */
 .custom-field-modal {
   position: fixed;
