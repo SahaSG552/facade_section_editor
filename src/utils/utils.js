@@ -18,16 +18,51 @@ export function distancePtToPt(p1, p2) {
 
 /**
  * Evaluates mathematical expressions in strings.
+ * Supports: +, -, *, /, parentheses, and basic math functions.
  *
  * @param {string|number} value - The value to evaluate. If it's a string, evaluates it as a math expression. If not a string, returns as-is.
- * @returns {string|number} The evaluated result or original value if evaluation fails.
+ * @returns {number} The evaluated result or NaN if evaluation fails.
  */
 export function evaluateMathExpression(value) {
-    if (!value || typeof value !== "string") return value;
+    if (value === null || value === undefined) return NaN;
+    
+    // If already a number, return it
+    if (typeof value === "number") return value;
+    
+    // If not a string, try to convert
+    if (typeof value !== "string") return NaN;
+    
+    const expr = value.trim();
+    if (!expr) return NaN;
+    
+    // Try simple number first
+    const num = parseFloat(expr);
+    if (!isNaN(num) && isFinite(num) && expr === num.toString()) {
+        return num;
+    }
+    
     try {
-        return math.evaluate(value);
+        // Sanitize expression - only allow safe characters
+        // Allow: digits, decimal point, operators, parentheses, spaces, common math
+        if (!/^[\d\s+\-*/().^%]+$/.test(expr)) {
+            // Has invalid characters, try to extract numbers and operators
+            return NaN;
+        }
+        
+        // Replace ^ with ** for exponentiation
+        let sanitized = expr.replace(/\^/g, '**');
+        
+        // Use Function constructor for safe evaluation
+        // This is safer than eval but still evaluates the expression
+        const result = new Function('return ' + sanitized)();
+        
+        if (typeof result === 'number' && !isNaN(result) && isFinite(result)) {
+            return result;
+        }
+        
+        return NaN;
     } catch (e) {
-        return value; // if not a valid expression, return as is
+        return NaN;
     }
 }
 

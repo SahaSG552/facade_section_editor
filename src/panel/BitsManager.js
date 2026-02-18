@@ -10,6 +10,7 @@ import CanvasManager from "../canvas/CanvasManager.js";
 import { evaluateMathExpression } from "../utils/utils.js";
 import { getSVGBounds } from "../canvas/zoomUtils.js";
 import variablesManager from "../data/VariablesManager.js";
+import PathEditor from "./PathEditor.js";
 
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -119,6 +120,19 @@ export default class BitsManager {
                     Z`,
                     );
                     break;
+                case "profile":
+                    // Profile cutter icon - custom shape (chamfer-like)
+                    innerShape = document.createElementNS(svgNS, "path");
+                    innerShape.setAttribute(
+                        "d",
+                        `M ${-s} ${s}
+                    L ${-s} ${-s / 2}
+                    L ${-s / 2} ${-s}
+                    L ${s} ${-s}
+                    L ${s} ${s}
+                    Z`,
+                    );
+                    break;
                 case "newBit":
                     innerShape = document.createElementNS(svgNS, "path");
                     innerShape.setAttribute(
@@ -198,7 +212,8 @@ export default class BitsManager {
             conical: ['angle'],
             ball: ['height'],
             fillet: ['height', 'cornerRadius', 'flat'],
-            bull: ['height', 'cornerRadius', 'flat']
+            bull: ['height', 'cornerRadius', 'flat'],
+            profile: [] // profile uses profilePath instead of numeric params
         };
         
         // Check base required params
@@ -216,6 +231,11 @@ export default class BitsManager {
             if (val === undefined || val === null || isNaN(val) || !isFinite(val)) {
                 return false;
             }
+        }
+        
+        // Profile type requires profilePath
+        if (groupName === 'profile' && !bit.profilePath) {
+            return false;
         }
         
         return true;
@@ -333,6 +353,27 @@ export default class BitsManager {
         L ${x - bit.diameter / 2} ${y - bit.length}
         L ${x + bit.diameter / 2} ${y - bit.length} Z`,
                 );
+                bitShape.setAttribute("fill", fillColor);
+                break;
+            }
+            case "profile": {
+                // Profile cutter: custom profile defined by SVG path
+                if (!bit.profilePath) return group;
+                
+                // Parse the profile path and transform it
+                // The profilePath is defined with origin at bottom-center, Y pointing up
+                // We need to: 1) flip Y (SVG Y is down), 2) translate to position
+                const transformedPath = this.transformProfilePath(
+                    bit.profilePath,
+                    x,
+                    y,
+                    bit.diameter
+                );
+                
+                if (!transformedPath) return group;
+                
+                bitShape = document.createElementNS(svgNS, "path");
+                bitShape.setAttribute("d", transformedPath);
                 bitShape.setAttribute("fill", fillColor);
                 break;
             }
@@ -806,6 +847,14 @@ export default class BitsManager {
             if (flat !== null && !isNaN(flat)) bitParams.flat = flat;
         }
 
+        // Profile type: collect profilePath
+        if (groupName === "profile") {
+            const profilePathInput = form.querySelector("#bit-profilePath");
+            if (profilePathInput && profilePathInput.value.trim()) {
+                bitParams.profilePath = profilePathInput.value.trim();
+            }
+        }
+
         return bitParams;
     }
 
@@ -840,6 +889,12 @@ export default class BitsManager {
             const cornerRadius = form.querySelector("#bit-cornerRadius")?.value?.trim();
             const flat = form.querySelector("#bit-flat")?.value?.trim();
             if (!height || !cornerRadius || !flat) return false;
+        }
+
+        // Profile type requires profilePath
+        if (groupName === "profile") {
+            const profilePath = form.querySelector("#bit-profilePath")?.value?.trim();
+            if (!profilePath) return false;
         }
 
         // Now check if we can actually evaluate the values for drawing (pass groupName for custom vars)
@@ -976,6 +1031,14 @@ export default class BitsManager {
             payload.flat = flat !== null ? flat : 0;
         }
         
+        // Profile type: store profilePath
+        if (groupName === "profile") {
+            const profilePathInput = form.querySelector("#bit-profilePath");
+            if (profilePathInput && profilePathInput.value.trim()) {
+                payload.profilePath = profilePathInput.value.trim();
+            }
+        }
+        
         // Store custom variable values
         const customVars = variablesManager.getCustomVariables(groupName);
         const customValues = {};
@@ -1018,6 +1081,7 @@ export default class BitsManager {
             height: rawVals.height !== undefined ? rawVals.height : (bit ? bit.height : ""),
             cornerRadius: rawVals.cornerRadius !== undefined ? rawVals.cornerRadius : (bit ? bit.cornerRadius : ""),
             flat: rawVals.flat !== undefined ? rawVals.flat : (bit ? bit.flat : ""),
+            profilePath: bit ? bit.profilePath : "",
             toolNumber: bit && bit.toolNumber !== undefined ? bit.toolNumber : 1,
             color: bit && bit.fillColor ? bit.fillColor : "#cccccc",
             customValues: customVals,
@@ -1418,6 +1482,41 @@ export default class BitsManager {
 
         addInputListeners();
 
+        // Initialize PathEditor for profile type
+        let pathEditorInstance = null;
+        const profilePathInput = modal.querySelector("#bit-profilePath");
+        const pathEditorContainer = modal.querySelector("#path-editor-container");
+        
+        if (groupName === "profile" && pathEditorContainer && profilePathInput) {
+            // Get variable values for the path editor
+            const getVariableValues = () => this.collectVariableValues(form, groupName);
+            
+            // Create PathEditor instance
+            pathEditorInstance = new PathEditor({
+                container: pathEditorContainer,
+                hiddenInput: profilePathInput,
+                onChange: (path) => {
+                    updateBitPreview();
+                },
+                variableValues: getVariableValues()
+            });
+            
+            // Set initial path if editing existing bit
+            if (defaultValues.profilePath) {
+                pathEditorInstance.setPath(defaultValues.profilePath);
+            }
+            
+            // Update variable values when form inputs change
+            const updatePathEditorVariables = () => {
+                pathEditorInstance.setVariableValues(getVariableValues());
+            };
+            
+            // Add listeners to update variables
+            formGrid.querySelectorAll("input").forEach(input => {
+                input.addEventListener("input", updatePathEditorVariables);
+            });
+        }
+
         // Color input listener
         const colorInput = modal.querySelector("#bit-color");
         colorInput.addEventListener("input", updateBitPreview);
@@ -1572,6 +1671,21 @@ export default class BitsManager {
                 </div>
             `;
         });
+
+        // Profile-specific field: profilePath (at the end, full-width)
+        if (groupName === "profile") {
+            const profilePathValue = defaultValues.profilePath || "";
+            rows += `
+                <div class="bit-form-row profile-path-row" data-field="profilePath">
+                    <label for="bit-profilePath">Profile Path:</label>
+                    <div class="input-wrapper profile-path-wrapper">
+                        <div id="path-editor-container"></div>
+                        <input type="hidden" id="bit-profilePath" value="${profilePathValue}">
+                    </div>
+                    <button type="button" class="delete-field-btn" disabled style="visibility:hidden;">×</button>
+                </div>
+            `;
+        }
 
         return rows;
     }
@@ -1823,6 +1937,137 @@ export default class BitsManager {
             // Assign to bitData
             if (!bit.bitData) bit.bitData = {};
             bit.bitData.profilePath = pathData;
+        });
+    }
+
+    // Transform profile path from profile coordinate system to SVG coordinates
+    // Profile CS: origin at bottom-center (anchor point), Y pointing up
+    // X=0 is at center, positive X is right, negative X is left
+    // SVG CS: origin at top-left, Y pointing down
+    transformProfilePath(profilePath, x, y, diameter) {
+        if (!profilePath) return null;
+        
+        try {
+            // Parse the path and transform coordinates
+            // 1. Flip Y axis (multiply by -1)
+            // 2. Translate to position (x, y)
+            // 3. X=0 maps to center (x), so SVG x = x + profileX
+            
+            const commands = profilePath.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
+            if (!commands) return null;
+            
+            const result = [];
+            
+            commands.forEach((cmd) => {
+                const type = cmd[0].toUpperCase();
+                const params = cmd
+                    .slice(1)
+                    .trim()
+                    .split(/[\s,]+/)
+                    .map(Number)
+                    .filter((n) => !isNaN(n));
+                
+                // Transform each coordinate
+                let transformedParams = [];
+                let i = 0;
+                
+                while (i < params.length) {
+                    if (type === "M" || type === "L" || type === "T") {
+                        // x y -> transform to SVG coords
+                        // Profile: x=0 is center, y=0 is bottom (anchor)
+                        // SVG: x = x + profileX, y = y - profileY (flip Y)
+                        const px = params[i];
+                        const py = params[i + 1];
+                        transformedParams.push(x + px, y - py);
+                        i += 2;
+                    } else if (type === "H") {
+                        // x only - relative to center
+                        transformedParams.push(x + params[i]);
+                        i += 1;
+                    } else if (type === "V") {
+                        // y only - flip
+                        transformedParams.push(y - params[i]);
+                        i += 1;
+                    } else if (type === "C") {
+                        // x1 y1 x2 y2 x y
+                        transformedParams.push(
+                            x + params[i], y - params[i + 1],
+                            x + params[i + 2], y - params[i + 3],
+                            x + params[i + 4], y - params[i + 5]
+                        );
+                        i += 6;
+                    } else if (type === "S" || type === "Q") {
+                        // x1 y1 x y
+                        transformedParams.push(
+                            x + params[i], y - params[i + 1],
+                            x + params[i + 2], y - params[i + 3]
+                        );
+                        i += 4;
+                    } else if (type === "A") {
+                        // rx ry angle large sweep x y
+                        // Invert sweep flag when Y is inverted
+                        const sweep = 1 - params[i + 4];
+                        transformedParams.push(
+                            params[i], params[i + 1], params[i + 2],
+                            params[i + 3], sweep,
+                            x + params[i + 5], y - params[i + 6]
+                        );
+                        i += 7;
+                    } else if (type === "Z") {
+                        break;
+                    } else {
+                        // Unknown command, copy as is
+                        transformedParams = params.slice(i);
+                        break;
+                    }
+                }
+                
+                result.push(type + " " + transformedParams.join(" "));
+            });
+            
+            return result.join(" ");
+        } catch (e) {
+            console.warn("Failed to transform profile path:", e);
+            return null;
+        }
+    }
+
+    // Highlight SVG path syntax for display
+    highlightPathSyntax(pathData) {
+        if (!pathData) return "";
+        
+        // Escape HTML entities first
+        let escaped = pathData
+            .replace(/&/g, "&")
+            .replace(/</g, "<")
+            .replace(/>/g, ">");
+        
+        // Highlight commands (M, L, H, V, C, S, Q, T, A, Z)
+        escaped = escaped.replace(/([MLHVCSQTAZmlhvcsqtaz])/g, '<span class="path-cmd">$1</span>');
+        
+        // Highlight numbers (including negative and decimals)
+        escaped = escaped.replace(/(-?\d+\.?\d*)/g, '<span class="path-num">$1</span>');
+        
+        // Highlight commas
+        escaped = escaped.replace(/,/g, '<span class="path-comma">,</span>');
+        
+        return escaped;
+    }
+
+    // Parse path into commands for line-by-line editing
+    parsePathToLines(pathData) {
+        if (!pathData) return [];
+        
+        const commands = pathData.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi) || [];
+        return commands.map((cmd, index) => {
+            const type = cmd[0].toUpperCase();
+            const params = cmd.slice(1).trim();
+            return {
+                index,
+                type,
+                params,
+                raw: cmd
+            };
         });
     }
 

@@ -130,4 +130,17 @@ export default {
             },
         ],
     },
+    profile: {
+        operations: ["AL", "OU", "IN", "PO"],
+        bits: [
+            {
+                id: "prf-1",
+                name: "Chamfer 45",
+                diameter: 12,
+                length: 10,
+                profilePath: "M 0 0 L 12 0 L 12 5 L 0 10 Z",
+                fillColor: "rgba(255, 128, 0, 0.3)",
+            },
+        ],
+    },
 };

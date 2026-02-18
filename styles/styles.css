@@ -1197,6 +1197,254 @@ html {
   stroke-dasharray: 3, 3;
 }
 
+/* ===== PROFILE PATH EDITOR ===== */
+.profile-path-row {
+  grid-template-columns: 120px 1fr 30px !important;
+  margin-top: 10px;
+}
+
+.profile-path-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.path-editor {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+  border-radius: var(--radius);
+  min-height: 80px;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  cursor: text;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.path-editor:focus {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsla(var(--primary), 0.2);
+}
+
+.path-editor:empty::before {
+  content: 'M 0 0 L 10 0 L 10 5 L 0 10 Z';
+  color: hsl(var(--muted-foreground));
+  pointer-events: none;
+}
+
+/* Path syntax highlighting */
+.path-cmd {
+  color: #e63946;
+  font-weight: 600;
+}
+
+.path-num {
+  color: #2a9d8f;
+}
+
+.path-comma {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Dark mode path highlighting */
+.dark .path-cmd {
+  color: #ff6b6b;
+}
+
+.dark .path-num {
+  color: #4ecdc4;
+}
+
+/* Path editor line numbers (optional enhancement) */
+.path-editor::before {
+  content: '';
+}
+
+/* Error state for invalid path */
+.path-editor.error {
+  border-color: #e63946;
+  background-color: rgba(230, 57, 70, 0.05);
+}
+
+.path-editor.error:focus {
+  box-shadow: 0 0 0 2px rgba(230, 57, 70, 0.2);
+}
+
+/* ===== PATH EDITOR MODULE ===== */
+.path-editor-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.path-editor-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 150px;
+  overflow-y: auto;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background-color: hsl(var(--input));
+  padding: 4px;
+}
+
+.path-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.path-line:hover {
+  background-color: hsl(var(--accent));
+}
+
+.path-line-number {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  min-width: 18px;
+  text-align: right;
+  user-select: none;
+}
+
+.path-line-content {
+  flex: 1;
+  font-size: 12px;
+  cursor: text;
+  word-break: break-all;
+}
+
+.path-line-delete {
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+}
+
+.path-line:hover .path-line-delete {
+  opacity: 1;
+}
+
+.path-line-delete:hover {
+  background-color: rgba(230, 57, 70, 0.15);
+  color: #e63946;
+}
+
+.path-line-edit-input {
+  width: 100%;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid hsl(var(--primary));
+  border-radius: 4px;
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
+  outline: none;
+}
+
+.path-editor-input-wrapper {
+  display: flex;
+  gap: 4px;
+}
+
+.path-editor-input {
+  flex: 1;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.path-editor-input:focus {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 2px hsla(var(--primary), 0.2);
+}
+
+.path-editor-input::placeholder {
+  color: hsl(var(--muted-foreground));
+}
+
+/* Path syntax highlighting */
+.path-var {
+  color: #9b59b6;
+  font-weight: 500;
+}
+
+.dark .path-var {
+  color: #bb8fce;
+}
+
+/* Drag and drop styles */
+.path-line-number {
+  cursor: grab;
+  user-select: none;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: background-color 0.15s;
+}
+
+.path-line-number:hover {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.path-line-number:active {
+  cursor: grabbing;
+}
+
+.path-line.dragging {
+  opacity: 0.5;
+  background-color: hsl(var(--accent));
+}
+
+.path-line.drag-over {
+  border-top: 2px solid hsl(var(--primary));
+}
+
+/* Expression highlight */
+.path-expr {
+  color: #e67e22;
+  font-style: italic;
+}
+
+.dark .path-expr {
+  color: #f39c12;
+}
+
+/* Evaluated value tooltip */
+.path-evaluated {
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  margin-left: 8px;
+  font-style: italic;
+}
+
 /* ===== CUSTOM FIELD MODAL ===== */
 .custom-field-modal {
   position: fixed;
