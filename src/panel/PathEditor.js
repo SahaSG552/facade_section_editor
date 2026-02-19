@@ -355,12 +355,13 @@ export default class PathEditor {
         numEl.textContent = this.lines.indexOf(lineData) + 1;
         lineEl.appendChild(numEl);
         
-        // Command cell
-        const cmdCell = document.createElement('span');
+        // Command cell - compact button style
+        const cmdCell = document.createElement('button');
+        cmdCell.type = 'button';
         cmdCell.className = 'path-cell path-cell-cmd';
         cmdCell.title = def.label || cmd;
         cmdCell.textContent = cmd;
-        cmdCell.addEventListener('click', () => this.editCmdCell(lineData, cmdCell));
+        cmdCell.addEventListener('click', () => this.activateCmdEdit(lineData));
         lineEl.appendChild(cmdCell);
         
         // Parameter cells
@@ -371,27 +372,25 @@ export default class PathEditor {
             const paramVal = params[i] || '';
             const argLabel = expectedArgs[i] || `arg${i+1}`;
             
-            const cell = document.createElement('span');
+            const cell = document.createElement('button');
+            cell.type = 'button';
             cell.className = 'path-cell path-cell-param';
             cell.dataset.argIndex = i;
             cell.dataset.argLabel = argLabel;
-            cell.title = argLabel;
             
-            // Show raw value with evaluated result if different
+            // Tooltip shows argLabel=evaluatedValue
             const evaluated = paramVal ? this.evaluateToken(paramVal) : '';
             const hasFormula = paramVal && paramVal !== evaluated;
+            cell.title = hasFormula ? `${argLabel}=${evaluated}` : argLabel;
             
             if (paramVal) {
-                cell.innerHTML = `<span class="cell-raw">${this.escapeHtml(paramVal)}</span>`;
-                if (hasFormula) {
-                    cell.innerHTML += `<span class="cell-eval">=${evaluated}</span>`;
-                }
+                cell.textContent = paramVal;
             } else {
-                cell.innerHTML = `<span class="cell-placeholder">${argLabel}</span>`;
+                cell.textContent = argLabel;
                 cell.classList.add('cell-empty');
             }
             
-            cell.addEventListener('click', () => this.editParamCell(lineData, cell, i, argLabel));
+            cell.addEventListener('click', () => this.activateParamEdit(lineData, i, argLabel));
             lineEl.appendChild(cell);
         }
         
@@ -419,8 +418,313 @@ export default class PathEditor {
             this.buildLineCells(lineData.element, lineData);
         }
     }
-    
-    // Edit the command cell
+
+    // Track active edit state
+    clearActiveEdit() {
+        // Remove active state from all cells
+        this.linesContainer.querySelectorAll('.path-cell.active-edit').forEach(c => c.classList.remove('active-edit'));
+        this.activeEditLineData = null;
+        this.activeEditType = null;
+        this.activeEditArgIndex = null;
+    }
+
+    // Activate command edit mode: show ? in cell, show cmd buttons in suggestions
+    activateCmdEdit(lineData) {
+        // If already editing this cmd, deactivate
+        if (this.activeEditLineData === lineData && this.activeEditType === 'cmd') {
+            this.clearActiveEdit();
+            this.renderSuggestions();
+            this.rerenderLine(lineData);
+            return;
+        }
+        this.clearActiveEdit();
+        this.activeEditLineData = lineData;
+        this.activeEditType = 'cmd';
+
+        // Mark cmd cell as active
+        const cmdCell = lineData.element?.querySelector('.path-cell-cmd');
+        if (cmdCell) {
+            cmdCell.classList.add('active-edit');
+            cmdCell.textContent = '?';
+        }
+
+        // Show command buttons in suggestions area
+        let html = '<div class="path-suggestions-group">';
+        html += '<span class="path-suggestions-label">Select command:</span>';
+        Object.entries(SVG_COMMAND_DEFS).forEach(([c, def]) => {
+            html += `<button class="path-suggestion-btn cmd-btn" data-cmd="${c}" title="${def.label}">${c}</button>`;
+        });
+        html += '</div>';
+        this.suggestionsEl.innerHTML = html;
+
+        this.suggestionsEl.querySelectorAll('.cmd-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newCmd = btn.dataset.cmd;
+                const parsed = this.parseLine(lineData.text);
+                const params = parsed ? parsed.params : [];
+                lineData.text = newCmd + (params.length > 0 ? ' ' + params.join(' ') : '');
+                this.clearActiveEdit();
+                this.rerenderLine(lineData);
+                this.updateHiddenInput();
+                this.onChange(this.getEvaluatedPath());
+                this.renderSuggestions();
+            });
+        });
+    }
+
+    // Activate param edit mode: show inline input in cell, show var buttons in suggestions
+    activateParamEdit(lineData, argIndex, argLabel) {
+        // If already editing this param, deactivate
+        if (this.activeEditLineData === lineData && this.activeEditType === 'param' && this.activeEditArgIndex === argIndex) {
+            this.clearActiveEdit();
+            this.renderSuggestions();
+            this.rerenderLine(lineData);
+            return;
+        }
+        this.clearActiveEdit();
+        this.activeEditLineData = lineData;
+        this.activeEditType = 'param';
+        this.activeEditArgIndex = argIndex;
+
+        const parsed = this.parseLine(lineData.text);
+        const currentVal = parsed ? (parsed.params[argIndex] || '') : '';
+
+        // Find the param cell and replace with inline input
+        const paramCells = lineData.element?.querySelectorAll('.path-cell-param');
+        const cell = paramCells?.[argIndex];
+        if (cell) {
+            cell.classList.add('active-edit');
+            cell.innerHTML = '';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'path-cell-inline-input';
+            input.value = currentVal;
+            input.placeholder = argLabel;
+            cell.appendChild(input);
+
+            // Focus and select
+            requestAnimationFrame(() => { input.focus(); input.select(); });
+
+            const finish = (save = true) => {
+                if (save) {
+                    this.finishParamEdit(lineData, argIndex, input.value);
+                } else {
+                    this.rerenderLine(lineData);
+                }
+                this.clearActiveEdit();
+                this.renderSuggestions();
+            };
+
+            input.addEventListener('blur', () => finish(true));
+            input.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+                else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+                else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    finish(true);
+                    // Move to next param
+                    const nextCell = paramCells?.[argIndex + 1];
+                    if (nextCell) nextCell.click();
+                }
+            });
+
+            // Store input ref for variable insertion
+            this.activeEditInput = input;
+        }
+
+        // Show variable buttons in suggestions area
+        const vars = this.getAvailableVariables();
+        let html = '';
+        if (vars.length > 0) {
+            html += '<div class="path-suggestions-group">';
+            html += `<span class="path-suggestions-label">Variables for <em>${argLabel}</em>:</span>`;
+            vars.forEach(v => {
+                const val = this.variableValues[v.varName];
+                const valStr = val !== undefined ? `=${val}` : '';
+                html += `<button class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.varName}${valStr}">{${v.varName}}${valStr}</button>`;
+            });
+            html += '</div>';
+        } else {
+            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">No variables defined</span></div>';
+        }
+        this.suggestionsEl.innerHTML = html;
+
+        this.suggestionsEl.querySelectorAll('.var-btn').forEach(btn => {
+            btn.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // prevent blur on input
+                const varName = btn.dataset.var;
+                if (this.activeEditInput) {
+                    const inp = this.activeEditInput;
+                    const start = inp.selectionStart;
+                    const end = inp.selectionEnd;
+                    const before = inp.value.substring(0, start);
+                    const after = inp.value.substring(end);
+                    inp.value = before + `{${varName}}` + after;
+                    inp.focus();
+                    inp.setSelectionRange(start + varName.length + 2, start + varName.length + 2);
+                }
+            });
+        });
+    }
+
+    rerenderLine(lineData) {
+        if (lineData.element) {
+            this.buildLineCells(lineData.element, lineData);
+        }
+    }
+
+    // Track active edit state
+    clearActiveEdit() {
+        // Remove active state from all cells
+        this.linesContainer.querySelectorAll('.path-cell.active-edit').forEach(c => c.classList.remove('active-edit'));
+        this.activeEditLineData = null;
+        this.activeEditType = null;
+        this.activeEditArgIndex = null;
+        this.activeEditInput = null;
+    }
+
+    // Activate command edit mode: show ? in cell, show cmd buttons in suggestions
+    activateCmdEdit(lineData) {
+        // If already editing this cmd, deactivate
+        if (this.activeEditLineData === lineData && this.activeEditType === 'cmd') {
+            this.clearActiveEdit();
+            this.renderSuggestions();
+            this.rerenderLine(lineData);
+            return;
+        }
+        this.clearActiveEdit();
+        this.activeEditLineData = lineData;
+        this.activeEditType = 'cmd';
+
+        // Mark cmd cell as active
+        const cmdCell = lineData.element?.querySelector('.path-cell-cmd');
+        if (cmdCell) {
+            cmdCell.classList.add('active-edit');
+            cmdCell.textContent = '?';
+        }
+
+        // Show command buttons in suggestions area
+        let html = '<div class="path-suggestions-group">';
+        html += '<span class="path-suggestions-label">Select command:</span>';
+        Object.entries(SVG_COMMAND_DEFS).forEach(([c, def]) => {
+            html += `<button class="path-suggestion-btn cmd-btn" data-cmd="${c}" title="${def.label}">${c}</button>`;
+        });
+        html += '</div>';
+        this.suggestionsEl.innerHTML = html;
+
+        this.suggestionsEl.querySelectorAll('.cmd-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newCmd = btn.dataset.cmd;
+                const parsed = this.parseLine(lineData.text);
+                const params = parsed ? parsed.params : [];
+                lineData.text = newCmd + (params.length > 0 ? ' ' + params.join(' ') : '');
+                this.clearActiveEdit();
+                this.rerenderLine(lineData);
+                this.updateHiddenInput();
+                this.onChange(this.getEvaluatedPath());
+                this.renderSuggestions();
+            });
+        });
+    }
+
+    // Activate param edit mode: show inline input in cell, show var buttons in suggestions
+    activateParamEdit(lineData, argIndex, argLabel) {
+        // If already editing this param, deactivate
+        if (this.activeEditLineData === lineData && this.activeEditType === 'param' && this.activeEditArgIndex === argIndex) {
+            this.clearActiveEdit();
+            this.renderSuggestions();
+            this.rerenderLine(lineData);
+            return;
+        }
+        this.clearActiveEdit();
+        this.activeEditLineData = lineData;
+        this.activeEditType = 'param';
+        this.activeEditArgIndex = argIndex;
+
+        const parsed = this.parseLine(lineData.text);
+        const currentVal = parsed ? (parsed.params[argIndex] || '') : '';
+
+        // Find the param cell and replace with inline input
+        const paramCells = lineData.element?.querySelectorAll('.path-cell-param');
+        const cell = paramCells?.[argIndex];
+        if (cell) {
+            cell.classList.add('active-edit');
+            cell.innerHTML = '';
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'path-cell-inline-input';
+            input.value = currentVal;
+            input.placeholder = argLabel;
+            cell.appendChild(input);
+
+            // Focus and select
+            requestAnimationFrame(() => { input.focus(); input.select(); });
+
+            const finish = (save = true) => {
+                if (save) {
+                    this.finishParamEdit(lineData, argIndex, input.value);
+                } else {
+                    this.rerenderLine(lineData);
+                }
+                this.clearActiveEdit();
+                this.renderSuggestions();
+            };
+
+            input.addEventListener('blur', () => finish(true));
+            input.addEventListener('keydown', (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+                else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+                else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    finish(true);
+                    // Move to next param
+                    const nextCell = paramCells?.[argIndex + 1];
+                    if (nextCell) nextCell.click();
+                }
+            });
+
+            // Store input ref for variable insertion
+            this.activeEditInput = input;
+        }
+
+        // Show variable buttons in suggestions area
+        const vars = this.getAvailableVariables();
+        let html = '';
+        if (vars.length > 0) {
+            html += '<div class="path-suggestions-group">';
+            html += `<span class="path-suggestions-label">Variables for <em>${argLabel}</em>:</span>`;
+            vars.forEach(v => {
+                const val = this.variableValues[v.varName];
+                const valStr = val !== undefined ? `=${val}` : '';
+                html += `<button class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.varName}${valStr}">{${v.varName}}${valStr}</button>`;
+            });
+            html += '</div>';
+        } else {
+            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">No variables defined</span></div>';
+        }
+        this.suggestionsEl.innerHTML = html;
+
+        this.suggestionsEl.querySelectorAll('.var-btn').forEach(btn => {
+            btn.addEventListener('mousedown', (e) => {
+                e.preventDefault(); // prevent blur on input
+                const varName = btn.dataset.var;
+                if (this.activeEditInput) {
+                    const inp = this.activeEditInput;
+                    const start = inp.selectionStart;
+                    const end = inp.selectionEnd;
+                    const before = inp.value.substring(0, start);
+                    const after = inp.value.substring(end);
+                    inp.value = before + `{${varName}}` + after;
+                    inp.focus();
+                    inp.setSelectionRange(start + varName.length + 2, start + varName.length + 2);
+                }
+            });
+        });
+    }
+
+    // Edit the command cell (legacy - kept for compatibility)
     editCmdCell(lineData, cmdCell) {
         const parsed = this.parseLine(lineData.text);
         if (!parsed) return;
