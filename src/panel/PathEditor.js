@@ -119,7 +119,7 @@ export default class PathEditor {
             html += '<span class="path-suggestions-label">Commands:</span>';
             Object.entries(SVG_COMMAND_DEFS).forEach(([cmd, def]) => {
                 const active = inputVal === cmd ? ' active' : '';
-                html += `<button class="path-suggestion-btn cmd-btn${active}" data-cmd="${cmd}" title="${def.label}">${cmd}</button>`;
+                html += `<button type="button" class="path-suggestion-btn cmd-btn${active}" data-cmd="${cmd}" title="${def.label}">${cmd}</button>`;
             });
             html += '</div>';
         } else {
@@ -146,7 +146,7 @@ export default class PathEditor {
                     vars.forEach(v => {
                         const val = this.variableValues[v.varName];
                         const valStr = val !== undefined ? ` = ${val}` : '';
-                        html += `<button class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.name}${valStr}">{${v.varName}}</button>`;
+                        html += `<button type="button" class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.name}${valStr}">{${v.varName}}</button>`;
                     });
                     html += '</div>';
                 }
@@ -452,7 +452,7 @@ export default class PathEditor {
         let html = '<div class="path-suggestions-group">';
         html += '<span class="path-suggestions-label">Select command:</span>';
         Object.entries(SVG_COMMAND_DEFS).forEach(([c, def]) => {
-            html += `<button class="path-suggestion-btn cmd-btn" data-cmd="${c}" title="${def.label}">${c}</button>`;
+            html += `<button type="button" class="path-suggestion-btn cmd-btn" data-cmd="${c}" title="${def.label}">${c}</button>`;
         });
         html += '</div>';
         this.suggestionsEl.innerHTML = html;
@@ -518,171 +518,25 @@ export default class PathEditor {
             input.addEventListener('blur', () => finish(true));
             input.addEventListener('keydown', (e) => {
                 e.stopPropagation();
-                if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-                else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
-                else if (e.key === 'Tab') {
+                if (e.key === 'Enter') { 
+                    e.preventDefault();
+                    finish(true); 
+                } else if (e.key === 'Escape') { 
+                    e.preventDefault();
+                    finish(false); 
+                } else if (e.key === 'Tab') {
                     e.preventDefault();
                     finish(true);
                     // Move to next param
                     const nextCell = paramCells?.[argIndex + 1];
                     if (nextCell) nextCell.click();
                 }
+                // Allow normal typing for other keys
             });
 
-            // Store input ref for variable insertion
-            this.activeEditInput = input;
-        }
-
-        // Show variable buttons in suggestions area
-        const vars = this.getAvailableVariables();
-        let html = '';
-        if (vars.length > 0) {
-            html += '<div class="path-suggestions-group">';
-            html += `<span class="path-suggestions-label">Variables for <em>${argLabel}</em>:</span>`;
-            vars.forEach(v => {
-                const val = this.variableValues[v.varName];
-                const valStr = val !== undefined ? `=${val}` : '';
-                html += `<button class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.varName}${valStr}">{${v.varName}}${valStr}</button>`;
-            });
-            html += '</div>';
-        } else {
-            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">No variables defined</span></div>';
-        }
-        this.suggestionsEl.innerHTML = html;
-
-        this.suggestionsEl.querySelectorAll('.var-btn').forEach(btn => {
-            btn.addEventListener('mousedown', (e) => {
-                e.preventDefault(); // prevent blur on input
-                const varName = btn.dataset.var;
-                if (this.activeEditInput) {
-                    const inp = this.activeEditInput;
-                    const start = inp.selectionStart;
-                    const end = inp.selectionEnd;
-                    const before = inp.value.substring(0, start);
-                    const after = inp.value.substring(end);
-                    inp.value = before + `{${varName}}` + after;
-                    inp.focus();
-                    inp.setSelectionRange(start + varName.length + 2, start + varName.length + 2);
-                }
-            });
-        });
-    }
-
-    rerenderLine(lineData) {
-        if (lineData.element) {
-            this.buildLineCells(lineData.element, lineData);
-        }
-    }
-
-    // Track active edit state
-    clearActiveEdit() {
-        // Remove active state from all cells
-        this.linesContainer.querySelectorAll('.path-cell.active-edit').forEach(c => c.classList.remove('active-edit'));
-        this.activeEditLineData = null;
-        this.activeEditType = null;
-        this.activeEditArgIndex = null;
-        this.activeEditInput = null;
-    }
-
-    // Activate command edit mode: show ? in cell, show cmd buttons in suggestions
-    activateCmdEdit(lineData) {
-        // If already editing this cmd, deactivate
-        if (this.activeEditLineData === lineData && this.activeEditType === 'cmd') {
-            this.clearActiveEdit();
-            this.renderSuggestions();
-            this.rerenderLine(lineData);
-            return;
-        }
-        this.clearActiveEdit();
-        this.activeEditLineData = lineData;
-        this.activeEditType = 'cmd';
-
-        // Mark cmd cell as active
-        const cmdCell = lineData.element?.querySelector('.path-cell-cmd');
-        if (cmdCell) {
-            cmdCell.classList.add('active-edit');
-            cmdCell.textContent = '?';
-        }
-
-        // Show command buttons in suggestions area
-        let html = '<div class="path-suggestions-group">';
-        html += '<span class="path-suggestions-label">Select command:</span>';
-        Object.entries(SVG_COMMAND_DEFS).forEach(([c, def]) => {
-            html += `<button class="path-suggestion-btn cmd-btn" data-cmd="${c}" title="${def.label}">${c}</button>`;
-        });
-        html += '</div>';
-        this.suggestionsEl.innerHTML = html;
-
-        this.suggestionsEl.querySelectorAll('.cmd-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const newCmd = btn.dataset.cmd;
-                const parsed = this.parseLine(lineData.text);
-                const params = parsed ? parsed.params : [];
-                lineData.text = newCmd + (params.length > 0 ? ' ' + params.join(' ') : '');
-                this.clearActiveEdit();
-                this.rerenderLine(lineData);
-                this.updateHiddenInput();
-                this.onChange(this.getEvaluatedPath());
-                this.renderSuggestions();
-            });
-        });
-    }
-
-    // Activate param edit mode: show inline input in cell, show var buttons in suggestions
-    activateParamEdit(lineData, argIndex, argLabel) {
-        // If already editing this param, deactivate
-        if (this.activeEditLineData === lineData && this.activeEditType === 'param' && this.activeEditArgIndex === argIndex) {
-            this.clearActiveEdit();
-            this.renderSuggestions();
-            this.rerenderLine(lineData);
-            return;
-        }
-        this.clearActiveEdit();
-        this.activeEditLineData = lineData;
-        this.activeEditType = 'param';
-        this.activeEditArgIndex = argIndex;
-
-        const parsed = this.parseLine(lineData.text);
-        const currentVal = parsed ? (parsed.params[argIndex] || '') : '';
-
-        // Find the param cell and replace with inline input
-        const paramCells = lineData.element?.querySelectorAll('.path-cell-param');
-        const cell = paramCells?.[argIndex];
-        if (cell) {
-            cell.classList.add('active-edit');
-            cell.innerHTML = '';
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.className = 'path-cell-inline-input';
-            input.value = currentVal;
-            input.placeholder = argLabel;
-            cell.appendChild(input);
-
-            // Focus and select
-            requestAnimationFrame(() => { input.focus(); input.select(); });
-
-            const finish = (save = true) => {
-                if (save) {
-                    this.finishParamEdit(lineData, argIndex, input.value);
-                } else {
-                    this.rerenderLine(lineData);
-                }
-                this.clearActiveEdit();
-                this.renderSuggestions();
-            };
-
-            input.addEventListener('blur', () => finish(true));
-            input.addEventListener('keydown', (e) => {
+            // Allow normal input
+            input.addEventListener('input', (e) => {
                 e.stopPropagation();
-                if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-                else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
-                else if (e.key === 'Tab') {
-                    e.preventDefault();
-                    finish(true);
-                    // Move to next param
-                    const nextCell = paramCells?.[argIndex + 1];
-                    if (nextCell) nextCell.click();
-                }
             });
 
             // Store input ref for variable insertion
@@ -698,7 +552,7 @@ export default class PathEditor {
             vars.forEach(v => {
                 const val = this.variableValues[v.varName];
                 const valStr = val !== undefined ? `=${val}` : '';
-                html += `<button class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.varName}${valStr}">{${v.varName}}${valStr}</button>`;
+                html += `<button type="button" class="path-suggestion-btn var-btn" data-var="${v.varName}" title="${v.varName}${valStr}">{${v.varName}}${valStr}</button>`;
             });
             html += '</div>';
         } else {
@@ -709,6 +563,7 @@ export default class PathEditor {
         this.suggestionsEl.querySelectorAll('.var-btn').forEach(btn => {
             btn.addEventListener('mousedown', (e) => {
                 e.preventDefault(); // prevent blur on input
+                e.stopPropagation();
                 const varName = btn.dataset.var;
                 if (this.activeEditInput) {
                     const inp = this.activeEditInput;
@@ -720,6 +575,11 @@ export default class PathEditor {
                     inp.focus();
                     inp.setSelectionRange(start + varName.length + 2, start + varName.length + 2);
                 }
+            });
+            // Also prevent click from bubbling up
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
             });
         });
     }

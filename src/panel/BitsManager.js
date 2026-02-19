@@ -761,7 +761,8 @@ export default class BitsManager {
     }
 
     // Helper method to collect bit parameters from form
-    collectBitParameters(form, groupName) {
+    // modalElement is needed for profile type to find profilePath input (it's outside form)
+    collectBitParameters(form, groupName, modalElement = null) {
         const name = form.querySelector("#bit-name").value.trim();
         
         // Collect variable values for formula evaluation (pass groupName for custom vars)
@@ -847,9 +848,9 @@ export default class BitsManager {
             if (flat !== null && !isNaN(flat)) bitParams.flat = flat;
         }
 
-        // Profile type: collect profilePath
-        if (groupName === "profile") {
-            const profilePathInput = form.querySelector("#bit-profilePath");
+        // Profile type: collect profilePath (input is in modal, not in form)
+        if (groupName === "profile" && modalElement) {
+            const profilePathInput = modalElement.querySelector("#bit-profilePath");
             if (profilePathInput && profilePathInput.value.trim()) {
                 bitParams.profilePath = profilePathInput.value.trim();
             }
@@ -859,7 +860,8 @@ export default class BitsManager {
     }
 
     // Helper method to validate bit parameters
-    validateBitParameters(form, groupName) {
+    // modalElement is needed for profile type to find profilePath input (it's outside form)
+    validateBitParameters(form, groupName, modalElement = null) {
         const name = form.querySelector("#bit-name")?.value?.trim();
         if (!name) return false;
 
@@ -891,9 +893,9 @@ export default class BitsManager {
             if (!height || !cornerRadius || !flat) return false;
         }
 
-        // Profile type requires profilePath
+        // Profile type requires profilePath (input is in modal, not in form)
         if (groupName === "profile") {
-            const profilePath = form.querySelector("#bit-profilePath")?.value?.trim();
+            const profilePath = modalElement?.querySelector("#bit-profilePath")?.value?.trim();
             if (!profilePath) return false;
         }
 
@@ -911,7 +913,8 @@ export default class BitsManager {
     }
 
     // Helper method to build bit payload for saving
-    buildBitPayload(form, groupName) {
+    // modalElement is needed for profile type to find profilePath input (it's outside form)
+    buildBitPayload(form, groupName, modalElement = null) {
         // Get resolved variable values (pass groupName for custom vars)
         const variableValues = this.collectVariableValues(form, groupName);
         
@@ -1032,12 +1035,13 @@ export default class BitsManager {
         }
         
         // Profile type: store profilePath (evaluated) and rawProfilePath (with formulas)
-        if (groupName === "profile") {
-            const profilePathInput = form.querySelector("#bit-profilePath");
+        // Inputs are in modal, not in form
+        if (groupName === "profile" && modalElement) {
+            const profilePathInput = modalElement.querySelector("#bit-profilePath");
             if (profilePathInput && profilePathInput.value.trim()) {
                 payload.profilePath = profilePathInput.value.trim();
             }
-            const rawProfilePathInput = form.querySelector("#bit-rawProfilePath");
+            const rawProfilePathInput = modalElement.querySelector("#bit-rawProfilePath");
             if (rawProfilePathInput && rawProfilePathInput.value.trim()) {
                 payload.rawProfilePath = rawProfilePathInput.value.trim();
             }
@@ -1096,34 +1100,41 @@ export default class BitsManager {
         const variables = variablesManager.getVariablesForType(groupName);
         const customVariables = variablesManager.getCustomVariables(groupName);
 
+        // Generate form rows without profile path (will be added separately)
+        const formRows = this.generateFormRows(groupName, defaultValues, variables, false);
+        const profilePathHtml = groupName === "profile" ? this.generateProfilePathHtml(defaultValues) : "";
+        
         const modal = document.createElement("div");
         modal.className = "modal";
         modal.innerHTML = `
     <div class="modal-content">
       <h2>${isEdit ? "Edit Bit" : "New Bit Parameters"}</h2>
       <div class="modal-body">
-        <form id="bit-form" class="bit-form">
-          <div class="bit-form-grid" id="bit-form-grid">
-            ${this.generateFormRows(groupName, defaultValues, variables)}
-          </div>
+        <div class="bit-form-container">
+          <form id="bit-form" class="bit-form">
+            <div class="bit-form-grid" id="bit-form-grid">
+              ${formRows}
+            </div>
+          </form>
           <button type="button" class="add-field-btn" id="add-custom-field-btn">
             + Add Custom Field
           </button>
-        </form>
+          ${profilePathHtml}
+        </div>
         <div id="bit-preview" class="bit-preview">
           <svg id="bit-preview-canvas" width="400" height="400"></svg>
           <div id="preview-toolbar">
-            <button id="preview-zoom-in" title="Zoom In">+</button>
-            <button id="preview-zoom-out" title="Zoom Out">-</button>
-            <button id="preview-fit" title="Fit to Scale">Fit</button>
-            <button id="preview-toggle-grid" title="Toggle Grid">Grid</button>
+            <button type="button" id="preview-zoom-in" title="Zoom In">+</button>
+            <button type="button" id="preview-zoom-out" title="Zoom Out">-</button>
+            <button type="button" id="preview-fit" title="Fit to Scale">Fit</button>
+            <button type="button" id="preview-toggle-grid" title="Toggle Grid">Grid</button>
             <input type="color" id="bit-color" value="${defaultValues.color}" title="Bit Color">
           </div>
         </div>
       </div>
       <div class="button-group">
         <button type="button" id="cancel-btn">Cancel</button>
-        <button type="submit" form="bit-form">OK</button>
+        <button type="button" id="ok-btn">OK</button>
       </div>
     </div>
   `;
@@ -1248,7 +1259,7 @@ export default class BitsManager {
             const previewBitsLayer = previewCanvasManager.getLayer("bits");
             previewBitsLayer.innerHTML = "";
 
-            if (!this.validateBitParameters(form, groupName)) {
+            if (!this.validateBitParameters(form, groupName, modal)) {
                 const text = document.createElementNS(svgNS, "text");
                 text.setAttribute("x", previewCanvasManager.panX);
                 text.setAttribute("y", previewCanvasManager.panY + 10);
@@ -1261,7 +1272,7 @@ export default class BitsManager {
                 return;
             }
 
-            const bitParams = this.collectBitParameters(form, groupName);
+            const bitParams = this.collectBitParameters(form, groupName, modal);
 
             // Calculate bounds for positioning
             const tempGroup = this.createBitShapeElement(bitParams, groupName, 0, 0, true);
@@ -1434,8 +1445,8 @@ export default class BitsManager {
         };
 
         const previewFitToScale = () => {
-            if (this.validateBitParameters(form, groupName)) {
-                const tempBitParams = this.collectBitParameters(form, groupName);
+            if (this.validateBitParameters(form, groupName, modal)) {
+                const tempBitParams = this.collectBitParameters(form, groupName, modal);
                 const tempGroup = this.createBitShapeElement(tempBitParams, groupName, 0, 0, true);
                 previewCanvasManager.fitToSVGElement(tempGroup, 20);
             } else {
@@ -1584,9 +1595,16 @@ export default class BitsManager {
         updateBitPreview();
         previewFitToScale();
 
-        // Form submit handler
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
+        // Prevent form submission on Enter key
+        form.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        });
+
+        // OK button click handler
+        modal.querySelector("#ok-btn").addEventListener("click", async () => {
             const name = form.querySelector("#bit-name").value.trim();
 
             if (await this.isBitNameDuplicate(name, isEdit ? bit?.id : null)) {
@@ -1594,7 +1612,7 @@ export default class BitsManager {
                 return;
             }
 
-            const payload = this.buildBitPayload(form, groupName);
+            const payload = this.buildBitPayload(form, groupName, modal);
 
             let updatedBit;
             if (isEdit) {
@@ -1617,8 +1635,22 @@ export default class BitsManager {
         });
     }
 
+    // Generate profile path HTML (separate from form)
+    generateProfilePathHtml(defaultValues) {
+        const profilePathValue = defaultValues.profilePath || "";
+        const rawProfilePathValue = defaultValues.rawProfilePath || profilePathValue;
+        return `
+            <div class="profile-path-section">
+                <div class="profile-path-header">Profile Path:</div>
+                <div id="path-editor-container"></div>
+                <input type="hidden" id="bit-profilePath" value="${profilePathValue}">
+                <input type="hidden" id="bit-rawProfilePath" value="${rawProfilePathValue}">
+            </div>
+        `;
+    }
+
     // Generate form rows for flex grid layout
-    generateFormRows(groupName, defaultValues, variables) {
+    generateFormRows(groupName, defaultValues, variables, includeProfilePath = true) {
         let rows = "";
 
         // Name field (always first) - supports variables like R{cr}
@@ -1692,23 +1724,6 @@ export default class BitsManager {
                 </div>
             `;
         });
-
-        // Profile-specific field: profilePath (at the end, full-width)
-        if (groupName === "profile") {
-            const profilePathValue = defaultValues.profilePath || "";
-            const rawProfilePathValue = defaultValues.rawProfilePath || profilePathValue;
-            rows += `
-                <div class="bit-form-row profile-path-row" data-field="profilePath">
-                    <label for="bit-profilePath">Profile Path:</label>
-                    <div class="input-wrapper profile-path-wrapper">
-                        <div id="path-editor-container"></div>
-                        <input type="hidden" id="bit-profilePath" value="${profilePathValue}">
-                        <input type="hidden" id="bit-rawProfilePath" value="${rawProfilePathValue}">
-                    </div>
-                    <button type="button" class="delete-field-btn" disabled style="visibility:hidden;">×</button>
-                </div>
-            `;
-        }
 
         return rows;
     }
@@ -1809,7 +1824,7 @@ export default class BitsManager {
                         <input type="text" id="bit-${varName}" value="${defaultValue}">
                         <div class="formula-result"></div>
                     </div>
-                    <button type="button" class="delete-field-btn" title="Delete custom field">×</button>
+                    <button type="button" class="delete-field-btn visible" title="Delete custom field">×</button>
                 `;
                 formGrid.appendChild(row);
 

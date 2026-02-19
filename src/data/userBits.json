@@ -4,7 +4,9 @@
       "id": "cyl-1",
       "name": "D10H20",
       "diameter": 10,
-      "length": 20
+      "length": 20,
+      "profilePath": "M -5 20 L 5 20 L 5 0 L -5 0 Z",
+      "extension": null
     },
     {
       "id": "cyl-2",
@@ -18,7 +20,21 @@
       "diameter": 4,
       "length": 13,
       "toolNumber": 4,
-      "fillColor": "#d37373"
+      "fillColor": "#d37373",
+      "profilePath": "M -2 13 L 2 13 L 2 0 L -2 0 Z",
+      "extension": null,
+      "rawValues": {
+        "diameter": "4",
+        "length": "13",
+        "shankDiameter": "8",
+        "totalLength": "50",
+        "angle": "",
+        "height": "",
+        "cornerRadius": "",
+        "flat": ""
+      },
+      "shankDiameter": 8,
+      "totalLength": 50
     },
     {
       "id": "b_mir9yp5kdp8up1",
@@ -38,15 +54,27 @@
       "angle": 90,
       "toolNumber": 1,
       "fillColor": "#369b54",
-      "shankDiameter": 12,
-      "totalLength": 50
+      "shankDiameter": 0,
+      "totalLength": 0,
+      "rawValues": {
+        "diameter": "25.4",
+        "length": "19",
+        "shankDiameter": "",
+        "totalLength": "",
+        "angle": "90",
+        "height": "",
+        "cornerRadius": "",
+        "flat": ""
+      }
     },
     {
       "id": "con-2",
       "name": "V120D32",
       "diameter": 32,
       "length": 13.2,
-      "angle": 120
+      "angle": 120,
+      "profilePath": "M 0 0 L -16 9.237604307034015 L -16 13.2 L 16 13.2 L 16 9.237604307034015 Z",
+      "extension": null
     },
     {
       "id": "con-3",
@@ -63,7 +91,20 @@
       "diameter": 14,
       "length": 16,
       "toolNumber": 1,
-      "angle": 60
+      "angle": 60,
+      "fillColor": "#cccccc",
+      "rawValues": {
+        "diameter": "14",
+        "length": "16",
+        "shankDiameter": "",
+        "totalLength": "",
+        "angle": "60",
+        "height": "",
+        "cornerRadius": "",
+        "flat": ""
+      },
+      "shankDiameter": 0,
+      "totalLength": 0
     }
   ],
   "ball": [
@@ -81,7 +122,22 @@
       "length": 25,
       "height": 9.5,
       "toolNumber": 1,
-      "fillColor": "#a4ae24"
+      "fillColor": "#a4ae24",
+      "rawName": "U{d}",
+      "rawValues": {
+        "diameter": "19",
+        "length": "25",
+        "shankDiameter": "",
+        "totalLength": "",
+        "angle": "",
+        "height": "{d}/2",
+        "cornerRadius": "",
+        "flat": ""
+      },
+      "shankDiameter": 0,
+      "totalLength": 0,
+      "profilePath": "M 9.5 9.5 A 9.5 9.5 0 0 0 -9.5 9.5 L -9.5 25 L 9.5 25 Z",
+      "extension": null
     },
     {
       "id": "bn-3",
@@ -90,7 +146,9 @@
       "length": 22,
       "height": 19.05,
       "toolNumber": 1,
-      "fillColor": "#c332b7"
+      "fillColor": "#c332b7",
+      "profilePath": "M 19.05 19.05 A 19.05 19.05 0 0 0 -19.05 19.05 L -19.05 22 L 19.05 22 Z",
+      "extension": null
     },
     {
       "id": "b_mizv5vo3ko6kzl",
@@ -103,10 +161,33 @@
     {
       "id": "b_mizv9oo9jqz57s",
       "name": "U6",
-      "diameter": 6,
+      "diameter": 6.35,
       "length": 10,
       "toolNumber": 1,
-      "height": 3
+      "height": 3.175,
+      "fillColor": "#7b8863",
+      "rawValues": {
+        "diameter": "6.35",
+        "length": "10",
+        "shankDiameter": "8",
+        "totalLength": "50",
+        "angle": "",
+        "height": "{d}/2",
+        "cornerRadius": "",
+        "flat": ""
+      },
+      "shankDiameter": 8,
+      "totalLength": 50,
+      "rawName": "U{d}",
+      "profilePath": "M 3.175 3.175 A 3.175 3.175 0 0 0 -3.175 3.175 L -3.175 10 L 3.175 10 Z",
+      "extension": null,
+      "shank": {
+        "diameter": 8,
+        "bitDiameter": 6.35,
+        "hasCollision": true,
+        "widthDifference": 1.6499936561884843,
+        "scale": 1.2598425196850394
+      }
     },
     {
       "id": "b_mj1f0h4maqz8po",
@@ -148,6 +229,37 @@
       "length": 45,
       "toolNumber": 1,
       "height": 38.1
+    },
+    {
+      "id": "b_mlshhzbnma3enm",
+      "name": "U4",
+      "diameter": 4,
+      "length": 10,
+      "toolNumber": 1,
+      "height": 2,
+      "fillColor": "#7b8863",
+      "rawValues": {
+        "diameter": "4",
+        "length": "10",
+        "shankDiameter": "8",
+        "totalLength": "50",
+        "angle": "",
+        "height": "{d}/2",
+        "cornerRadius": "",
+        "flat": ""
+      },
+      "shankDiameter": 8,
+      "totalLength": 50,
+      "rawName": "U{d}",
+      "profilePath": "M 3 3 A 3 3 0 0 0 -3 3 L -3 10 L 3 10 Z",
+      "extension": null,
+      "shank": {
+        "diameter": 8,
+        "bitDiameter": 6,
+        "hasCollision": true,
+        "widthDifference": 2,
+        "scale": 1.3333333333333333
+      }
     }
   ],
   "fillet": [
@@ -179,7 +291,9 @@
       "toolNumber": 1,
       "height": 8,
       "cornerRadius": 8,
-      "flat": 0
+      "flat": 0,
+      "profilePath": "M 8 8 A 8 8 0 0 1 0 0 L 0 0 A 8 8 0 0 1 -8 8 L -8 16 L 8 16 Z",
+      "extension": null
     },
     {
       "id": "b_mix5t7abnv2kcb",
@@ -231,7 +345,21 @@
       "length": 10,
       "height": 3,
       "cornerRadius": 3,
-      "flat": 4
+      "flat": 4,
+      "fillColor": "#cccccc",
+      "toolNumber": 1,
+      "rawValues": {
+        "diameter": "10",
+        "length": "10",
+        "shankDiameter": "",
+        "totalLength": "",
+        "angle": "",
+        "height": "3",
+        "cornerRadius": "3",
+        "flat": "4"
+      },
+      "shankDiameter": 0,
+      "totalLength": 0
     },
     {
       "id": "bul-2",
@@ -243,6 +371,66 @@
       "flat": 8,
       "toolNumber": 1,
       "fillColor": "#d0ca25"
+    }
+  ],
+  "profile": [
+    {
+      "id": "b_mlrzln7anr547m",
+      "name": "CH45",
+      "diameter": 20,
+      "length": 8,
+      "profilePath": "M 0 0 L -2 0 L -10 3 L -10 8 L 10 8 L 10 3 L 2 0 Z",
+      "fillColor": "#b18bbb",
+      "toolNumber": 1,
+      "rawValues": {
+        "diameter": "20",
+        "length": "8",
+        "shankDiameter": "",
+        "totalLength": "",
+        "angle": "",
+        "height": "",
+        "cornerRadius": "",
+        "flat": ""
+      },
+      "shankDiameter": 0,
+      "totalLength": 0,
+      "extension": null,
+      "customValues": {
+        "r": "{d}/2",
+        "f": "4",
+        "h": "5",
+        "cr": "3"
+      },
+      "rawProfilePath": "M 0 0 L -{f}/2 0 L -{r} 3 L -{r} {l} L {r} {l} L {r} 3 L {f}/2 0 Z"
+    },
+    {
+      "id": "b_mlsf49q2fb6v4j",
+      "name": "P22H7",
+      "fillColor": "#93b654",
+      "toolNumber": 1,
+      "rawName": "P{d}H{h}",
+      "rawValues": {
+        "diameter": "22",
+        "length": "11",
+        "shankDiameter": "",
+        "totalLength": "",
+        "angle": "",
+        "height": "",
+        "cornerRadius": "",
+        "flat": ""
+      },
+      "diameter": 22,
+      "length": 11,
+      "shankDiameter": 0,
+      "totalLength": 0,
+      "profilePath": "M 0 0 A 6 6 1 0 0 -5.5 3.5 A 6 6 0 0 1 -11 7 L -11 11 L 11 11 L 11 7 A 6 6 0 0 1 5.5 3.5 A 6 6 1 0 0 0 0 Z",
+      "rawProfilePath": "M 0 0 A 6 6 1 0 0 -{d}/4 {h}/2 A 6 6 0 0 1 -{d}/2 {h} L -{d}/2 {l} L {d}/2 {l} L {d}/2 {h} A 6 6 0 0 1 {d}/4 {h}/2 A 6 6 1 0 0 0 0",
+      "customValues": {
+        "r": "",
+        "f": "",
+        "h": "7"
+      },
+      "extension": null
     }
   ]
 }

@@ -1185,6 +1185,26 @@ html {
   background-color: hsl(var(--muted));
 }
 
+/* Bit form container - wraps form, add button, and profile path */
+.bit-form-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Profile path section - outside form, after add-field-btn */
+.profile-path-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.profile-path-section .profile-path-header {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 6px;
+}
+
 /* ===== BIT PREVIEW ANCHOR & AXIS ===== */
 .bit-preview-anchor {
   stroke: red;
@@ -1452,6 +1472,7 @@ html {
   gap: 4px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
+  max-width: 100%;
 }
 
 .path-editor-lines {
@@ -1459,6 +1480,7 @@ html {
   flex-direction: column;
   gap: 1px;
   max-height: 200px;
+  overflow-x: auto;
   overflow-y: auto;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
@@ -1473,7 +1495,8 @@ html {
   padding: 2px 4px;
   border-radius: 3px;
   transition: background-color 0.15s;
-  min-height: 26px;
+  min-height: 22px;
+  flex-wrap: nowrap;
 }
 
 .path-line:hover {
@@ -1501,20 +1524,26 @@ html {
   cursor: grabbing;
 }
 
-/* Command cell */
+/* Base cell style - compact buttons */
+.path-cell {
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Command cell - red accent */
 .path-cell-cmd {
   background-color: rgba(230, 57, 70, 0.12);
   color: #e63946;
   font-weight: 700;
-  font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 5px;
   min-width: 18px;
   text-align: center;
-  flex-shrink: 0;
-  border: 1px solid transparent;
-  transition: all 0.15s;
 }
 
 .path-cell-cmd:hover {
@@ -1522,26 +1551,23 @@ html {
   border-color: rgba(230, 57, 70, 0.4);
 }
 
+.path-cell-cmd.active-edit {
+  background-color: rgba(230, 57, 70, 0.35);
+  border-color: rgba(230, 57, 70, 0.6);
+}
+
 .dark .path-cell-cmd {
   background-color: rgba(255, 107, 107, 0.15);
   color: #ff6b6b;
 }
 
-/* Parameter cell */
+/* Parameter cell - teal accent */
 .path-cell-param {
   background-color: rgba(42, 157, 143, 0.08);
   color: hsl(var(--foreground));
   font-size: 11px;
-  padding: 2px 5px;
-  border-radius: 3px;
-  cursor: pointer;
-  min-width: 24px;
-  border: 1px solid transparent;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  white-space: nowrap;
+  padding: 1px 5px;
+  min-width: 20px;
 }
 
 .path-cell-param:hover {
@@ -1553,6 +1579,13 @@ html {
   background-color: rgba(0, 0, 0, 0.04);
   border-style: dashed;
   border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+
+.path-cell-param.active-edit {
+  background-color: rgba(42, 157, 143, 0.25);
+  border-color: rgba(42, 157, 143, 0.5);
+  padding: 0;
 }
 
 .dark .path-cell-param {
@@ -1563,30 +1596,29 @@ html {
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* Raw value in cell */
-.cell-raw {
+/* Inline input inside param cell - compact */
+.path-cell-inline-input {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  padding: 1px 1px;
+  border: none;
+  background: transparent;
   color: hsl(var(--foreground));
+  outline: none;
+  min-width: 30px;
+  max-width: 80px;
+  width: auto;
 }
 
-/* Evaluated result in cell */
-.cell-eval {
-  color: hsl(var(--primary));
-  font-size: 10px;
-  opacity: 0.8;
-}
-
-/* Placeholder text in empty cell */
-.cell-placeholder {
-  color: hsl(var(--muted-foreground));
-  font-size: 10px;
-  font-style: italic;
+.path-cell-inline-input:focus {
+  outline: none;
 }
 
 /* Delete button */
 .path-line-delete {
   opacity: 0;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   padding: 0;
   border: none;
   background: transparent;
@@ -1596,7 +1628,7 @@ html {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 12px;
   transition: opacity 0.15s, background-color 0.15s, color 0.15s;
   flex-shrink: 0;
   margin-left: auto;
@@ -1635,14 +1667,15 @@ html {
 .path-editor-input {
   flex: 1;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  padding: 5px 8px;
+  font-size: 10px;
+  padding: 1px 1px;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--input));
   color: hsl(var(--foreground));
   border-radius: var(--radius);
   outline: none;
   transition: border-color 0.2s;
+  min-width: 0;
 }
 
 .path-editor-input:focus {
@@ -1651,19 +1684,19 @@ html {
 
 .path-editor-input::placeholder {
   color: hsl(var(--muted-foreground));
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .path-editor-add-btn {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
   cursor: pointer;
   border-radius: var(--radius);
-  font-size: 18px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1679,18 +1712,18 @@ html {
 .path-editor-suggestions {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .path-suggestions-group {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   flex-wrap: wrap;
 }
 
 .path-suggestions-label {
-  font-size: 10px;
+  font-size: 9px;
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
   flex-shrink: 0;
@@ -1703,7 +1736,7 @@ html {
 }
 
 .path-suggestion-btn {
-  padding: 2px 6px;
+  padding: 1px 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
   border: 1px solid hsl(var(--border));
@@ -1751,22 +1784,22 @@ html {
   color: #bb8fce;
 }
 
-/* Cell edit input */
+/* Cell edit input (legacy dropdown style) */
 .path-cell-input {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  padding: 2px 4px;
+  font-size: 10px;
+  padding: 1px 3px;
   border: 1px solid hsl(var(--primary));
   border-radius: 3px;
   background-color: hsl(var(--card));
   color: hsl(var(--foreground));
   outline: none;
-  min-width: 40px;
-  max-width: 120px;
+  min-width: 30px;
+  max-width: 80px;
 }
 
 .path-cell-input.cmd-input {
-  max-width: 30px;
+  max-width: 24px;
   text-align: center;
   font-weight: 700;
   color: #e63946;
@@ -1789,18 +1822,18 @@ html {
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  min-width: 140px;
-  max-height: 180px;
+  min-width: 120px;
+  max-height: 150px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 3px;
+  padding: 2px;
 }
 
 .path-dropdown-opt {
-  padding: 4px 8px;
-  font-size: 11px;
+  padding: 3px 6px;
+  font-size: 10px;
   font-family: 'JetBrains Mono', monospace;
   border: none;
   background: transparent;
@@ -1822,6 +1855,28 @@ html {
 
 .dark .path-dropdown-opt.var-opt {
   color: #bb8fce;
+}
+
+/* Profile path row - header on top */
+.profile-path-row {
+  grid-template-columns: 1fr !important;
+  margin-top: 10px;
+}
+
+.profile-path-row label {
+  display: none; /* Hide inline label */
+}
+
+.profile-path-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-path-header {
+  font-size: 12px;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 2px;
 }
 
 /* ===== CUSTOM FIELD MODAL ===== */
