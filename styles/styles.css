@@ -1208,13 +1208,10 @@ html {
 /* ===== BIT PREVIEW ANCHOR & AXIS ===== */
 .bit-preview-anchor {
   stroke: red;
-  stroke-width: 1;
 }
 
 .bit-preview-axis {
   stroke: gray;
-  stroke-width: 0.5;
-  stroke-dasharray: 3, 3;
 }
 
 /* ===== PROFILE PATH EDITOR ===== */

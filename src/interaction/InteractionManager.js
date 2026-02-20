@@ -18,6 +18,7 @@ export default class InteractionManager {
         this.autoScrollThreshold = config.autoScrollThreshold || 50;
         this.bitTolerance = config.bitTolerance || 20;
         this.touchTolerance = config.touchTolerance || 30;
+        this.panMouseButton = config.panMouseButton ?? 2;
 
         // State flags
         this.isPanning = false;
@@ -153,12 +154,29 @@ export default class InteractionManager {
             this.handleGestureEnd.bind(this),
             { passive: false }
         );
+
+        this.canvas.addEventListener("contextmenu", (e) => {
+            if (this.isPanning || this.isDraggingBit || this.isDraggingPhantom) {
+                e.preventDefault();
+            }
+        });
     }
 
     // ========== Mouse Event Handlers ==========
 
     handleMouseDown(e) {
-        if (e.button !== 0) return; // Only handle left mouse button
+        if (e.button === this.panMouseButton) {
+            this.isPanning = true;
+            this.panStartX = e.clientX;
+            this.panStartY = e.clientY;
+            this.panStartPanX = this.canvasManager.panX;
+            this.panStartPanY = this.canvasManager.panY;
+            this.canvas.style.cursor = "grabbing";
+            e.preventDefault();
+            return;
+        }
+
+        if (e.button !== 0) return; // Left button is reserved for selection/drag tools
 
         const svgCoords = this.canvasManager.screenToSvg(e.clientX, e.clientY);
         let clickedOnBit = false;
@@ -295,13 +313,7 @@ export default class InteractionManager {
             this.callbacks.clearBitSelection?.();
         }
 
-        // Start panning
-        this.isPanning = true;
-        this.panStartX = e.clientX;
-        this.panStartY = e.clientY;
-        this.panStartPanX = this.canvasManager.panX;
-        this.panStartPanY = this.canvasManager.panY;
-        this.canvas.style.cursor = "grabbing";
+        // Left click on empty space: keep selection behavior only (no panning)
     }
 
     handleMouseMove(e) {
@@ -453,6 +465,7 @@ export default class InteractionManager {
 
             this.canvasManager.panX = this.panStartPanX - svgDeltaX;
             this.canvasManager.panY = this.panStartPanY - svgDeltaY;
+            this.canvasManager.lastFitRequest = null;
             this.canvasManager.updateViewBox();
         }
     }
@@ -698,6 +711,7 @@ export default class InteractionManager {
 
             this.canvasManager.panX = this.touchPanStartPanX - svgDeltaX;
             this.canvasManager.panY = this.touchPanStartPanY - svgDeltaY;
+            this.canvasManager.lastFitRequest = null;
             this.canvasManager.updateViewBox();
         }
     }

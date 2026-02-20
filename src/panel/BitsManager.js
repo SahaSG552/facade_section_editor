@@ -8,7 +8,7 @@ import {
 } from "../data/bitsStore.js";
 import CanvasManager from "../canvas/CanvasManager.js";
 import { evaluateMathExpression } from "../utils/utils.js";
-import { getSVGBounds } from "../canvas/zoomUtils.js";
+import { fitAllVisibleElements } from "../canvas/zoomUtils.js";
 import variablesManager from "../data/VariablesManager.js";
 import PathEditor from "./PathEditor.js";
 
@@ -1145,7 +1145,11 @@ export default class BitsManager {
 
         // Preview canvas manager
         let previewCanvasManager;
-        let previewZoomInitialized = false;
+        let previewRenderState = {
+            signature: null,
+            shape: null,
+            bitParams: null,
+        };
 
         // Initialize preview canvas with larger size
         const initializePreviewCanvas = () => {
@@ -1157,10 +1161,11 @@ export default class BitsManager {
                 enablePan: true,
                 enableGrid: true,
                 enableMouseEvents: true,
-                gridSize: 10,
+                gridSize: 1,
                 initialZoom: 1,
-                gridAnchorX: 200,  // Use gridAnchorX instead of initialPanX
-                gridAnchorY: 200,  // Use gridAnchorY instead of initialPanY
+                // Grid anchor at origin (0, 0) for preview canvas
+                gridAnchorX: 0,
+                gridAnchorY: 0,
                 layers: ["grid", "bits", "overlay"],
                 onZoom: (zoomLevel) => {
                     updatePreviewStrokeWidths(zoomLevel);
@@ -1178,46 +1183,39 @@ export default class BitsManager {
             const shankShape = previewBitsLayer?.querySelector(".shank-shape");
             if (bitShape) bitShape.setAttribute("stroke-width", thickness);
             if (shankShape) shankShape.setAttribute("stroke-width", thickness);
+
+            if (previewRenderState.shape) {
+                drawAnchorAndAxis(previewRenderState.shape);
+            }
         }
 
-        // Function to draw anchor cross and axis line
-        const drawAnchorAndAxis = (bitParams, bitShape) => {
+        // Draw anchor cross and axis line.
+        // Bit is always placed with anchor (bottom-center) at (0, 0),
+        // so grid anchor = (0,0) is fixed in CanvasManager config — no dynamic update needed.
+        const drawAnchorAndAxis = (bitShape) => {
             const overlayLayer = previewCanvasManager.getLayer("overlay");
             if (!overlayLayer) return;
-            
-            // Clear previous overlay
             overlayLayer.innerHTML = "";
 
-            // Get the actual bit shape bounds to find the bottom center
-            let anchorX = previewCanvasManager.panX || 200;
-            let anchorY = previewCanvasManager.panY || 200;
-            let topY = anchorY - 50; // Default axis line length
+            // Anchor is always at origin
+            const anchorX = 0;
+            const anchorY = 0;
 
+            // Find top of bit for the axis line (use getBBox on attached element)
+            let topY = -50;
             if (bitShape) {
                 try {
-                    const bounds = getSVGBounds(bitShape);
-                    if (bounds && isFinite(bounds.centerX) && isFinite(bounds.maxY)) {
-                        anchorX = bounds.centerX;
-                        anchorY = bounds.maxY; // Bottom of the bit
-                        topY = bounds.minY - 5; // 5px above the top
-                    }
-                } catch (e) {
-                    console.warn("Failed to get SVG bounds:", e);
-                }
+                    const bbox = bitShape.getBBox();
+                    if (isFinite(bbox.y)) topY = bbox.y - 5;
+                } catch (e) {}
             }
 
-            // Validate values
-            if (!isFinite(anchorX)) anchorX = 200;
-            if (!isFinite(anchorY)) anchorY = 200;
-            if (!isFinite(topY)) topY = anchorY - 50;
-
-            // Calculate adaptive stroke width based on zoom
             const zoom = previewCanvasManager.zoomLevel || 1;
-            const axisStrokeWidth = Math.max(0.3, 0.5 / Math.sqrt(zoom));
-            const crossStrokeWidth = Math.max(0.5, 1 / Math.sqrt(zoom));
-            const crossSize = Math.max(3, 5 / Math.sqrt(zoom));
+            const axisStrokeWidth = Math.min(0.1, 1 / Math.sqrt(zoom));
+            const crossStrokeWidth = Math.min(0.1, 1 / Math.sqrt(zoom));
+            const crossSize = Math.min(3, 5 / Math.sqrt(zoom));
 
-            // Draw axis line (dashed gray vertical line)
+            // Axis line (dashed gray, from anchor upward)
             const axisLine = document.createElementNS(svgNS, "line");
             axisLine.setAttribute("x1", anchorX);
             axisLine.setAttribute("y1", anchorY);
@@ -1229,24 +1227,20 @@ export default class BitsManager {
             axisLine.classList.add("bit-preview-axis");
             overlayLayer.appendChild(axisLine);
 
-            // Draw anchor cross (red cross at bottom center)
+            // Anchor cross (red)
             const crossGroup = document.createElementNS(svgNS, "g");
             crossGroup.classList.add("bit-preview-anchor");
 
             const hLine = document.createElementNS(svgNS, "line");
-            hLine.setAttribute("x1", anchorX - crossSize);
-            hLine.setAttribute("y1", anchorY);
-            hLine.setAttribute("x2", anchorX + crossSize);
-            hLine.setAttribute("y2", anchorY);
+            hLine.setAttribute("x1", anchorX - crossSize); hLine.setAttribute("y1", anchorY);
+            hLine.setAttribute("x2", anchorX + crossSize); hLine.setAttribute("y2", anchorY);
             hLine.setAttribute("stroke", "red");
             hLine.setAttribute("stroke-width", crossStrokeWidth);
             crossGroup.appendChild(hLine);
 
             const vLine = document.createElementNS(svgNS, "line");
-            vLine.setAttribute("x1", anchorX);
-            vLine.setAttribute("y1", anchorY - crossSize);
-            vLine.setAttribute("x2", anchorX);
-            vLine.setAttribute("y2", anchorY + crossSize);
+            vLine.setAttribute("x1", anchorX); vLine.setAttribute("y1", anchorY - crossSize);
+            vLine.setAttribute("x2", anchorX); vLine.setAttribute("y2", anchorY + crossSize);
             vLine.setAttribute("stroke", "red");
             vLine.setAttribute("stroke-width", crossStrokeWidth);
             crossGroup.appendChild(vLine);
@@ -1257,12 +1251,15 @@ export default class BitsManager {
         // Function to update bit preview
         const updateBitPreview = () => {
             const previewBitsLayer = previewCanvasManager.getLayer("bits");
-            previewBitsLayer.innerHTML = "";
 
             if (!this.validateBitParameters(form, groupName, modal)) {
+                previewBitsLayer.innerHTML = "";
+                previewRenderState.signature = null;
+                previewRenderState.shape = null;
+                previewRenderState.bitParams = null;
                 const text = document.createElementNS(svgNS, "text");
-                text.setAttribute("x", previewCanvasManager.panX);
-                text.setAttribute("y", previewCanvasManager.panY + 10);
+                text.setAttribute("x", 0);
+                text.setAttribute("y", 10);
                 text.setAttribute("text-anchor", "middle");
                 text.setAttribute("font-size", "14");
                 text.setAttribute("fill", "#999");
@@ -1273,63 +1270,41 @@ export default class BitsManager {
             }
 
             const bitParams = this.collectBitParameters(form, groupName, modal);
+            const renderSignature = JSON.stringify({
+                groupName,
+                bitParams,
+                color: modal.querySelector("#bit-color")?.value,
+            });
 
-            // Calculate bounds for positioning
-            const tempGroup = this.createBitShapeElement(bitParams, groupName, 0, 0, true);
-            const bounds = getSVGBounds(tempGroup);
-
-            // Validate bounds
-            if (!bounds || bounds.width <= 0 || bounds.height <= 0 || 
-                !isFinite(bounds.width) || !isFinite(bounds.height)) {
-                const text = document.createElementNS(svgNS, "text");
-                text.setAttribute("x", previewCanvasManager.panX);
-                text.setAttribute("y", previewCanvasManager.panY + 10);
-                text.setAttribute("text-anchor", "middle");
-                text.setAttribute("font-size", "14");
-                text.setAttribute("fill", "#999");
-                text.textContent = "Invalid parameters";
-                previewBitsLayer.appendChild(text);
-                drawAnchorAndAxis(null);
+            if (previewRenderState.signature === renderSignature && previewRenderState.shape) {
+                drawAnchorAndAxis(previewRenderState.shape);
+                updateFormulaResults();
                 return;
             }
 
-            // Calculate initial zoom level to fit bit within preview area
-            if (!previewZoomInitialized) {
-                const availableWidth = 400 - 60;
-                const availableHeight = 400 - 60;
-                const zoomX = availableWidth / bounds.width;
-                const zoomY = availableHeight / bounds.height;
-                const zoomLevel = Math.min(zoomX, zoomY);
-
-                // Ensure zoom level is valid
-                if (isFinite(zoomLevel) && zoomLevel > 0) {
-                    previewCanvasManager.zoomLevel = zoomLevel;
-                } else {
-                    previewCanvasManager.zoomLevel = 1;
-                }
-                previewCanvasManager.updateViewBox();
-                previewZoomInitialized = true;
-            }
+            previewBitsLayer.innerHTML = "";
 
             const strokeWidth = Math.max(0.1, 0.5 / Math.sqrt(previewCanvasManager.zoomLevel));
 
-            // Create bit shape centered at pan position
+            // Place bit with anchor (bottom-center) at canvas origin (0, 0).
+            // createBitShapeElement(bit, group, x, y) — x,y IS the anchor position.
             const shape = this.createBitShapeElement(
-                bitParams,
-                groupName,
-                previewCanvasManager.panX - bounds.centerX,
-                previewCanvasManager.panY - bounds.centerY,
-                true,
-                true,
-                strokeWidth,
+                bitParams, groupName,
+                0, 0,   // anchor → origin
+                true, true, strokeWidth,
             );
 
             previewBitsLayer.appendChild(shape);
-            
-            // Draw anchor and axis - pass the actual shape element
-            drawAnchorAndAxis(bitParams, shape);
+            previewRenderState.signature = renderSignature;
+            previewRenderState.shape = shape;
+            previewRenderState.bitParams = bitParams;
 
-            // Update formula results
+            // Fit to BITS ONLY first — overlay has stale-positioned debug text that would break bbox
+            fitAllVisibleElements(previewCanvasManager, ["bits"], 10);
+
+            // Now draw axis and anchor cross with the CORRECT viewBox already set
+            drawAnchorAndAxis(shape);
+
             updateFormulaResults();
         };
 
@@ -1436,27 +1411,19 @@ export default class BitsManager {
         // Preview zoom functions
         const previewZoomIn = () => {
             previewCanvasManager.zoomIn();
-            updateBitPreview();
+            updatePreviewStrokeWidths();
         };
 
         const previewZoomOut = () => {
             previewCanvasManager.zoomOut();
-            updateBitPreview();
+            updatePreviewStrokeWidths();
         };
 
         const previewFitToScale = () => {
-            if (this.validateBitParameters(form, groupName, modal)) {
-                const tempBitParams = this.collectBitParameters(form, groupName, modal);
-                const tempGroup = this.createBitShapeElement(tempBitParams, groupName, 0, 0, true);
-                previewCanvasManager.fitToSVGElement(tempGroup, 20);
-            } else {
-                previewCanvasManager.zoomLevel = 1;
-                previewCanvasManager.panX = 200;
-                previewCanvasManager.panY = 200;
-                previewCanvasManager.updateViewBox();
-            }
+            // Fit to bits only (overlay has debug text that would skew bbox)
+            fitAllVisibleElements(previewCanvasManager, ["bits"], 10);
+            if (previewRenderState.shape) drawAnchorAndAxis(previewRenderState.shape);
             updatePreviewStrokeWidths();
-            updateBitPreview();
         };
 
         const togglePreviewGrid = () => {
@@ -1538,7 +1505,10 @@ export default class BitsManager {
 
         // Color input listener
         const colorInput = modal.querySelector("#bit-color");
-        colorInput.addEventListener("input", updateBitPreview);
+        colorInput.addEventListener("input", () => {
+            previewRenderState.signature = null;
+            updateBitPreview();
+        });
 
         // Add custom field button
         modal.querySelector("#add-custom-field-btn").addEventListener("click", () => {

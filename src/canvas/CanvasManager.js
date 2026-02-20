@@ -1,68 +1,105 @@
 import { fitToBounds, zoomToSVGElement } from "./zoomUtils.js";
-// GridRenderer - класс для создания SVG сетки с использованием паттернов
+
+/**
+ * GridRenderer — draws an SVG pattern-based grid anchored to a specific point.
+ *
+ * ## Core mechanic
+ * Uses `patternUnits="userSpaceOnUse"` so tile coordinates are in SVG user space.
+ * Phase is computed as a positive modulo:
+ *
+ *   phaseX = ((anchorX % size) + size) % size   → always in [0, size)
+ *
+ * Applied via `patternTransform="translate(phaseX, phaseY)"` — not via pattern x/y,
+ * which has inconsistent browser behaviour. The translate value stays small (< gridSize)
+ * regardless of how large anchorX is, avoiding floating-point drift on large coordinates.
+ *
+ * Mathematical guarantee: anchorX = phaseX + n*size for some integer n,
+ * so a grid line is guaranteed to pass through anchorX (and anchorY).
+ *
+ * ## Why not pattern x/y?
+ * Setting `pattern x=anchorX` is supposed to phase the tile in user space per the SVG spec,
+ * but several browsers apply it inconsistently when the value is large or negative.
+ * `patternTransform` is universally supported and produces correct results.
+ *
+ * ## ID namespacing
+ * `id` must be unique per CanvasManager instance to avoid `url(#id)` resolving to the
+ * wrong pattern when multiple canvases share the same HTML document.
+ * Use `CanvasManager.instanceId` to namespace (e.g. `grid-${ns}`).
+ *
+ * @param {string}   svgNS     - SVG namespace URI
+ * @param {Element}  defs      - SVG `<defs>` element to register the pattern in
+ * @param {Element}  gridLayer - `<g>` layer to append the fill rect to
+ * @param {object}   config
+ * @param {string}   config.id           - Unique pattern base-ID (produces `${id}-pattern`)
+ * @param {number}   config.size         - Grid spacing in user units
+ * @param {string}   config.color        - Line stroke colour
+ * @param {number}   config.thickness    - Line stroke-width in user units
+ * @param {number}   config.gridAnchorX  - X coordinate that a vertical line passes through
+ * @param {number}   config.gridAnchorY  - Y coordinate that a horizontal line passes through
+ * @param {number}   config.viewBoxX     - Current viewBox left edge
+ * @param {number}   config.viewBoxY     - Current viewBox top edge
+ * @param {number}   config.viewBoxWidth - Current viewBox width
+ * @param {number}   config.viewBoxHeight- Current viewBox height
+ */
 class GridRenderer {
     constructor(svgNS, defs, gridLayer, config) {
         this.svgNS = svgNS;
         this.defs = defs;
         this.gridLayer = gridLayer;
-        this.config = config; // { id, size, color, thickness, anchorX, anchorY, panX, panY, width, height }
+        this.config = config;
     }
 
     render() {
-        // Remove existing pattern
-        const existingPattern = this.defs.querySelector(
-            `#${this.config.id}-pattern`
-        );
-        if (existingPattern) {
-            this.defs.removeChild(existingPattern);
-        }
+        const { id, size, color, thickness } = this.config;
+        const anchorX = this.config.gridAnchorX ?? 0;
+        const anchorY = this.config.gridAnchorY ?? 0;
+        const { viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight } = this.config;
 
-        // Calculate offset - grid starts from anchor point to ensure consistency
-        // If anchor is null, default to 0
-        let xOffset =
-            this.config.gridAnchorX !== null ? this.config.gridAnchorX : 0;
-        let yOffset =
-            this.config.gridAnchorY !== null ? this.config.gridAnchorY : 0;
+        // Positive modulo: keeps phase in [0, size) regardless of anchorX sign or magnitude.
+        // A grid line will pass through anchorX because anchorX = phaseX + n*size for some n ∈ Z.
+        const phaseX = ((anchorX % size) + size) % size;
+        const phaseY = ((anchorY % size) + size) % size;
 
-        // Create pattern
+        // Remove stale pattern
+        const old = this.defs.querySelector(`#${id}-pattern`);
+        if (old) old.remove();
+
         const pattern = document.createElementNS(this.svgNS, "pattern");
-        pattern.id = `${this.config.id}-pattern`;
+        pattern.id = `${id}-pattern`;
         pattern.setAttribute("patternUnits", "userSpaceOnUse");
-        pattern.setAttribute("x", xOffset);
-        pattern.setAttribute("y", yOffset);
-        pattern.setAttribute("width", this.config.size);
-        pattern.setAttribute("height", this.config.size);
+        // Tile size and position at origin — phase handled by patternTransform
+        pattern.setAttribute("x", 0);
+        pattern.setAttribute("y", 0);
+        pattern.setAttribute("width", size);
+        pattern.setAttribute("height", size);
+        // patternTransform translate shifts the tiling phase in user space
+        pattern.setAttribute("patternTransform", `translate(${phaseX}, ${phaseY})`);
 
-        // Horizontal line
+        // Lines at top/left edge of tile (local coords 0)
         const hLine = document.createElementNS(this.svgNS, "line");
-        hLine.setAttribute("x1", 0);
-        hLine.setAttribute("y1", 0);
-        hLine.setAttribute("x2", this.config.size);
-        hLine.setAttribute("y2", 0);
-        hLine.setAttribute("stroke", this.config.color);
-        hLine.setAttribute("stroke-width", this.config.thickness);
+        hLine.setAttribute("x1", 0);    hLine.setAttribute("y1", 0);
+        hLine.setAttribute("x2", size); hLine.setAttribute("y2", 0);
+        hLine.setAttribute("stroke", color);
+        hLine.setAttribute("stroke-width", thickness);
         pattern.appendChild(hLine);
 
-        // Vertical line
         const vLine = document.createElementNS(this.svgNS, "line");
-        vLine.setAttribute("x1", 0);
-        vLine.setAttribute("y1", 0);
-        vLine.setAttribute("x2", 0);
-        vLine.setAttribute("y2", this.config.size);
-        vLine.setAttribute("stroke", this.config.color);
-        vLine.setAttribute("stroke-width", this.config.thickness);
+        vLine.setAttribute("x1", 0); vLine.setAttribute("y1", 0);
+        vLine.setAttribute("x2", 0); vLine.setAttribute("y2", size);
+        vLine.setAttribute("stroke", color);
+        vLine.setAttribute("stroke-width", thickness);
         pattern.appendChild(vLine);
 
         this.defs.appendChild(pattern);
 
-        // Create rectangle to cover the entire viewBox area
+        // Rect expanded ±size to prevent tile-edge clipping
         const rect = document.createElementNS(this.svgNS, "rect");
-        rect.setAttribute("x", this.config.x);
-        rect.setAttribute("y", this.config.y);
-        rect.setAttribute("width", this.config.width);
-        rect.setAttribute("height", this.config.height);
-        rect.setAttribute("fill", `url(#${this.config.id}-pattern)`);
-        rect.setAttribute("pointer-events", "none"); // Allow touch events to pass through to container
+        rect.setAttribute("x", viewBoxX - size);
+        rect.setAttribute("y", viewBoxY - size);
+        rect.setAttribute("width",  viewBoxWidth  + size * 2);
+        rect.setAttribute("height", viewBoxHeight + size * 2);
+        rect.setAttribute("fill", `url(#${id}-pattern)`);
+        rect.setAttribute("pointer-events", "none");
         this.gridLayer.appendChild(rect);
     }
 }
@@ -70,6 +107,8 @@ class GridRenderer {
 // CanvasManager - унифицированный класс для работы с SVG канвасами
 
 class CanvasManager {
+    static _nextId = 0;
+
     constructor(config) {
         this.config = {
             canvas: null,
@@ -81,6 +120,11 @@ class CanvasManager {
             enableMouseEvents: true,
             enableSelection: false,
             enableDrag: false,
+            panMouseButton: 2,
+            preventContextMenu: true,
+            preserveFitOnResize: true,
+            minZoom: 0.05,
+            maxZoom: 50,
             gridSize: 1,
             gridAnchorX: null, // Anchor point for grid alignment (if null, uses center)
             gridAnchorY: null, // Anchor point for grid alignment (if null, uses center)
@@ -99,6 +143,9 @@ class CanvasManager {
 
         this.svgNS = "http://www.w3.org/2000/svg";
 
+        // Unique instance ID to namespace SVG defs IDs (avoids cross-canvas url(#id) collisions)
+        this.instanceId = CanvasManager._nextId++;
+
         // Инициализация переменных состояния
         this.zoomLevel = this.config.initialZoom;
         this.panX = this.config.initialPanX;
@@ -107,6 +154,7 @@ class CanvasManager {
         this.lastMouseX = 0;
         this.lastMouseY = 0;
         this.gridEnabled = this.config.enableGrid;
+        this.lastFitRequest = null;
 
         // Создание слоев
         this.layers = {};
@@ -122,6 +170,12 @@ class CanvasManager {
 
         this.canvas = this.config.canvas;
         this.updateCanvasSize();
+
+        if (this.config.preventContextMenu) {
+            this.canvas.addEventListener("contextmenu", (e) => {
+                e.preventDefault();
+            });
+        }
 
         // Set SVG width and height to 100% for responsive sizing
         this.canvas.setAttribute("width", "100%");
@@ -278,66 +332,49 @@ class CanvasManager {
 
         // Calculate current viewBox bounds
         const rect = this.canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
         const viewBoxWidth = rect.width / this.zoomLevel;
         const viewBoxHeight = rect.height / this.zoomLevel;
         const viewBoxX = this.panX - viewBoxWidth / 2;
         const viewBoxY = this.panY - viewBoxHeight / 2;
 
-        // Calculate grid line spacing (increase spacing for very small grid sizes to improve performance)
-        let effectiveGridSize = this.config.gridSize;
-        const minGridSpacing = 1; // Minimum 5 pixels between grid lines for performance
-        if (effectiveGridSize * this.zoomLevel < minGridSpacing) {
-            effectiveGridSize = minGridSpacing / this.zoomLevel;
-        }
+        const effectiveGridSize = this.config.gridSize;
 
-        // Calculate stroke width that scales with zoom level
+        // Stroke width scales with zoom
         const thickness = Math.max(0.01, 0.1 / Math.sqrt(this.zoomLevel));
-        // Auxiliary grid renderer (10x spacing, thicker and darker lines)
-        const auxGridSize = 10;
-        // Main grid renderer
-        const mainGridConfig = {
-            id: "grid",
-            size: this.config.gridSize,
-            color: "#e0e0e0",
-            thickness: thickness,
-            gridAnchorX: this.config.gridAnchorX - 0.5,
-            gridAnchorY: this.config.gridAnchorY - 0.5,
-            panX: this.panX,
-            panY: this.panY,
-            x: viewBoxX,
-            y: viewBoxY,
-            width: viewBoxWidth,
-            height: viewBoxHeight,
-        };
-        const mainGrid = new GridRenderer(
-            this.svgNS,
-            defs,
-            this.gridLayer,
-            mainGridConfig
-        );
-        mainGrid.render();
 
-        const auxGridConfig = {
-            id: "aux-grid",
-            size: auxGridSize,
+        const anchorX =
+            this.config.gridAnchorX !== null
+                ? this.config.gridAnchorX
+                : this.panX;
+        const anchorY =
+            this.config.gridAnchorY !== null
+                ? this.config.gridAnchorY
+                : this.panY;
+
+        const sharedBounds = { viewBoxX, viewBoxY, viewBoxWidth, viewBoxHeight };
+        const ns = this.instanceId; // namespace for unique pattern IDs
+
+        new GridRenderer(this.svgNS, defs, this.gridLayer, {
+            id: `grid-${ns}`,
+            size: effectiveGridSize,
+            color: "#e0e0e0",
+            thickness,
+            gridAnchorX: anchorX,
+            gridAnchorY: anchorY,
+            ...sharedBounds,
+        }).render();
+
+        new GridRenderer(this.svgNS, defs, this.gridLayer, {
+            id: `aux-grid-${ns}`,
+            size: effectiveGridSize * 10,
             color: "#5f5959ff",
             thickness: thickness * 2,
-            gridAnchorX: this.config.gridAnchorX - 0.5,
-            gridAnchorY: this.config.gridAnchorY - 0.5,
-            panX: this.panX,
-            panY: this.panY,
-            x: viewBoxX,
-            y: viewBoxY,
-            width: viewBoxWidth,
-            height: viewBoxHeight,
-        };
-        const auxGrid = new GridRenderer(
-            this.svgNS,
-            defs,
-            this.gridLayer,
-            auxGridConfig
-        );
-        auxGrid.render();
+            gridAnchorX: anchorX,
+            gridAnchorY: anchorY,
+            ...sharedBounds,
+        }).render();
     }
 
     toggleGrid() {
@@ -354,19 +391,46 @@ class CanvasManager {
     // === ZOOM AND PAN FUNCTIONS ===
     zoomIn() {
         this.zoomLevel *= 1.2;
+        this.zoomLevel = Math.max(
+            this.config.minZoom,
+            Math.min(this.config.maxZoom, this.zoomLevel)
+        );
+        this.lastFitRequest = null;
         this.updateViewBox();
     }
 
     zoomOut() {
         this.zoomLevel /= 1.2;
+        this.zoomLevel = Math.max(
+            this.config.minZoom,
+            Math.min(this.config.maxZoom, this.zoomLevel)
+        );
+        this.lastFitRequest = null;
         this.updateViewBox();
     }
 
     fitToScale(bounds = null) {
+        this.lastFitRequest = {
+            type: "bounds",
+            bounds: bounds
+                ? {
+                      minX: bounds.minX,
+                      maxX: bounds.maxX,
+                      minY: bounds.minY,
+                      maxY: bounds.maxY,
+                      padding: bounds.padding,
+                  }
+                : null,
+        };
         fitToBounds(this, bounds);
     }
 
     fitToSVGElement(svgElement, padding = 20) {
+        this.lastFitRequest = {
+            type: "svg-element",
+            svgElement,
+            padding,
+        };
         zoomToSVGElement(this, svgElement, padding);
     }
 
@@ -403,6 +467,10 @@ class CanvasManager {
         const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
         const oldZoom = this.zoomLevel;
         this.zoomLevel *= zoomFactor;
+        this.zoomLevel = Math.max(
+            this.config.minZoom,
+            Math.min(this.config.maxZoom, this.zoomLevel)
+        );
 
         const oldViewBoxWidth = rect.width / oldZoom;
         const oldViewBoxHeight = rect.height / oldZoom;
@@ -422,6 +490,7 @@ class CanvasManager {
         this.panY = newViewBoxY + newViewBoxHeight / 2;
 
         this.updateViewBox();
+        this.lastFitRequest = null;
 
         // Вызов пользовательского обработчика
         if (this.config.onWheel) {
@@ -430,8 +499,7 @@ class CanvasManager {
     }
 
     handleMouseDown(e) {
-        if (e.button === 0) {
-            // Левая кнопка мыши
+        if (e.button === this.config.panMouseButton) {
             if (this.config.enablePan) {
                 this.isDragging = true;
                 this.lastMouseX = e.clientX;
@@ -461,6 +529,7 @@ class CanvasManager {
             this.lastMouseY = e.clientY;
 
             this.updateViewBox();
+            this.lastFitRequest = null;
         }
 
         // Вызов пользовательского обработчика
@@ -557,14 +626,15 @@ class CanvasManager {
             let newZoom = this.pinchStartZoom * zoomFactor;
 
             // Limit zoom levels
-            const minZoom = 0.1;
-            const maxZoom = 10;
+            const minZoom = this.config.minZoom;
+            const maxZoom = this.config.maxZoom;
             newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
 
             // Only update if zoom changed significantly
             if (Math.abs(newZoom - this.zoomLevel) > 0.01) {
                 this.zoomLevel = newZoom;
                 this.updateViewBox();
+                this.lastFitRequest = null;
             }
         }
     }
@@ -663,6 +733,24 @@ class CanvasManager {
     // Изменение размера канваса (вызывается при resize окна)
     resize() {
         this.updateCanvasSize();
+        if (this.config.preserveFitOnResize && this.lastFitRequest) {
+            if (
+                this.lastFitRequest.type === "svg-element" &&
+                this.lastFitRequest.svgElement
+            ) {
+                zoomToSVGElement(
+                    this,
+                    this.lastFitRequest.svgElement,
+                    this.lastFitRequest.padding ?? 20
+                );
+                return;
+            }
+
+            if (this.lastFitRequest.type === "bounds") {
+                fitToBounds(this, this.lastFitRequest.bounds);
+                return;
+            }
+        }
 
         this.updateViewBox();
     }

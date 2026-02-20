@@ -169,9 +169,11 @@ export class PanelCoordinateHelper {
     getGridAnchorPosition() {
         const origin = this.getPanelOrigin();
         const gridSize = this.appConfig.ui.gridSize;
+        // Grid anchor = panel anchor point (origin + anchor offset), NOT origin + gridSize/2
+        const anchorOffset = this.appConfig.getAnchorOffset();
         return {
-            x: origin.x + gridSize / 2,
-            y: origin.y + gridSize / 2,
+            x: origin.x + anchorOffset.x,
+            y: origin.y + anchorOffset.y,
         };
     }
 

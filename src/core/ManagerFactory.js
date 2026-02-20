@@ -29,10 +29,9 @@ export class ManagerFactory {
         const panelX = (canvasSize.width - this.appConfig.panel.width) / 2;
         const panelY = (canvasSize.height - this.appConfig.panel.thickness) / 2;
         const anchorOffset = this.appConfig.getAnchorOffset();
-        const gridAnchorX =
-            panelX + anchorOffset.x + this.appConfig.ui.gridSize / 2;
-        const gridAnchorY =
-            panelY + anchorOffset.y + this.appConfig.ui.gridSize / 2;
+        // Grid anchor = panel anchor point (NO additional offset)
+        const gridAnchorX = panelX + anchorOffset.x;
+        const gridAnchorY = panelY + anchorOffset.y;
 
         return new CanvasManager({
             canvas: canvas,
@@ -95,6 +94,7 @@ export class ManagerFactory {
             autoScrollThreshold: this.appConfig.interaction.autoScrollThreshold,
             bitTolerance: this.appConfig.interaction.bitTolerance,
             touchTolerance: this.appConfig.interaction.touchTolerance,
+            panMouseButton: 2,
         });
 
         manager.setCallbacks(callbacks);

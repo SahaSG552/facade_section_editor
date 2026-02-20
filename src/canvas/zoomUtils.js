@@ -148,6 +148,17 @@ export function zoomToBBox(canvasManager, bbox, padding = 0) {
     canvasManager.panX = bbox.center.x;
     canvasManager.panY = bbox.center.y;
 
+    canvasManager.lastFitRequest = {
+        type: "bounds",
+        bounds: {
+            minX: bbox.center.x - width / 2,
+            maxX: bbox.center.x + width / 2,
+            minY: bbox.center.y - height / 2,
+            maxY: bbox.center.y + height / 2,
+            padding,
+        },
+    };
+
     // Update viewBox using the standard method
     canvasManager.updateViewBox();
 
@@ -163,6 +174,99 @@ export function zoomToBBox(canvasManager, bbox, padding = 0) {
  */
 export function zoomToElements(canvasManager, elements, padding = 0) {
     const bbox = calculateElementsBBox(elements);
+    zoomToBBox(canvasManager, bbox, padding);
+}
+
+/**
+ * Fits all visible elements from specified canvas layers
+ * Directly collects and measures SVG elements from DOM, calculates combined bbox, and zooms to fit
+ * Works like zoomToElements() but for entire layers instead of selected indices
+ * @param {CanvasManager} canvasManager - The canvas manager instance
+ * @param {Array<string>} layerNames - Array of layer names to include in fit (e.g., ["panel", "bits", "phantoms"])
+ * @param {number} padding - Additional padding in SVG units (default: 50)
+ * @returns {void}
+ */
+export function fitAllVisibleElements(
+    canvasManager,
+    layerNames = [],
+    padding = 50
+) {
+    // Collect all visible SVG elements from specified layers (recursive search)
+    const allElements = [];
+
+    function collectVisibleElements(node) {
+        if (!node) return;
+        if (node.nodeType === Node.ELEMENT_NODE) {
+            const style = window.getComputedStyle(node);
+            if (node.style.display !== "none" && style.display !== "none" && style.visibility !== "hidden") {
+                allElements.push(node);
+                // Recursively collect children
+                Array.from(node.children).forEach((child) => collectVisibleElements(child));
+            }
+        }
+    }
+
+    layerNames.forEach((layerName) => {
+        const layer = canvasManager.getLayer(layerName);
+        if (layer) {
+            collectVisibleElements(layer);
+        }
+    });
+
+    // If no elements found, use default fit
+    if (allElements.length === 0) {
+        const canvasRect = canvasManager.canvas.getBoundingClientRect();
+        canvasManager.zoomLevel = 1;
+        canvasManager.panX = canvasManager.canvasParameters.width / 2;
+        canvasManager.panY = canvasManager.canvasParameters.height / 2;
+        canvasManager.updateViewBox();
+        return;
+    }
+
+    // Calculate combined bounding box by measuring each element's bbox
+    let minX = Infinity,
+        minY = Infinity,
+        maxX = -Infinity,
+        maxY = -Infinity;
+
+    allElements.forEach((element) => {
+        if (element && typeof element.getBBox === "function") {
+            try {
+                const bbox = element.getBBox();
+                // Only include elements with non-zero dimensions (skip empty groups)
+                if (isFinite(bbox.x) && isFinite(bbox.y) && isFinite(bbox.width) && isFinite(bbox.height) &&
+                    bbox.width > 0 && bbox.height > 0) {
+                    minX = Math.min(minX, bbox.x);
+                    minY = Math.min(minY, bbox.y);
+                    maxX = Math.max(maxX, bbox.x + bbox.width);
+                    maxY = Math.max(maxY, bbox.y + bbox.height);
+                }
+            } catch (e) {
+                // Skip elements that can't be measured
+            }
+        }
+    });
+
+    // If no valid elements found, use default
+    if (minX === Infinity || maxX === -Infinity) {
+        const canvasRect = canvasManager.canvas.getBoundingClientRect();
+        canvasManager.zoomLevel = 1;
+        canvasManager.panX = canvasManager.canvasParameters.width / 2;
+        canvasManager.panY = canvasManager.canvasParameters.height / 2;
+        canvasManager.updateViewBox();
+        return;
+    }
+
+    // Build bbox object and zoom to it
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const bbox = {
+        width,
+        height,
+        center: { x: minX + width / 2, y: minY + height / 2 },
+    };
+
+    // Zoom to the calculated bounding box with padding
     zoomToBBox(canvasManager, bbox, padding);
 }
 

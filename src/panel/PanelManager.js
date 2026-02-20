@@ -93,6 +93,22 @@ class PanelManager {
         this.sceneAnchorY = y;
     }
 
+    getPanelOrigin() {
+        if (this.sceneAnchorX !== null && this.sceneAnchorY !== null) {
+            // sceneAnchorX/Y IS the anchor point; panel origin = anchor minus anchor offset
+            const anchorOffset = this.getPanelAnchorOffset();
+            return {
+                x: this.sceneAnchorX - anchorOffset.x,
+                y: this.sceneAnchorY - anchorOffset.y,
+            };
+        }
+
+        return {
+            x: (this.canvasManager.canvasParameters.width - this.panelWidth) / 2,
+            y: (this.canvasManager.canvasParameters.height - this.panelThickness) / 2,
+        };
+    }
+
     /**
      * Transform Y coordinate for display (considering anchor)
      */
@@ -114,24 +130,11 @@ class PanelManager {
      * Get panel anchor coordinates in canvas space
      */
     getPanelAnchorCoords() {
+        const panelOrigin = this.getPanelOrigin();
         const anchorOffset = this.getPanelAnchorOffset();
-
-        if (this.sceneAnchorX !== null && this.sceneAnchorY !== null) {
-            return {
-                x: this.sceneAnchorX - this.gridSize / 2 + anchorOffset.x,
-                y: this.sceneAnchorY - this.gridSize / 2 + anchorOffset.y,
-            };
-        }
-
-        const panelX =
-            (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
-        const panelY =
-            (this.canvasManager.canvasParameters.height - this.panelThickness) /
-            2;
-
         return {
-            x: panelX + anchorOffset.x,
-            y: panelY + anchorOffset.y,
+            x: panelOrigin.x + anchorOffset.x,
+            y: panelOrigin.y + anchorOffset.y,
         };
     }
 
@@ -141,37 +144,17 @@ class PanelManager {
     updateBitsForNewAnchor(bits = []) {
         const previousAnchor =
             this.panelAnchor === "top-left" ? "bottom-left" : "top-left";
+        const panelOrigin = this.getPanelOrigin();
 
-        let currentAnchorX, currentAnchorY, newAnchorX, newAnchorY;
+        const currentAnchorOffset = previousAnchor === "top-left"
+            ? { x: 0, y: 0 }
+            : { x: 0, y: this.panelThickness };
+        const newAnchorOffset = this.getPanelAnchorOffset();
 
-        if (this.sceneAnchorX !== null && this.sceneAnchorY !== null) {
-            const anchorOffset = this.getPanelAnchorOffset();
-            const currentAnchorOffset = previousAnchor === "top-left"
-                ? { x: 0, y: 0 }
-                : { x: 0, y: this.panelThickness };
-
-            currentAnchorX = this.sceneAnchorX - this.gridSize / 2 + currentAnchorOffset.x;
-            currentAnchorY = this.sceneAnchorY - this.gridSize / 2 + currentAnchorOffset.y;
-            newAnchorX = this.sceneAnchorX - this.gridSize / 2 + anchorOffset.x;
-            newAnchorY = this.sceneAnchorY - this.gridSize / 2 + anchorOffset.y;
-        } else {
-            const panelX =
-                (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
-            const panelY =
-                (this.canvasManager.canvasParameters.height - this.panelThickness) /
-                2;
-
-            currentAnchorX = panelX;
-            currentAnchorY =
-                previousAnchor === "top-left"
-                    ? panelY
-                    : panelY + this.panelThickness;
-            newAnchorX = panelX;
-            newAnchorY =
-                this.panelAnchor === "top-left"
-                    ? panelY
-                    : panelY + this.panelThickness;
-        }
+        const currentAnchorX = panelOrigin.x + currentAnchorOffset.x;
+        const currentAnchorY = panelOrigin.y + currentAnchorOffset.y;
+        const newAnchorX = panelOrigin.x + newAnchorOffset.x;
+        const newAnchorY = panelOrigin.y + newAnchorOffset.y;
 
         bits.forEach((bit) => {
             const physicalX = currentAnchorX + bit.x;
@@ -201,18 +184,10 @@ class PanelManager {
      * Reposition bits to match current anchor and logical coordinates
      */
     updateBitsPositions(bits = []) {
-        let panelX, panelY;
-        if (this.sceneAnchorX !== null && this.sceneAnchorY !== null) {
-            const anchorOffset = this.getPanelAnchorOffset();
-            panelX = this.sceneAnchorX - this.gridSize / 2 + anchorOffset.x;
-            panelY = this.sceneAnchorY - this.gridSize / 2 + anchorOffset.y;
-        } else {
-            panelX = (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
-            panelY = (this.canvasManager.canvasParameters.height - this.panelThickness) / 2;
-        }
+        const panelOrigin = this.getPanelOrigin();
         const anchorOffset = this.getPanelAnchorOffset();
-        const anchorX = panelX + anchorOffset.x;
-        const anchorY = panelY + anchorOffset.y;
+        const anchorX = panelOrigin.x + anchorOffset.x;
+        const anchorY = panelOrigin.y + anchorOffset.y;
 
         bits.forEach((bit) => {
             const desiredAbsX = anchorX + (bit.x || 0);
@@ -261,22 +236,10 @@ class PanelManager {
      * Update panel shape (position and dimensions)
      */
     updatePanelShape() {
-        let panelX, panelY;
+        const panelOrigin = this.getPanelOrigin();
 
-        if (this.sceneAnchorX !== null && this.sceneAnchorY !== null) {
-            const anchorOffset = this.getPanelAnchorOffset();
-            panelX = this.sceneAnchorX - this.gridSize / 2 + anchorOffset.x;
-            panelY = this.sceneAnchorY - this.gridSize / 2 + anchorOffset.y;
-        } else {
-            panelX =
-                (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
-            panelY =
-                (this.canvasManager.canvasParameters.height - this.panelThickness) /
-                2;
-        }
-
-        this.partSection.setAttribute("x", panelX);
-        this.partSection.setAttribute("y", panelY);
+        this.partSection.setAttribute("x", panelOrigin.x);
+        this.partSection.setAttribute("y", panelOrigin.y);
         this.partSection.setAttribute("width", this.panelWidth);
         this.partSection.setAttribute("height", this.panelThickness);
         this.partSection.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
@@ -293,22 +256,10 @@ class PanelManager {
     * Прямоугольник с полукруглой аркой сверху для теста оффсета с кривыми Безье
      */
     updatePartFront() {
-        let panelX, panelY;
+        const panelOrigin = this.getPanelOrigin();
 
-        if (this.sceneAnchorX !== null && this.sceneAnchorY !== null) {
-            const anchorOffset = this.getPanelAnchorOffset();
-            panelX = this.sceneAnchorX - this.gridSize / 2 + anchorOffset.x;
-            panelY = this.sceneAnchorY - this.gridSize / 2 + anchorOffset.y;
-        } else {
-            panelX =
-                (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
-            panelY =
-                (this.canvasManager.canvasParameters.height - this.panelThickness) /
-                2;
-        }
-
-        const frontX = panelX;
-        const frontY = panelY - this.panelHeight - 100;
+        const frontX = panelOrigin.x;
+        const frontY = panelOrigin.y - this.panelHeight - 100;
         const frontWidth = this.panelWidth;
         const frontHeight = this.panelHeight;
 
@@ -348,26 +299,9 @@ class PanelManager {
 
         indicator.innerHTML = "";
 
-        let anchorX, anchorY;
-        if (this.sceneAnchorX !== null && this.sceneAnchorY !== null) {
-            const anchorOffset = this.getPanelAnchorOffset();
-            anchorX = this.sceneAnchorX - this.gridSize / 2 + anchorOffset.x;
-            anchorY = this.sceneAnchorY - this.gridSize / 2 + anchorOffset.y;
-        } else {
-            const panelX =
-                (this.canvasManager.canvasParameters.width - this.panelWidth) / 2;
-            const panelY =
-                (this.canvasManager.canvasParameters.height - this.panelThickness) /
-                2;
-
-            if (this.panelAnchor === "top-left") {
-                anchorX = panelX;
-                anchorY = panelY;
-            } else if (this.panelAnchor === "bottom-left") {
-                anchorX = panelX;
-                anchorY = panelY + this.panelThickness;
-            }
-        }
+        const anchorCoords = this.getPanelAnchorCoords();
+        const anchorX = anchorCoords.x;
+        const anchorY = anchorCoords.y;
 
         // Draw a small cross
         const crossSize = 5;
@@ -411,8 +345,8 @@ class PanelManager {
                 (this.canvasManager.canvasParameters.height - this.panelThickness) /
                 2;
             const anchorOffset = this.getPanelAnchorOffset();
-            gridAnchorX = panelX + anchorOffset.x + this.gridSize / 2;
-            gridAnchorY = panelY + anchorOffset.y + this.gridSize / 2;
+            gridAnchorX = panelX + anchorOffset.x;
+            gridAnchorY = panelY + anchorOffset.y;
         }
 
         if (this.canvasManager && this.canvasManager.config) {

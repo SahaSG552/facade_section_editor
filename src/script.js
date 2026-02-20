@@ -3,7 +3,11 @@ import {
     distancePtToPt,
     evaluateMathExpression,
 } from "./utils/utils.js";
-import { zoomToBBox, calculateElementsBBox } from "./canvas/zoomUtils.js";
+import {
+    zoomToBBox,
+    calculateElementsBBox,
+    fitAllVisibleElements,
+} from "./canvas/zoomUtils.js";
 import { getBits, addBit, deleteBit, updateBit } from "./data/bitsStore.js";
 import CanvasManager from "./canvas/CanvasManager.js";
 import BitsManager from "./panel/BitsManager.js";
@@ -236,8 +240,9 @@ function initializeSVG() {
         const panelX = (canvasWidth - panelWidth) / 2;
         const panelY = (canvasHeight - panelThickness) / 2;
         const anchorOffset = getPanelAnchorOffset();
-        const gridAnchorX = panelX + anchorOffset.x + gridSize / 2;
-        const gridAnchorY = panelY + anchorOffset.y + gridSize / 2;
+        // Grid anchor = panel anchor point (no gridSize/2 offset)
+        const gridAnchorX = panelX + anchorOffset.x;
+        const gridAnchorY = panelY + anchorOffset.y;
 
         // Store anchor position in scene coordinates (fixed, not recalculated on resize)
         sceneAnchorX = gridAnchorX;
@@ -809,11 +814,13 @@ function initializeSVG() {
 
 // Helper function to update canvas after panel toggle
 function updateCanvasAfterPanelToggle() {
-    mainCanvasManager.canvasParameters.width =
-        canvas.getBoundingClientRect().width;
-    mainCanvasManager.canvasParameters.height =
-        canvas.getBoundingClientRect().height;
-    mainCanvasManager.updateViewBox();
+    mainCanvasManager.resize();
+
+    updatePanelShape();
+    updateBitsPositions();
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
 
     // Update Three.js canvas if active
     if (threeModule && threeModule.sceneManager) {
@@ -856,10 +863,14 @@ function updateBitsForNewAnchor() {
                 ? { x: 0, y: 0 }
                 : { x: 0, y: panelThickness };
 
-            currentAnchorX = sceneAnchorX - gridSize / 2 + currentAnchorOffset.x;
-            currentAnchorY = sceneAnchorY - gridSize / 2 + currentAnchorOffset.y;
-            newAnchorX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-            newAnchorY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+            // sceneAnchorX/Y is the current (old) anchor point directly
+            // panel origin = sceneAnchor - currentAnchorOffset
+            const panelOriginX = sceneAnchorX - currentAnchorOffset.x;
+            const panelOriginY = sceneAnchorY - currentAnchorOffset.y;
+            currentAnchorX = sceneAnchorX;
+            currentAnchorY = sceneAnchorY;
+            newAnchorX = panelOriginX + anchorOffset.x;
+            newAnchorY = panelOriginY + anchorOffset.y;
         } else {
             const panelX =
                 (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
@@ -926,8 +937,8 @@ function updatePanelShape() {
         let panelX, panelY;
         if (sceneAnchorX !== null && sceneAnchorY !== null) {
             const anchorOffset = getPanelAnchorOffset();
-            panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-            panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+            panelX = sceneAnchorX - anchorOffset.x;
+            panelY = sceneAnchorY - anchorOffset.y;
         } else {
             panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
             panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
@@ -1005,8 +1016,12 @@ function updateBitsPositions() {
         panelManager.updateBitsPositions(bitsOnCanvas);
     } else {
         const anchorOffset = getPanelAnchorOffset();
-        const anchorX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-        const anchorY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+        // sceneAnchorX/Y IS the anchor point; remove old incorrect gridSize/2 offset
+        const anchorX = sceneAnchorX - anchorOffset.x + anchorOffset.x; // = sceneAnchorX
+        const anchorY = sceneAnchorY - anchorOffset.y + anchorOffset.y; // = sceneAnchorY
+        /* simplified: */
+        // const anchorX = sceneAnchorX;
+        // const anchorY = sceneAnchorY;
 
         bitsOnCanvas.forEach((bit) => {
             const desiredAbsX = anchorX + (bit.x || 0);
@@ -1272,9 +1287,9 @@ function updateOffsetContours() {
     // Always calculate relative to top anchor for consistent offset calculations
     let panelX, panelY;
     if (sceneAnchorX !== null && sceneAnchorY !== null) {
-        const anchorOffset = { x: 0, y: 0 };
-        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+        // sceneAnchorX/Y IS the top-left anchor point (x-offset always 0 for both anchor types)
+        panelX = sceneAnchorX;
+        panelY = sceneAnchorY;
     } else {
         panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
         panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
@@ -2767,39 +2782,13 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
 }
 
 function fitToScale() {
-    // Collect all visible elements from all layers except "grid"
-    const allElements = [];
-
-    // Get all layers except grid
-    const layerNames = ["panel", "offsets", "bits", "phantoms", "overlay"];
-
-    layerNames.forEach((layerName) => {
-        const layer = mainCanvasManager.getLayer(layerName);
-        if (layer) {
-            // Get all child elements, filtering out hidden ones
-            const childElements = Array.from(layer.children).filter(
-                (child) =>
-                    child.style.display !== "none" &&
-                    window.getComputedStyle(child).display !== "none"
-            );
-            allElements.push(...childElements);
-        }
-    });
-
-    // If no elements found, fall back to default fit
-    if (allElements.length === 0) {
-        mainCanvasManager.fitToScale({
-            minX: 0,
-            maxX: mainCanvasManager.canvasParameters.width,
-            minY: 0,
-            maxY: mainCanvasManager.canvasParameters.height,
-            padding: 20,
-        });
-        return;
-    }
-
-    // Use the unified zoom function to zoom to all canvas elements
-    zoomToElements(allElements, 100); // 100 units padding for fit to scale
+    // Use the unified fit function that collects all visible elements from specified layers
+    // and zooms to fit them with padding
+    fitAllVisibleElements(
+        mainCanvasManager,
+        ["panel", "offsets", "bits", "phantoms", "overlay"],
+        100 // 100 units padding for fit to scale
+    );
 }
 
 /**
@@ -2904,15 +2893,15 @@ function transformYFromDisplay(displayY, anchorOffset) {
 function getPanelAnchorCoords() {
     if (panelManager) return panelManager.getPanelAnchorCoords();
     let panelX, panelY;
+    const offset = getPanelAnchorOffset();
     if (sceneAnchorX !== null && sceneAnchorY !== null) {
-        const anchorOffset = getPanelAnchorOffset();
-        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+        // sceneAnchorX/Y IS the anchor point; panel origin = anchor minus offset
+        panelX = sceneAnchorX - offset.x;
+        panelY = sceneAnchorY - offset.y;
     } else {
         panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
         panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
     }
-    const offset = getPanelAnchorOffset();
     return {
         x: panelX + offset.x,
         y: panelY + offset.y,
@@ -2987,9 +2976,9 @@ function updatePartShape() {
     }
     let panelX, panelY;
     if (sceneAnchorX !== null && sceneAnchorY !== null) {
-        const anchorOffset = { x: 0, y: 0 };
-        panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-        panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+        // sceneAnchorX/Y IS the top-left anchor point (x-offset always 0 for both anchor types)
+        panelX = sceneAnchorX;
+        panelY = sceneAnchorY;
     } else {
         panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
         panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
@@ -3401,9 +3390,8 @@ async function restoreBitPositions(positionsData) {
                 // Create bit on canvas at the saved position
                 let panelX, panelY;
                 if (sceneAnchorX !== null && sceneAnchorY !== null) {
-                    const anchorOffset = { x: 0, y: 0 };
-                    panelX = sceneAnchorX - gridSize / 2 + anchorOffset.x;
-                    panelY = sceneAnchorY - gridSize / 2 + anchorOffset.y;
+                    panelX = sceneAnchorX;
+                    panelY = sceneAnchorY;
                 } else {
                     panelX = (mainCanvasManager.canvasParameters.width - panelWidth) / 2;
                     panelY = (mainCanvasManager.canvasParameters.height - panelThickness) / 2;
