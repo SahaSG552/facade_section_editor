@@ -1,4 +1,5 @@
 import defaultBits from "./defaultBits.js";
+import variablesManager from "./VariablesManager.js";
 
 const STORAGE_KEY = "facade_bits_v1";
 let bits = null;
@@ -161,11 +162,18 @@ export function resetToDefaults() {
     save();
 }
 
-// Export bits data to JSON file
+// Export bits data to JSON file (includes custom variables)
 export function exportToJSON() {
     if (!bits) return null;
 
-    const dataStr = JSON.stringify(bits, null, 2);
+    // Include custom variables in export
+    const exportData = {
+        bits: bits,
+        customVariables: variablesManager.customVariables || {},
+        exportVersion: 1
+    };
+
+    const dataStr = JSON.stringify(exportData, null, 2);
     const dataBlob = new Blob([dataStr], { type: "application/json" });
 
     const link = document.createElement("a");
@@ -178,12 +186,26 @@ export function exportToJSON() {
     return dataBlob;
 }
 
-// Import bits data from JSON file
+// Import bits data from JSON file (includes custom variables)
 export function importFromJSON(jsonData) {
     try {
-        const importedBits = JSON.parse(jsonData);
-        // Validate structure
+        const parsed = JSON.parse(jsonData);
         const validGroups = Object.keys(defaultBits);
+        
+        // Check if new format with bits and customVariables
+        let importedBits;
+        let importedCustomVars = null;
+        
+        if (parsed.bits && typeof parsed.bits === "object") {
+            // New format: { bits: {...}, customVariables: {...}, exportVersion: 1 }
+            importedBits = parsed.bits;
+            importedCustomVars = parsed.customVariables || null;
+        } else {
+            // Old format: just the bits object { cylindrical: [...], ... }
+            importedBits = parsed;
+        }
+        
+        // Validate bits structure
         const isValid = validGroups.every((group) =>
             Array.isArray(importedBits[group])
         );
@@ -192,7 +214,7 @@ export function importFromJSON(jsonData) {
             throw new Error("Invalid JSON structure");
         }
 
-        // Set imported data
+        // Set imported bits data
         bits = {};
         validGroups.forEach((groupName) => {
             bits[groupName] = (importedBits[groupName] || []).map((b) => ({
@@ -200,8 +222,13 @@ export function importFromJSON(jsonData) {
                 ...b,
             }));
         });
-
         save();
+
+        // Import custom variables if present
+        if (importedCustomVars) {
+            variablesManager.importCustomVariables(importedCustomVars);
+        }
+
         return true;
     } catch (e) {
         console.error("Failed to import JSON:", e);

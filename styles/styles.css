@@ -1219,8 +1219,12 @@ html {
 
 /* ===== PROFILE PATH EDITOR ===== */
 .profile-path-row {
-  grid-template-columns: 120px 1fr 30px !important;
+  grid-template-columns: 1fr !important;
   margin-top: 10px;
+}
+
+.profile-path-row label {
+  display: none;
 }
 
 .profile-path-wrapper {
@@ -1229,243 +1233,13 @@ html {
   gap: 4px;
 }
 
-.path-editor {
-  font-family: 'JetBrains Mono', monospace;
+.profile-path-header {
   font-size: 12px;
-  line-height: 1.6;
-  padding: 8px 10px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
-  border-radius: var(--radius);
-  min-height: 80px;
-  max-height: 200px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  cursor: text;
-  outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.path-editor:focus {
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 2px hsla(var(--primary), 0.2);
-}
-
-.path-editor:empty::before {
-  content: 'M 0 0 L 10 0 L 10 5 L 0 10 Z';
   color: hsl(var(--muted-foreground));
-  pointer-events: none;
+  margin-bottom: 2px;
 }
 
-/* Path syntax highlighting */
-.path-cmd {
-  color: #e63946;
-  font-weight: 600;
-}
-
-.path-num {
-  color: #2a9d8f;
-}
-
-.path-comma {
-  color: hsl(var(--muted-foreground));
-}
-
-/* Dark mode path highlighting */
-.dark .path-cmd {
-  color: #ff6b6b;
-}
-
-.dark .path-num {
-  color: #4ecdc4;
-}
-
-/* Path editor line numbers (optional enhancement) */
-.path-editor::before {
-  content: '';
-}
-
-/* Error state for invalid path */
-.path-editor.error {
-  border-color: #e63946;
-  background-color: rgba(230, 57, 70, 0.05);
-}
-
-.path-editor.error:focus {
-  box-shadow: 0 0 0 2px rgba(230, 57, 70, 0.2);
-}
-
-/* ===== PATH EDITOR MODULE ===== */
-.path-editor-container {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.path-editor-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 150px;
-  overflow-y: auto;
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius);
-  background-color: hsl(var(--input));
-  padding: 4px;
-}
-
-.path-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  border-radius: 4px;
-  transition: background-color 0.15s;
-}
-
-.path-line:hover {
-  background-color: hsl(var(--accent));
-}
-
-.path-line-number {
-  color: hsl(var(--muted-foreground));
-  font-size: 10px;
-  min-width: 18px;
-  text-align: right;
-  user-select: none;
-}
-
-.path-line-content {
-  flex: 1;
-  font-size: 12px;
-  cursor: text;
-  word-break: break-all;
-}
-
-.path-line-delete {
-  opacity: 0;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: hsl(var(--muted-foreground));
-  cursor: pointer;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
-}
-
-.path-line:hover .path-line-delete {
-  opacity: 1;
-}
-
-.path-line-delete:hover {
-  background-color: rgba(230, 57, 70, 0.15);
-  color: #e63946;
-}
-
-.path-line-edit-input {
-  width: 100%;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  padding: 2px 4px;
-  border: 1px solid hsl(var(--primary));
-  border-radius: 4px;
-  background-color: hsl(var(--card));
-  color: hsl(var(--foreground));
-  outline: none;
-}
-
-.path-editor-input-wrapper {
-  display: flex;
-  gap: 4px;
-}
-
-.path-editor-input {
-  flex: 1;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
-  padding: 8px 10px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
-  border-radius: var(--radius);
-  outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
-
-.path-editor-input:focus {
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 2px hsla(var(--primary), 0.2);
-}
-
-.path-editor-input::placeholder {
-  color: hsl(var(--muted-foreground));
-}
-
-/* Path syntax highlighting */
-.path-var {
-  color: #9b59b6;
-  font-weight: 500;
-}
-
-.dark .path-var {
-  color: #bb8fce;
-}
-
-/* Drag and drop styles */
-.path-line-number {
-  cursor: grab;
-  user-select: none;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: background-color 0.15s;
-}
-
-.path-line-number:hover {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-}
-
-.path-line-number:active {
-  cursor: grabbing;
-}
-
-.path-line.dragging {
-  opacity: 0.5;
-  background-color: hsl(var(--accent));
-}
-
-.path-line.drag-over {
-  border-top: 2px solid hsl(var(--primary));
-}
-
-/* Expression highlight */
-.path-expr {
-  color: #e67e22;
-  font-style: italic;
-}
-
-.dark .path-expr {
-  color: #f39c12;
-}
-
-/* Evaluated value tooltip */
-.path-evaluated {
-  font-size: 10px;
-  color: hsl(var(--muted-foreground));
-  margin-left: 8px;
-  font-style: italic;
-}
-
-/* ===== NEW PATH EDITOR (table-based) ===== */
+/* ===== PATH EDITOR (table-based) ===== */
 .path-editor-container {
   display: flex;
   flex-direction: column;
@@ -1524,7 +1298,15 @@ html {
   cursor: grabbing;
 }
 
-/* Base cell style - compact buttons */
+.path-line.dragging {
+  opacity: 0.4;
+}
+
+.path-line.drag-over {
+  border-top: 2px solid hsl(var(--primary));
+}
+
+/* Base cell style */
 .path-cell {
   font-family: 'JetBrains Mono', monospace;
   border: 1px solid transparent;
@@ -1596,22 +1378,31 @@ html {
   background-color: rgba(255, 255, 255, 0.04);
 }
 
-/* Inline input inside param cell - compact */
+/* Inline input - override .modal-content input */
+.path-cell.path-cell-param .path-cell-inline-input,
 .path-cell-inline-input {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  padding: 1px 1px;
-  border: none;
-  background: transparent;
-  color: hsl(var(--foreground));
-  outline: none;
-  min-width: 30px;
-  max-width: 80px;
-  width: auto;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 11px !important;
+  padding: 1px 5px 1px 5px !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 2px !important;
+  background: transparent !important;
+  color: hsl(var(--foreground)) !important;
+  outline: none !important;
+  min-width: none !important;
+  max-width: none !important;
+  box-sizing: border-box !important;
+  vertical-align: middle !important;
+  line-height: inherit !important;
+  height: auto !important;
+  display: inline !important;
 }
 
 .path-cell-inline-input:focus {
-  outline: none;
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
 /* Delete button */
@@ -1643,15 +1434,6 @@ html {
   color: #e63946;
 }
 
-/* Drag states */
-.path-line.dragging {
-  opacity: 0.4;
-}
-
-.path-line.drag-over {
-  border-top: 2px solid hsl(var(--primary));
-}
-
 /* Input area */
 .path-editor-input-area {
   display: flex;
@@ -1668,7 +1450,7 @@ html {
   flex: 1;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  padding: 1px 1px;
+  padding: 1px;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--input));
   color: hsl(var(--foreground));
@@ -1708,7 +1490,7 @@ html {
   opacity: 0.85;
 }
 
-/* Suggestions area */
+/* Suggestions */
 .path-editor-suggestions {
   display: flex;
   flex-direction: column;
@@ -1782,101 +1564,6 @@ html {
 
 .dark .path-suggestion-btn.var-btn {
   color: #bb8fce;
-}
-
-/* Cell edit input (legacy dropdown style) */
-.path-cell-input {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  padding: 1px 3px;
-  border: 1px solid hsl(var(--primary));
-  border-radius: 3px;
-  background-color: hsl(var(--card));
-  color: hsl(var(--foreground));
-  outline: none;
-  min-width: 30px;
-  max-width: 80px;
-}
-
-.path-cell-input.cmd-input {
-  max-width: 24px;
-  text-align: center;
-  font-weight: 700;
-  color: #e63946;
-}
-
-/* Cell edit wrapper with dropdown */
-.path-cell-edit-wrapper {
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-}
-
-/* Dropdown for cell editing */
-.path-cell-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 200;
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  min-width: 120px;
-  max-height: 150px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 2px;
-}
-
-.path-dropdown-opt {
-  padding: 3px 6px;
-  font-size: 10px;
-  font-family: 'JetBrains Mono', monospace;
-  border: none;
-  background: transparent;
-  color: hsl(var(--foreground));
-  cursor: pointer;
-  border-radius: 3px;
-  text-align: left;
-  transition: background-color 0.1s;
-  white-space: nowrap;
-}
-
-.path-dropdown-opt:hover {
-  background-color: hsl(var(--accent));
-}
-
-.path-dropdown-opt.var-opt {
-  color: #9b59b6;
-}
-
-.dark .path-dropdown-opt.var-opt {
-  color: #bb8fce;
-}
-
-/* Profile path row - header on top */
-.profile-path-row {
-  grid-template-columns: 1fr !important;
-  margin-top: 10px;
-}
-
-.profile-path-row label {
-  display: none; /* Hide inline label */
-}
-
-.profile-path-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.profile-path-header {
-  font-size: 12px;
-  color: hsl(var(--muted-foreground));
-  margin-bottom: 2px;
 }
 
 /* ===== CUSTOM FIELD MODAL ===== */

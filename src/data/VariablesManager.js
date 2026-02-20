@@ -164,6 +164,45 @@ class VariablesManager {
     }
 
     /**
+     * Import custom variables from exported data
+     * @param {Object} customVars - Custom variables object { bitType: [variables] }
+     */
+    importCustomVariables(customVars) {
+        if (!customVars || typeof customVars !== "object") {
+            return;
+        }
+
+        // Merge imported variables with existing ones
+        Object.keys(customVars).forEach(bitType => {
+            if (!Array.isArray(customVars[bitType])) {
+                return;
+            }
+
+            // Initialize array if not exists
+            if (!this.customVariables[bitType]) {
+                this.customVariables[bitType] = [];
+            }
+
+            // Add imported variables that don't already exist (by varName)
+            const existingVarNames = new Set(
+                this.getVariablesForType(bitType).map(v => v.varName)
+            );
+
+            customVars[bitType].forEach(v => {
+                if (!existingVarNames.has(v.varName)) {
+                    this.customVariables[bitType].push({
+                        ...v,
+                        isCustom: true
+                    });
+                    existingVarNames.add(v.varName);
+                }
+            });
+        });
+
+        this.saveCustomVariables();
+    }
+
+    /**
      * Get available custom variables from all bit types (for suggestions)
      * Also includes type-specific variables from other bit types that don't exist in current type
      * @param {string} excludeType - Bit type to exclude
