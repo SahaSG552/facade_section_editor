@@ -11,6 +11,88 @@ import { evaluateMathExpression } from "../utils/utils.js";
 import { fitAllVisibleElements } from "../canvas/zoomUtils.js";
 import variablesManager from "../data/VariablesManager.js";
 import PathEditor from "./PathEditor.js";
+import ProfileEditor from "../editor/ProfileEditor.js";
+
+/**
+ * Merge a new numeric SVG path with the original formula path.
+ * For each coordinate token, if the new numeric value is numerically equal to
+ * the original formula’s evaluated value (tolerance 1e-4) — keep the formula.
+ * Otherwise use the new numeric value.
+ *
+ * Both paths must have the same command structure (same number and types of
+ * tokens). If they differ (user added/deleted segments), the new path is
+ * returned unchanged.
+ *
+ * @param {string} newPath   - New numeric SVG path (from canvas export)
+ * @param {string} rawPath   - Original formula SVG path (may contain {vars})
+ * @param {import('./PathEditor.js').default} pathEditor - PathEditor for evaluation
+ * @returns {string}
+ */
+function mergePathWithFormulas(newPath, rawPath, pathEditor) {
+    if (!rawPath || !pathEditor) return newPath;
+
+    /** Tokenize into cmd-letters and parameter blobs (handles `{expr}` and `-{expr}`). */
+    const tokenize = (str) => {
+        const tokens = [];
+        let i = 0;
+        while (i < str.length) {
+            while (i < str.length && /[\s,]/.test(str[i])) i++;
+            if (i >= str.length) break;
+            if (/[MmLlHhVvZzCcSsQqTtAa]/.test(str[i])) {
+                tokens.push({ type: 'cmd', value: str[i++] });
+            } else if ((str[i] === '-' || str[i] === '+') && str[i + 1] === '{') {
+                // e.g. -{h}
+                const end = str.indexOf('}', i + 1);
+                const k   = end >= 0 ? end + 1 : str.length;
+                tokens.push({ type: 'param', value: str.slice(i, k) });
+                i = k;
+            } else if (str[i] === '{') {
+                // e.g. {d/2}
+                const end = str.indexOf('}', i);
+                const k   = end >= 0 ? end + 1 : str.length;
+                tokens.push({ type: 'param', value: str.slice(i, k) });
+                i = k;
+            } else {
+                // plain number (may start with sign)
+                let j = i;
+                if (str[j] === '-' || str[j] === '+') j++;
+                while (j < str.length && /[\d.eE]/.test(str[j])) {
+                    if ((str[j] === 'e' || str[j] === 'E') && j + 1 < str.length &&
+                        (str[j + 1] === '-' || str[j + 1] === '+')) j++;
+                    j++;
+                }
+                const numStr = str.slice(i, j);
+                if (numStr) tokens.push({ type: 'param', value: numStr });
+                // Always advance: if nothing was consumed (e.g. unknown char like '/', '(')
+                // skip it so the outer while never stalls.
+                i = j > i ? j : j + 1;
+            }
+        }
+        return tokens;
+    };
+
+    const newTokens = tokenize(newPath);
+    const rawTokens = tokenize(rawPath);
+    if (newTokens.length !== rawTokens.length) return newPath; // incompatible structure
+
+    const result = [];
+    for (let i = 0; i < newTokens.length; i++) {
+        const nt = newTokens[i];
+        const rt = rawTokens[i];
+        if (nt.type === 'cmd') {
+            result.push(nt.value);
+        } else {
+            const newVal = parseFloat(nt.value);
+            const rawVal = parseFloat(pathEditor.evaluateToken(rt.value));
+            if (!isNaN(newVal) && !isNaN(rawVal) && Math.abs(newVal - rawVal) < 1e-4) {
+                result.push(rt.value); // identical → keep formula
+            } else {
+                result.push(nt.value); // changed → use new number
+            }
+        }
+    }
+    return result.join(' ');
+}
 
 const svgNS = "http://www.w3.org/2000/svg";
 
@@ -1129,7 +1211,9 @@ export default class BitsManager {
             <button type="button" id="preview-fit" title="Fit to Scale">Fit</button>
             <button type="button" id="preview-toggle-grid" title="Toggle Grid">Grid</button>
             <input type="color" id="bit-color" value="${defaultValues.color}" title="Bit Color">
+            ${groupName === "profile" ? '<button type="button" id="preview-edit" class="preview-edit-btn" title="Edit profile shape">Edit</button>' : ""}
           </div>
+          <div id="text-editor-panel"></div>
         </div>
       </div>
       <div class="button-group">
@@ -1449,6 +1533,72 @@ export default class BitsManager {
         modal.querySelector("#preview-toggle-grid").addEventListener("click", () => {
             togglePreviewGrid();
         });
+
+        // Profile editor — only wired up for "profile" type bits
+        if (groupName === "profile") {
+            const profileEditor = new ProfileEditor();
+
+            modal.querySelector("#preview-edit")?.addEventListener("click", () => {
+                const variableValues = this.collectVariableValues(form, groupName);
+                // Use the evaluated path from the hidden input (set by PathEditor).
+                // Fall back to defaultValues.profilePath (bit.profilePath for existing bits).
+                const evaluatedInput = modal.querySelector("#bit-profilePath");
+                const profilePath    = (evaluatedInput?.value?.trim()) || defaultValues.profilePath || "";
+
+                // Snapshot the raw formula path BEFORE entering edit (setPath will overwrite it).
+                const originalRawPath = pathEditorInstance?.getPath() ?? "";
+
+
+                // Track whether the user confirmed the edit (Done) or cancelled it.
+                let editSaved = false;
+
+                profileEditor.enter({
+                    modal,
+                    canvasManager: previewCanvasManager,
+                    profilePath,
+                    variableValues,
+                    pathEditor: pathEditorInstance,
+                    onSave: (newPath) => {
+                        editSaved = true;
+                        if (newPath !== null) {
+                            // Merge numeric canvas result with original formula path.
+                            // Coordinates that did not change keep their formula tokens.
+                            const merged = mergePathWithFormulas(newPath, originalRawPath, pathEditorInstance);
+                            // Reload the merged path into PathEditor with onChange suppressed.
+                            // updateHiddenInput() fires inside each addLine() call and writes:
+                            //   - hiddenInput    (#bit-profilePath)    <- EVALUATED numeric path
+                            //   - rawHiddenInput (#bit-rawProfilePath) <- raw formula path
+                            // CRITICAL: hiddenInput must be a pure numeric path before
+                            // updateBitPreview() reads it. Formula tokens like {d} passed to
+                            // transformProfilePath() cause getBBox() to freeze the browser.
+                            if (pathEditorInstance) {
+                                const savedOnChange = pathEditorInstance.onChange;
+                                pathEditorInstance.onChange = () => {};   // suppress during reload
+                                pathEditorInstance.setPath(merged);
+                                pathEditorInstance.onChange = savedOnChange;
+                            }
+                        }
+                        updateBitPreview();
+                    },
+                    // Always called after exit (save or cancel) to restore preview rendering.
+                    // EditorCanvas.destroy() clears bitsLayer.innerHTML, so the cached shape
+                    // DOM element is detached. Reset the signature to force a full re-render.
+                    onClose: () => {
+                        if (!editSaved && pathEditorInstance) {
+                            // Cancel: restore the path that was in the PathEditor before
+                            // editing started (preserving any formula tokens).
+                            const savedOnChange = pathEditorInstance.onChange;
+                            pathEditorInstance.onChange = () => {};
+                            pathEditorInstance.setPath(originalRawPath);
+                            pathEditorInstance.onChange = savedOnChange;
+                        }
+                        previewRenderState.signature = null;
+                        previewRenderState.shape = null;
+                        updateBitPreview();
+                    },
+                });
+            });
+        }
 
         // Add input event listeners
         const addInputListeners = () => {

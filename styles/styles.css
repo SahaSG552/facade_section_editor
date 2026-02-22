@@ -1214,6 +1214,219 @@ html {
   stroke: gray;
 }
 
+/* ===== PROFILE EDITOR — Edit button ===== */
+.preview-edit-btn {
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+  font-weight: 600;
+}
+
+/* ===== PROFILE EDITOR — Mode switching ===== */
+
+/* Hide elements when in editor mode (used for #preview-toolbar) */
+.editor-mode-hidden {
+  display: none !important;
+}
+
+/* Canvas gets a subtle active-edit outline so it's clear you're drawing */
+.bit-preview--editing {
+  outline: 2px solid hsl(var(--primary) / 0.35);
+  outline-offset: -2px;
+}
+
+/* ===== EDITOR TOOLBAR ===== */
+#editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-top: 1px solid hsl(var(--border));
+  background-color: hsl(var(--muted));
+  flex-wrap: wrap;
+}
+
+.editor-toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.editor-toolbar-separator {
+  width: 1px;
+  height: 20px;
+  background-color: hsl(var(--border));
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.editor-toolbar-spacer {
+  flex: 1;
+}
+
+.editor-tool-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.1s, border-color 0.1s;
+}
+
+.editor-tool-btn:hover {
+  background-color: hsl(var(--accent));
+  border-color: hsl(var(--primary) / 0.5);
+}
+
+.editor-tool-btn.active {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+}
+
+.editor-snap-btn {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.1s;
+}
+
+.editor-snap-btn.active {
+  background-color: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.4);
+}
+
+.editor-action-btn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.editor-action-btn.editor-action-primary {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+}
+
+/* ===== EDITOR CANVAS — selection box (CursorTool drag) ===== */
+.editor-selection-box {
+  fill: hsl(var(--primary) / 0.08);
+  stroke: hsl(var(--primary));
+  stroke-width: 0.3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+/* Crossing selection (right-to-left drag) uses dashed red border */
+.editor-selection-box--crossing {
+  fill: hsl(0 70% 50% / 0.06);
+  stroke: hsl(0 70% 50%);
+  stroke-dasharray: 2 2;
+}
+
+/* ===== EDITOR CANVAS — axis line ===== */
+.editor-axis {
+  stroke: hsl(var(--primary) / 0.4);
+  stroke-width: 0.3;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/* ===== EDITOR CANVAS — ghost (in-progress drawing) ===== */
+.editor-ghost line,
+.editor-ghost circle {
+  stroke: hsl(var(--primary));
+  fill: none;
+  pointer-events: none;
+}
+
+.editor-ghost line {
+  stroke-width: 0.5;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.85;
+}
+
+/* Filled endpoint circles on ghost */
+.editor-ghost-endpoint {
+  fill: hsl(var(--primary));
+  stroke: none;
+  pointer-events: none;
+  vector-effect: non-scaling-stroke;
+}
+
+/* ===== EDITOR CANVAS — drawn segments ===== */
+.editor-segment {
+  stroke: hsl(var(--foreground) / 0.85);
+  stroke-width: 0.5;
+  fill: none;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.editor-segment-selected {
+  stroke: hsl(var(--primary));
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Mirrored (left-half) counterpart — subtler */
+.editor-segment-mirror {
+  stroke: hsl(var(--foreground) / 0.35);
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
+/* Endpoint dots on committed segments */
+.editor-endpoint {
+  fill: hsl(var(--foreground) / 0.7);
+  stroke: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.editor-endpoint-mirror {
+  fill: hsl(var(--foreground) / 0.25);
+}
+
+.editor-endpoint-selected {
+  fill: hsl(var(--primary));
+}
+
+/* Hover states — applied by CursorTool */
+.editor-segment-hover {
+  stroke: hsl(var(--primary) / 0.6);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.editor-endpoint-hover {
+  fill: hsl(var(--primary) / 0.8);
+  r: 0.1;           /* slightly larger when hovered */
+  vector-effect: non-scaling-stroke;
+}
+
+/* Default cursor on segments (overriding any move cursor) */
+.editor-segment {
+  cursor: pointer;
+}
+
 /* ===== PROFILE PATH EDITOR ===== */
 .profile-path-row {
   grid-template-columns: 1fr !important;
@@ -1253,6 +1466,7 @@ html {
   max-height: 200px;
   overflow-x: auto;
   overflow-y: auto;
+  user-select: none;
   border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   background-color: hsl(var(--input));
@@ -1268,6 +1482,7 @@ html {
   transition: background-color 0.15s;
   min-height: 22px;
   flex-wrap: nowrap;
+  user-select: none;
 }
 
 .path-line:hover {
@@ -1301,6 +1516,19 @@ html {
 
 .path-line.drag-over {
   border-top: 2px solid hsl(var(--primary));
+}
+
+/* Selected row (via canvas selection or row click) */
+.path-line-selected {
+  background-color: hsl(var(--primary) / 0.15) !important;
+  outline: 1px solid hsl(var(--primary) / 0.4);
+  outline-offset: -1px;
+  border-radius: 3px;
+}
+
+/* Mirror rows (visual hint that these are the reflected half) */
+.path-line-mirror {
+  opacity: 0.5;
 }
 
 /* Base cell style */

@@ -65,6 +65,8 @@ export default class PathEditor {
         this.onChange = options.onChange || (() => {});
         this.variableValues = options.variableValues || {};
         this.getVariableList = options.getVariableList || (() => []);
+        /** @type {((index: number) => void)|null} Fired when the user clicks on a line row background */
+        this.onLineClick = options.onLineClick || null;
         
         /** @type {HTMLElement|null} Main editor element */
         this.element = null;
@@ -72,6 +74,10 @@ export default class PathEditor {
         this.lines = [];
         /** @type {Object|null} Currently dragged line data */
         this.draggedLine = null;
+        /** @type {boolean} True when dragging a group of selected lines */
+        this._isGroupDrag = false;
+        /** @type {Set<number>} Indices of currently selected lines (for group drag) */
+        this._selectedLineIndices = new Set();
         
         /** @type {Object|null} Currently edited line data */
         this.activeEditLineData = null;
@@ -422,6 +428,17 @@ export default class PathEditor {
         lineEl.className = 'path-line';
         lineEl.dataset.id = lineData.id;
         this.buildLineCells(lineEl, lineData, false);
+
+        // Click on the row background (not a cell/button) → notify external listener
+        lineEl.addEventListener('click', (e) => {
+            if (e.target.closest('.path-cell') || e.target.closest('.path-line-delete') ||
+                e.target.closest('.path-line-number')) return;
+            if (this.onLineClick) {
+                const idx = this.lines.indexOf(lineData);
+                if (idx !== -1) this.onLineClick(idx, e); // pass event for shift-detection
+            }
+        });
+
         return lineEl;
     }
     
@@ -840,15 +857,25 @@ export default class PathEditor {
     addDragHandlers(numEl, lineData) {
         numEl.addEventListener('dragstart', (e) => {
             this.draggedLine = lineData;
-            lineData.element.classList.add('dragging');
+            const idx = this.lines.indexOf(lineData);
+            this._isGroupDrag = this._selectedLineIndices.size > 1 && this._selectedLineIndices.has(idx);
+
+            if (this._isGroupDrag) {
+                // Mark all selected lines as dragging
+                this._selectedLineIndices.forEach(i => {
+                    this.lines[i]?.element?.classList.add('dragging');
+                });
+            } else {
+                lineData.element.classList.add('dragging');
+            }
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', String(lineData.id));
         });
         
         numEl.addEventListener('dragend', () => {
-            if (this.draggedLine) this.draggedLine.element.classList.remove('dragging');
+            this.lines.forEach(l => l.element?.classList.remove('dragging', 'drag-over'));
             this.draggedLine = null;
-            this.lines.forEach(l => l.element.classList.remove('drag-over'));
+            this._isGroupDrag = false;
         });
         
         lineData.element.addEventListener('dragover', (e) => {
@@ -866,9 +893,43 @@ export default class PathEditor {
             e.preventDefault();
             lineData.element.classList.remove('drag-over');
             if (this.draggedLine && this.draggedLine.id !== lineData.id) {
-                this.reorderLines(this.draggedLine, lineData);
+                if (this._isGroupDrag) {
+                    this._reorderLinesGroup(this.draggedLine, lineData);
+                } else {
+                    this.reorderLines(this.draggedLine, lineData);
+                }
             }
         });
+    }
+
+    /**
+     * Reorder a group of selected lines to before/after the target line.
+     * @private
+     */
+    _reorderLinesGroup(draggedLine, targetLine) {
+        const selectedSet = this._selectedLineIndices;
+        const targetIdx   = this.lines.indexOf(targetLine);
+        if (targetIdx === -1) return;
+
+        const selectedLines   = this.lines.filter((_, i) => selectedSet.has(i));
+        const unselectedLines = this.lines.filter((_, i) => !selectedSet.has(i));
+
+        // Find where targetLine falls in the unselected list
+        const unselTargetIdx = unselectedLines.indexOf(targetLine);
+        if (unselTargetIdx === -1) {
+            // Target is itself selected — append selected group at end
+            this.lines = [...unselectedLines, ...selectedLines];
+        } else {
+            // Insert selected group before the target in the unselected list
+            unselectedLines.splice(unselTargetIdx, 0, ...selectedLines);
+            this.lines = unselectedLines;
+        }
+
+        this.linesContainer.innerHTML = '';
+        this.lines.forEach(line => this.linesContainer.appendChild(line.element));
+        this.updateLineNumbers();
+        this.updateHiddenInput();
+        this.onChange(this.getEvaluatedPath());
     }
     
     /**
@@ -991,6 +1052,51 @@ export default class PathEditor {
         this.lines = [];
         if (this.hiddenInput) this.hiddenInput.value = '';
         if (this.rawHiddenInput) this.rawHiddenInput.value = '';
+    }
+
+    // ─── Selection ────────────────────────────────────────────────────────────
+
+    /**
+     * Visually select (highlight) a row by its line index.
+     * @param {number} index - Index into `this.lines`
+     */
+    setSelectedLine(index) {
+        this._selectedLineIndices = new Set([index]);
+        this.clearLineSelection();
+        if (index >= 0 && index < this.lines.length) {
+            this.lines[index].element?.classList.add('path-line-selected');
+        }
+    }
+
+    /**
+     * Highlight multiple rows simultaneously (for multi-segment canvas selection).
+     * @param {number[]} indices
+     */
+    setSelectedLines(indices) {
+        this._selectedLineIndices = new Set(indices);
+        this.clearLineSelection();
+        for (const idx of indices) {
+            if (idx >= 0 && idx < this.lines.length) {
+                this.lines[idx].element?.classList.add('path-line-selected');
+            }
+        }
+    }
+
+    /** Remove visual selection from all rows. */
+    clearLineSelection() {
+        this._selectedLineIndices = new Set();
+        this.linesContainer?.querySelectorAll('.path-line-selected')
+            .forEach(el => el.classList.remove('path-line-selected'));
+    }
+
+    /**
+     * Mark line rows as mirror (dim them) for the given index range.
+     * @param {number} startIndex - First mirror line index (inclusive)
+     */
+    setMirrorStartIndex(startIndex) {
+        this.lines.forEach((line, i) => {
+            line.element?.classList.toggle('path-line-mirror', i >= startIndex);
+        });
     }
     
     /**
