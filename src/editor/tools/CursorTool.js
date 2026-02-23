@@ -105,7 +105,9 @@ export default class CursorTool extends BaseTool {
                 return;
             }
         }
-        this._updateHover(pos);
+        // Always use raw (unsnapped) position for hover hit-testing so that grid
+        // snap does not prevent hovering over arcs and segments between grid nodes.
+        this._updateHover(this.ctx.canvas.screenToSVG(e));
     }
 
     onPointerUp(pos, e) {
@@ -119,7 +121,10 @@ export default class CursorTool extends BaseTool {
             const rawEnd = this.ctx.canvas.screenToSVG(e);
             this._applyBoxSelection(downSvg, rawEnd, e.shiftKey);
         } else {
-            const hitId = this.ctx.canvas.hitTest(pos);
+            // Use raw (unsnapped) position for hit-testing so that grid snap does
+            // not prevent clicking on arcs and segments between grid nodes.
+            const rawPos = this.ctx.canvas.screenToSVG(e);
+            const hitId = this.ctx.canvas.hitTest(rawPos);
             if (hitId) {
                 // Treat the whole connected chain as a single selectable unit.
                 const chainIds = this.ctx.state.getChain(hitId).map(s => s.id);
@@ -165,7 +170,7 @@ export default class CursorTool extends BaseTool {
 
         const ids = [];
         for (const seg of this.ctx.state.segments) {
-            if (seg.type !== "line") continue;
+            if (seg.type !== "line" && seg.type !== "arc") continue;
             const { start: s, end: en } = seg.data;
             const hit = ltr
                 ? _ptInRect(s, minX, maxX, minY, maxY) && _ptInRect(en, minX, maxX, minY, maxY)

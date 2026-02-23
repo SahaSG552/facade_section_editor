@@ -6,6 +6,7 @@ import CursorTool from "./tools/CursorTool.js";
 import MoveTool from "./tools/MoveTool.js";
 import LineTool from "./tools/LineTool.js";
 import MirrorTool from "./tools/MirrorTool.js";
+import ArcTool from "./tools/ArcTool.js";
 
 const log = LoggerFactory.createLogger("ProfileEditor");
 
@@ -71,6 +72,16 @@ export default class ProfileEditor {
         /** Guard flag: true while a text-editor change is being processed (prevents setPath() round-trip). @type {boolean} */
         this._pathEditorIsSource = false;
 
+        /** Saved PathEditor.onChange before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnChange = null;
+
+        /** Saved PathEditor.onLineClick before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnLineClick = null;
+
+        /** The SVG <circle> dot drawn on the canvas overlay when an M row is selected in edit mode.
+         *  Cleared when a segment is selected or edit mode exits. @type {SVGCircleElement|null} */
+        this._mDotElement = null;
+
         /** @type {boolean} */
         this._active = false;
 
@@ -134,11 +145,17 @@ export default class ProfileEditor {
         //
         // _pathEditorIsSource is true while we are processing a text-originated
         // change, so syncToPathEditor can skip the setPath() call.
+        // Clear any stale preview overlays (anchor cross, segment highlights) that
+        // drawAnchorAndAxis() left on the overlay layer before edit mode was entered.
+        const overlayLayer = canvasManager.getLayer("overlay");
+        if (overlayLayer) overlayLayer.innerHTML = "";
+
         if (pathEditor) {
             // Save the original onChange so we can restore it on exit.
             // We do NOT call it while editing (prevents updateBitPreview overwriting
             // the editor's line segments in the bits layer).
-            this._origPathEditorOnChange = pathEditor.onChange;
+            this._origPathEditorOnChange    = pathEditor.onChange;
+            this._origPathEditorOnLineClick = pathEditor.onLineClick;
 
             // PathEditor → canvas: user edited the text — re-import into state.
             pathEditor.onChange = (newPath) => {
@@ -152,15 +169,32 @@ export default class ProfileEditor {
             };
 
             // PathEditor row click → canvas selection.
-            // Shift+click toggles; plain click replaces selection.
+            // _pathEditorIsSource=true prevents syncToPathEditor from calling setPath(),
+            // which would strip all formula tokens from the text editor content.
             pathEditor.onLineClick = (idx, e) => {
                 const segId = this._lineSegIds[idx];
-                if (!segId) return;
+
+                if (segId === null) {
+                    // M row: no backing segment, but still visually selectable.
+                    // Show a dot at the M anchor and highlight the row.
+                    this._pathEditorIsSource = true;
+                    this.state.clearSelection();
+                    this._pathEditorIsSource = false;
+                    this._pathEditor.setSelectedLines([idx]);
+                    this._showMDot(idx);
+                    return;
+                }
+                if (segId === undefined) return;  // out-of-bounds
+
+                // Normal segment row: select segment, clear any M-row dot.
+                this._clearMDot();
+                this._pathEditorIsSource = true;
                 if (e?.shiftKey) {
                     this.state.toggleSelection(segId);
                 } else {
                     this.state.setSelection(segId);
                 }
+                this._pathEditorIsSource = false;
             };
         }
 
@@ -171,6 +205,9 @@ export default class ProfileEditor {
          */
         const syncToPathEditor = () => {
             if (!this._pathEditor) return;
+            // A canvas-driven state change (draw/move/delete) clears any M-row dot
+            // because M-row visual selection is only meaningful when nothing else moves.
+            this._clearMDot();
             const { path, lineSegIds } = this.state.exportPathWithMap();
             this._lineSegIds = lineSegIds;
 
@@ -249,6 +286,9 @@ export default class ProfileEditor {
             onSnapChange: (type, active) => {
                 this.editorCanvas.snapManager.setEnabled(type, active);
             },
+            onGridSizeChange: (size) => {
+                this.editorCanvas.snapManager.setGridSize(size);
+            },
         });
         this.toolbar.mount();
         this.toolbar.setActiveTool("cursor");
@@ -285,10 +325,11 @@ export default class ProfileEditor {
         // updateBitPreview() call inside onSave uses the original onChange
         // (not the editor's _importPath handler).
         if (this._pathEditor) {
-            this._pathEditor.onChange   = this._origPathEditorOnChange ?? (() => {});
-            this._pathEditor.onLineClick = null;
+            this._clearMDot();
+            this._pathEditor.onChange    = this._origPathEditorOnChange    ?? (() => {});
+            this._pathEditor.onLineClick = this._origPathEditorOnLineClick ?? null;
             this._pathEditor.clearLineSelection();
-            this._pathEditor    = null;
+            this._pathEditor = null;
         }
         this._lineSegIds = [];
 
@@ -326,7 +367,52 @@ export default class ProfileEditor {
 
     /** @returns {boolean} */
     get isActive() { return this._active; }
+    // ─── M-row canvas selection ──────────────────────────────────────────────────
 
+    /**
+     * Draw a filled blue circle on the canvas overlay at the M-row anchor point.
+     * Used when the user clicks an M-row in the PathEditor during edit mode,
+     * giving visual feedback identical to the preview-mode dot.
+     * @param {number} rowIdx - PathEditor row index of the M command
+     */
+    _showMDot(rowIdx) {
+        this._clearMDot();
+        if (!this.editorCanvas) return;
+        // The segment whose start is the M anchor is the next non-null entry
+        let segId = null;
+        for (let i = rowIdx + 1; i < this._lineSegIds.length; i++) {
+            if (this._lineSegIds[i] !== null) { segId = this._lineSegIds[i]; break; }
+        }
+        if (!segId) return;
+        const seg = this.state.segments.find(s => s.id === segId);
+        if (!seg) return;
+        const { x, y } = seg.data.start;
+        const overlay = this.editorCanvas.cm.getLayer("overlay");
+        if (!overlay) return;
+        const zoom = this.editorCanvas.cm.zoomLevel || 1;
+        const r = Math.max(0.5, 3 / zoom);
+        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        dot.setAttribute("cx", x);
+        dot.setAttribute("cy", y);
+        dot.setAttribute("r", r);
+        dot.setAttribute("fill", "#2196F3");
+        dot.setAttribute("fill-opacity", "0.85");
+        dot.setAttribute("stroke", "#1565C0");
+        dot.setAttribute("stroke-width", Math.max(0.05, 0.5 / zoom));
+        dot.classList.add("editor-m-selection");
+        this._mDotElement = dot;
+        overlay.appendChild(dot);
+    }
+
+    /**
+     * Remove the M-row anchor dot from the canvas overlay (if present).
+     */
+    _clearMDot() {
+        if (this._mDotElement) {
+            this._mDotElement.remove();
+            this._mDotElement = null;
+        }
+    }
     // ─── Tool activation ─────────────────────────────────────────────────────
 
     /** @type {import("./tools/BaseTool.js").default|null} — the currently active tool instance */
@@ -348,8 +434,13 @@ export default class ProfileEditor {
         }
         const tool = this._createTool(toolId);
         if (!tool) return;
+
+        // Cursor style: crosshair for all drawing/editing tools; default for select.
+        const svgCanvas = this.editorCanvas?.cm?.canvas;
+        if (svgCanvas) svgCanvas.style.cursor = toolId === "cursor" ? "" : "crosshair";
+
         tool.activate({ state: this.state, canvas: this.editorCanvas });
-        this._currentTool = tool;
+        this._currentTool  = tool;
         this._currentToolId = toolId;
         this._bindCanvasEvents(tool);
     }
@@ -367,6 +458,8 @@ export default class ProfileEditor {
             case "move":   return new MoveTool();
             case "line":   return new LineTool();
             case "mirror": return new MirrorTool();
+            case "arc3pt": return new ArcTool("arc3pt");
+            case "arc2pt": return new ArcTool("arc2pt");
             default:
                 log.debug("_createTool: tool not implemented:", toolId);
                 return null;

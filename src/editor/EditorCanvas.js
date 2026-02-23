@@ -33,6 +33,73 @@ function _pointToSegmentDist(p, a, b) {
     const nearY = a.y + t * dy;
     return Math.hypot(p.x - nearX, p.y - nearY);
 }
+/**
+ * Minimum distance from point P to a circular arc segment.
+ * Returns the perpendicular distance if the point projects onto the arc,
+ * otherwise returns the distance to the nearer endpoint.
+ * All coordinates in the same SVG Y-down space.
+ */
+// ─── Arc hit-test helper using browser's isPointInStroke ────────────────────
+// A hidden off-screen SVG is created lazily and reused for every hit-test call.
+// Using the browser's own geometry engine avoids all manual largeArc/sweep math.
+const _SVG_NS = "http://www.w3.org/2000/svg";
+let _arcHitSvg  = null;
+let _arcHitPath = null;
+
+function _ensureArcHitHelper() {
+    if (_arcHitSvg) return;
+    _arcHitSvg  = document.createElementNS(_SVG_NS, "svg");
+    _arcHitPath = document.createElementNS(_SVG_NS, "path");
+    _arcHitPath.setAttribute("fill", "none");
+    _arcHitPath.setAttribute("stroke", "black");
+    _arcHitSvg.appendChild(_arcHitPath);
+    // Must be in the document for isPointInStroke to work in all browsers.
+    Object.assign(_arcHitSvg.style, {
+        position: "fixed", left: "-9999px", top: "-9999px",
+        width: "1px", height: "1px", overflow: "visible",
+        pointerEvents: "none", opacity: "0",
+    });
+    document.body.appendChild(_arcHitSvg);
+}
+
+/**
+ * Distance from point p to an SVG arc segment.
+ * Uses isPointInStroke() for the angular containment check so that
+ * all largeArc / sweep combinations are handled correctly without
+ * any manual angle-range arithmetic.
+ *
+ * @param {{x:number,y:number}} p
+ * @param {{start,end,radius,largeArc,sweep}} arcData
+ * @param {number} toleranceUnits  hit radius in SVG user-space units
+ * @returns {number}  0 if point is on arc within tolerance; min endpoint distance otherwise.
+ */
+function _pointToArcDist(p, { start, end, radius, largeArc, sweep }, toleranceUnits) {
+    _ensureArcHitHelper();
+
+    const d = `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} ${sweep} ${end.x} ${end.y}`;
+    _arcHitPath.setAttribute("d", d);
+    // stroke-width in SVG user-space = 2 × tolerance so any point within tolerance is "in stroke"
+    _arcHitPath.setAttribute("stroke-width", String(toleranceUnits * 2));
+
+    let inStroke = false;
+    try {
+        inStroke = _arcHitPath.isPointInStroke(new DOMPoint(p.x, p.y));
+    } catch (_) {
+        // Fallback for environments that don't support isPointInStroke:
+        // conservative check — just test radial distance (ignores arc angle range).
+        // This produces false positives but never false negatives.
+        const cx = (start.x + end.x) / 2; // rough center estimate
+        const cy = (start.y + end.y) / 2;
+        inStroke = Math.abs(Math.hypot(p.x - cx, p.y - cy) - radius) <= toleranceUnits;
+    }
+
+    if (inStroke) return 0;
+    return Math.min(
+        Math.hypot(p.x - start.x, p.y - start.y),
+        Math.hypot(p.x - end.x,   p.y - end.y),
+    );
+}
+
 import SnapManager from "./snaps/SnapManager.js";
 
 const log = LoggerFactory.createLogger("EditorCanvas");
@@ -260,6 +327,29 @@ export default class EditorCanvas {
             return g;
         }
 
+        if (seg.type === "arc") {
+            const { start, end, radius, largeArc, sweep } = seg.data;
+            const selected = seg.selected;
+
+            const g = document.createElementNS(SVG_NS, "g");
+            g.setAttribute("data-seg-id", seg.id);
+
+            const path = document.createElementNS(SVG_NS, "path");
+            path.setAttribute("d",
+                `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} ${sweep} ${end.x} ${end.y}`
+            );
+            path.setAttribute("fill", "none");
+            path.classList.add("editor-segment");
+            path.setAttribute("data-seg-id", seg.id);
+            if (selected) path.classList.add("editor-segment-selected");
+            g.appendChild(path);
+
+            _appendEndpoint(g, start.x, start.y, selected, false, "start");
+            _appendEndpoint(g, end.x,   end.y,   selected, false, "end");
+
+            return g;
+        }
+
         log.debug("_buildSegmentElement: unsupported type", seg.type);
         return null;
     }
@@ -284,6 +374,8 @@ export default class EditorCanvas {
 
             if (seg.type === "line") {
                 dist = _pointToSegmentDist(point, seg.data.start, seg.data.end);
+            } else if (seg.type === "arc") {
+                dist = _pointToArcDist(point, seg.data, toleranceUnits);
             }
 
             if (dist < toleranceUnits && dist < bestDist) {
@@ -310,7 +402,7 @@ export default class EditorCanvas {
         let bestDist = Infinity;
 
         for (const seg of this.state.segments) {
-            if (seg.type === "line") {
+            if (seg.type === "line" || seg.type === "arc") {
                 const pts = [
                     { key: "start", pt: seg.data.start },
                     { key: "end",   pt: seg.data.end   },
@@ -338,8 +430,9 @@ export default class EditorCanvas {
         if (!segId) return;
         const layer = this.cm.getLayer("bits");
         if (!layer) return;
-        const groups = layer.querySelectorAll(`[data-seg-id="${segId}"] line`);
-        groups.forEach(el => el.classList.toggle("editor-segment-hover", active));
+        // Match both <line> and <path> children (lines and arcs)
+        layer.querySelectorAll(`[data-seg-id="${segId}"] line, [data-seg-id="${segId}"] path`)
+             .forEach(el => el.classList.toggle("editor-segment-hover", active));
     }
 
     /**

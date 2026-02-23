@@ -3,6 +3,33 @@ import LoggerFactory from "../core/LoggerFactory.js";
 const log = LoggerFactory.createLogger("EditorStateManager");
 
 /**
+ * Compute circle center from two endpoint points, radius, and SVG arc flags.
+ * Works in any consistent coordinate space (Y-up or Y-down).
+ * Uses the standard SVG endpoint-to-center arc parameterisation.
+ * @param {{x:number,y:number}} pt1
+ * @param {{x:number,y:number}} pt2
+ * @param {number} r
+ * @param {0|1} largeArc
+ * @param {0|1} sweep
+ * @returns {{x:number,y:number}|null}
+ */
+function arcCenterFromEndpoints(pt1, pt2, r, largeArc, sweep) {
+    const dx = (pt1.x - pt2.x) / 2;
+    const dy = (pt1.y - pt2.y) / 2;
+    const d2 = dx * dx + dy * dy;
+    const d  = Math.sqrt(d2);
+    if (d < 1e-9) return null;
+    const h    = Math.sqrt(Math.max(0, r * r - d2));
+    const sign = (largeArc === sweep) ? -1 : 1;
+    const nx   = -dy / d;
+    const ny   =  dx / d;
+    return {
+        x: (pt1.x + pt2.x) / 2 + sign * h * nx,
+        y: (pt1.y + pt2.y) / 2 + sign * h * ny,
+    };
+}
+
+/**
  * @typedef {"cursor"|"line"|"rect2pt"|"rect3pt"|"arc2pt"|"arc3pt"|"circle2pt"|"circle3pt"} DrawTool
  * @typedef {"trim"|"extend"|"join"|"explode"|"fillet"|"chamfer"|"offset"|"close"|"bool"|"aux"} EditTool
  * @typedef {DrawTool|EditTool} Tool
@@ -10,10 +37,18 @@ const log = LoggerFactory.createLogger("EditorStateManager");
 
 /**
  * @typedef {object} PathSegment
- * @property {string} id       - Unique segment ID
- * @property {string} type     - "line" | "arc" | "circle" | "rect"
- * @property {object} data     - Tool-specific geometry data (endpoints, radius, etc.)
+ * @property {string} id            - Unique segment ID
+ * @property {string} type          - "line" | "arc" | "circle" | "rect"
+ * @property {object} data          - Tool-specific geometry data (endpoints, radius, etc.)
  * @property {boolean} selected
+ * @property {number}  contourId    - Contour group (set by M-command index at import time)
+ * @property {'H'|'V'|'L'|'Z'|undefined} [cmdHint]
+ *   Original SVG command that created this segment.  Used by exportPathWithMap to
+ *   preserve the user's chosen command on canvas↔text round-trips:
+ *   - 'H' → emit H (if still horizontal) or L (if moved off-axis)
+ *   - 'V' → emit V (if still vertical)   or L (if moved off-axis)
+ *   - 'L' → always emit L (user explicitly wrote L)
+ *   - undefined (drawn on canvas) → auto-detect H/V when perfectly axis-aligned
  */
 
 /**
@@ -122,12 +157,12 @@ export default class EditorStateManager {
      * @returns {PathSegment} the added segment
      */
     addSegment(segmentData) {
-        // Determine contourId: inherit from any segment whose end == our start.
+        // Determine contourId: inherit from any segment whose end ≈ our start.
         let contourId = segmentData.contourId;   // allow explicit override
         if (contourId === undefined) {
             const EPS = 1e-6;
             const connecting = this.segments.find(s =>
-                s.type === 'line' &&
+                (s.type === 'line' || s.type === 'arc') &&
                 Math.abs(s.data.end.x - segmentData.data.start.x) < EPS &&
                 Math.abs(s.data.end.y - segmentData.data.start.y) < EPS
             );
@@ -203,10 +238,10 @@ export default class EditorStateManager {
         const EPS = 1e-6;
         const eq  = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
 
-        // Group segments by contourId.
+        // Group segments by contourId.  Includes both lines and arcs.
         const groups = new Map();
         for (const seg of this.segments) {
-            if (seg.type !== 'line') continue;
+            if (seg.type !== 'line' && seg.type !== 'arc') continue;
             const cid = seg.contourId ?? 0;
             if (!groups.has(cid)) groups.set(cid, []);
             groups.get(cid).push(seg);
@@ -282,9 +317,11 @@ export default class EditorStateManager {
         const seed = this.segments.find(s => s.id === segId);
         if (!seed) return [];
 
-        // Work only within the same contour.
+        // Work only within the same contour (lines and arcs).
         const cid   = seed.contourId ?? 0;
-        const lines = this.segments.filter(s => s.type === 'line' && (s.contourId ?? 0) === cid);
+        const lines = this.segments.filter(
+            s => (s.type === 'line' || s.type === 'arc') && (s.contourId ?? 0) === cid
+        );
 
         const visited = new Set([seed.id]);
         const chain   = [seed];
@@ -324,7 +361,7 @@ export default class EditorStateManager {
         const EPS    = 1e-6;
         const result = [];
         for (const seg of this.segments) {
-            if (seg.type !== 'line') continue;
+            if (seg.type !== 'line' && seg.type !== 'arc') continue;
             if (Math.abs(seg.data.start.x - pt.x) < EPS && Math.abs(seg.data.start.y - pt.y) < EPS)
                 result.push({ segId: seg.id, pointKey: 'start' });
             if (Math.abs(seg.data.end.x   - pt.x) < EPS && Math.abs(seg.data.end.y   - pt.y) < EPS)
@@ -475,7 +512,7 @@ export default class EditorStateManager {
                         subX = x; subY = y;
                     } else {
                         // Implicit L after first M coordinate pair
-                        segments.push({ type: "line", contourId, data: { start: { x: cx, y: cy }, end: { x, y } } });
+                        segments.push({ type: "line", contourId, cmdHint: 'L', data: { start: { x: cx, y: cy }, end: { x, y } } });
                     }
                     cx = x; cy = y;
                 }
@@ -483,30 +520,53 @@ export default class EditorStateManager {
                 for (let i = 0; i < args.length; i += 2) {
                     let x = args[i], y = args[i + 1];
                     if (rel) { x += cx; y += cy; }
-                    segments.push({ type: "line", contourId, data: { start: { x: cx, y: cy }, end: { x, y } } });
+                    // Preserve 'L' hint so this segment is never auto-converted to H/V on re-export.
+                    segments.push({ type: "line", contourId, cmdHint: 'L', data: { start: { x: cx, y: cy }, end: { x, y } } });
                     cx = x; cy = y;
                 }
             } else if (upper === "H") {
                 for (let i = 0; i < args.length; i++) {
                     let x = args[i];
                     if (rel) x += cx;
-                    segments.push({ type: "line", contourId, data: { start: { x: cx, y: cy }, end: { x, y: cy } } });
+                    segments.push({ type: "line", contourId, cmdHint: 'H', data: { start: { x: cx, y: cy }, end: { x, y: cy } } });
                     cx = x;
                 }
             } else if (upper === "V") {
                 for (let i = 0; i < args.length; i++) {
                     let y = args[i];
                     if (rel) y += cy;
-                    segments.push({ type: "line", contourId, data: { start: { x: cx, y: cy }, end: { x: cx, y } } });
+                    segments.push({ type: "line", contourId, cmdHint: 'V', data: { start: { x: cx, y: cy }, end: { x: cx, y } } });
                     cy = y;
                 }
             } else if (upper === "Z") {
                 if (Math.abs(cx - subX) > 1e-6 || Math.abs(cy - subY) > 1e-6) {
-                    segments.push({ type: "line", contourId, data: { start: { x: cx, y: cy }, end: { x: subX, y: subY } } });
+                    segments.push({ type: "line", contourId, cmdHint: 'Z', data: { start: { x: cx, y: cy }, end: { x: subX, y: subY } } });
                 }
                 cx = subX; cy = subY;
+            } else if (upper === "A") {
+                // A rx ry x-rotation large-arc-flag sweep-flag x y
+                // Stored in bit-space (Y-up); the Y-negation + sweep-flip happen
+                // in the segments.map() below, consistent with line segment handling.
+                for (let i = 0; i + 6 < args.length; i += 7) {
+                    const rx = args[i], ry = args[i + 1];
+                    const largeArc = Math.round(args[i + 3]);
+                    const sweepBit = Math.round(args[i + 4]);
+                    let ex = args[i + 5], ey = args[i + 6];
+                    if (rel) { ex += cx; ey += cy; }
+                    const r = (rx + ry) / 2;  // treat ellipse as circle with avg radius
+                    const startBit = { x: cx, y: cy };
+                    const endBit   = { x: ex, y: ey };
+                    const centerBit = arcCenterFromEndpoints(startBit, endBit, r, largeArc, sweepBit);
+                    if (centerBit) {
+                        segments.push({
+                            type: 'arc', contourId,
+                            data: { start: startBit, end: endBit, center: centerBit, radius: r, largeArc, sweep: sweepBit },
+                        });
+                    }
+                    cx = ex; cy = ey;
+                }
             }
-            // C, S, Q, T, A — TODO: add arc/curve support later
+            // C, S, Q, T — not yet supported
         }
 
         if (resetHistory) {
@@ -514,32 +574,62 @@ export default class EditorStateManager {
             this._historyIndex = -1;
         }
         // Negate Y: path is stored in bit-space (Y-up), editor works in SVG-space (Y-down).
-        this.segments = segments.map(s => ({
-            id:        `seg-${this._nextSegmentId++}`,
-            selected:  false,
-            contourId: s.contourId,
-            type:      s.type,
-            data: {
-                start: { x: s.data.start.x, y: -s.data.start.y },
-                end:   { x: s.data.end.x,   y: -s.data.end.y   },
-            },
-        }));
+        this.segments = segments.map(s => {
+            const base = {
+                id:        `seg-${this._nextSegmentId++}`,
+                selected:  false,
+                contourId: s.contourId,
+                type:      s.type,
+            };
+            if (s.type === 'arc') {
+                return {
+                    ...base,
+                    data: {
+                        start:    { x: s.data.start.x,  y: -s.data.start.y },
+                        end:      { x: s.data.end.x,    y: -s.data.end.y   },
+                        center:   { x: s.data.center.x, y: -s.data.center.y },
+                        radius:   s.data.radius,
+                        largeArc: s.data.largeArc,
+                        // Y-flip reverses winding direction, so flip sweep flag.
+                        sweep:    1 - s.data.sweep,
+                    },
+                };
+            }
+            // line
+            return {
+                ...base,
+                cmdHint: s.cmdHint,  // preserve H / V / L / Z so export round-trips faithfully
+                data: {
+                    start: { x: s.data.start.x, y: -s.data.start.y },
+                    end:   { x: s.data.end.x,   y: -s.data.end.y   },
+                },
+            };
+        });
         this._pushHistory("Import");
         this._notifySegments();
     }
 
     /**
      * Export path for display in the text editor.
-     * Returns the path serialised from current segments plus a line→segId map
+     * Returns the path serialised from current segments plus a line segment ID map
      * so the text editor can sync selection back to the canvas.
      *
-     * Segments are exported exactly as stored — no automatic mirroring.
+     * Compact command selection:
+     *  - Perfectly horizontal segment (start.y === end.y) -> H x
+     *  - Perfectly vertical   segment (start.x === end.x) -> V y
+     *  - Diagonal                                         -> L x y
+     *
+     * This ensures that H/V commands entered in the PathEditor survive a
+     * canvas round-trip without being widened to L (which would break the
+     * token-count match inside mergePathWithFormulas).
+     *
+     * Segments are exported exactly as stored -- no automatic mirroring.
      * Use MirrorTool to create explicit mirrored copies.
      *
      * @returns {{ path: string, lineSegIds: Array<string|null> }}
-     *   path       — SVG path string
-     *   lineSegIds — parallel array: for each PathEditor row, the canonical segment ID
-     *                (null for M-only rows that don’t belong to a specific segment)
+     *   path       -- SVG path string
+     *   lineSegIds -- parallel array: for each PathEditor row, the canonical segment ID
+     *                 (null for M-only rows that do not belong to a specific segment)
      */
     exportPathWithMap() {
         if (this.segments.length === 0) return { path: "", lineSegIds: [] };
@@ -554,15 +644,41 @@ export default class EditorStateManager {
         let prevCid      = null;
 
         for (const seg of this.segments) {
-            if (seg.type !== "line") continue;
+            if (seg.type !== "line" && seg.type !== "arc") continue;
             const { start, end } = seg.data;
             const cid = seg.contourId ?? 0;
+
             // Start a new sub-path when: first segment, different contour, or geometric gap.
             if (prevEnd === null || cid !== prevCid || !eq(start, prevEnd)) {
                 parts.push(`M ${r(start.x)} ${r(-start.y)}`);
-                lineSegIds.push(seg.id);  // M row maps to this segment
+                lineSegIds.push(null);  // M row: null — not backed by a segment ID.
+                // The following L/H/V/A row pushes the real seg.id, so indexOf(segId)
+                // correctly finds the segment row and not the M row.
             }
-            parts.push(`L ${r(end.x)} ${r(-end.y)}`);
+
+            if (seg.type === "arc") {
+                const { radius, largeArc, sweep } = seg.data;
+                // Y is negated (bit-space is Y-up); negating Y reverses winding, so flip sweep.
+                parts.push(`A ${r(radius)} ${r(radius)} 0 ${largeArc} ${1 - sweep} ${r(end.x)} ${r(-end.y)}`);
+            } else {
+                // line: choose command based on cmdHint + current geometry
+                const hint = seg.cmdHint;
+                const isH  = Math.abs(start.y - end.y) < EPS;
+                const isV  = Math.abs(start.x - end.x) < EPS;
+
+                if (hint === 'H') {
+                    parts.push(isH ? `H ${r(end.x)}` : `L ${r(end.x)} ${r(-end.y)}`);
+                } else if (hint === 'V') {
+                    parts.push(isV ? `V ${r(-end.y)}` : `L ${r(end.x)} ${r(-end.y)}`);
+                } else if (hint === 'L' || hint === 'Z') {
+                    parts.push(`L ${r(end.x)} ${r(-end.y)}`);
+                } else {
+                    if (isH)      parts.push(`H ${r(end.x)}`);
+                    else if (isV) parts.push(`V ${r(-end.y)}`);
+                    else          parts.push(`L ${r(end.x)} ${r(-end.y)}`);
+                }
+            }
+
             lineSegIds.push(seg.id);
             prevEnd = end;
             prevCid = cid;

@@ -10,6 +10,7 @@ const log = LoggerFactory.createLogger("EditorToolbar");
 const _saved = {
     activeTool: "cursor",
     snaps: { grid: true, ortho: true, obj: false },
+    gridSize: 1,
 };
 
 /**
@@ -24,25 +25,26 @@ const _saved = {
 /** @type {ToolDefinition[]} */
 const TOOL_DEFINITIONS = [
     // Draw tools
-    { id: "cursor",   label: "Select",    icon: "↖",   group: "draw", key: "Escape" },    { id: "move",     label: "Move",      icon: "✥",   group: "draw", key: "g" },    { id: "line",     label: "Line",      icon: "╱",   group: "draw", key: "l" },
-    { id: "arc2pt",   label: "Arc 2pt",   icon: "⌒",   group: "draw", key: "a" },
-    { id: "arc3pt",   label: "Arc 3pt",   icon: "⌓",   group: "draw" },
-    { id: "circle2pt",label: "Circle 2pt",icon: "○",   group: "draw", key: "c" },
-    { id: "circle3pt",label: "Circle 3pt",icon: "◎",   group: "draw" },
-    { id: "rect2pt",  label: "Rect 2pt",  icon: "▭",   group: "draw", key: "r" },
-    { id: "rect3pt",  label: "Rect 3pt",  icon: "▬",   group: "draw" },
+    { id: "cursor",   label: "Select",                         icon: "↖", group: "draw", key: "s" },
+    { id: "move",     label: "Move",                           icon: "✥", group: "draw", key: "m" },
+    { id: "line",     label: "Line",                           icon: "╱", group: "draw", key: "l" },
+    { id: "arc",      label: "Arc (LMB: 3pt | RMB: 2pt+R)",   icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt", rmbTool: "arc2pt" },
+    { id: "circle2pt",label: "Circle 2pt",                     icon: "○", group: "draw", key: "c" },
+    { id: "circle3pt",label: "Circle 3pt",                     icon: "◎", group: "draw" },
+    { id: "rect2pt",  label: "Rect 2pt",                       icon: "▭", group: "draw", key: "r" },
+    { id: "rect3pt",  label: "Rect 3pt",                       icon: "▬", group: "draw" },
     // Edit tools
-    { id: "fillet",   label: "Fillet",    icon: "⌔",   group: "edit", key: "f" },
-    { id: "chamfer",  label: "Chamfer",   icon: "⌐",   group: "edit" },
-    { id: "trim",     label: "Trim",      icon: "✂",   group: "edit", key: "t" },
-    { id: "extend",   label: "Extend",    icon: "↔",   group: "edit" },
-    { id: "offset",   label: "Offset",    icon: "⊙",   group: "edit", key: "o" },
-    { id: "mirror",   label: "Mirror",    icon: "⊳",   group: "edit", key: "m" },
-    { id: "join",     label: "Join",      icon: "⊕",   group: "edit", key: "j" },
-    { id: "explode",  label: "Explode",   icon: "⊗",   group: "edit" },
-    { id: "close",    label: "Close",     icon: "⬡",   group: "edit" },
-    { id: "bool",     label: "Boolean",   icon: "⊔",   group: "edit" },
-    { id: "aux",      label: "Aux Line",  icon: "⋯",   group: "edit" },
+    { id: "fillet",   label: "Fillet",    icon: "⌔", group: "edit", key: "f" },
+    { id: "chamfer",  label: "Chamfer",   icon: "⌐", group: "edit" },
+    { id: "trim",     label: "Trim",      icon: "✂", group: "edit", key: "t" },
+    { id: "extend",   label: "Extend",    icon: "↔", group: "edit" },
+    { id: "offset",   label: "Offset",    icon: "⊙", group: "edit", key: "o" },
+    { id: "mirror",   label: "Mirror",    icon: "⊳", group: "edit" },
+    { id: "join",     label: "Join",      icon: "⊕", group: "edit", key: "j" },
+    { id: "explode",  label: "Explode",   icon: "⊗", group: "edit" },
+    { id: "close",    label: "Close",     icon: "⬡", group: "edit" },
+    { id: "bool",     label: "Boolean",   icon: "⊔", group: "edit" },
+    { id: "aux",      label: "Aux Line",  icon: "⋯", group: "edit" },
 ];
 
 /**
@@ -73,15 +75,17 @@ export default class EditorToolbar {
      * @param {() => void} callbacks.onDone
      * @param {() => void} callbacks.onCancel
      * @param {(type: string, active: boolean) => void} [callbacks.onSnapChange]
+     * @param {(size: number) => void} [callbacks.onGridSizeChange]
      */
-    constructor(container, { onToolChange, onDone, onCancel, onSnapChange } = {}) {
+    constructor(container, { onToolChange, onDone, onCancel, onSnapChange, onGridSizeChange } = {}) {
         /** @type {HTMLElement} */
         this.container = container;
 
-        this.onToolChange = onToolChange;
-        this.onDone       = onDone;
-        this.onCancel     = onCancel;
-        this.onSnapChange = onSnapChange;
+        this.onToolChange     = onToolChange;
+        this.onDone           = onDone;
+        this.onCancel         = onCancel;
+        this.onSnapChange     = onSnapChange;
+        this.onGridSizeChange = onGridSizeChange;
 
         /** @type {HTMLElement|null} */
         this._toolbar = null;
@@ -108,6 +112,9 @@ export default class EditorToolbar {
         this._toolbar = document.createElement("div");
         this._toolbar.id = "editor-toolbar";
         this._toolbar.innerHTML = this._buildHTML();
+        // Suppress the browser's native context menu over the whole toolbar so
+        // right-click on tool buttons activates the secondary tool cleanly.
+        this._toolbar.addEventListener("contextmenu", (e) => e.preventDefault());
         // Insert directly after the SVG canvas so toolbar sits BELOW it;
         // fall back to append if no SVG found.
         const svgEl = this.container.querySelector("svg");
@@ -154,9 +161,22 @@ export default class EditorToolbar {
      * @param {string} toolId
      */
     setActiveTool(toolId) {
-        this._buttons.forEach((btn, id) => {
-            btn.classList.toggle("active", id === toolId);
-            btn.setAttribute("aria-pressed", id === toolId ? "true" : "false");
+        // A dual-mode button is registered under TWO ids (lmbTool + rmbTool) but
+        // is a single DOM element.  Collect the target button first, then update
+        // each UNIQUE button element exactly once to avoid toggle conflicts.
+        const activeBtn = this._buttons.get(toolId);
+
+        // Determine if the active tool is the secondary (RMB) variant of a dual-mode button.
+        const isSecondary = TOOL_DEFINITIONS.some(d => d.rmbTool === toolId);
+
+        const seen = new Set();
+        this._buttons.forEach((btn) => {
+            if (seen.has(btn)) return;
+            seen.add(btn);
+            const isActive = btn === activeBtn;
+            btn.classList.toggle("active", isActive);
+            btn.classList.toggle("active-rmb", isActive && isSecondary);
+            btn.setAttribute("aria-pressed", isActive ? "true" : "false");
         });
         this._activeTool = toolId;
         _saved.activeTool = toolId; // persist
@@ -185,7 +205,15 @@ export default class EditorToolbar {
             </div>
             <div class="editor-toolbar-separator"></div>
             <div class="editor-toolbar-section editor-snap-controls">
-                <button class="editor-snap-btn${_saved.snaps.grid  ? " active" : ""}" data-snap="grid"  title="Snap to grid (S)">Grid</button>
+                <button class="editor-snap-btn${_saved.snaps.grid  ? " active" : ""}" data-snap="grid"  title="Snap to grid">Grid</button>
+                <select class="editor-grid-select" title="Grid scale">
+                    <option value="10"${_saved.gridSize === 10 ? " selected" : ""}>10</option>
+                    <option value="5"${_saved.gridSize  ===  5 ? " selected" : ""}>5</option>
+                    <option value="1"${_saved.gridSize  ===  1 ? " selected" : ""}> 1</option>
+                    <option value="0.5"${_saved.gridSize === 0.5 ? " selected" : ""}>0.5</option>
+                    <option value="0.1"${_saved.gridSize === 0.1 ? " selected" : ""}>0.1</option>
+                    <option value="0.01"${_saved.gridSize === 0.01 ? " selected" : ""}>0.01</option>
+                </select>
                 <button class="editor-snap-btn${_saved.snaps.ortho ? " active" : ""}" data-snap="ortho" title="Ortho snap (O)">Ortho</button>
                 <button class="editor-snap-btn${_saved.snaps.obj   ? " active" : ""}" data-snap="obj"   title="Object snap">Obj</button>
             </div>
@@ -216,10 +244,26 @@ export default class EditorToolbar {
 
         this._toolbar.querySelectorAll("[data-tool]").forEach(btn => {
             const toolId = btn.dataset.tool;
-            this._buttons.set(toolId, btn);
-            btn.addEventListener("click", () => {
-                if (this.onToolChange) this.onToolChange(toolId);
-            });
+            const def    = TOOL_DEFINITIONS.find(t => t.id === toolId);
+
+            if (def?.lmbTool && def?.rmbTool) {
+                // Dual-mode button: LMB fires lmbTool, RMB fires rmbTool.
+                // Register button under BOTH tool IDs so setActiveTool() highlights it
+                // for either active tool.
+                this._buttons.set(def.lmbTool, btn);
+                this._buttons.set(def.rmbTool, btn);
+                btn.addEventListener("click", () => this.onToolChange?.(def.lmbTool));
+                btn.addEventListener("contextmenu", (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.onToolChange?.(def.rmbTool);
+                });
+            } else {
+                this._buttons.set(toolId, btn);
+                btn.addEventListener("click", () => {
+                    if (this.onToolChange) this.onToolChange(toolId);
+                });
+            }
         });
 
         this._toolbar.querySelectorAll("[data-snap]").forEach(btn => {
@@ -234,6 +278,18 @@ export default class EditorToolbar {
                 if (this.onSnapChange) this.onSnapChange(snapType, isActive);
             });
         });
+
+        // Grid scale select
+        const gridSelect = this._toolbar.querySelector(".editor-grid-select");
+        if (gridSelect) {
+            // Fire the initial gridSize to SnapManager so it matches the persisted value.
+            this.onGridSizeChange?.(_saved.gridSize);
+            gridSelect.addEventListener("change", () => {
+                const size = parseFloat(gridSelect.value);
+                _saved.gridSize = size;
+                this.onGridSizeChange?.(size);
+            });
+        }
 
         const doneBtn = this._toolbar.querySelector("#editor-done-btn");
         const cancelBtn = this._toolbar.querySelector("#editor-cancel-btn");
@@ -254,7 +310,10 @@ export default class EditorToolbar {
             if (e.key === "z" && (e.ctrlKey || e.metaKey)) { /* handled by ProfileEditor */ return; }
 
             const def = TOOL_DEFINITIONS.find(t => t.key === e.key && !e.ctrlKey && !e.metaKey);
-            if (def && this.onToolChange) this.onToolChange(def.id);
+            if (def && this.onToolChange) {
+                // For dual-mode buttons the keyboard shortcut fires the LMB (primary) tool.
+                this.onToolChange(def.lmbTool ?? def.id);
+            }
         };
         window.addEventListener("keydown", this._keyHandler);
     }

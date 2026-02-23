@@ -96,6 +96,67 @@ function mergePathWithFormulas(newPath, rawPath, pathEditor) {
 
 const svgNS = "http://www.w3.org/2000/svg";
 
+/**
+ * Parse an evaluated (numeric-only) SVG path string into a row-indexed array
+ * that mirrors the PathEditor row list.
+ *
+ * Row mapping:
+ *  - M rows   → null  (no drawable segment, just a move)
+ *  - L/H/V/Z  → { start: {x, y}, end: {x, y} } in bit-space (Y-up, origin at anchor)
+ *
+ * @param {string} pathStr - Evaluated path with numbers only (no formula tokens)
+ * @returns {Array<null|{start:{x:number,y:number}, end:{x:number,y:number}}>}
+ */
+/**
+ * Parse an already-evaluated (all-numeric) SVG path string into one typed
+ * entry per PathEditor row:
+ *   - { type: 'move', x, y }           – M command (anchor point to highlight)
+ *   - { type: 'line', start, end }     – L / H / V / Z command (segment to highlight)
+ *   - null still never appears; M-row is now a real object so canvas can draw a dot.
+ */
+function parseEvaluatedPathRows(pathStr) {
+    if (!pathStr) return [];
+    const rows      = [];
+    const commandRe = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
+    let cx = 0, cy = 0, subX = 0, subY = 0, m;
+    while ((m = commandRe.exec(pathStr)) !== null) {
+        const cmd  = m[1].toUpperCase();
+        const args = m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number).filter(n => !isNaN(n));
+        if (cmd === 'M') {
+            for (let i = 0; i + 1 < args.length; i += 2) {
+                const x = args[i], y = args[i + 1];
+                if (i === 0) {
+                    subX = x; subY = y;
+                    rows.push({ type: 'move', x, y });      // anchor dot for M row
+                } else {
+                    rows.push({ type: 'line', start: { x: cx, y: cy }, end: { x, y } });
+                }
+                cx = x; cy = y;
+            }
+        } else if (cmd === 'L') {
+            for (let i = 0; i + 1 < args.length; i += 2) {
+                const x = args[i], y = args[i + 1];
+                rows.push({ type: 'line', start: { x: cx, y: cy }, end: { x, y } });
+                cx = x; cy = y;
+            }
+        } else if (cmd === 'H') {
+            for (const x of args) {
+                rows.push({ type: 'line', start: { x: cx, y: cy }, end: { x, y: cy } });
+                cx = x;
+            }
+        } else if (cmd === 'V') {
+            for (const y of args) {
+                rows.push({ type: 'line', start: { x: cx, y: cy }, end: { x: cx, y } });
+                cy = y;
+            }
+        } else if (cmd === 'Z') {
+            rows.push({ type: 'line', start: { x: cx, y: cy }, end: { x: subX, y: subY } });
+            cx = subX; cy = subY;
+        }
+    }
+    return rows;
+}
+
 export default class BitsManager {
     constructor(canvasManager) {
         this.canvasManager = canvasManager;
@@ -1235,6 +1296,11 @@ export default class BitsManager {
             bitParams: null,
         };
 
+        // Indices of PathEditor rows currently selected (highlighted) in preview mode.
+        // Empty = no selection. Supports multi-selection via Shift+click.
+        // Reset when the bit editor modal opens or closes.
+        let previewSelectedRows = [];
+
         // Initialize preview canvas with larger size
         const initializePreviewCanvas = () => {
             previewCanvasManager = new CanvasManager({
@@ -1330,6 +1396,42 @@ export default class BitsManager {
             crossGroup.appendChild(vLine);
 
             overlayLayer.appendChild(crossGroup);
+
+            // Re-draw all selected-row highlights (dot for M, line for L/H/V/Z).
+            // drawAnchorAndAxis clears the overlay, so highlights are re-appended every time.
+            if (previewSelectedRows.length > 0 && profilePathInput) {
+                const segRows = parseEvaluatedPathRows(profilePathInput.value);
+                for (const rowIdx of previewSelectedRows) {
+                    const seg = segRows[rowIdx];
+                    if (!seg) continue;
+                    if (seg.type === 'move') {
+                        // M command: draw a filled circle at the anchor point
+                        const dot = document.createElementNS(svgNS, "circle");
+                        dot.setAttribute("cx", seg.x);
+                        dot.setAttribute("cy", -seg.y);
+                        dot.setAttribute("r",  Math.max(0.5, 3 / zoom));
+                        dot.setAttribute("fill", "#2196F3");
+                        dot.setAttribute("fill-opacity", "0.85");
+                        dot.setAttribute("stroke", "#1565C0");
+                        dot.setAttribute("stroke-width", Math.max(0.05, 0.5 / zoom));
+                        dot.classList.add("preview-seg-highlight");
+                        overlayLayer.appendChild(dot);
+                    } else {
+                        // L / H / V / Z command: draw a highlighted line
+                        const sw = Math.max(0.05, 1.5 / zoom);
+                        const hl = document.createElementNS(svgNS, "line");
+                        hl.setAttribute("x1",  seg.start.x);
+                        hl.setAttribute("y1", -seg.start.y);
+                        hl.setAttribute("x2",  seg.end.x);
+                        hl.setAttribute("y2", -seg.end.y);
+                        hl.setAttribute("stroke", "#2196F3");
+                        hl.setAttribute("stroke-width", sw);
+                        hl.setAttribute("stroke-linecap", "round");
+                        hl.classList.add("preview-seg-highlight");
+                        overlayLayer.appendChild(hl);
+                    }
+                }
+            }
         };
 
         // Function to update bit preview
@@ -1552,6 +1654,11 @@ export default class BitsManager {
                 // Track whether the user confirmed the edit (Done) or cancelled it.
                 let editSaved = false;
 
+                // Clear preview-mode row selection so no stale blue highlights
+                // survive on the canvas or in the PathEditor when edit starts.
+                previewSelectedRows = [];
+                if (pathEditorInstance) pathEditorInstance.clearLineSelection();
+
                 profileEditor.enter({
                     modal,
                     canvasManager: previewCanvasManager,
@@ -1584,6 +1691,7 @@ export default class BitsManager {
                     // EditorCanvas.destroy() clears bitsLayer.innerHTML, so the cached shape
                     // DOM element is detached. Reset the signature to force a full re-render.
                     onClose: () => {
+                        previewSelectedRows = [];  // clear canvas highlights when editor exits
                         if (!editSaved && pathEditorInstance) {
                             // Cancel: restore the path that was in the PathEditor before
                             // editing started (preserving any formula tokens).
@@ -1641,6 +1749,27 @@ export default class BitsManager {
             if (initialPath) {
                 pathEditorInstance.setPath(initialPath);
             }
+
+            // Preview mode: clicking a PathEditor row highlights it AND draws
+            // a marker on the preview canvas.  ProfileEditor.enter() saves this
+            // handler and restores it on exit, so it works in both modes.
+            // Preview mode: row click highlights row + canvas marker.
+            // Shift+click adds to selection (multi-select), plain click replaces.
+            pathEditorInstance.onLineClick = (rowIdx, e) => {
+                if (e?.shiftKey) {
+                    // Toggle the clicked row: add if absent, remove if present
+                    const idx = previewSelectedRows.indexOf(rowIdx);
+                    if (idx >= 0) {
+                        previewSelectedRows = previewSelectedRows.filter(r => r !== rowIdx);
+                    } else {
+                        previewSelectedRows = [...previewSelectedRows, rowIdx];
+                    }
+                } else {
+                    previewSelectedRows = [rowIdx];
+                }
+                pathEditorInstance.setSelectedLines(previewSelectedRows);
+                drawAnchorAndAxis(previewRenderState.shape);
+            };
             
             // Update variable values when form inputs change
             const updatePathEditorVariables = () => {

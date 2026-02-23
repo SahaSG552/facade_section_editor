@@ -54,6 +54,14 @@ export default class SnapManager {
         this.enabled[type] = active;
     }
 
+    /**
+     * Change the grid snap increment.
+     * @param {number} size  Grid spacing in SVG user-space units
+     */
+    setGridSize(size) {
+        this.cm.config.gridSize = size;
+    }
+
     // ─── Main entry point ────────────────────────────────────────────────────
 
     /**

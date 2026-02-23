@@ -1291,6 +1291,13 @@ html {
   border-color: hsl(var(--primary));
 }
 
+/* RMB-activated variant of a dual-mode button: amber tint to signal secondary mode */
+.editor-tool-btn.active-rmb {
+  background-color: hsl(38 92% 50%);
+  color: hsl(0 0% 10%);
+  border-color: hsl(38 92% 40%);
+}
+
 .editor-snap-btn {
   height: 24px;
   padding: 0 8px;
@@ -1301,6 +1308,23 @@ html {
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.1s;
+}
+
+.editor-grid-select {
+    height: 24px;
+    padding: 0 4px;
+    font-size: 11px;
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    cursor: pointer;
+    border-radius: 4px;
+    width: 52px;
+    transition: border-color 0.1s;
+}
+
+.editor-grid-select:hover {
+    border-color: hsl(var(--accent));
 }
 
 .editor-snap-btn.active {
@@ -1352,13 +1376,15 @@ html {
 
 /* ===== EDITOR CANVAS — ghost (in-progress drawing) ===== */
 .editor-ghost line,
-.editor-ghost circle {
+.editor-ghost circle,
+.editor-ghost path {
   stroke: hsl(var(--primary));
   fill: none;
   pointer-events: none;
 }
 
-.editor-ghost line {
+.editor-ghost line,
+.editor-ghost path {
   stroke-width: 0.5;
   vector-effect: non-scaling-stroke;
   opacity: 0.85;
@@ -1370,6 +1396,79 @@ html {
   stroke: none;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
+}
+
+/* Dashed radius lines from arc center to endpoints */
+.editor-ghost-radius {
+  stroke: hsl(var(--primary) / 0.4);
+  stroke-width: 0.5;
+  stroke-dasharray: 1 1;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* Arc center marker (hollow circle) */
+.editor-ghost-center {
+  fill: none;
+  stroke: hsl(var(--primary) / 0.75);
+  stroke-width: 0.5;
+  r: 0.07;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+/* ===== ARC RADIUS POPUP (floating input near cursor) ===== */
+.arc-radius-popup {
+  position: fixed;
+  z-index: 9999;
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  color: hsl(var(--foreground, 0 0% 90%));
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  pointer-events: auto;
+  user-select: none;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+}
+
+.arc-radius-input {
+  width: 64px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid hsl(var(--foreground, 0 0% 90%) / 0.5);
+  color: hsl(var(--foreground, 0 0% 90%));
+  padding: 0 2px 1px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+/* Remove spinner arrows */
+.arc-radius-input::-webkit-outer-spin-button,
+.arc-radius-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.arc-radius-input:focus {
+  outline: none;
+  border-bottom-color: hsl(var(--primary));
+}
+
+.arc-radius-input.arc-radius-error {
+  border-bottom-color: hsl(var(--destructive, 0 72% 51%));
+  animation: arc-shake 0.3s ease;
+}
+
+@keyframes arc-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
 }
 
 /* ===== EDITOR CANVAS — drawn segments ===== */

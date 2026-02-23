@@ -99,8 +99,12 @@ export default class MoveTool extends BaseTool {
             return;
         }
 
-        // ── IDLE: endpoint hit has highest priority ───────────────────────
-        const pointHit = this.ctx.canvas.hitTestPoint(pos);
+        // Use raw (unsnapped) position for hit-testing so that grid snap does not
+        // prevent clicking on arcs and segments between grid nodes.
+        const rawPos = e ? this.ctx.canvas.screenToSVG(e) : pos;
+
+        // ── IDLE: endpoint hit has highest priority ─────────────────────────────────
+        const pointHit = this.ctx.canvas.hitTestPoint(rawPos);
         if (pointHit) {
             const seg = this._findSeg(pointHit.segId);
             if (seg) {
@@ -140,7 +144,7 @@ export default class MoveTool extends BaseTool {
         }
 
         // ── IDLE: segment hit ────────────────────────────────────────────
-        const hitId = this.ctx.canvas.hitTest(pos);
+        const hitId = this.ctx.canvas.hitTest(rawPos);
         if (hitId) {
             if (e.shiftKey) {
                 // Toggle the entire chain as a single unit.
@@ -187,7 +191,7 @@ export default class MoveTool extends BaseTool {
         if (!e.shiftKey) this.ctx.state.clearSelection();
     }
 
-    onPointerMove(pos) {
+    onPointerMove(pos, e) {
         // ── Translate all selected segments ──────────────────────────────
         if (this._mode === "moving-seg" && this._anchorSegId) {
             const anchorOrigin = this._movingOrigins.get(this._anchorSegId);
@@ -204,15 +208,18 @@ export default class MoveTool extends BaseTool {
             for (const id of this._movingSegIds) {
                 const origin = this._movingOrigins.get(id);
                 if (!origin) continue;
-                updates.push({
-                    id,
-                    changes: {
-                        data: {
-                            start: { x: origin.start.x + dx, y: origin.start.y + dy },
-                            end:   { x: origin.end.x   + dx, y: origin.end.y   + dy },
-                        },
-                    },
-                });
+                // Build new data by spreading origin (preserves radius/largeArc/sweep etc.),
+                // then override the positional fields that need to be translated.
+                const newData = {
+                    ...origin,
+                    start: { x: origin.start.x + dx, y: origin.start.y + dy },
+                    end:   { x: origin.end.x   + dx, y: origin.end.y   + dy },
+                };
+                // Arc segments also have a center point that must translate.
+                if (origin.center) {
+                    newData.center = { x: origin.center.x + dx, y: origin.center.y + dy };
+                }
+                updates.push({ id, changes: { data: newData } });
             }
             this.ctx.state.updateSegments(updates);
             return;
@@ -232,8 +239,8 @@ export default class MoveTool extends BaseTool {
             return;
         }
 
-        // ── IDLE: hover ──────────────────────────────────────────────────
-        this._updateHover(pos);
+        // ── IDLE: hover (use raw unsnapped pos so arcs can be highlighted) ─────
+        this._updateHover(e ? this.ctx.canvas.screenToSVG(e) : pos);
     }
 
     onPointerUp(_pos, _e) {

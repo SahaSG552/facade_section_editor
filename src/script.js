@@ -378,11 +378,9 @@ function initializeSVG() {
         .getElementById("toggle-grid-btn")
         .addEventListener("click", () => mainCanvasManager.toggleGrid());
 
-    // Add grid scale input listener
-    document.getElementById("grid-scale").addEventListener("blur", (e) => {
-        const val = evaluateMathExpression(e.target.value);
-        e.target.value = val;
-        gridSize = parseFloat(val) || 1;
+    // Add grid scale select listener
+    document.getElementById("grid-scale").addEventListener("change", (e) => {
+        gridSize = parseFloat(e.target.value) || 1;
         appState.setGridSize(gridSize);
         // Update grid size in canvas manager
         mainCanvasManager.config.gridSize = gridSize;
