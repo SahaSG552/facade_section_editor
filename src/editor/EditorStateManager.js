@@ -102,6 +102,21 @@ export default class EditorStateManager {
         /** @type {number} — monotonically increasing contour ID counter */
         this._nextContourId = 1;
 
+        /**
+         * When set, newly drawn line/arc segments that don’t snap geometrically
+         * are placed into this contour instead of starting a new one.
+         * Set by ProfileEditor when the user selects a PathEditor sub-line.
+         * @type {number|null}
+         */
+        this.activeContourId = null;
+        /**
+         * When set, a newly added segment is inserted AFTER this segment in the
+         * segments array (preserving mid-path insertion order).
+         * Cleared when the path deactivates or a shape row is selected.
+         * Automatically advanced to the just-added segment after each insert.
+         * @type {string|null}
+         */
+        this.insertAfterSegId = null;
         // Callbacks — set externally
         /** @type {((tool: Tool) => void)|null} */
         this.onToolChange = null;
@@ -143,13 +158,30 @@ export default class EditorStateManager {
         // Determine contourId: inherit from any segment whose end ≈ our start.
         let contourId = segmentData.contourId;   // allow explicit override
         if (contourId === undefined) {
-            const EPS = 1e-6;
-            const connecting = this.segments.find(s =>
-                (s.type === 'line' || s.type === 'arc') &&
-                Math.abs(s.data.end.x - segmentData.data.start.x) < EPS &&
-                Math.abs(s.data.end.y - segmentData.data.start.y) < EPS
-            );
-            contourId = connecting ? connecting.contourId : this._nextContourId++;
+            if (segmentData.type === 'circle' || segmentData.type === 'rect' || segmentData.type === 'ellipse') {
+                // When a path is active in the PathEditor, embed the shape in that path.
+                // Otherwise give it its own contour (standalone element).
+                contourId = this.activeContourId ?? this._nextContourId++;
+            } else {
+                const EPS = 1e-6;
+                const connecting = this.segments.find(s =>
+                    (s.type === 'line' || s.type === 'arc') &&
+                    Math.abs(s.data.end.x - segmentData.data.start.x) < EPS &&
+                    Math.abs(s.data.end.y - segmentData.data.start.y) < EPS
+                );
+                // Priority:
+                //  1. activeContourId set (sub-line / path header selected in PathEditor)
+                //     → always add to that path, ignoring geometric snap.
+                //  2. No active contour + geometric snap → join the snapped contour.
+                //  3. Nothing → new contour.
+                if (this.activeContourId !== null) {
+                    contourId = this.activeContourId;
+                } else if (connecting) {
+                    contourId = connecting.contourId;
+                } else {
+                    contourId = this._nextContourId++;
+                }
+            }
         }
         const segment = {
             id: `seg-${this._nextSegmentId++}`,
@@ -157,9 +189,26 @@ export default class EditorStateManager {
             contourId,
             ...segmentData,
         };
-        this.segments = [...this.segments, segment];
+        // Insert after the tracked segment when one is set; otherwise append.
+        if (this.insertAfterSegId !== null) {
+            const afterIdx = this.segments.findIndex(s => s.id === this.insertAfterSegId);
+            if (afterIdx !== -1) {
+                const arr = [...this.segments];
+                arr.splice(afterIdx + 1, 0, segment);
+                this.segments = arr;
+            } else {
+                this.segments = [...this.segments, segment];
+            }
+        } else {
+            this.segments = [...this.segments, segment];
+        }
+        // Advance so the next drawn segment continues from this one.
+        this.insertAfterSegId = segment.id;
         this._pushHistory("Add segment");
         this._notifySegments();
+        // Auto-select the new segment so the PathEditor highlights its row
+        // and the next drawn element will be inserted after it.
+        this.setSelection(segment.id);
         return segment;
     }
 
@@ -280,7 +329,77 @@ export default class EditorStateManager {
             result.push(...sorted);
         }
 
-        this.segments = result;
+        // Re-attach non-chain segments (circles, rects, etc.).
+        // Embedded shapes (sharing contourId with a chain) are inserted right after
+        // the chain’s last sorted segment so that exportPathWithMap can emit them
+        // adjacent to their contour (required for _buildElemsWithPaths range logic).
+        const nonChain = this.segments.filter(s => s.type !== 'line' && s.type !== 'arc');
+        const chainCids = new Set(result.map(s => s.contourId ?? 0));
+        const embedded  = nonChain.filter(s => chainCids.has(s.contourId ?? 0));
+        const standalone = nonChain.filter(s => !chainCids.has(s.contourId ?? 0));
+
+        // Insert each embedded shape immediately after the last segment of its contour.
+        const finalResult = [];
+        const emittedCids = new Set();
+        for (let i = 0; i < result.length; i++) {
+            finalResult.push(result[i]);
+            const cid = result[i].contourId ?? 0;
+            const isLast = result[i + 1] === undefined || (result[i + 1].contourId ?? 0) !== cid;
+            if (isLast && !emittedCids.has(cid)) {
+                emittedCids.add(cid);
+                finalResult.push(...embedded.filter(s => (s.contourId ?? 0) === cid));
+            }
+        }
+        this.segments = [...finalResult, ...standalone];
+    }
+
+    /**
+     * Return top-level element descriptors for the PathEditor's unified element list.
+     *
+     * Each connected chain of line/arc segments becomes a single 'path' element
+     * (when the chain contains at least one arc) or a 'polyline' element (lines only).
+     * Standalone shapes (circle, rect, ellipse) each become their own element.
+     *
+     * @returns {Array<
+     *   {type:'circle'|'rect'|'ellipse', segId:string, data:object} |
+     *   {type:'path'|'polyline', contourId:number, segIds:string[]}
+     * >}
+     */
+    getElements() {
+        const elements = [];
+        const processedContours = new Set();
+        // Contours that have at least one line/arc segment.
+        const lineArcContours = new Set(
+            this.segments.filter(s => s.type === 'line' || s.type === 'arc').map(s => s.contourId ?? 0)
+        );
+        for (const seg of this.segments) {
+            if (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse') {
+                const cid = seg.contourId ?? 0;
+                if (!lineArcContours.has(cid)) {
+                    // Standalone shape — own contour with no line/arc siblings.
+                    elements.push({ type: seg.type, segId: seg.id, data: { ...seg.data } });
+                }
+                // Embedded shapes (sharing contourId with a line/arc chain) are
+                // included in the chain’s segIds below.
+            } else if ((seg.type === 'line' || seg.type === 'arc') && !processedContours.has(seg.contourId ?? 0)) {
+                const cid = seg.contourId ?? 0;
+                processedContours.add(cid);
+                const chain = this.segments.filter(
+                    s => (s.type === 'line' || s.type === 'arc') && (s.contourId ?? 0) === cid
+                );
+                // Include any shapes embedded in this contour.
+                const embedded = this.segments.filter(
+                    s => (s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse') && (s.contourId ?? 0) === cid
+                );
+                const hasArc = chain.some(s => s.type === 'arc');
+                elements.push({
+                    type: hasArc ? 'path' : 'polyline',
+                    contourId: cid,
+                    segIds: [...chain.map(s => s.id), ...embedded.map(s => s.id)],
+                });
+            }
+        }
+        return elements;
     }
 
     /**
@@ -299,6 +418,8 @@ export default class EditorStateManager {
         const eq   = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
         const seed = this.segments.find(s => s.id === segId);
         if (!seed) return [];
+        // Standalone closed shapes — return immediately without chain-walking.
+        if (seed.type === 'circle' || seed.type === 'rect' || seed.type === 'ellipse') return [seed];
 
         // Work only within the same contour (lines and arcs).
         const cid   = seed.contourId ?? 0;
@@ -341,6 +462,7 @@ export default class EditorStateManager {
      * @returns {Array<{segId:string, pointKey:'start'|'end'}>}
      */
     getSegmentsAtVertex(pt) {
+        if (!pt) return [];   // guard: called with undefined when circle pt3 not yet stored
         const EPS    = 1e-6;
         const result = [];
         for (const seg of this.segments) {
@@ -552,7 +674,11 @@ export default class EditorStateManager {
 
                     const startBit = { x: cx, y: cy };
                     const endBit   = { x: ex, y: ey };
-                    const centerBit = arcCenterFromEndpoints(startBit, endBit, r, largeArc, sweepBit);
+                    // arcCenterFromEndpoints assumes Y-down SVG space (sweep=1 → CW).
+                    // The path is stored in Y-up bit-space, so the sweep direction is
+                    // reversed relative to SVG. Pass the flipped sweep so the center
+                    // lands on the correct side of the chord.
+                    const centerBit = arcCenterFromEndpoints(startBit, endBit, r, largeArc, 1 - sweepBit);
                     if (centerBit) {
                         const segData = { start: startBit, end: endBit, center: centerBit, radius: r, largeArc, sweep: sweepBit };
                         if (radiusExpr) segData.radiusExpr = radiusExpr;
@@ -606,6 +732,56 @@ export default class EditorStateManager {
                 },
             };
         });
+
+        // ── Reconstruct circles from the M-A-A-Z pattern emitted by exportPathWithMap ──
+        // A circle is stored as two consecutive half-arcs (largeArc=1) in the same
+        // contour where the second arc ends exactly where the first arc starts, both
+        // on the same Y level with equal radii.
+        {
+            const EPS   = 1e-4;
+            const eqPt  = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+            const merged = [];
+            let i = 0;
+            while (i < this.segments.length) {
+                const s    = this.segments[i];
+                const next = this.segments[i + 1];
+                if (
+                    s.type    === 'arc' && next?.type === 'arc' &&
+                    s.contourId === next.contourId &&
+                    s.data.largeArc === 1 && next.data.largeArc === 1 &&
+                    Math.abs(s.data.radius - next.data.radius) < EPS &&
+                    eqPt(s.data.start, next.data.end) &&
+                    Math.abs(s.data.start.y - s.data.end.y) < EPS
+                ) {
+                    // Two diametrically-opposite half-arcs → circle
+                    const cx = (s.data.start.x + s.data.end.x) / 2;
+                    const cy = s.data.start.y;  // same as s.data.end.y
+                    merged.push({
+                        id:        s.id,
+                        selected:  false,
+                        contourId: s.contourId,
+                        type:      'circle',
+                        data: {
+                            center:  { x: cx, y: cy },
+                            radius:  s.data.radius,
+                            // arcMode marks the circle as having a draggable pt3 handle;
+                            // MoveTool checks this to enter moving-pt3 mode.
+                            arcMode: 'circle2pt',
+                            // Pre-compute pt3 at the right-most point so hitTestPoint
+                            // finds it immediately (before the first drag).
+                            pt3:     { x: cx + s.data.radius, y: cy },
+                            ...(s.data.radiusExpr && { radiusExpr: s.data.radiusExpr }),
+                        },
+                    });
+                    i += 2; // consume both arcs
+                } else {
+                    merged.push(s);
+                    i++;
+                }
+            }
+            this.segments = merged;
+        }
+
         this._pushHistory("Import");
         this._notifySegments();
     }
@@ -627,13 +803,23 @@ export default class EditorStateManager {
      * Segments are exported exactly as stored -- no automatic mirroring.
      * Use MirrorTool to create explicit mirrored copies.
      *
-     * @returns {{ path: string, lineSegIds: Array<string|null> }}
-     *   path       -- SVG path string
-     *   lineSegIds -- parallel array: for each PathEditor row, the canonical segment ID
-     *                 (null for M-only rows that do not belong to a specific segment)
+     * @param {object} [opts]
+     * @param {boolean} [opts.skipShapes=false] - When true, shape elements (circle, rect,
+     *   ellipse) are returned in `shapeElements` rather than serialised into the path string.
+     *   Use this for PathEditor display; leave false (default) for saving profilePath.
+     * @returns {{ path: string, lineSegIds: Array<string|null>, shapeElements?: Array }}
+     *   path          -- SVG path string (only line/arc segments when skipShapes=true)
+     *   lineSegIds    -- parallel array: for each PathEditor row, the canonical segment ID
+     *                    (null for M-only rows that do not belong to a specific segment)
+     *   shapeElements -- (only when skipShapes=true) array of { segId, type, data } for
+     *                    each circle / rect / ellipse segment
      */
-    exportPathWithMap() {
-        if (this.segments.length === 0) return { path: "", lineSegIds: [] };
+    exportPathWithMap({ skipShapes = false } = {}) {
+        if (this.segments.length === 0) {
+            return skipShapes
+                ? { path: "", lineSegIds: [], shapeElements: [] }
+                : { path: "", lineSegIds: [] };
+        }
 
         const r   = n => parseFloat(n.toFixed(4));
         const EPS = 1e-6;
@@ -641,10 +827,113 @@ export default class EditorStateManager {
 
         const parts      = [];
         const lineSegIds = [];
+        const shapeElements = [];
         let prevEnd      = null;
         let prevCid      = null;
 
+        // Build a processing order that keeps embedded shapes (shapes sharing a
+        // contourId with a line/arc chain) adjacent to that chain's last segment.
+        // This is required by _buildElemsWithPaths, which uses a min/max range on
+        // lineSegIds to slice commands for each element.
+        const _lineArcCids = new Set(
+            this.segments.filter(s => s.type === 'line' || s.type === 'arc').map(s => s.contourId ?? 0)
+        );
+        const _seenCids   = new Set();
+        const _ordered    = [];
         for (const seg of this.segments) {
+            if (seg.type === 'line' || seg.type === 'arc') {
+                _ordered.push(seg);
+                // After the last line/arc of this contour, append embedded shapes.
+                const cid = seg.contourId ?? 0;
+                const idx = this.segments.indexOf(seg);
+                const isLast = !this.segments.slice(idx + 1)
+                    .some(s => (s.type === 'line' || s.type === 'arc') && (s.contourId ?? 0) === cid);
+                if (isLast && !_seenCids.has(cid)) {
+                    _seenCids.add(cid);
+                    for (const sh of this.segments) {
+                        if ((sh.type === 'circle' || sh.type === 'rect' || sh.type === 'ellipse')
+                                && (sh.contourId ?? 0) === cid) {
+                            _ordered.push(sh);
+                        }
+                    }
+                }
+            } else if (!_lineArcCids.has(seg.contourId ?? 0)) {
+                // Standalone shape — append as-is; embedded shapes handled above.
+                _ordered.push(seg);
+            }
+        }
+
+        for (const seg of _ordered) {
+            // ── Circle: emit as two half-arcs OR collect as shape element ────────
+            if (seg.type === 'circle') {
+                const _isEmbedded = _lineArcCids.has(seg.contourId ?? 0);
+                if (skipShapes && !_isEmbedded) {
+                    shapeElements.push({ segId: seg.id, type: 'circle', data: { ...seg.data } });
+                } else {
+                    const { center, radius, radiusExpr } = seg.data;
+                    const rxStr = radiusExpr ?? r(radius);
+                    parts.push(`M ${r(center.x - radius)} ${r(-center.y)}`);
+                    lineSegIds.push(null);
+                    parts.push(`A ${rxStr} ${rxStr} 0 1 0 ${r(center.x + radius)} ${r(-center.y)}`);
+                    lineSegIds.push(seg.id);
+                    parts.push(`A ${rxStr} ${rxStr} 0 1 0 ${r(center.x - radius)} ${r(-center.y)}`);
+                    lineSegIds.push(seg.id);
+                    parts.push(`Z`);
+                    lineSegIds.push(null);
+                }
+                continue;
+            }
+            // ── Future shape types (rect, ellipse) ───────────────────────────────
+            if (seg.type === 'rect' || seg.type === 'ellipse') {
+                const _isEmbedded = _lineArcCids.has(seg.contourId ?? 0);
+                if (skipShapes && !_isEmbedded) {
+                    shapeElements.push({ segId: seg.id, type: seg.type, data: { ...seg.data } });
+                } else if (seg.type === 'rect') {
+                    // Serialize as a closed path (Y negated editor→profile space).
+                    const { x, y, w, h, rx: rx0 = 0 } = seg.data;
+                    const rx = Math.max(0, Math.min(rx0, w / 2, h / 2));
+                    if (rx > EPS) {
+                        // Rounded corners: use arc commands at each corner.
+                        parts.push(
+                            `M ${r(x + rx)} ${r(-y)}`,
+                            `L ${r(x + w - rx)} ${r(-y)}`,
+                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x + w)} ${r(-(y + rx))}`,
+                            `L ${r(x + w)} ${r(-(y + h - rx))}`,
+                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x + w - rx)} ${r(-(y + h))}`,
+                            `L ${r(x + rx)} ${r(-(y + h))}`,
+                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x)} ${r(-(y + h - rx))}`,
+                            `L ${r(x)} ${r(-(y + rx))}`,
+                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x + rx)} ${r(-y)}`,
+                            `Z`,
+                        );
+                        for (let i = 0; i < 10; i++) lineSegIds.push(i === 0 ? seg.id : null);
+                    } else {
+                        // Sharp corners: four L commands.
+                        parts.push(
+                            `M ${r(x)} ${r(-y)}`,
+                            `L ${r(x + w)} ${r(-y)}`,
+                            `L ${r(x + w)} ${r(-(y + h))}`,
+                            `L ${r(x)} ${r(-(y + h))}`,
+                            `Z`,
+                        );
+                        for (let i = 0; i < 5; i++) lineSegIds.push(i === 0 ? seg.id : null);
+                    }
+                    prevEnd = null; prevCid = null; // force M for next segment
+                } else {
+                    // ellipse → two half-ellipse arcs (like circle but with rx ≠ ry).
+                    const { cx, cy, rx: ex, ry } = seg.data;
+                    parts.push(`M ${r(cx - ex)} ${r(-cy)}`);
+                    lineSegIds.push(null);
+                    parts.push(`A ${r(ex)} ${r(ry)} 0 1 0 ${r(cx + ex)} ${r(-cy)}`);
+                    lineSegIds.push(seg.id);
+                    parts.push(`A ${r(ex)} ${r(ry)} 0 1 0 ${r(cx - ex)} ${r(-cy)}`);
+                    lineSegIds.push(seg.id);
+                    parts.push(`Z`);
+                    lineSegIds.push(null);
+                    prevEnd = null; prevCid = null;
+                }
+                continue;
+            }
             if (seg.type !== "line" && seg.type !== "arc") continue;
             const { start, end } = seg.data;
             const cid = seg.contourId ?? 0;
@@ -652,9 +941,9 @@ export default class EditorStateManager {
             // Start a new sub-path when: first segment, different contour, or geometric gap.
             if (prevEnd === null || cid !== prevCid || !eq(start, prevEnd)) {
                 parts.push(`M ${r(start.x)} ${r(-start.y)}`);
-                lineSegIds.push(null);  // M row: null — not backed by a segment ID.
-                // The following L/H/V/A row pushes the real seg.id, so indexOf(segId)
-                // correctly finds the segment row and not the M row.
+                // Synthetic segId "m:<contourId>" so PathEditor can route M-row clicks
+                // through state.setSelection — identical pipeline to L/A rows.
+                lineSegIds.push(`m:${cid}`);
             }
 
             if (seg.type === "arc") {
@@ -687,7 +976,9 @@ export default class EditorStateManager {
             prevCid = cid;
         }
 
-        return { path: parts.join(" "), lineSegIds };
+        return skipShapes
+            ? { path: parts.join(" "), lineSegIds, shapeElements }
+            : { path: parts.join(" "), lineSegIds };
     }
 
     /**

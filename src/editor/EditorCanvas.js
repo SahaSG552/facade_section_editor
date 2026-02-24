@@ -1,4 +1,5 @@
 import LoggerFactory from "../core/LoggerFactory.js";
+import { EV } from "./EditorVisualConfig.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -29,8 +30,8 @@ function _appendArcHandle(g, cx, cy, pointKey) {
     const c = document.createElementNS(SVG_NS, "circle");
     c.setAttribute("cx", cx);
     c.setAttribute("cy", cy);
-    c.setAttribute("r", "0.06");
-    c.classList.add("editor-arc-handle");
+    c.setAttribute("r", EV.r.handle);
+    c.classList.add(EV.cls.arcHandle);
     c.setAttribute("data-point-key", pointKey);
     c.setAttribute("pointer-events", "none");
     g.appendChild(c);
@@ -41,8 +42,8 @@ function _appendArcCenter(g, cx, cy) {
     const c = document.createElementNS(SVG_NS, "circle");
     c.setAttribute("cx", cx);
     c.setAttribute("cy", cy);
-    c.setAttribute("r", "0.035");
-    c.classList.add("editor-arc-center");
+    c.setAttribute("r", EV.r.center);
+    c.classList.add(EV.cls.arcCenter);
     c.setAttribute("pointer-events", "none");
     g.appendChild(c);
 }
@@ -52,7 +53,7 @@ function _appendArcRadiusLine(g, x1, y1, x2, y2) {
     const line = document.createElementNS(SVG_NS, "line");
     line.setAttribute("x1", x1); line.setAttribute("y1", y1);
     line.setAttribute("x2", x2); line.setAttribute("y2", y2);
-    line.classList.add("editor-arc-radius-line");
+    line.classList.add(EV.cls.arcRadiusLine);
     line.setAttribute("pointer-events", "none");
     g.appendChild(line);
 }
@@ -73,10 +74,10 @@ function _appendEndpoint(g, cx, cy, selected, mirror = false, pointKey = "") {
     const c = document.createElementNS(SVG_NS, "circle");
     c.setAttribute("cx", cx);
     c.setAttribute("cy", cy);
-    c.setAttribute("r", "0.05");
-    c.classList.add("editor-endpoint");
-    if (mirror)   c.classList.add("editor-endpoint-mirror");
-    if (selected) c.classList.add("editor-endpoint-selected");
+    c.setAttribute("r", EV.r.endpoint);
+    c.classList.add(EV.cls.endpoint);
+    if (mirror)   c.classList.add(EV.cls.endpointMirror);
+    if (selected) c.classList.add(EV.cls.endpointSelected);
     if (pointKey) c.setAttribute("data-point-key", pointKey);
     c.setAttribute("pointer-events", "none");
     g.appendChild(c);
@@ -442,6 +443,91 @@ export default class EditorCanvas {
             return g;
         }
 
+        if (seg.type === "circle") {
+            const { center, radius } = seg.data;
+            const g = document.createElementNS(SVG_NS, "g");
+            g.setAttribute("data-seg-id", seg.id);
+
+            const circ = document.createElementNS(SVG_NS, "circle");
+            circ.setAttribute("cx", center.x);
+            circ.setAttribute("cy", center.y);
+            circ.setAttribute("r", radius);
+            circ.setAttribute("fill", "none");
+            circ.classList.add("editor-segment");
+            circ.setAttribute("data-seg-id", seg.id);
+            if (seg.selected) circ.classList.add("editor-segment-selected");
+            g.appendChild(circ);
+
+            if (seg.selected) {
+                const pt3 = seg.data.pt3 ?? { x: center.x + radius, y: center.y };
+                // Dashed radius line: center → pt3
+                const dash = document.createElementNS(SVG_NS, "line");
+                dash.setAttribute("x1", center.x); dash.setAttribute("y1", center.y);
+                dash.setAttribute("x2", pt3.x);    dash.setAttribute("y2", pt3.y);
+                dash.classList.add("editor-ghost-radius");
+                dash.setAttribute("pointer-events", "none");
+                g.appendChild(dash);
+                _appendArcCenter(g, center.x, center.y);
+                _appendArcHandle(g, pt3.x, pt3.y, "pt3");
+            }
+            return g;
+        }
+
+        if (seg.type === "rect") {
+            const { x, y, w, h, rx = 0 } = seg.data;
+            const g = document.createElementNS(SVG_NS, "g");
+            g.setAttribute("data-seg-id", seg.id);
+
+            const rect = document.createElementNS(SVG_NS, "rect");
+            rect.setAttribute("x", x);
+            rect.setAttribute("y", y);
+            rect.setAttribute("width",  w);
+            rect.setAttribute("height", h);
+            rect.setAttribute("rx", rx);
+            rect.setAttribute("fill", "none");
+            rect.classList.add("editor-segment");
+            rect.setAttribute("data-seg-id", seg.id);
+            if (seg.selected) rect.classList.add("editor-segment-selected");
+            g.appendChild(rect);
+
+            if (seg.selected) {
+                // Corner handles (non-interactive, visual only)
+                for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
+                    _appendArcHandle(g, cx, cy, "corner");
+                }
+            }
+            return g;
+        }
+
+        if (seg.type === "ellipse") {
+            const { cx, cy, rx, ry } = seg.data;
+            const g = document.createElementNS(SVG_NS, "g");
+            g.setAttribute("data-seg-id", seg.id);
+
+            const el = document.createElementNS(SVG_NS, "ellipse");
+            el.setAttribute("cx", cx);
+            el.setAttribute("cy", cy);
+            el.setAttribute("rx", rx);
+            el.setAttribute("ry", ry);
+            el.setAttribute("fill", "none");
+            el.classList.add("editor-segment");
+            el.setAttribute("data-seg-id", seg.id);
+            if (seg.selected) el.classList.add("editor-segment-selected");
+            g.appendChild(el);
+
+            if (seg.selected) {
+                // Axis-endpoint handles + center dot
+                _appendArcCenter(g, cx, cy);
+                for (const [hx, hy] of [
+                    [cx + rx, cy], [cx - rx, cy],
+                    [cx, cy + ry], [cx, cy - ry],
+                ]) {
+                    _appendArcHandle(g, hx, hy, "axis");
+                }
+            }
+            return g;
+        }
+
         log.debug("_buildSegmentElement: unsupported type", seg.type);
         return null;
     }
@@ -468,6 +554,29 @@ export default class EditorCanvas {
                 dist = _pointToSegmentDist(point, seg.data.start, seg.data.end);
             } else if (seg.type === "arc") {
                 dist = _pointToArcDist(point, seg.data, toleranceUnits);
+            } else if (seg.type === "circle") {
+                const { center, radius } = seg.data;
+                dist = Math.abs(Math.hypot(point.x - center.x, point.y - center.y) - radius);
+            } else if (seg.type === "rect") {
+                // Distance to nearest edge of the rectangle.
+                const { x, y, w, h } = seg.data;
+                const nearX = Math.max(x, Math.min(point.x, x + w));
+                const nearY = Math.max(y, Math.min(point.y, y + h));
+                const inside = point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h;
+                if (inside) {
+                    // Minimum distance to any of the 4 edges
+                    dist = Math.min(point.x - x, x + w - point.x, point.y - y, y + h - point.y);
+                } else {
+                    dist = Math.hypot(point.x - nearX, point.y - nearY);
+                }
+            } else if (seg.type === "ellipse") {
+                // Approximate distance from point to ellipse outline.
+                const { cx, cy, rx, ry } = seg.data;
+                const nx = (point.x - cx) / (rx || 1);
+                const ny = (point.y - cy) / (ry || 1);
+                const len = Math.hypot(nx, ny);
+                // Scale back to SVG space (avg radius approximation)
+                dist = Math.abs(len - 1) * Math.min(rx, ry);
             }
 
             if (dist < toleranceUnits && dist < bestDist) {
@@ -512,6 +621,16 @@ export default class EditorCanvas {
             // selected so the handle is visible in the rendered overlay.
             if (seg.type === "arc" && seg.data.arcMode && seg.selected) {
                 const pt3 = seg.data.pt3 ?? _computeArcMidpoint(seg.data);
+                const d = Math.hypot(point.x - pt3.x, point.y - pt3.y);
+                if (d <= tol && d < bestDist) {
+                    bestDist = d;
+                    bestRef  = { segId: seg.id, pointKey: "pt3" };
+                }
+            }
+
+            // Circle pt3 handle — only while selected.
+            if (seg.type === "circle" && seg.selected) {
+                const pt3 = seg.data.pt3 ?? { x: seg.data.center.x + seg.data.radius, y: seg.data.center.y };
                 const d = Math.hypot(point.x - pt3.x, point.y - pt3.y);
                 if (d <= tol && d < bestDist) {
                     bestDist = d;
@@ -588,7 +707,42 @@ export default class EditorCanvas {
             changes: { data: { ...restData, ...result, pt3: newPt3, arcMode: "arc2pt" } },
         }]);
     }
+    /**
+     * Recalculate a circle segment when the user drags its pt3 control handle.
+     * @param {string}               segId
+     * @param {{x:number,y:number}}  newPos  SVG-space position of the dragged handle
+     */
+    updateCircleFromPt3(segId, newPos) {
+        const seg = this.state.segments.find(s => s.id === segId);
+        if (!seg || seg.type !== 'circle') return;
+        const newRadius = Math.hypot(newPos.x - seg.data.center.x, newPos.y - seg.data.center.y);
+        if (newRadius < 1e-6) return;
+        this.state.updateSegments([{ id: segId, changes: { data: {
+            ...seg.data,
+            radius:     newRadius,
+            pt3:        { ...newPos },
+            radiusExpr: undefined,
+        }}}]);
+    }
 
+    /**
+     * Resize a circle to the given radius while projecting the pt3 handle
+     * onto the new circumference (preserving its angular direction).
+     * @param {string} segId
+     * @param {number} newRadius
+     */
+    updateCircleRadius(segId, newRadius) {
+        const seg = this.state.segments.find(s => s.id === segId);
+        if (!seg || seg.type !== 'circle') return;
+        const { center, pt3 } = seg.data;
+        const dcLen = Math.hypot(pt3.x - center.x, pt3.y - center.y);
+        const newPt3 = dcLen > 1e-9
+            ? { x: center.x + newRadius * (pt3.x - center.x) / dcLen,
+                y: center.y + newRadius * (pt3.y - center.y) / dcLen }
+            : { x: center.x + newRadius, y: center.y };
+        const { radiusExpr: _dropped, ...restData } = seg.data;
+        this.state.updateSegments([{ id: segId, changes: { data: { ...restData, radius: newRadius, pt3: newPt3 } } }]);
+    }
     // ─── Hover helpers ───────────────────────────────────────────────────────
 
     /**
@@ -600,8 +754,8 @@ export default class EditorCanvas {
         if (!segId) return;
         const layer = this.cm.getLayer("bits");
         if (!layer) return;
-        // Match both <line> and <path> children (lines and arcs)
-        layer.querySelectorAll(`[data-seg-id="${segId}"] line, [data-seg-id="${segId}"] path`)
+        // Match line, path (arcs), circle, rect, and ellipse children.
+        layer.querySelectorAll(`[data-seg-id="${segId}"] line, [data-seg-id="${segId}"] path, [data-seg-id="${segId}"] circle.editor-segment, [data-seg-id="${segId}"] rect.editor-segment, [data-seg-id="${segId}"] ellipse.editor-segment`)
              .forEach(el => el.classList.toggle("editor-segment-hover", active));
     }
 

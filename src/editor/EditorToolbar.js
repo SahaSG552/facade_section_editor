@@ -29,10 +29,9 @@ const TOOL_DEFINITIONS = [
     { id: "move",     label: "Move",                           icon: "✥", group: "draw", key: "m" },
     { id: "line",     label: "Line",                           icon: "╱", group: "draw", key: "l" },
     { id: "arc",      label: "Arc (3pt + R)",                   icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt" },
-    { id: "circle2pt",label: "Circle 2pt",                     icon: "○", group: "draw", key: "c" },
-    { id: "circle3pt",label: "Circle 3pt",                     icon: "◎", group: "draw" },
-    { id: "rect2pt",  label: "Rect 2pt",                       icon: "▭", group: "draw", key: "r" },
-    { id: "rect3pt",  label: "Rect 3pt",                       icon: "▬", group: "draw" },
+    { id: "circle",   label: "Circle (LMB: 2pt · RMB: 3pt)",  icon: "○", group: "draw", key: "c", lmbTool: "circle2pt", rmbTool: "circle3pt" },
+    { id: "rect",     label: "Rect (LMB: 2pt · RMB: 3pt)",      icon: "▭", group: "draw", key: "r", lmbTool: "rect2pt",      rmbTool: "rect3pt"      },
+    { id: "ellipse",  label: "Ellipse (LMB: 2pt · RMB: 3pt)",   icon: "⬭", group: "draw", key: "e", lmbTool: "ellipse2pt",   rmbTool: "ellipse3pt"   },
     // Edit tools
     { id: "fillet",   label: "Fillet",    icon: "⌔", group: "edit", key: "f" },
     { id: "chamfer",  label: "Chamfer",   icon: "⌐", group: "edit" },

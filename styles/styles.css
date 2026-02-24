@@ -1385,6 +1385,7 @@ html {
 }
 
 .editor-ghost line,
+.editor-ghost circle,
 .editor-ghost path {
   stroke-width: 0.5;
   vector-effect: non-scaling-stroke;
@@ -1814,6 +1815,260 @@ html {
 .path-line-delete:hover {
   background-color: rgba(230, 57, 70, 0.15);
   color: #e63946;
+}
+
+/* ── Shape Element rows ─────────────────────────────────────────────────── */
+
+.path-editor-shapes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-x: auto;
+  user-select: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background-color: hsl(var(--input));
+  padding: 3px;
+  position: relative;
+}
+
+.path-shape-element {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  min-height: 22px;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+  cursor: default;
+  transition: background-color 0.15s;
+}
+
+.path-shape-element:hover {
+  background-color: hsl(var(--accent));
+}
+
+.path-shape-element.path-line-selected {
+  background-color: hsl(var(--primary) / 0.15) !important;
+  outline: 1px solid hsl(var(--primary) / 0.4);
+  outline-offset: -1px;
+}
+
+/* Icon + type label */
+.path-shape-icon {
+  font-size: 11px;
+  font-weight: 700;
+  color: #7c3aed;
+  padding: 1px 5px;
+  background: rgba(124, 58, 237, 0.1);
+  border-radius: 3px;
+  flex-shrink: 0;
+  min-width: 48px;
+  text-align: center;
+}
+
+.dark .path-shape-icon {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.12);
+}
+
+/* Attribute cells (label + value) */
+.path-shape-attr {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background-color: rgba(124, 58, 237, 0.06);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 1px 4px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  transition: background-color 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.path-shape-attr:hover {
+  background-color: rgba(124, 58, 237, 0.15);
+  border-color: rgba(124, 58, 237, 0.35);
+}
+
+.dark .path-shape-attr {
+  background-color: rgba(167, 139, 250, 0.08);
+}
+
+.path-shape-attr-label {
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.path-shape-attr-value {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
+/* Delete button on shape rows (same base as .path-line-delete) */
+.path-shape-delete {
+  opacity: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.path-shape-element:hover .path-shape-delete {
+  opacity: 1;
+}
+
+.path-shape-delete:hover {
+  background-color: rgba(230, 57, 70, 0.15);
+  color: #e63946;
+}
+
+/* ─────────────────── Unified Element List (new PathEditor) ─────────────────── */
+
+.path-editor-elements {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* Every top-level element row (circle, rect, ellipse, path, polyline) */
+.pe-elem {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
+  min-height: 22px;
+  box-sizing: border-box;
+  border-left: 2px solid transparent;
+  transition: background-color 0.1s;
+}
+
+.pe-elem:hover {
+  background-color: hsl(var(--accent) / 0.35);
+}
+
+/* Active element (suggestions bar reacts to this) */
+.pe-elem.pe-elem-active {
+  background-color: hsl(var(--accent) / 0.5);
+}
+
+/* Selected row highlight */
+.pe-elem.path-line-selected,
+.pe-sub-line.path-line-selected {
+  background-color: hsl(var(--primary) / 0.12);
+}
+
+/* Left-border accent by element type */
+.pe-elem-circle   { border-left-color: hsl(270 60% 55%); }   /* purple */
+.pe-elem-rect     { border-left-color: hsl(30  80% 50%); }   /* orange */
+.pe-elem-ellipse  { border-left-color: hsl(180 50% 45%); }   /* teal   */
+.pe-elem-path     { border-left-color: hsl(217 80% 55%); }   /* blue   */
+.pe-elem-polyline { border-left-color: hsl(140 55% 45%); }   /* green  */
+
+/* pe-path-wrap: plain block container for path group (header + body) */
+.pe-path-wrap {
+  display: block;
+}
+
+/* pe-path-header is path-line pe-elem, cursor:pointer to hint it's clickable */
+.pe-path-header {
+  cursor: pointer;
+}
+
+/* Expanded sub-lines container */
+.pe-path-body {
+  padding: 0 0 2px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sub-line inherits .path-line styles but with no extra left padding */
+.pe-sub-line {
+  padding-left: 2px;
+}
+
+/* Drag-sort visual states */
+.pe-sub-line-dragging {
+  opacity: 0.4;
+}
+
+.pe-sub-line-drag-over {
+  border-top: 2px solid hsl(var(--primary));
+  margin-top: -1px;
+}
+
+/* ── Per-type colors for shape/path type command buttons ────────────────── */
+
+/* Path / Polyline: blue */
+.pe-type-path,
+.pe-type-polyline {
+  background-color: rgba(33, 150, 243, 0.12) !important;
+  color: #2196f3 !important;
+  border-color: rgba(33, 150, 243, 0.2) !important;
+}
+.pe-type-path:hover,
+.pe-type-polyline:hover {
+  background-color: rgba(33, 150, 243, 0.25) !important;
+  border-color: rgba(33, 150, 243, 0.4) !important;
+}
+
+/* Circle: purple */
+.pe-type-circle {
+  background-color: rgba(156, 39, 176, 0.12) !important;
+  color: #9c27b0 !important;
+  border-color: rgba(156, 39, 176, 0.2) !important;
+}
+.pe-type-circle:hover {
+  background-color: rgba(156, 39, 176, 0.25) !important;
+  border-color: rgba(156, 39, 176, 0.4) !important;
+}
+
+/* Rect: orange */
+.pe-type-rect {
+  background-color: rgba(255, 152, 0, 0.12) !important;
+  color: #ff9800 !important;
+  border-color: rgba(255, 152, 0, 0.2) !important;
+}
+.pe-type-rect:hover {
+  background-color: rgba(255, 152, 0, 0.25) !important;
+  border-color: rgba(255, 152, 0, 0.4) !important;
+}
+
+/* Ellipse: teal */
+.pe-type-ellipse {
+  background-color: rgba(0, 188, 212, 0.12) !important;
+  color: #00bcd4 !important;
+  border-color: rgba(0, 188, 212, 0.2) !important;
+}
+.pe-type-ellipse:hover {
+  background-color: rgba(0, 188, 212, 0.25) !important;
+  border-color: rgba(0, 188, 212, 0.4) !important;
+}
+
+/* Drag-sort states for top-level elements */
+.pe-elem.pe-elem-dragging {
+  opacity: 0.4;
+}
+.pe-elem.pe-elem-drag-over {
+  border-top: 2px solid hsl(var(--primary));
+  margin-top: -1px;
 }
 
 /* Input area */

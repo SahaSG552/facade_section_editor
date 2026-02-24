@@ -117,10 +117,14 @@ export default class CursorTool extends BaseTool {
 
         const rawPos = this.ctx.canvas.screenToSVG(e);
 
-        // ── Arc pt3: if already following, second click → commit ─────────────────
+        // ── Arc/circle pt3: if already following, second click → commit ─────────────
         if (this._pt3Drag) {
             // Apply the final cursor position and commit to history.
-            this.ctx.canvas.updateArcFromPt3(this._pt3Drag.segId, rawPos);
+            if (this._pt3Drag.isCircle) {
+                this.ctx.canvas.updateCircleFromPt3(this._pt3Drag.segId, rawPos);
+            } else {
+                this.ctx.canvas.updateArcFromPt3(this._pt3Drag.segId, rawPos);
+            }
             this._commitPt3();
             return;
         }
@@ -136,11 +140,12 @@ export default class CursorTool extends BaseTool {
                     this.ctx.state.setSelection(chainIds);
                 }
                 this._pt3Drag = {
-                    segId:  ptHit.segId,
-                    arcMode: seg.data.arcMode,
-                    radius:  seg.data.radius,
-                    // Capture origin for Escape‐restore (no history entry yet).
-                    origin:  JSON.parse(JSON.stringify(seg.data)),
+                    segId:    ptHit.segId,
+                    arcMode:  seg.data.arcMode,
+                    radius:   seg.data.radius,
+                    isCircle: seg.type === 'circle',
+                    // Capture origin for Escape‑restore (no history entry yet).
+                    origin:   JSON.parse(JSON.stringify(seg.data)),
                 };
                 // Show radius popup for all arc modes.
                 if (seg.data.arcMode) this._showArcPopup(e, seg);
@@ -156,10 +161,14 @@ export default class CursorTool extends BaseTool {
     }
 
     onPointerMove(pos, e) {
-        // ── Arc pt3 drag ───────────────────────────────────────────────
+        // ── Arc/circle pt3 drag ──────────────────────────────────────────
         if (this._pt3Drag) {
             const rawPos = this.ctx.canvas.screenToSVG(e);
-            this.ctx.canvas.updateArcFromPt3(this._pt3Drag.segId, rawPos);
+            if (this._pt3Drag.isCircle) {
+                this.ctx.canvas.updateCircleFromPt3(this._pt3Drag.segId, rawPos);
+            } else {
+                this.ctx.canvas.updateArcFromPt3(this._pt3Drag.segId, rawPos);
+            }
             if (this._arcPopup && e) this._positionArcPopup(e);
             // Update live radius display while the user is not typing.
             if (this._arcPopup && !this._inputFocused) {
@@ -230,6 +239,22 @@ export default class CursorTool extends BaseTool {
                 this.ctx.state.clearSelection();
             }
         }
+    }
+
+    /**
+     * RMB while a pt3 drag is active → cancel the operation (same as Escape).
+     * @override
+     */
+    onConfirm(_pos, _e) {
+        if (this._pt3Drag) {
+            this.ctx.state.updateSegments([{
+                id:      this._pt3Drag.segId,
+                changes: { data: this._pt3Drag.origin },
+            }]);
+            this._endPt3Drag();
+            return true;
+        }
+        return false;
     }
 
     onKeyDown(e) {
@@ -364,23 +389,44 @@ export default class CursorTool extends BaseTool {
         const num = parseFloat(raw);
         if (!isNaN(num) && num > 0) {
             const seg = this.ctx.state.segments.find(s => s.id === segId);
-            if (seg) {
-                const chord = Math.hypot(seg.data.end.x - seg.data.start.x, seg.data.end.y - seg.data.start.y);
-                if (num * 2 < chord - 1e-6) { showError(`Min: ${(chord / 2).toFixed(3)}`); return; }
+            if (seg?.type === 'circle') {
+                this.ctx.canvas.updateCircleRadius(segId, num);
+            } else {
+                if (seg) {
+                    const chord = Math.hypot(seg.data.end.x - seg.data.start.x, seg.data.end.y - seg.data.start.y);
+                    if (num * 2 < chord - 1e-6) { showError(`Min: ${(chord / 2).toFixed(3)}`); return; }
+                }
+                this.ctx.canvas.updateArcRadius(segId, num); // also clears radiusExpr
             }
-            this.ctx.canvas.updateArcRadius(segId, num); // also clears radiusExpr
         } else {
             // Accept both bare "d" and "{d}" format; normalise to "{d}" for export.
             const varMatch = raw.match(/^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/) ??
                              (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(raw) ? [null, raw] : null);
             if (varMatch) {
-                const radiusExpr = `{${varMatch[1]}}`;
+                const varName    = varMatch[1];
+                const radiusExpr = `{${varName}}`;
                 const seg = this.ctx.state.segments.find(s => s.id === segId);
                 if (seg) {
-                    this.ctx.state.updateSegments([{
-                        id: segId,
-                        changes: { data: { ...seg.data, radiusExpr } },
-                    }]);
+                    if (seg.type === 'circle') {
+                        // Resolve variable so the circle visually resizes, then re-apply expr.
+                        const resolved = this.ctx.state.variableValues?.[varName];
+                        if (resolved != null && !isNaN(Number(resolved))) {
+                            this.ctx.canvas.updateCircleRadius(segId, Number(resolved));
+                            // updateCircleRadius drops radiusExpr — restore it.
+                            const updated = this.ctx.state.segments.find(s => s.id === segId);
+                            if (updated) {
+                                this.ctx.state.updateSegments([{ id: segId, changes: { data: { ...updated.data, radiusExpr } } }]);
+                            }
+                        } else {
+                            // Variable not yet defined — store expression only.
+                            this.ctx.state.updateSegments([{ id: segId, changes: { data: { ...seg.data, radiusExpr } } }]);
+                        }
+                    } else {
+                        this.ctx.state.updateSegments([{
+                            id: segId,
+                            changes: { data: { ...seg.data, radiusExpr } },
+                        }]);
+                    }
                 }
             } else {
                 showError(raw.length === 0 ? "Enter a number or {variable}" : "Invalid value — use a number or {variable}");
@@ -423,6 +469,14 @@ export default class CursorTool extends BaseTool {
 
         const ids = [];
         for (const seg of this.ctx.state.segments) {
+            if (seg.type === 'circle') {
+                const { center: c, radius } = seg.data;
+                const hit = ltr
+                    ? (c.x - radius >= minX && c.x + radius <= maxX && c.y - radius >= minY && c.y + radius <= maxY)
+                    : (c.x + radius >= minX && c.x - radius <= maxX && c.y + radius >= minY && c.y - radius <= maxY);
+                if (hit) ids.push(seg.id);
+                continue;
+            }
             if (seg.type !== "line" && seg.type !== "arc") continue;
             const { start: s, end: en } = seg.data;
             const hit = ltr

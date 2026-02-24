@@ -1,5 +1,6 @@
 import BaseTool from "./BaseTool.js";
 import LoggerFactory from "../../core/LoggerFactory.js";
+import { EV } from "../EditorVisualConfig.js";
 
 const log = LoggerFactory.createLogger("ArcTool");
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -149,7 +150,7 @@ function buildArcGhost(pt1, pt2, r, largeArc, sweep, center) {
         const dash = document.createElementNS(SVG_NS, "line");
         dash.setAttribute("x1", center.x); dash.setAttribute("y1", center.y);
         dash.setAttribute("x2", pt.x);     dash.setAttribute("y2", pt.y);
-        dash.classList.add("editor-ghost-radius");
+        dash.classList.add(EV.cls.ghostRadius);
         g.appendChild(dash);
     }
 
@@ -157,8 +158,8 @@ function buildArcGhost(pt1, pt2, r, largeArc, sweep, center) {
     const cdot = document.createElementNS(SVG_NS, "circle");
     cdot.setAttribute("cx", center.x);
     cdot.setAttribute("cy", center.y);
-    cdot.setAttribute("r", "0.05");
-    cdot.classList.add("editor-ghost-center");
+    cdot.setAttribute("r", EV.r.ghostCenter);
+    cdot.classList.add(EV.cls.ghostCenter);
     g.appendChild(cdot);
 
     // Endpoint dots
@@ -166,8 +167,8 @@ function buildArcGhost(pt1, pt2, r, largeArc, sweep, center) {
         const c = document.createElementNS(SVG_NS, "circle");
         c.setAttribute("cx", pt.x);
         c.setAttribute("cy", pt.y);
-        c.setAttribute("r", "0.05");
-        c.classList.add("editor-ghost-endpoint");
+        c.setAttribute("r", EV.r.ghostEndpoint);
+        c.classList.add(EV.cls.ghostEndpoint);
         g.appendChild(c);
     }
 
@@ -190,8 +191,8 @@ function buildLineGhost(pt1, pt2) {
         const c = document.createElementNS(SVG_NS, "circle");
         c.setAttribute("cx", pt.x);
         c.setAttribute("cy", pt.y);
-        c.setAttribute("r", "0.05");
-        c.classList.add("editor-ghost-endpoint");
+        c.setAttribute("r", EV.r.ghostEndpoint);
+        c.classList.add(EV.cls.ghostEndpoint);
         g.appendChild(c);
     }
     return g;

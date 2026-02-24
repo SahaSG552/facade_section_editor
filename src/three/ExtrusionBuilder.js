@@ -1431,7 +1431,13 @@ export default class ExtrusionBuilder {
         // If bitData has a profilePath (SVG path), use SVGLoader
         if (bitData.profilePath) {
             try {
-                const svgString = `<svg xmlns="http://www.w3.org/2000/svg"><path d="${bitData.profilePath}"/></svg>`;
+                // Support both a plain SVG path `d` string (current format) and a
+                // future SVG fragment that already contains element tags like
+                // <circle>, <rect>, etc.  Detect by looking for the first non-
+                // whitespace character: if it's '<' we have an SVG fragment.
+                const _pc = (bitData.profilePath ?? '').trimStart();
+                const profileContent = _pc.startsWith('<') ? _pc : `<path d="${_pc}"/>`;
+                const svgString = `<svg xmlns="http://www.w3.org/2000/svg">${profileContent}</svg>`;
                 const dataUrl = "data:image/svg+xml;base64," + btoa(svgString);
                 const loader = new SVGLoader();
 

@@ -117,7 +117,7 @@ const svgNS = "http://www.w3.org/2000/svg";
 function parseEvaluatedPathRows(pathStr) {
     if (!pathStr) return [];
     const rows      = [];
-    const commandRe = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
+    const commandRe = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
     let cx = 0, cy = 0, subX = 0, subY = 0, m;
     while ((m = commandRe.exec(pathStr)) !== null) {
         const cmd  = m[1].toUpperCase();
@@ -152,6 +152,17 @@ function parseEvaluatedPathRows(pathStr) {
         } else if (cmd === 'Z') {
             rows.push({ type: 'line', start: { x: cx, y: cy }, end: { x: subX, y: subY } });
             cx = subX; cy = subY;
+        } else if (cmd === 'A') {
+            // A rx ry x-rotation large-arc-flag sweep-flag x y  (7 args per arc)
+            for (let i = 0; i + 6 < args.length; i += 7) {
+                const r        = args[i];           // rx (treat as circular)
+                const largeArc = args[i + 3];
+                const sweep    = args[i + 4];
+                const ex = args[i + 5], ey = args[i + 6];
+                rows.push({ type: 'arc', start: { x: cx, y: cy }, end: { x: ex, y: ey },
+                            radius: r, largeArc, sweep });
+                cx = ex; cy = ey;
+            }
         }
     }
     return rows;
@@ -1416,6 +1427,21 @@ export default class BitsManager {
                         dot.setAttribute("stroke-width", Math.max(0.05, 0.5 / zoom));
                         dot.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(dot);
+                    } else if (seg.type === 'arc') {
+                        // A command: draw a highlighted arc path.
+                        // Path is stored in Y-up bit-space; negate Y and flip sweep for SVG Y-down.
+                        const sw = Math.max(0.05, 1.5 / zoom);
+                        const d  = `M ${seg.start.x} ${-seg.start.y} ` +
+                                   `A ${seg.radius} ${seg.radius} 0 ${seg.largeArc} ${1 - seg.sweep} ` +
+                                   `${seg.end.x} ${-seg.end.y}`;
+                        const hl = document.createElementNS(svgNS, "path");
+                        hl.setAttribute("d", d);
+                        hl.setAttribute("fill", "none");
+                        hl.setAttribute("stroke", "#2196F3");
+                        hl.setAttribute("stroke-width", sw);
+                        hl.setAttribute("stroke-linecap", "round");
+                        hl.classList.add("preview-seg-highlight");
+                        overlayLayer.appendChild(hl);
                     } else {
                         // L / H / V / Z command: draw a highlighted line
                         const sw = Math.max(0.05, 1.5 / zoom);
@@ -1684,6 +1710,13 @@ export default class BitsManager {
                                 pathEditorInstance.setPath(merged);
                                 pathEditorInstance.onChange = savedOnChange;
                             }
+                        } else if (pathEditorInstance) {
+                            // No edits were made (canUndo = false) — still need to restore
+                            // PathEditor to preview-mode structure (clears editor-mode segIds).
+                            const savedOnChange = pathEditorInstance.onChange;
+                            pathEditorInstance.onChange = () => {};
+                            pathEditorInstance.setPath(originalRawPath);
+                            pathEditorInstance.onChange = savedOnChange;
                         }
                         updateBitPreview();
                     },

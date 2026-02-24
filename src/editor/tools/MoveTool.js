@@ -236,12 +236,20 @@ export default class MoveTool extends BaseTool {
             this._movingSegIds = selectedIds;
             this._anchorSegId  = hitId;
 
-            // Offset = cursor relative to anchor segment's start point
+            // Offset = cursor relative to anchor segment's start point (or center for circles)
             const anchorSeg = this._findSeg(hitId);
             if (anchorSeg) {
+                const anchorRef =
+                    anchorSeg.data.center && !anchorSeg.data.start
+                        ? anchorSeg.data.center                              // circle
+                    : anchorSeg.data.cx !== undefined
+                        ? { x: anchorSeg.data.cx, y: anchorSeg.data.cy }    // ellipse
+                    : anchorSeg.data.x !== undefined && !anchorSeg.data.start
+                        ? { x: anchorSeg.data.x, y: anchorSeg.data.y }      // rect
+                        : anchorSeg.data.start;                              // line / arc
                 this._moveOffset = {
-                    dx: pos.x - anchorSeg.data.start.x,
-                    dy: pos.y - anchorSeg.data.start.y,
+                    dx: pos.x - anchorRef.x,
+                    dy: pos.y - anchorRef.y,
                 };
             }
 
@@ -255,10 +263,15 @@ export default class MoveTool extends BaseTool {
     }
 
     onPointerMove(pos, e) {
-        // ── Arc pt3 following ────────────────────────────────────────────────────
+        // ── Arc/circle pt3 following ───────────────────────────────────────────────
         if (this._mode === "moving-pt3" && this._movingPt3) {
             const rawPos = e ? this.ctx.canvas.screenToSVG(e) : pos;
-            this.ctx.canvas.updateArcFromPt3(this._movingPt3.segId, rawPos);
+            const _pt3Seg = this._findSeg(this._movingPt3.segId);
+            if (_pt3Seg?.type === 'circle') {
+                this.ctx.canvas.updateCircleFromPt3(this._movingPt3.segId, rawPos);
+            } else {
+                this.ctx.canvas.updateArcFromPt3(this._movingPt3.segId, rawPos);
+            }
             if (e) this._positionArcPopup(e);
             // Update the radius input live, but only if the user is not typing in it.
             if (this._arcPopup && !this._inputFocused) {
@@ -276,28 +289,47 @@ export default class MoveTool extends BaseTool {
             const anchorOrigin = this._movingOrigins.get(this._anchorSegId);
             if (!anchorOrigin) return;
 
-            // Compute delta from anchor origin
-            const newStartX = pos.x - this._moveOffset.dx;
-            const newStartY = pos.y - this._moveOffset.dy;
-            const dx = newStartX - anchorOrigin.start.x;
-            const dy = newStartY - anchorOrigin.start.y;
+            // Compute delta from anchor origin (circles use center; lines/arcs use start).
+            const anchorRef = anchorOrigin.center && !anchorOrigin.start
+                ? anchorOrigin.center
+                : anchorOrigin.start;
+            const newRefX = pos.x - this._moveOffset.dx;
+            const newRefY = pos.y - this._moveOffset.dy;
+            const dx = newRefX - anchorRef.x;
+            const dy = newRefY - anchorRef.y;
 
             // Batch-update all moving segments
             const updates = [];
             for (const id of this._movingSegIds) {
                 const origin = this._movingOrigins.get(id);
                 if (!origin) continue;
-                const newData = {
-                    ...origin,
-                    start: { x: origin.start.x + dx, y: origin.start.y + dy },
-                    end:   { x: origin.end.x   + dx, y: origin.end.y   + dy },
-                };
-                // Translate arc center and pt3 control handle.
-                if (origin.center) {
-                    newData.center = { x: origin.center.x + dx, y: origin.center.y + dy };
-                }
-                if (origin.pt3) {
-                    newData.pt3 = { x: origin.pt3.x + dx, y: origin.pt3.y + dy };
+                let newData;
+                if (origin.center !== undefined && origin.start === undefined) {
+                    // Circle: translate center (and pt3)
+                    newData = {
+                        ...origin,
+                        center: { x: origin.center.x + dx, y: origin.center.y + dy },
+                        ...(origin.pt3 && { pt3: { x: origin.pt3.x + dx, y: origin.pt3.y + dy } }),
+                    };
+                } else if (origin.cx !== undefined) {
+                    // Ellipse: translate cx/cy
+                    newData = { ...origin, cx: origin.cx + dx, cy: origin.cy + dy };
+                } else if (origin.x !== undefined && origin.start === undefined) {
+                    // Rect: translate x/y
+                    newData = { ...origin, x: origin.x + dx, y: origin.y + dy };
+                } else {
+                    newData = {
+                        ...origin,
+                        start: { x: origin.start.x + dx, y: origin.start.y + dy },
+                        end:   { x: origin.end.x   + dx, y: origin.end.y   + dy },
+                    };
+                    // Translate arc center and pt3 control handle.
+                    if (origin.center) {
+                        newData.center = { x: origin.center.x + dx, y: origin.center.y + dy };
+                    }
+                    if (origin.pt3) {
+                        newData.pt3 = { x: origin.pt3.x + dx, y: origin.pt3.y + dy };
+                    }
                 }
                 updates.push({ id, changes: { data: newData } });
             }
@@ -602,23 +634,44 @@ export default class MoveTool extends BaseTool {
         const num = parseFloat(raw);
         if (!isNaN(num) && num > 0) {
             const seg = this._findSeg(segId);
-            if (seg) {
-                const chord = Math.hypot(seg.data.end.x - seg.data.start.x, seg.data.end.y - seg.data.start.y);
-                if (num * 2 < chord - 1e-6) { showError(`Min: ${(chord / 2).toFixed(3)}`); return; }
+            if (seg?.type === 'circle') {
+                this.ctx.canvas.updateCircleRadius(segId, num);
+            } else {
+                if (seg) {
+                    const chord = Math.hypot(seg.data.end.x - seg.data.start.x, seg.data.end.y - seg.data.start.y);
+                    if (num * 2 < chord - 1e-6) { showError(`Min: ${(chord / 2).toFixed(3)}`); return; }
+                }
+                this.ctx.canvas.updateArcRadius(segId, num); // also clears radiusExpr
             }
-            this.ctx.canvas.updateArcRadius(segId, num); // also clears radiusExpr
         } else {
             // Accept both bare "d" and "{d}" format; normalise to "{d}" for export.
             const varMatch = raw.match(/^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/) ??
                              (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(raw) ? [null, raw] : null);
             if (varMatch) {
-                const radiusExpr = `{${varMatch[1]}}`;
+                const varName    = varMatch[1];
+                const radiusExpr = `{${varName}}`;
                 const seg = this._findSeg(segId);
                 if (seg) {
-                    this.ctx.state.updateSegments([{
-                        id: segId,
-                        changes: { data: { ...seg.data, radiusExpr } },
-                    }]);
+                    if (seg.type === 'circle') {
+                        // Resolve variable so the circle visually resizes, then re-apply expr.
+                        const resolved = this.ctx.state.variableValues?.[varName];
+                        if (resolved != null && !isNaN(Number(resolved))) {
+                            this.ctx.canvas.updateCircleRadius(segId, Number(resolved));
+                            // updateCircleRadius drops radiusExpr — restore it.
+                            const updated = this._findSeg(segId);
+                            if (updated) {
+                                this.ctx.state.updateSegments([{ id: segId, changes: { data: { ...updated.data, radiusExpr } } }]);
+                            }
+                        } else {
+                            // Variable not yet defined — store expression only.
+                            this.ctx.state.updateSegments([{ id: segId, changes: { data: { ...seg.data, radiusExpr } } }]);
+                        }
+                    } else {
+                        this.ctx.state.updateSegments([{
+                            id: segId,
+                            changes: { data: { ...seg.data, radiusExpr } },
+                        }]);
+                    }
                 }
             } else {
                 showError(raw.length === 0 ? "Enter a number or {variable}" : "Invalid value — use a number or {variable}");
