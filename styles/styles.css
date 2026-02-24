@@ -1190,6 +1190,7 @@ html {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 /* Profile path section - outside form, after add-field-btn */
@@ -1526,6 +1527,61 @@ html {
   cursor: pointer;
 }
 
+/* ── Arc selection overlay ────────────────────────────────────────────────── */
+
+/* Dashed guide line from arc center → pt3 control handle */
+.editor-arc-radius-line {
+  stroke: hsl(var(--muted-foreground) / 0.5);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Small dot at the geometric center of a selected arc */
+.editor-arc-center {
+  fill: hsl(var(--muted-foreground) / 0.55);
+  stroke: none;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Draggable midpoint handle on selected arcs (orange/accent) */
+.editor-arc-handle {
+  fill: hsl(30 100% 55%);       /* warm amber */
+  stroke: hsl(0 100% 55%);      /* red outline for visibility */
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  cursor: crosshair;
+}
+
+.editor-arc-handle-hover {
+  fill: hsl(30 100% 70%);
+  r: 0.09;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Error hint text inside the arc radius popup */
+.arc-radius-hint {
+  display: block;
+  font-size: 10px;
+  color: hsl(0 80% 62%);
+  margin-top: 2px;
+  min-height: 13px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Radius label (arc2pt only) */
+.editor-arc-radius-label {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.07px;      /* in SVG user-space units */
+  fill: hsl(30 100% 45%);
+  text-anchor: middle;
+  dominant-baseline: auto;
+  vector-effect: non-scaling-stroke;
+  user-select: none;
+  pointer-events: none;
+}
+
 /* ===== PROFILE PATH EDITOR ===== */
 .profile-path-row {
   grid-template-columns: 1fr !important;
@@ -1540,6 +1596,7 @@ html {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .profile-path-header {
@@ -1555,7 +1612,7 @@ html {
   gap: 4px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  max-width: 100%;
+  min-width: 0;
 }
 
 .path-editor-lines {
@@ -1580,6 +1637,7 @@ html {
   border-radius: 3px;
   transition: background-color 0.15s;
   min-height: 22px;
+  min-width: max-content;
   flex-wrap: nowrap;
   user-select: none;
 }

@@ -2,6 +2,72 @@ import LoggerFactory from "../core/LoggerFactory.js";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/** Arc geometry midpoint via hidden SVG path (uses the same helper as hit-test). */
+function _computeArcMidpoint({ start, end, radius, largeArc, sweep }) {
+    _ensureArcHitHelper();
+    const d = `M ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArc} ${sweep} ${end.x} ${end.y}`;
+    _arcHitPath.setAttribute("d", d);
+    _arcHitPath.setAttribute("stroke-width", "0");
+    try {
+        const len = _arcHitPath.getTotalLength();
+        if (len > 0) {
+            const pt = _arcHitPath.getPointAtLength(len / 2);
+            return { x: pt.x, y: pt.y };
+        }
+    } catch (_) { /* fallthrough */ }
+    return { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+}
+
+/**
+ * Append an arc control handle (the draggable midpoint circle) to the group.
+ * @param {SVGGElement} g
+ * @param {number} cx
+ * @param {number} cy
+ * @param {string} pointKey  stored as data-point-key so hitTestPoint + hover work
+ */
+function _appendArcHandle(g, cx, cy, pointKey) {
+    const c = document.createElementNS(SVG_NS, "circle");
+    c.setAttribute("cx", cx);
+    c.setAttribute("cy", cy);
+    c.setAttribute("r", "0.06");
+    c.classList.add("editor-arc-handle");
+    c.setAttribute("data-point-key", pointKey);
+    c.setAttribute("pointer-events", "none");
+    g.appendChild(c);
+}
+
+/** Small gray center dot for selected arcs. */
+function _appendArcCenter(g, cx, cy) {
+    const c = document.createElementNS(SVG_NS, "circle");
+    c.setAttribute("cx", cx);
+    c.setAttribute("cy", cy);
+    c.setAttribute("r", "0.035");
+    c.classList.add("editor-arc-center");
+    c.setAttribute("pointer-events", "none");
+    g.appendChild(c);
+}
+
+/** Dashed radius guide line from arc center to the control handle. */
+function _appendArcRadiusLine(g, x1, y1, x2, y2) {
+    const line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", x1); line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+    line.classList.add("editor-arc-radius-line");
+    line.setAttribute("pointer-events", "none");
+    g.appendChild(line);
+}
+
+/** Radius label text (for arc2pt only). */
+function _appendArcRadiusLabel(g, x, y, radius) {
+    const txt = document.createElementNS(SVG_NS, "text");
+    txt.setAttribute("x", x);
+    txt.setAttribute("y", y);
+    txt.classList.add("editor-arc-radius-label");
+    txt.textContent = `R ${radius.toFixed(3)}`;
+    txt.setAttribute("pointer-events", "none");
+    g.appendChild(txt);
+}
+
 /** @param {SVGGElement} g @param {number} cx @param {number} cy @param {boolean} selected @param {boolean} [mirror] @param {string} [pointKey] */
 function _appendEndpoint(g, cx, cy, selected, mirror = false, pointKey = "") {
     const c = document.createElementNS(SVG_NS, "circle");
@@ -101,6 +167,7 @@ function _pointToArcDist(p, { start, end, radius, largeArc, sweep }, toleranceUn
 }
 
 import SnapManager from "./snaps/SnapManager.js";
+import { arc2ptData, circumcenter, arcFlagsViaPoint } from "./tools/ArcTool.js";
 
 const log = LoggerFactory.createLogger("EditorCanvas");
 
@@ -347,6 +414,31 @@ export default class EditorCanvas {
             _appendEndpoint(g, start.x, start.y, selected, false, "start");
             _appendEndpoint(g, end.x,   end.y,   selected, false, "end");
 
+            // ── Arc control handle ──────────────────────────────────────────
+            // Only render when the arc is selected and its construction mode
+            // is known (arcMode is set when drawn by ArcTool). The handle lets
+            // the user drag the arc's midpoint to reshape it.
+            if (selected && seg.data.arcMode) {
+                const { center } = seg.data;
+                // Use stored pt3 if available; compute the geometric midpoint otherwise
+                // (needed for arcs imported from existing paths that lack pt3).
+                const pt3 = seg.data.pt3 ?? _computeArcMidpoint(seg.data);
+
+                // Construction-style visuals: two dashed radius lines
+                // center → start and center → end, matching the ghost drawn
+                // while the arc is being placed.
+                for (const pt of [start, end]) {
+                    const dash = document.createElementNS(SVG_NS, "line");
+                    dash.setAttribute("x1", center.x); dash.setAttribute("y1", center.y);
+                    dash.setAttribute("x2", pt.x);     dash.setAttribute("y2", pt.y);
+                    dash.classList.add("editor-ghost-radius");
+                    dash.setAttribute("pointer-events", "none");
+                    g.appendChild(dash);
+                }
+                _appendArcCenter(g, center.x, center.y);
+                _appendArcHandle(g, pt3.x, pt3.y, "pt3");
+            }
+
             return g;
         }
 
@@ -415,8 +507,86 @@ export default class EditorCanvas {
                     }
                 }
             }
+
+            // Arc control handle (pt3) — only hit-testable while the arc is
+            // selected so the handle is visible in the rendered overlay.
+            if (seg.type === "arc" && seg.data.arcMode && seg.selected) {
+                const pt3 = seg.data.pt3 ?? _computeArcMidpoint(seg.data);
+                const d = Math.hypot(point.x - pt3.x, point.y - pt3.y);
+                if (d <= tol && d < bestDist) {
+                    bestDist = d;
+                    bestRef  = { segId: seg.id, pointKey: "pt3" };
+                }
+            }
         }
         return bestRef;
+    }
+
+    // ─── Arc control-handle update ───────────────────────────────────────────
+
+    /**
+     * Recalculate an arc segment when the user drags its pt3 control handle.
+     *
+     * - **arc3pt**: re-runs the circumcenter calculation through start, end, newPos.
+     * - **arc2pt**: re-runs arc2ptData with the stored radius; newPos acts as the
+     *               cursor-side hint, changing largeArc/sweep and updating pt3.
+     *
+     * Calls `state.updateSegments` so the canvas re-renders automatically.
+     *
+     * @param {string}               segId
+     * @param {{x:number,y:number}}  newPos  SVG-space position of the dragged handle
+     */
+    updateArcFromPt3(segId, newPos) {
+        const seg = this.state.segments.find(s => s.id === segId);
+        if (!seg || seg.type !== "arc" || !seg.data.arcMode) return;
+
+        const { start, end } = seg.data;
+        // Always use circumcenter so the handle moves freely regardless of
+        // whether the arc was originally drawn as arc2pt or arc3pt.
+        const c = circumcenter(start, end, newPos);
+        if (!c) return; // collinear — skip
+        const flags = arcFlagsViaPoint(start, end, newPos, c.cx, c.cy);
+        const newData = {
+            ...seg.data,
+            center:     { x: c.cx, y: c.cy },
+            radius:     c.r,
+            ...flags,
+            pt3:        { ...newPos },
+            arcMode:    "arc3pt",
+            radiusExpr: undefined, // radius changed — drop any formula token
+        };
+        this.state.updateSegments([{ id: segId, changes: { data: newData } }]);
+    }
+
+    /**
+     * Recalculate an arc2pt segment with a new radius while keeping the arc
+     * on the same side (pt3 is used as the side hint).
+     * @param {string} segId
+     * @param {number} newRadius
+     */
+    updateArcRadius(segId, newRadius) {
+        const seg = this.state.segments.find(s => s.id === segId);
+        if (!seg || seg.type !== "arc" || !seg.data.arcMode) return;
+
+        const { start, end } = seg.data;
+        const sideHint = seg.data.pt3 ?? _computeArcMidpoint(seg.data);
+        const result = arc2ptData(start, end, newRadius, sideHint);
+        if (!result) return;
+
+        // Project the sideHint onto the new circle so pt3 reflects the updated radius.
+        const { center } = result;
+        const dcLen = Math.hypot(sideHint.x - center.x, sideHint.y - center.y);
+        const newPt3 = dcLen > 1e-9
+            ? { x: center.x + newRadius * (sideHint.x - center.x) / dcLen,
+                y: center.y + newRadius * (sideHint.y - center.y) / dcLen }
+            : _computeArcMidpoint({ ...result, arcMode: "arc2pt" });
+
+        // Clear any stored variable expression: user explicitly set a numeric radius.
+        const { radiusExpr: _dropped, ...restData } = seg.data;
+        this.state.updateSegments([{
+            id: segId,
+            changes: { data: { ...restData, ...result, pt3: newPt3, arcMode: "arc2pt" } },
+        }]);
     }
 
     // ─── Hover helpers ───────────────────────────────────────────────────────
@@ -447,6 +617,12 @@ export default class EditorCanvas {
         const circle = layer.querySelector(
             `[data-seg-id="${ref.segId}"] [data-point-key="${ref.pointKey}"]`
         );
-        if (circle) circle.classList.toggle("editor-endpoint-hover", active);
+        if (circle) {
+            if (ref.pointKey === "pt3") {
+                circle.classList.toggle("editor-arc-handle-hover", active);
+            } else {
+                circle.classList.toggle("editor-endpoint-hover", active);
+            }
+        }
     }
 }

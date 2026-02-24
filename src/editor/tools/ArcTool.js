@@ -13,7 +13,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @param {{x:number,y:number}} p3
  * @returns {{ cx:number, cy:number, r:number }|null} null if points are collinear
  */
-function circumcenter(p1, p2, p3) {
+export function circumcenter(p1, p2, p3) {
     const ax = p2.x - p1.x, ay = p2.y - p1.y;
     const bx = p3.x - p1.x, by = p3.y - p1.y;
     const D = 2 * (ax * by - ay * bx);
@@ -59,7 +59,7 @@ export function arcCenterFromEndpoints(pt1, pt2, r, largeArc, sweep) {
  * @param {number} cy  circle center Y
  * @returns {{ largeArc: 0|1, sweep: 0|1 }}
  */
-function arcFlagsViaPoint(pt1, pt2, ptThrough, cx, cy) {
+export function arcFlagsViaPoint(pt1, pt2, ptThrough, cx, cy) {
     const a1 = Math.atan2(pt1.y - cy, pt1.x - cx);
     const a2 = Math.atan2(pt2.y - cy, pt2.x - cx);
     const a3 = Math.atan2(ptThrough.y - cy, ptThrough.x - cx);
@@ -88,7 +88,7 @@ function arcFlagsViaPoint(pt1, pt2, ptThrough, cx, cy) {
  * @param {{x:number,y:number}} cursorPos  hint for which side
  * @returns {{ start, end, center, radius, largeArc:0|1, sweep:0|1 }|null}
  */
-function arc2ptData(pt1, pt2, radius, cursorPos) {
+export function arc2ptData(pt1, pt2, radius, cursorPos) {
     const dx   = pt2.x - pt1.x, dy = pt2.y - pt1.y;
     const dist = Math.hypot(dx, dy);
     if (dist < 1e-9 || radius * 2 < dist - 1e-6) return null;
@@ -200,50 +200,48 @@ function buildLineGhost(pt1, pt2) {
 // ─── ArcTool ─────────────────────────────────────────────────────────────────
 
 /**
- * ArcTool — draw circular arc segments in two modes:
+ * ArcTool — draw circular arc segments via three-point placement, with an
+ * optional typed-radius shortcut.
  *
- * **arc3pt** (default / LMB on toolbar button):
+ * **Drawing flow:**
  * 1. Click → P1
- * 2. Click → P2 (ghost: line P1→cursor)
- * 3. Move  → live arc through P1, P2, cursor (with center dot + radius lines)
- * 4. Click → commit `arc` segment through P1, P2, P3
+ * 2. Click → P2  (ghost: line P1→cursor; radius popup appears, not focused)
+ * 3. Move  → live arc through P1, P2, cursor; popup shows current radius.
+ * 4. Click → commit arc (circumcenter through P1, P2, cursor).
  *
- * **arc2pt** (RMB on toolbar button):
- * 1. Click → P1
- * 2. Click → P2 (ghost: line P1→cursor)
- * 3. Floating input appears near cursor — type radius + Enter
- * 4. Move  → live arc preview on either side of the chord; arc follows cursor side
- * 5. Click → commit `arc` segment (minor arc, cursor-chosen side)
+ * **Radius-input shortcut (phase 3):**
+ * - **Tab**          — focus the radius input and select its text.
+ * - **Tab** (again)  — blur input, return to cursor-following mode.
+ * - **Any digit/.**  — auto-fill input, focus it.
+ * - **Enter** (cursor-following) — commit arc via cursor as P3.
+ * - **Enter** (input focused)    — commit arc with typed radius; cursor sets side.
+ * - **Escape**       — cancel and reset.
  *
- * Both modes produce: `{ type:"arc", data:{ start, end, center, radius, largeArc, sweep } }`
- * where coordinates and `sweep` are stored in SVG Y-down editor space.
- * `exportPathWithMap()` in EditorStateManager negates Y and flips sweep when serialising.
+ * Produced segment:
+ * `{ type:"arc", data:{ start, end, center, radius, largeArc, sweep, arcMode, pt3 } }`
  */
 export default class ArcTool extends BaseTool {
-    /**
-     * @param {'arc3pt'|'arc2pt'} mode
-     */
-    constructor(mode = "arc3pt") {
+    constructor() {
         super();
-        this.id    = mode;
-        this._mode = mode;
+        this.id = "arc3pt";
 
         /**
          * Interaction phases:
          *   0 = idle
-         *   1 = P1 placed, waiting P2
-         *   2 = P2 placed; arc3pt: move→P3; arc2pt: waiting radius input
-         *   3 = [arc2pt only] radius confirmed, move→choose side, click→commit
-         * @private @type {0|1|2|3}
+         *   1 = P1 placed, cursor shows line P1→cursor
+         *   2 = P2 placed, cursor follows for P3 (arc ghost + radius popup visible)
+         * @private @type {0|1|2}
          */
         this._phase = 0;
 
         /** @private @type {{x:number,y:number}|null} */ this._pt1       = null;
         /** @private @type {{x:number,y:number}|null} */ this._pt2       = null;
-        /** @private @type {number|null}               */ this._radius    = null;
         /** @private @type {{x:number,y:number}|null} */ this._cursorPos = null;
 
-        /** @private @type {HTMLElement|null} — floating radius input popup */
+        /** @private — true while the radius input has keyboard focus */
+        this._inputFocused = false;
+
+        /** @private @type {HTMLElement|null} — floating radius popup */
         this._popup = null;
     }
 
@@ -252,14 +250,14 @@ export default class ArcTool extends BaseTool {
     activate(ctx) {
         super.activate(ctx);
         this._reset();
-        log.debug(`ArcTool(${this._mode}) activated`);
+        log.debug("ArcTool activated");
     }
 
     deactivate() {
         this._removePopup();
-        super.deactivate(); // clears ghost
+        super.deactivate();
         this._phase = 0; this._pt1 = null; this._pt2 = null;
-        this._radius = null; this._cursorPos = null;
+        this._cursorPos = null; this._inputFocused = false;
     }
 
     hasActiveCommand() { return this._phase > 0; }
@@ -267,45 +265,37 @@ export default class ArcTool extends BaseTool {
     // ─── Pointer events ──────────────────────────────────────────────────────
 
     onPointerDown(pos, e) {
-        if (this._mode === "arc3pt") {
-            if      (this._phase === 0) { this._pt1 = pos; this._phase = 1; }
-            else if (this._phase === 1) { this._pt2 = pos; this._phase = 2; }
-            else if (this._phase === 2) { this._commitArc3pt(pos); this._reset(); }
-
-        } else { // arc2pt
-            if      (this._phase === 0) { this._pt1 = pos; this._phase = 1; }
-            else if (this._phase === 1) { this._pt2 = pos; this._phase = 2; this._showPopup(e); }
-            else if (this._phase === 3) { this._commitArc2pt(pos); this._reset(); }
+        if      (this._phase === 0) { this._pt1 = pos; this._phase = 1; }
+        else if (this._phase === 1) { this._pt2 = pos; this._phase = 2; this._showPopup(e); }
+        else if (this._phase === 2) {
+            // Click always commits using the cursor position as P3.
+            this._commitArc3pt(pos);
+            this._reset();
         }
     }
 
     onPointerMove(pos, e) {
         this._cursorPos = pos;
-
-        // Keep popup near the cursor while it is visible
         if (this._popup && e) this._positionPopup(e);
 
         if (this._phase === 1) {
             this.ctx.canvas.setGhost(buildLineGhost(this._pt1, pos));
 
-        } else if (this._mode === "arc3pt" && this._phase === 2) {
+        } else if (this._phase === 2) {
             const c = circumcenter(this._pt1, this._pt2, pos);
             if (c) {
                 const flags = arcFlagsViaPoint(this._pt1, this._pt2, pos, c.cx, c.cy);
                 this.ctx.canvas.setGhost(
                     buildArcGhost(this._pt1, this._pt2, c.r, flags.largeArc, flags.sweep, { x: c.cx, y: c.cy })
                 );
+                // Update radius display while the user is not typing.
+                if (this._popup && !this._inputFocused) {
+                    const inp = this._popup.querySelector("input");
+                    if (inp) inp.value = c.r.toFixed(3);
+                }
             } else {
-                // Collinear: fall back to straight-line ghost
+                // Collinear fallback
                 this.ctx.canvas.setGhost(buildLineGhost(this._pt1, this._pt2));
-            }
-
-        } else if (this._mode === "arc2pt" && this._phase === 3) {
-            const data = arc2ptData(this._pt1, this._pt2, this._radius, pos);
-            if (data) {
-                this.ctx.canvas.setGhost(
-                    buildArcGhost(data.start, data.end, data.radius, data.largeArc, data.sweep, data.center)
-                );
             }
         }
     }
@@ -318,7 +308,42 @@ export default class ArcTool extends BaseTool {
     }
 
     onKeyDown(e) {
-        if (e.key === "Escape" && this._phase > 0) { this._reset(); return true; }
+        if (e.key === "Escape") {
+            if (this._phase > 0) { this._reset(); return true; }
+            return false;
+        }
+        if (this._phase !== 2) return false;
+
+        // Tab: toggle focus between cursor-following and radius input.
+        if (e.key === "Tab") {
+            e.preventDefault();
+            if (!this._inputFocused) {
+                const inp = this._popup?.querySelector("input");
+                if (inp) { inp.focus(); inp.select(); }
+            }
+            // Tab while input is focused is handled inside the input's keydown listener.
+            return true;
+        }
+
+        // Enter while cursor-following: commit arc via cursor position.
+        if (e.key === "Enter" && !this._inputFocused && this._cursorPos) {
+            this._commitArc3pt(this._cursorPos);
+            this._reset();
+            return true;
+        }
+
+        // Typing a digit or decimal: auto-fill input and focus it.
+        if (!this._inputFocused && e.key.length === 1 && /[\d.]/.test(e.key)) {
+            const inp = this._popup?.querySelector("input");
+            if (inp) {
+                inp.value = e.key;
+                inp.focus();
+                inp.setSelectionRange(1, 1);
+                e.preventDefault();
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -332,21 +357,74 @@ export default class ArcTool extends BaseTool {
         this.ctx.state.addSegment({
             type: "arc",
             data: {
-                start: { ...this._pt1 }, end: { ...this._pt2 },
-                center: { x: c.cx, y: c.cy }, radius: c.r,
+                start:   { ...this._pt1 },
+                end:     { ...this._pt2 },
+                center:  { x: c.cx, y: c.cy },
+                radius:  c.r,
                 ...flags,
+                arcMode: "arc3pt",
+                pt3:     { ...pt3 },
             },
         });
         log.debug("ArcTool: committed arc3pt r=", c.r.toFixed(3));
     }
 
-    /** @private */
-    _commitArc2pt(cursorPos) {
-        const pos  = cursorPos ?? this._cursorPos ?? this._pt2;
-        const data = arc2ptData(this._pt1, this._pt2, this._radius, pos);
-        if (!data) { log.warn("ArcTool: radius too small for chord distance"); return; }
-        this.ctx.state.addSegment({ type: "arc", data });
-        log.debug("ArcTool: committed arc2pt r=", this._radius);
+    /**
+     * Commit arc with the radius typed in the popup.
+     * The current cursor position determines which side the arc curves toward.
+     * @private
+     */
+    _commitFromInput() {
+        const inp  = this._popup?.querySelector("input");
+        const hint = this._popup?.querySelector(".arc-radius-hint");
+        const raw  = inp?.value?.trim() ?? "";
+        const dist = Math.hypot(this._pt2.x - this._pt1.x, this._pt2.y - this._pt1.y);
+
+        const showError = (msg) => {
+            if (inp)  { inp.classList.add("arc-radius-error"); setTimeout(() => inp.classList.remove("arc-radius-error"), 2000); }
+            if (hint) hint.textContent = msg;
+        };
+
+        // Accept {varname} or bare varname — resolve to a number via variableValues.
+        const varMatch = raw.match(/^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/) ??
+                         (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(raw) ? [null, raw] : null);
+        const radiusExpr = varMatch ? `{${varMatch[1]}}` : null;
+
+        let val;
+        if (radiusExpr) {
+            const resolved = this.ctx.state.variableValues?.[varMatch[1]];
+            if (resolved == null || isNaN(Number(resolved))) {
+                showError(`Unknown variable — define ${varMatch[1]} in the bit properties`);
+                return;
+            }
+            val = Number(resolved);
+        } else {
+            val = parseFloat(raw);
+            if (isNaN(val) || val <= 0) { showError("Enter a number or {variable}"); return; }
+        }
+
+        if (val * 2 < dist - 1e-6) {
+            showError(`Min: ${(dist / 2).toFixed(3)}`);
+            return;
+        }
+
+        const cursor = this._cursorPos ?? this._pt2;
+        const result = arc2ptData(this._pt1, this._pt2, val, cursor);
+        if (!result) { showError("Radius too small"); return; }
+
+        const { center, radius } = result;
+        const dcLen = Math.hypot(cursor.x - center.x, cursor.y - center.y);
+        const pt3   = dcLen > 1e-9
+            ? { x: center.x + radius * (cursor.x - center.x) / dcLen,
+                y: center.y + radius * (cursor.y - center.y) / dcLen }
+            : { x: center.x + radius, y: center.y };
+
+        this.ctx.state.addSegment({
+            type: "arc",
+            data: { ...result, arcMode: "arc2pt", pt3, ...(radiusExpr && { radiusExpr }) },
+        });
+        log.debug("ArcTool: committed arc (typed radius) r=", val, radiusExpr ?? "");
+        this._reset();
     }
 
     // ─── Floating radius popup ────────────────────────────────────────────────
@@ -354,6 +432,7 @@ export default class ArcTool extends BaseTool {
     /** @private */
     _showPopup(e) {
         this._removePopup();
+        this._inputFocused = false;
 
         const popup = document.createElement("div");
         popup.className = "arc-radius-popup";
@@ -363,33 +442,31 @@ export default class ArcTool extends BaseTool {
         popup.appendChild(label);
 
         const inp = document.createElement("input");
-        inp.type        = "number";
-        inp.step        = "any";
-        inp.min         = "0";
-        inp.placeholder = "radius";
-        inp.className   = "arc-radius-input";
+        inp.type      = "text";
+        inp.inputMode = "decimal";
+        inp.className = "arc-radius-input";
+        // Value is populated dynamically by onPointerMove; start empty.
         popup.appendChild(inp);
+
+        const hint = document.createElement("small");
+        hint.className = "arc-radius-hint";
+        popup.appendChild(hint);
 
         document.body.appendChild(popup);
         this._popup = popup;
         if (e) this._positionPopup(e);
 
-        requestAnimationFrame(() => inp.focus());
+        // Track whether the user has keyboard focus in the input.
+        inp.addEventListener("focus", () => { this._inputFocused = true; inp.select(); });
+        inp.addEventListener("blur",  () => { this._inputFocused = false; });
 
         inp.addEventListener("keydown", (ev) => {
-            ev.stopPropagation(); // prevent toolbar shortcut interception
-            if (ev.key === "Enter") {
-                const val  = parseFloat(inp.value);
-                const dist = Math.hypot(this._pt2.x - this._pt1.x, this._pt2.y - this._pt1.y);
-                if (!isNaN(val) && val * 2 >= dist - 1e-6) {
-                    this._radius = val;
-                    this._phase  = 3;
-                    this._removePopup();
-                } else {
-                    // Visual shake feedback: radius too small
-                    inp.classList.add("arc-radius-error");
-                    setTimeout(() => inp.classList.remove("arc-radius-error"), 400);
-                }
+            ev.stopPropagation();
+            if (ev.key === "Tab") {
+                ev.preventDefault();
+                inp.blur(); // return to cursor-following mode
+            } else if (ev.key === "Enter") {
+                this._commitFromInput();
             } else if (ev.key === "Escape") {
                 this._reset();
             }
@@ -411,7 +488,7 @@ export default class ArcTool extends BaseTool {
     /** @private */
     _reset() {
         this._phase = 0; this._pt1 = null; this._pt2 = null;
-        this._radius = null; this._cursorPos = null;
+        this._cursorPos = null; this._inputFocused = false;
         this._removePopup();
         this.ctx?.canvas.clearGhost();
     }

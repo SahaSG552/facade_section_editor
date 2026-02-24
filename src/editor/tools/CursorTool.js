@@ -5,6 +5,28 @@ const log = LoggerFactory.createLogger("CursorTool");
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/** Epsilon for floating-point coordinate comparisons. */
+const EPS = 1e-6;
+
+/**
+ * Compare two segment data objects geometrically.
+ * Returns true when all numeric geometry fields are equal within EPS.
+ * @param {object} a
+ * @param {object} b
+ * @returns {boolean}
+ */
+function _segDataEqual(a, b) {
+    if (!a || !b) return false;
+    const p = (u, v) => Math.abs(u.x - v.x) < EPS && Math.abs(u.y - v.y) < EPS;
+    if (a.start  && (!b.start  || !p(a.start,  b.start)))  return false;
+    if (a.end    && (!b.end    || !p(a.end,    b.end)))    return false;
+    if (a.center && (!b.center || !p(a.center, b.center))) return false;
+    if (typeof a.radius   === 'number' && Math.abs(a.radius - b.radius)     > EPS) return false;
+    if (typeof a.largeArc === 'number' && a.largeArc !== b.largeArc)               return false;
+    if (typeof a.sweep    === 'number' && a.sweep    !== b.sweep)                   return false;
+    return true;
+}
+
 /** Point-in-AABB test */
 function _ptInRect(p, x1, x2, y1, y2) {
     return p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2;
@@ -62,6 +84,14 @@ export default class CursorTool extends BaseTool {
         this._hoverSegId = null;
         /** @private @type {{segId:string,pointKey:string}|null} */
         this._hoverPoint = null;
+
+        // Arc pt3 handle inline drag
+        /** @private @type {{segId:string, arcMode:string, radius:number}|null} */
+        this._pt3Drag = null;
+        /** @private @type {HTMLElement|null} */
+        this._arcPopup = null;
+        /** @private @type {boolean} — true while radius popup input has keyboard focus */
+        this._inputFocused = false;
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -74,23 +104,74 @@ export default class CursorTool extends BaseTool {
     deactivate() {
         this._clearHover();
         this._endDrag();
+        this._endPt3Drag();
         super.deactivate();
     }
 
-    hasActiveCommand() { return false; }
+    hasActiveCommand() { return this._pt3Drag !== null; }
 
     // ─── Pointer events ─────────────────────────────────────────────────────
 
     onPointerDown(pos, e) {
         if (e.button !== 0) return;
+
+        const rawPos = this.ctx.canvas.screenToSVG(e);
+
+        // ── Arc pt3: if already following, second click → commit ─────────────────
+        if (this._pt3Drag) {
+            // Apply the final cursor position and commit to history.
+            this.ctx.canvas.updateArcFromPt3(this._pt3Drag.segId, rawPos);
+            this._commitPt3();
+            return;
+        }
+
+        // ── Arc pt3 handle: first click → enter following mode ──────────────────
+        const ptHit = this.ctx.canvas.hitTestPoint(rawPos);
+        if (ptHit?.pointKey === "pt3") {
+            const seg = this.ctx.state.segments.find(s => s.id === ptHit.segId);
+            if (seg && seg.data.arcMode) {
+                // Make sure the arc is selected so the handle stays visible.
+                if (!this.ctx.state.selectedIds.has(ptHit.segId)) {
+                    const chainIds = this.ctx.state.getChain(ptHit.segId).map(s => s.id);
+                    this.ctx.state.setSelection(chainIds);
+                }
+                this._pt3Drag = {
+                    segId:  ptHit.segId,
+                    arcMode: seg.data.arcMode,
+                    radius:  seg.data.radius,
+                    // Capture origin for Escape‐restore (no history entry yet).
+                    origin:  JSON.parse(JSON.stringify(seg.data)),
+                };
+                // Show radius popup for all arc modes.
+                if (seg.data.arcMode) this._showArcPopup(e, seg);
+                return; // do NOT start box-select
+            }
+        }
+
         this._downClient = { x: e.clientX, y: e.clientY };
         // Use raw (un-snapped) SVG position so the box-selection start is not
         // pulled to a nearby endpoint by the snap manager.
-        this._downSvgPos = this.ctx.canvas.screenToSVG(e);
+        this._downSvgPos = rawPos;
         this._dragging   = false;
     }
 
     onPointerMove(pos, e) {
+        // ── Arc pt3 drag ───────────────────────────────────────────────
+        if (this._pt3Drag) {
+            const rawPos = this.ctx.canvas.screenToSVG(e);
+            this.ctx.canvas.updateArcFromPt3(this._pt3Drag.segId, rawPos);
+            if (this._arcPopup && e) this._positionArcPopup(e);
+            // Update live radius display while the user is not typing.
+            if (this._arcPopup && !this._inputFocused) {
+                const _seg = this.ctx.state.segments.find(s => s.id === this._pt3Drag.segId);
+                if (_seg) {
+                    const _inp = this._arcPopup.querySelector("input");
+                    if (_inp) _inp.value = _seg.data.radius.toFixed(3);
+                }
+            }
+            return;
+        }
+
         if (this._downClient) {
             const dist = Math.hypot(
                 e.clientX - this._downClient.x,
@@ -111,6 +192,10 @@ export default class CursorTool extends BaseTool {
     }
 
     onPointerUp(pos, e) {
+        // In pt3-following mode the commit happens on the NEXT pointerDown (click-pick-click).
+        // Ignore the mouseup that ends the initial picking click.
+        if (this._pt3Drag) return;
+
         if (!this._downSvgPos) return;
         const downSvg = this._downSvgPos;
         const wasDrag = this._dragging;
@@ -148,6 +233,39 @@ export default class CursorTool extends BaseTool {
     }
 
     onKeyDown(e) {
+        if (e.key === "Escape" && this._pt3Drag) {
+            // Restore arc to state before the user clicked the handle (origin captured at pick time).
+            this.ctx.state.updateSegments([{
+                id: this._pt3Drag.segId,
+                changes: { data: this._pt3Drag.origin },
+            }]);
+            this._endPt3Drag();
+            return true;
+        }
+        // Keyboard shortcuts while pt3-following (input NOT focused).
+        if (this._pt3Drag && !this._inputFocused) {
+            if (e.key === "Tab") {
+                e.preventDefault();
+                const inp = this._arcPopup?.querySelector("input");
+                if (inp) { inp.focus(); inp.select(); }
+                return true;
+            }
+            if (e.key === "Enter") {
+                // Commit arc at its current cursor-driven position.
+                this._commitPt3();
+                return true;
+            }
+            if (e.key.length === 1 && /[\d.]/.test(e.key)) {
+                const inp = this._arcPopup?.querySelector("input");
+                if (inp) {
+                    inp.value = e.key;
+                    inp.focus();
+                    inp.setSelectionRange(1, 1);
+                    e.preventDefault();
+                    return true;
+                }
+            }
+        }
         if (e.key === "Delete" || e.key === "Backspace") {
             const ids = [...this.ctx.state.selectedIds];
             if (ids.length > 0) {
@@ -157,7 +275,142 @@ export default class CursorTool extends BaseTool {
         }
         return false;
     }
+    // ─── Arc pt3 handle drag ────────────────────────────────────────────────
 
+    /** @private — commit arc pt3 placement to history and exit following mode. */
+    _commitPt3() {
+        const origin = this._pt3Drag?.origin;
+        const cur    = this.ctx.state.segments.find(s => s.id === this._pt3Drag?.segId)?.data;
+        const changed = !_segDataEqual(origin, cur);
+        if (changed) {
+            this.ctx.state._pushHistory("Edit arc");
+        }
+        this._endPt3Drag();
+    }
+
+    /**
+     * Show the floating radius popup for an arc handle.
+     * Popup starts unfocused (cursor-following mode); Tab focuses it.
+     * @private
+     */
+    _showArcPopup(e, seg) {
+        this._removeArcPopup();
+        this._inputFocused = false;
+        const popup = document.createElement("div");
+        popup.className = "arc-radius-popup";
+
+        const label = document.createElement("span");
+        label.textContent = "R =";
+        popup.appendChild(label);
+
+        const inp = document.createElement("input");
+        inp.type      = "text";
+        inp.inputMode = "decimal";
+        inp.className = "arc-radius-input";
+        // Show stored expression if present, otherwise numeric radius.
+        inp.value     = seg.data.radiusExpr ?? seg.data.radius.toFixed(3);
+        popup.appendChild(inp);
+
+        const hint = document.createElement("small");
+        hint.className = "arc-radius-hint";
+        popup.appendChild(hint);
+
+        document.body.appendChild(popup);
+        this._arcPopup = popup;
+        if (e) this._positionArcPopup(e);
+        // No auto-focus: popup shows live radius while cursor follows.
+        // User presses Tab (or a digit) to enter input mode.
+
+        inp.addEventListener("focus", () => { this._inputFocused = true; inp.select(); });
+        inp.addEventListener("blur",  () => { this._inputFocused = false; });
+
+        inp.addEventListener("keydown", (ev) => {
+            ev.stopPropagation();
+            if (ev.key === "Tab") {
+                ev.preventDefault();
+                inp.blur(); // return to cursor-following mode
+            } else if (ev.key === "Enter") {
+                this._commitFromInput();
+            } else if (ev.key === "Escape") {
+                // Restore arc and exit following mode.
+                if (this._pt3Drag) {
+                    this.ctx.state.updateSegments([{
+                        id: this._pt3Drag.segId,
+                        changes: { data: this._pt3Drag.origin },
+                    }]);
+                }
+                this._endPt3Drag();
+            }
+        });
+    }
+
+    /**
+     * Commit the value typed in the radius popup.
+     * Accepts a positive number (fixed radius) or a variable-name identifier.
+     * @private
+     */
+    _commitFromInput() {
+        const inp   = this._arcPopup?.querySelector("input");
+        const hint  = this._arcPopup?.querySelector(".arc-radius-hint");
+        const raw   = inp?.value?.trim() ?? "";
+        const segId = this._pt3Drag?.segId;
+        if (!segId) return;
+
+        const showError = (msg) => {
+            if (inp)  { inp.classList.add("arc-radius-error"); setTimeout(() => inp.classList.remove("arc-radius-error"), 2000); }
+            if (hint) hint.textContent = msg;
+        };
+
+        const num = parseFloat(raw);
+        if (!isNaN(num) && num > 0) {
+            const seg = this.ctx.state.segments.find(s => s.id === segId);
+            if (seg) {
+                const chord = Math.hypot(seg.data.end.x - seg.data.start.x, seg.data.end.y - seg.data.start.y);
+                if (num * 2 < chord - 1e-6) { showError(`Min: ${(chord / 2).toFixed(3)}`); return; }
+            }
+            this.ctx.canvas.updateArcRadius(segId, num); // also clears radiusExpr
+        } else {
+            // Accept both bare "d" and "{d}" format; normalise to "{d}" for export.
+            const varMatch = raw.match(/^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/) ??
+                             (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(raw) ? [null, raw] : null);
+            if (varMatch) {
+                const radiusExpr = `{${varMatch[1]}}`;
+                const seg = this.ctx.state.segments.find(s => s.id === segId);
+                if (seg) {
+                    this.ctx.state.updateSegments([{
+                        id: segId,
+                        changes: { data: { ...seg.data, radiusExpr } },
+                    }]);
+                }
+            } else {
+                showError(raw.length === 0 ? "Enter a number or {variable}" : "Invalid value — use a number or {variable}");
+                return;
+            }
+        }
+
+        this._removeArcPopup();
+        this._inputFocused = false;
+        this._commitPt3();
+    }
+
+    /** @private */
+    _positionArcPopup(e) {
+        if (!this._arcPopup) return;
+        this._arcPopup.style.left = (e.clientX + 14) + "px";
+        this._arcPopup.style.top  = (e.clientY + 14) + "px";
+    }
+
+    /** @private */
+    _removeArcPopup() {
+        if (this._arcPopup) { this._arcPopup.remove(); this._arcPopup = null; }
+    }
+
+    /** @private */
+    _endPt3Drag() {
+        this._pt3Drag = null;
+        this._inputFocused = false;
+        this._removeArcPopup();
+    }
     // ─── Box selection ──────────────────────────────────────────────────────
 
     /** @private */

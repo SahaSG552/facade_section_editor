@@ -28,7 +28,7 @@ const TOOL_DEFINITIONS = [
     { id: "cursor",   label: "Select",                         icon: "↖", group: "draw", key: "s" },
     { id: "move",     label: "Move",                           icon: "✥", group: "draw", key: "m" },
     { id: "line",     label: "Line",                           icon: "╱", group: "draw", key: "l" },
-    { id: "arc",      label: "Arc (LMB: 3pt | RMB: 2pt+R)",   icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt", rmbTool: "arc2pt" },
+    { id: "arc",      label: "Arc (3pt + R)",                   icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt" },
     { id: "circle2pt",label: "Circle 2pt",                     icon: "○", group: "draw", key: "c" },
     { id: "circle3pt",label: "Circle 3pt",                     icon: "◎", group: "draw" },
     { id: "rect2pt",  label: "Rect 2pt",                       icon: "▭", group: "draw", key: "r" },
@@ -246,18 +246,20 @@ export default class EditorToolbar {
             const toolId = btn.dataset.tool;
             const def    = TOOL_DEFINITIONS.find(t => t.id === toolId);
 
-            if (def?.lmbTool && def?.rmbTool) {
-                // Dual-mode button: LMB fires lmbTool, RMB fires rmbTool.
-                // Register button under BOTH tool IDs so setActiveTool() highlights it
-                // for either active tool.
+            if (def?.lmbTool) {
+                // Button has an explicit lmbTool (and optionally rmbTool).
+                // Register under lmbTool (and rmbTool if present) so setActiveTool()
+                // highlights this button for either active tool.
                 this._buttons.set(def.lmbTool, btn);
-                this._buttons.set(def.rmbTool, btn);
                 btn.addEventListener("click", () => this.onToolChange?.(def.lmbTool));
-                btn.addEventListener("contextmenu", (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.onToolChange?.(def.rmbTool);
-                });
+                if (def.rmbTool) {
+                    this._buttons.set(def.rmbTool, btn);
+                    btn.addEventListener("contextmenu", (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        this.onToolChange?.(def.rmbTool);
+                    });
+                }
             } else {
                 this._buttons.set(toolId, btn);
                 btn.addEventListener("click", () => {

@@ -1,33 +1,7 @@
 import LoggerFactory from "../core/LoggerFactory.js";
+import { arcCenterFromEndpoints } from "./tools/ArcTool.js";
 
 const log = LoggerFactory.createLogger("EditorStateManager");
-
-/**
- * Compute circle center from two endpoint points, radius, and SVG arc flags.
- * Works in any consistent coordinate space (Y-up or Y-down).
- * Uses the standard SVG endpoint-to-center arc parameterisation.
- * @param {{x:number,y:number}} pt1
- * @param {{x:number,y:number}} pt2
- * @param {number} r
- * @param {0|1} largeArc
- * @param {0|1} sweep
- * @returns {{x:number,y:number}|null}
- */
-function arcCenterFromEndpoints(pt1, pt2, r, largeArc, sweep) {
-    const dx = (pt1.x - pt2.x) / 2;
-    const dy = (pt1.y - pt2.y) / 2;
-    const d2 = dx * dx + dy * dy;
-    const d  = Math.sqrt(d2);
-    if (d < 1e-9) return null;
-    const h    = Math.sqrt(Math.max(0, r * r - d2));
-    const sign = (largeArc === sweep) ? -1 : 1;
-    const nx   = -dy / d;
-    const ny   =  dx / d;
-    return {
-        x: (pt1.x + pt2.x) / 2 + sign * h * nx,
-        y: (pt1.y + pt2.y) / 2 + sign * h * ny,
-    };
-}
 
 /**
  * @typedef {"cursor"|"line"|"rect2pt"|"rect3pt"|"arc2pt"|"arc3pt"|"circle2pt"|"circle3pt"} DrawTool
@@ -80,8 +54,9 @@ export default class EditorStateManager {
      * @param {object}  options
      * @param {string}  [options.profilePath=""] - Initial SVG path string to pre-populate segments
      * @param {number}  [options.maxHistory=50]  - Maximum number of undo steps to keep
+     * @param {Record<string,number>} [options.variableValues={}] - Variable values for parametric arc radii
      */
-    constructor({ profilePath = "", maxHistory = 50 } = {}) {
+    constructor({ profilePath = "", maxHistory = 50, variableValues = {} } = {}) {
         /** @type {Tool} */
         this.currentTool = "cursor";
 
@@ -112,6 +87,14 @@ export default class EditorStateManager {
 
         /** @type {number} */
         this._maxHistory = maxHistory;
+
+        /**
+         * Variable values for parametric arc radii (e.g. { d: 25.4 }).
+         * Set once at construction; update via `state.variableValues = { … }` before
+         * calling `_importPath` if you need live formula resolution.
+         * @type {Record<string,number>}
+         */
+        this.variableValues = variableValues;
 
         /** @type {number} — monotonically increasing segment ID counter */
         this._nextSegmentId = 1;
@@ -545,23 +528,35 @@ export default class EditorStateManager {
                 cx = subX; cy = subY;
             } else if (upper === "A") {
                 // A rx ry x-rotation large-arc-flag sweep-flag x y
+                // rx and ry may be {varname} tokens for parametric (formula) radii.
                 // Stored in bit-space (Y-up); the Y-negation + sweep-flip happen
                 // in the segments.map() below, consistent with line segment handling.
-                for (let i = 0; i + 6 < args.length; i += 7) {
-                    const rx = args[i], ry = args[i + 1];
-                    const largeArc = Math.round(args[i + 3]);
-                    const sweepBit = Math.round(args[i + 4]);
-                    let ex = args[i + 5], ey = args[i + 6];
+                const VAR_RE = /^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/;
+                // Tokenise preserving {varname} tokens alongside numeric values.
+                const rawTokens = m[2].match(/\{[a-zA-Z_][a-zA-Z0-9_]*\}|[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g) ?? [];
+                for (let i = 0; i + 6 < rawTokens.length; i += 7) {
+                    const rxTok = rawTokens[i], ryTok = rawTokens[i + 1];
+                    const largeArc = Math.round(Number(rawTokens[i + 3]));
+                    const sweepBit = Math.round(Number(rawTokens[i + 4]));
+                    let ex = Number(rawTokens[i + 5]), ey = Number(rawTokens[i + 6]);
                     if (rel) { ex += cx; ey += cy; }
-                    const r = (rx + ry) / 2;  // treat ellipse as circle with avg radius
+
+                    let r, radiusExpr = null;
+                    const rxVar = VAR_RE.exec(rxTok);
+                    if (rxVar) {
+                        radiusExpr = rxTok;                         // "{d}"
+                        r = this.variableValues[rxVar[1]] ?? 1;     // resolve or fallback
+                    } else {
+                        r = (Number(rxTok) + Number(ryTok)) / 2;   // treat ellipse as circle
+                    }
+
                     const startBit = { x: cx, y: cy };
                     const endBit   = { x: ex, y: ey };
                     const centerBit = arcCenterFromEndpoints(startBit, endBit, r, largeArc, sweepBit);
                     if (centerBit) {
-                        segments.push({
-                            type: 'arc', contourId,
-                            data: { start: startBit, end: endBit, center: centerBit, radius: r, largeArc, sweep: sweepBit },
-                        });
+                        const segData = { start: startBit, end: endBit, center: centerBit, radius: r, largeArc, sweep: sweepBit };
+                        if (radiusExpr) segData.radiusExpr = radiusExpr;
+                        segments.push({ type: 'arc', contourId, data: segData });
                     }
                     cx = ex; cy = ey;
                 }
@@ -592,6 +587,12 @@ export default class EditorStateManager {
                         largeArc: s.data.largeArc,
                         // Y-flip reverses winding direction, so flip sweep flag.
                         sweep:    1 - s.data.sweep,
+                        // Tag all imported arcs so the control handle is visible
+                        // when selected. pt3 will be computed from arc midpoint
+                        // on first render if not present.
+                        arcMode: "arc2pt",
+                        // Preserve variable expression for parametric radii.
+                        ...(s.data.radiusExpr && { radiusExpr: s.data.radiusExpr }),
                     },
                 };
             }
@@ -657,9 +658,11 @@ export default class EditorStateManager {
             }
 
             if (seg.type === "arc") {
-                const { radius, largeArc, sweep } = seg.data;
-                // Y is negated (bit-space is Y-up); negating Y reverses winding, so flip sweep.
-                parts.push(`A ${r(radius)} ${r(radius)} 0 ${largeArc} ${1 - sweep} ${r(end.x)} ${r(-end.y)}`);
+                const { radius, largeArc, sweep, radiusExpr } = seg.data;
+                // Use the stored variable expression when present; otherwise emit the
+                // numeric radius.  Y is negated (bit-space Y-up), so sweep is flipped.
+                const rxStr = radiusExpr ?? r(radius);
+                parts.push(`A ${rxStr} ${rxStr} 0 ${largeArc} ${1 - sweep} ${r(end.x)} ${r(-end.y)}`);
             } else {
                 // line: choose command based on cmdHint + current geometry
                 const hint = seg.cmdHint;

@@ -11,6 +11,39 @@ import ArcTool from "./tools/ArcTool.js";
 const log = LoggerFactory.createLogger("ProfileEditor");
 
 /**
+ * Merge formula tokens from a formula-containing path into a freshly exported
+ * numeric path.  At each token position: if the formula path has a `{varname}`
+ * token AND the variable's resolved value equals the numeric token (within 1e-4),
+ * the formula token is kept; otherwise the numeric token is used.
+ *
+ * If the two paths have different token counts (the segment structure changed),
+ * numericPath is returned as-is.
+ *
+ * @param {string} numericPath        - Path with all numeric values
+ * @param {string} formulaPath        - Original path that may contain {varname} tokens
+ * @param {Record<string,number>} vars - Variable name → resolved value map
+ * @returns {string}
+ */
+function _mergeFormulaPath(numericPath, formulaPath, vars) {
+    if (!formulaPath) return numericPath;
+    // Tokenise: SVG command letters and numeric/formula values treated as separate tokens.
+    const re = /[MmLlHhVvAaZzCcSsQqTt]|\{[a-zA-Z_][a-zA-Z0-9_]*\}|[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g;
+    const numTok = numericPath.match(re) ?? [];
+    const fmtTok = formulaPath.match(re) ?? [];
+    if (numTok.length !== fmtTok.length) return numericPath; // structure changed
+    const VAR_RE = /^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/;
+    return numTok.map((n, i) => {
+        const f = fmtTok[i];
+        const vm = VAR_RE.exec(f);
+        if (vm) {
+            const resolved = Number(vars[vm[1]]);
+            if (!isNaN(resolved) && Math.abs(resolved - Number(n)) < 1e-4) return f;
+        }
+        return n;
+    }).join(' ');
+}
+
+/**
  * ProfileEditor — top-level orchestrator for the profile cross-section editor.
  *
  * Manages the full lifecycle of edit mode inside the bit modal:
@@ -95,6 +128,14 @@ export default class ProfileEditor {
 
         /** @type {((e: KeyboardEvent) => void)|null} */
         this._keyHandler = null;
+
+        /**
+         * The last path text seen from PathEditor (may contain {varname} formula tokens).
+         * Updated ONLY when the text editor is the change source, so that formula tokens
+         * survive canvas edits unchanged.
+         * @type {string}
+         */
+        this._formulaPath = "";
     }
 
     // ─── Public API ──────────────────────────────────────────────────────────
@@ -121,11 +162,12 @@ export default class ProfileEditor {
         this._onSave    = onSave;
         this._onClose   = onClose ?? null;
         this._pathEditor = pathEditor;
+        this._formulaPath = profilePath; // initial formula path (may have {tokens} from saved data)
 
         log.info("Entering profile edit mode");
 
         // 1. Initialize state
-        this.state = new EditorStateManager({ profilePath });
+        this.state = new EditorStateManager({ profilePath, variableValues });
 
         // 2. Initialize canvas extension
         this.editorCanvas = new EditorCanvas(canvasManager, this.state);
@@ -161,6 +203,8 @@ export default class ProfileEditor {
             pathEditor.onChange = (newPath) => {
                 // Suppress re-entry caused by setPath() calls from syncToPathEditor.
                 if (this._syncingToPathEditor) return;
+                // Keep the formula path in sync with what the user typed.
+                this._formulaPath = newPath;
                 // Mark that this change originated in the text editor so that
                 // syncToPathEditor does NOT overwrite PathEditor content.
                 this._pathEditorIsSource = true;
@@ -213,8 +257,13 @@ export default class ProfileEditor {
 
             if (!this._pathEditorIsSource) {
                 // Canvas-originated change: update text content.
+                // Merge formula tokens back in: if a value hasn’t changed from what
+                // the formula resolves to, keep the {varname} token instead of the
+                // plain number.  This preserves parametric expressions across any
+                // canvas edit (drag, move, arc reshape, …).
+                const mergedPath = _mergeFormulaPath(path, this._formulaPath, this.state.variableValues);
                 this._syncingToPathEditor = true;
-                this._pathEditor.setPath(path);
+                this._pathEditor.setPath(mergedPath);
                 this._syncingToPathEditor = false;
             }
             // Always sync selection highlighting regardless of source.
@@ -428,12 +477,13 @@ export default class ProfileEditor {
      * @private
      */
     _activateTool(toolId) {
+        const tool = this._createTool(toolId);
+        if (!tool) return; // unknown tool — keep current tool active
+
         if (this._currentTool) {
             this._currentTool.deactivate();
             this._currentTool = null;
         }
-        const tool = this._createTool(toolId);
-        if (!tool) return;
 
         // Cursor style: crosshair for all drawing/editing tools; default for select.
         const svgCanvas = this.editorCanvas?.cm?.canvas;
@@ -458,8 +508,8 @@ export default class ProfileEditor {
             case "move":   return new MoveTool();
             case "line":   return new LineTool();
             case "mirror": return new MirrorTool();
-            case "arc3pt": return new ArcTool("arc3pt");
-            case "arc2pt": return new ArcTool("arc2pt");
+            case "arc3pt":
+            case "arc":    return new ArcTool();
             default:
                 log.debug("_createTool: tool not implemented:", toolId);
                 return null;
