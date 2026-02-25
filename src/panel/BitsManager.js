@@ -19,9 +19,9 @@ import ProfileEditor from "../editor/ProfileEditor.js";
  * the original formula’s evaluated value (tolerance 1e-4) — keep the formula.
  * Otherwise use the new numeric value.
  *
- * Both paths must have the same command structure (same number and types of
- * tokens). If they differ (user added/deleted segments), the new path is
- * returned unchanged.
+ * If structure differs (user added/deleted segments), merge is done best-effort:
+ * matching command/parameter regions keep formulas for unchanged values, while
+ * new/mismatched regions stay numeric.
  *
  * @param {string} newPath   - New numeric SVG path (from canvas export)
  * @param {string} rawPath   - Original formula SVG path (may contain {vars})
@@ -73,22 +73,39 @@ function mergePathWithFormulas(newPath, rawPath, pathEditor) {
 
     const newTokens = tokenize(newPath);
     const rawTokens = tokenize(rawPath);
-    if (newTokens.length !== rawTokens.length) return newPath; // incompatible structure
 
     const result = [];
+    let ri = 0;
+    const sameCmd = (a, b) => String(a || '').toUpperCase() === String(b || '').toUpperCase();
+
     for (let i = 0; i < newTokens.length; i++) {
         const nt = newTokens[i];
-        const rt = rawTokens[i];
         if (nt.type === 'cmd') {
             result.push(nt.value);
-        } else {
+            if (rawTokens[ri]?.type === 'cmd') {
+                if (sameCmd(rawTokens[ri].value, nt.value)) {
+                    ri++;
+                } else {
+                    let k = ri + 1;
+                    while (k < rawTokens.length && !(rawTokens[k].type === 'cmd' && sameCmd(rawTokens[k].value, nt.value))) k++;
+                    if (k < rawTokens.length) ri = k + 1;
+                }
+            }
+            continue;
+        }
+
+        const rt = rawTokens[ri];
+        if (rt?.type === 'param') {
             const newVal = parseFloat(nt.value);
             const rawVal = parseFloat(pathEditor.evaluateToken(rt.value));
             if (!isNaN(newVal) && !isNaN(rawVal) && Math.abs(newVal - rawVal) < 1e-4) {
-                result.push(rt.value); // identical → keep formula
+                result.push(rt.value); // unchanged → keep formula
             } else {
-                result.push(nt.value); // changed → use new number
+                result.push(nt.value); // changed/new → keep numeric
             }
+            ri++;
+        } else {
+            result.push(nt.value);
         }
     }
     return result.join(' ');
@@ -1694,9 +1711,13 @@ export default class BitsManager {
                     onSave: (newPath) => {
                         editSaved = true;
                         if (newPath !== null) {
-                            // Merge numeric canvas result with original formula path.
-                            // Coordinates that did not change keep their formula tokens.
-                            const merged = mergePathWithFormulas(newPath, originalRawPath, pathEditorInstance);
+                            // Merge numeric canvas result with the latest formula-aware
+                            // contour path from PathEditor. This keeps formulas for unchanged
+                            // tokens even when topology changed during edit (e.g. added element).
+                            const formulaBasePath = pathEditorInstance?.getContoursRawPath?.()
+                                || pathEditorInstance?.getPath?.()
+                                || originalRawPath;
+                            const merged = mergePathWithFormulas(newPath, formulaBasePath, pathEditorInstance);
                             // Reload the merged path into PathEditor with onChange suppressed.
                             // updateHiddenInput() fires inside each addLine() call and writes:
                             //   - hiddenInput    (#bit-profilePath)    <- EVALUATED numeric path

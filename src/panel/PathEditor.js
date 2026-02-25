@@ -228,6 +228,8 @@ export default class PathEditor {
         const prevExpandedBySig = new Map();
         const prevPathOrder = []; // [{contourId, expanded, lines}] ordered by position
         const prevLineTexts = new Map(); // contourId -> [{text, segId, formulaText}]
+        const prevShapeOrder = [];       // [{type, segId, attrs}]
+        const prevShapeBySegId = new Map();
         for (const elem of this._elements) {
             if (elem.type === 'path' || elem.type === 'polyline') {
                 const lineSnap = elem.lines.map(l => ({
@@ -239,16 +241,39 @@ export default class PathEditor {
                 prevLineTexts.set(elem.contourId, lineSnap);
                 const sig = this._contourSignatureFromLines(lineSnap);
                 if (sig) prevExpandedBySig.set(sig, prevExpanded.has(elem.contourId));
+            } else if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
+                const attrs = PathEditor.SHAPE_DEFS[elem.type]?.attrs ?? [];
+                const snap = {
+                    type: elem.type,
+                    segId: elem.segId,
+                    attrs: Object.fromEntries(attrs.map(a => [a, this._shapeAttrValue(elem.type, elem.data ?? {}, a)])),
+                };
+                prevShapeOrder.push(snap);
+                if (elem.segId) prevShapeBySegId.set(elem.segId, snap);
             }
         }
         let pathElemIndex = 0; // incremented for each path/polyline in the incoming list
+        let shapeElemIndex = 0;
 
         // Reset active sub-line ref (stale after rebuild)
         this._activeSubLine = null;
         this._lastSelectedLine = null;
         this._elements = elements.map(elem => {
             if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
-                return { type: elem.type, segId: elem.segId, data: { ...elem.data }, _elem: null };
+                const nextData = { ...(elem.data ?? {}) };
+                const prevShape = prevShapeBySegId.get(elem.segId) ?? prevShapeOrder[shapeElemIndex++] ?? null;
+                const attrs = PathEditor.SHAPE_DEFS[elem.type]?.attrs ?? [];
+                if (prevShape?.type === elem.type) {
+                    for (const attr of attrs) {
+                        const prevVal = prevShape.attrs?.[attr] ?? '';
+                        const incomingVal = this._shapeAttrValue(elem.type, nextData, attr);
+                        const chosenVal = this._chooseShapeAttrWithFormulaPriority(prevVal, incomingVal);
+                        if (chosenVal !== incomingVal) {
+                            Object.assign(nextData, this._shapeAttrToChanges(elem.type, nextData, attr, chosenVal));
+                        }
+                    }
+                }
+                return { type: elem.type, segId: elem.segId, data: nextData, _elem: null };
             }
             // path / polyline
             const cid = elem.contourId;
@@ -396,6 +421,35 @@ export default class PathEditor {
         const newVal = Number(this.evaluateToken(incomingTok));
         if (!isNaN(oldVal) && !isNaN(newVal)) return Math.abs(oldVal - newVal) <= 1e-4;
         return String(oldTok).trim() === String(incomingTok).trim();
+    }
+
+    /**
+     * Compare two shape attribute tokens by evaluated numeric value when possible.
+     * Falls back to strict text equality.
+     * @param {string} oldTok
+     * @param {string} incomingTok
+     * @returns {boolean}
+     * @private
+     */
+    _shapeTokenEquivalent(oldTok, incomingTok) {
+        const oldVal = Number(this.evaluateToken(String(oldTok ?? '')));
+        const newVal = Number(this.evaluateToken(String(incomingTok ?? '')));
+        if (!isNaN(oldVal) && !isNaN(newVal)) return Math.abs(oldVal - newVal) <= 1e-4;
+        return String(oldTok ?? '').trim() === String(incomingTok ?? '').trim();
+    }
+
+    /**
+     * Preserve previous formula token for a shape attribute when value is equivalent.
+     * @param {string} prevValue
+     * @param {string} incomingValue
+     * @returns {string}
+     * @private
+     */
+    _chooseShapeAttrWithFormulaPriority(prevValue, incomingValue) {
+        if (this._hasFormulaToken(prevValue) && this._shapeTokenEquivalent(prevValue, incomingValue)) {
+            return prevValue;
+        }
+        return incomingValue;
     }
 
     /**
@@ -1276,14 +1330,29 @@ export default class PathEditor {
                 const { center, radius } = elem.data ?? {};
                 if (center != null && radius != null) {
                     const r6 = v => +Number(v).toFixed(6);
-                    const cx = center.x, cy = center.y, rad = radius;
-                    const circleCmd =
-                        `M ${r6(cx - rad)} ${r6(-cy)}` +
-                        ` A ${r6(rad)} ${r6(rad)} 0 1 0 ${r6(cx + rad)} ${r6(-cy)}` +
-                        ` A ${r6(rad)} ${r6(rad)} 0 1 0 ${r6(cx - rad)} ${r6(-cy)}` +
+                    const cx = center.x;
+                    const cy = center.y;
+                    const radNum = Number(radius);
+                    const cxRaw = elem.data?._expr?.cx ?? r6(cx);
+                    const cyRaw = elem.data?._expr?.cy ?? r6(cy);
+                    const radRaw = elem.data?.radiusExpr ?? elem.data?._expr?.r ?? r6(radNum);
+                    const radEval = Number(this.evaluateToken(String(radRaw)));
+                    const mLeftX = r6(cx - radNum);
+                    const mRightX = r6(cx + radNum);
+                    const cySvg = r6(-cy);
+
+                    const evaluatedCmd =
+                        `M ${mLeftX} ${cySvg}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 1 0 ${mRightX} ${cySvg}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 1 0 ${mLeftX} ${cySvg}` +
                         ` Z`;
-                    parts.push(circleCmd);
-                    rawParts.push(circleCmd);
+                    const rawCmd =
+                        `M (${cxRaw})-(${radRaw}) -(${cyRaw})` +
+                        ` A ${radRaw} ${radRaw} 0 1 0 (${cxRaw})+(${radRaw}) -(${cyRaw})` +
+                        ` A ${radRaw} ${radRaw} 0 1 0 (${cxRaw})-(${radRaw}) -(${cyRaw})` +
+                        ` Z`;
+                    parts.push(evaluatedCmd);
+                    rawParts.push(rawCmd);
                 }
             }
         }
@@ -1805,6 +1874,8 @@ export default class PathEditor {
      * @private
      */
     _shapeAttrValue(type, data, attrKey) {
+        const exprVal = data?._expr?.[attrKey];
+        if (exprVal != null && exprVal !== '') return String(exprVal);
         if (type === 'circle') {
             if (attrKey === 'cx') return String(parseFloat((data.center?.x ?? 0).toFixed(4)));
             if (attrKey === 'cy') return String(parseFloat((data.center?.y ?? 0).toFixed(4)));
@@ -1834,23 +1905,37 @@ export default class PathEditor {
      * @private
      */
     _shapeAttrToChanges(type, data, attrKey, val) {
-        const VAR_RE = /^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/;
         const toNum  = s => parseFloat(this.evaluateToken(s));
+        const isFormula = s => typeof s === 'string' && /\{[^}]+\}/.test(s.trim());
+        const withExprMap = (key, rawVal) => {
+            const map = { ...(data?._expr ?? {}) };
+            if (isFormula(rawVal)) map[key] = rawVal.trim();
+            else delete map[key];
+            return map;
+        };
 
         if (type === 'circle') {
-            if (attrKey === 'cx') return { center: { ...data.center, x: toNum(val) } };
-            if (attrKey === 'cy') return { center: { ...data.center, y: toNum(val) } };
+            if (attrKey === 'cx') return {
+                center: { ...data.center, x: toNum(val) },
+                _expr: withExprMap('cx', val),
+            };
+            if (attrKey === 'cy') return {
+                center: { ...data.center, y: toNum(val) },
+                _expr: withExprMap('cy', val),
+            };
             if (attrKey === 'r') {
-                if (VAR_RE.test(val.trim())) return { radiusExpr: val.trim(), radius: toNum(val) };
-                return { radius: toNum(val), radiusExpr: undefined };
+                const exprMap = withExprMap('r', val);
+                const rExpr = exprMap.r;
+                if (rExpr) return { radiusExpr: rExpr, radius: toNum(val), _expr: exprMap };
+                return { radius: toNum(val), radiusExpr: undefined, _expr: exprMap };
             }
         }
         if (type === 'rect') {
             // data uses w/h directly
-            return { [attrKey]: toNum(val) };
+            return { [attrKey]: toNum(val), _expr: withExprMap(attrKey, val) };
         }
         if (type === 'ellipse') {
-            return { [attrKey]: toNum(val) };
+            return { [attrKey]: toNum(val), _expr: withExprMap(attrKey, val) };
         }
         return {};
     }
@@ -1899,23 +1984,57 @@ export default class PathEditor {
             const pathPos = cid - 1;
             // Detect M-A-A-Z circle pattern:
             //   M cx-r -cy  A r r 0 1 0 cx+r -cy  A r r 0 1 0 cx-r -cy  Z
+            const PARAM_RE = String.raw`(?:[-+]?\{[^}]+\}|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)`;
+            const arcCircleRe = new RegExp(`^A\\s+${PARAM_RE}\\s+${PARAM_RE}\\s+0\\s+1\\s+0`, 'i');
             const isCircle = cmds.length === 4
                 && /^[Mm]/.test(cmds[0])
                 && /^[Zz]$/.test(cmds[3])
-                && /^A\s+[\d.eE+-]+\s+[\d.eE+-]+\s+0\s+1\s+0/i.test(cmds[1])
-                && /^A\s+[\d.eE+-]+\s+[\d.eE+-]+\s+0\s+1\s+0/i.test(cmds[2]);
+                && arcCircleRe.test(cmds[1])
+                && arcCircleRe.test(cmds[2]);
 
             if (isCircle) {
                 // Parse: M (cx-r) (-cy)  →  cx = mX + r,  cy = -mY
-                const mNums  = cmds[0].replace(/^[Mm]\s*/, '').trim().split(/[\s,]+/).map(Number);
-                const aTokens = cmds[1].replace(/^[Aa]\s*/, '').trim().split(/[\s,]+/).map(Number);
+                const mTokensRaw = cmds[0].replace(/^[Mm]\s*/, '').trim().split(/[\s,]+/);
+                const mNums  = mTokensRaw.map(v => Number(this.evaluateToken(v)));
+                const aTokens = cmds[1].replace(/^[Aa]\s*/, '').trim().split(/[\s,]+/);
                 // A rx ry x-rotation large-arc-flag sweep-flag x y
-                const radius = aTokens[0];
+                const radiusToken = aTokens[0];
+                const radius = Number(this.evaluateToken(radiusToken));
                 const cx     = mNums[0] + radius;
                 const cy     = -mNums[1];
+                const mXTok = String(mTokensRaw[0] ?? '').trim();
+                const mYTok = String(mTokensRaw[1] ?? '').trim();
+                const endXTok = String(aTokens[5] ?? '').trim();
+
+                const hasFormulaLike = (s) => /\{[^}]+\}|[+\-*/()]/.test(String(s ?? ''));
+                const isSameExpr = (a, b) => String(a ?? '').replace(/\s+/g, '') === String(b ?? '').replace(/\s+/g, '');
+
+                const leftMatch = mXTok.match(/^\((.+)\)-\((.+)\)$/);
+                const rightMatch = endXTok.match(/^\((.+)\)\+\((.+)\)$/);
+                const yMatch = mYTok.match(/^-\((.+)\)$/);
+
+                let cxExpr;
+                let cyExpr;
+                let rExpr;
+
+                if (hasFormulaLike(radiusToken)) rExpr = String(radiusToken);
+                if (leftMatch && (!rExpr || isSameExpr(leftMatch[2], rExpr))) cxExpr = leftMatch[1];
+                if (!cxExpr && rightMatch && (!rExpr || isSameExpr(rightMatch[2], rExpr))) cxExpr = rightMatch[1];
+                if (yMatch) cyExpr = yMatch[1];
+
+                const exprMap = {};
+                if (cxExpr) exprMap.cx = cxExpr;
+                if (cyExpr) exprMap.cy = cyExpr;
+                if (rExpr) exprMap.r = rExpr;
                 this._elements.push({
                     type: 'circle', segId: `preview-circle-${cid}`,
-                    data: { center: { x: cx, y: cy }, radius }, _elem: null,
+                    data: {
+                        center: { x: cx, y: cy },
+                        radius,
+                        ...(rExpr ? { radiusExpr: rExpr } : {}),
+                        ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : {}),
+                    },
+                    _elem: null,
                 });
             } else {
                 const sig = this._contourSignatureFromCommands(cmds);
@@ -1955,11 +2074,15 @@ export default class PathEditor {
                 const { center, radius } = elem.data ?? {};
                 if (center != null && radius != null) {
                     const r6 = v => +Number(v).toFixed(6);
-                    const cx = center.x, cy = center.y, rad = radius;
+                    const cx = center.x, cy = center.y;
+                    const radNum = Number(radius);
+                    const cxRaw = elem.data?._expr?.cx ?? r6(cx);
+                    const cyRaw = elem.data?._expr?.cy ?? r6(cy);
+                    const radRaw = elem.data?.radiusExpr ?? elem.data?._expr?.r ?? r6(radNum);
                     const circleCmd =
-                        `M ${r6(cx - rad)} ${r6(-cy)}` +
-                        ` A ${r6(rad)} ${r6(rad)} 0 1 0 ${r6(cx + rad)} ${r6(-cy)}` +
-                        ` A ${r6(rad)} ${r6(rad)} 0 1 0 ${r6(cx - rad)} ${r6(-cy)}` +
+                        `M (${cxRaw})-(${radRaw}) -(${cyRaw})` +
+                        ` A ${radRaw} ${radRaw} 0 1 0 (${cxRaw})+(${radRaw}) -(${cyRaw})` +
+                        ` A ${radRaw} ${radRaw} 0 1 0 (${cxRaw})-(${radRaw}) -(${cyRaw})` +
                         ` Z`;
                     parts.push(circleCmd);
                 }
@@ -1983,6 +2106,26 @@ export default class PathEditor {
             }
         }
         return parts.join(' ');
+    }
+
+    /**
+     * Snapshot current shape parameter tokens as displayed in PathEditor.
+     * Used by ProfileEditor to preserve formula tokens in edit mode state.
+     *
+     * @returns {Array<{type:string, segId:string|null, attrs:Record<string,string>}>}
+     */
+    getShapeParamSnapshot() {
+        const snapshot = [];
+        for (const elem of this._elements) {
+            if (!(elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse')) continue;
+            const attrs = PathEditor.SHAPE_DEFS[elem.type]?.attrs ?? [];
+            const values = {};
+            for (const attr of attrs) {
+                values[attr] = this._shapeAttrValue(elem.type, elem.data ?? {}, attr);
+            }
+            snapshot.push({ type: elem.type, segId: elem.segId ?? null, attrs: values });
+        }
+        return snapshot;
     }
 
     /**
@@ -2057,7 +2200,7 @@ export default class PathEditor {
                 for (const attr of attrs) {
                     const a = this._shapeAttrValue(incoming.type, current.data ?? {}, attr);
                     const b = this._shapeAttrValue(incoming.type, incoming.data ?? {}, attr);
-                    if (a !== b) return true;
+                    if (a !== b && !this._shapeTokenEquivalent(a, b)) return true;
                 }
                 continue;
             }
@@ -2161,7 +2304,17 @@ export default class PathEditor {
             if (!rowEl) return false;
 
             current.segId = incoming.segId;
-            current.data = { ...(incoming.data ?? {}) };
+            const nextData = { ...(incoming.data ?? {}) };
+            const attrs = PathEditor.SHAPE_DEFS[incoming.type]?.attrs ?? [];
+            for (const attrKey of attrs) {
+                const prevVal = this._shapeAttrValue(incoming.type, current.data ?? {}, attrKey);
+                const incomingVal = this._shapeAttrValue(incoming.type, nextData, attrKey);
+                const chosenVal = this._chooseShapeAttrWithFormulaPriority(prevVal, incomingVal);
+                if (chosenVal !== incomingVal) {
+                    Object.assign(nextData, this._shapeAttrToChanges(incoming.type, nextData, attrKey, chosenVal));
+                }
+            }
+            current.data = nextData;
             rowEl.dataset.segId = current.segId;
 
             const def = PathEditor.SHAPE_DEFS[incoming.type];

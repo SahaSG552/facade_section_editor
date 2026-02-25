@@ -20,8 +20,9 @@ const log = LoggerFactory.createLogger("ProfileEditor");
  * token AND the variable's resolved value equals the numeric token (within 1e-4),
  * the formula token is kept; otherwise the numeric token is used.
  *
- * If the two paths have different token counts (the segment structure changed),
- * numericPath is returned as-is.
+ * If segment structure changed, merge is done best-effort: matching command/parameter
+ * regions keep formula tokens when numerically equivalent, while new/mismatched regions
+ * stay numeric.
  *
  * @param {string} numericPath        - Path with all numeric values
  * @param {string} formulaPath        - Original path that may contain {varname} tokens
@@ -87,20 +88,37 @@ function _mergeFormulaPath(numericPath, formulaPath, vars) {
 
     const numTok = tokenize(numericPath);
     const fmtTok = tokenize(formulaPath);
-    if (numTok.length !== fmtTok.length) return numericPath;
 
     const merged = [];
+    let fi = 0;
+    const sameCmd = (a, b) => String(a || '').toUpperCase() === String(b || '').toUpperCase();
+
     for (let i = 0; i < numTok.length; i++) {
         const n = numTok[i];
-        const f = fmtTok[i];
         if (n.type === 'cmd') {
             merged.push(n.value);
+            if (fmtTok[fi]?.type === 'cmd') {
+                if (sameCmd(fmtTok[fi].value, n.value)) {
+                    fi++;
+                } else {
+                    let k = fi + 1;
+                    while (k < fmtTok.length && !(fmtTok[k].type === 'cmd' && sameCmd(fmtTok[k].value, n.value))) k++;
+                    if (k < fmtTok.length) fi = k + 1;
+                }
+            }
             continue;
         }
-        const nVal = Number(n.value);
-        const fVal = resolveParam(f.value);
-        if (!isNaN(nVal) && !isNaN(fVal) && Math.abs(nVal - fVal) < 1e-4) merged.push(f.value);
-        else merged.push(n.value);
+
+        const f = fmtTok[fi];
+        if (f?.type === 'param') {
+            const nVal = Number(n.value);
+            const fVal = resolveParam(f.value);
+            if (!isNaN(nVal) && !isNaN(fVal) && Math.abs(nVal - fVal) < 1e-4) merged.push(f.value);
+            else merged.push(n.value);
+            fi++;
+        } else {
+            merged.push(n.value);
+        }
     }
     return merged.join(' ');
 }
@@ -163,6 +181,89 @@ function _buildElemsWithPaths(elements, mergedPath, lineSegIds) {
             lineSegIds: lineSegIds.slice(lo, hi + 1),
         };
     });
+}
+
+/**
+ * Resolve a token/expression to numeric value using current variables.
+ * @param {string|number} token
+ * @param {Record<string,number>} vars
+ * @returns {number}
+ */
+function _resolveTokenNumber(token, vars) {
+    const t = String(token ?? '').trim();
+    if (!t) return NaN;
+    const direct = Number(t);
+    if (!Number.isNaN(direct) && Number.isFinite(direct)) return direct;
+    try {
+        const expr = t.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (_, name) => {
+            const v = vars?.[name];
+            return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : '0';
+        });
+        const n = Number(evaluateMathExpression(expr));
+        return Number.isNaN(n) ? NaN : n;
+    } catch (_) {
+        return NaN;
+    }
+}
+
+/**
+ * Restore shape formula tokens into state segment data when values are equivalent.
+ * This keeps formulas visible in edit mode for circle/rect/ellipse parameters.
+ *
+ * @param {EditorStateManager} state
+ * @param {Array<{type:string, segId:string|null, attrs:Record<string,string>}>} snapshot
+ * @param {Record<string,number>} vars
+ */
+function _restoreShapeFormulasIntoState(state, snapshot, vars) {
+    if (!state || !Array.isArray(snapshot) || snapshot.length === 0) return;
+
+    const isFormula = (v) => typeof v === 'string' && /\{[^}]+\}/.test(v);
+    const isEq = (a, b) => !Number.isNaN(a) && !Number.isNaN(b) && Math.abs(a - b) <= 1e-4;
+    const shapeSegs = state.segments.filter(s => s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse');
+    if (shapeSegs.length === 0) return;
+
+    const queues = new Map();
+    for (const seg of shapeSegs) {
+        const q = queues.get(seg.type) ?? [];
+        q.push(seg);
+        queues.set(seg.type, q);
+    }
+
+    const updates = [];
+    for (const snap of snapshot) {
+        const q = queues.get(snap.type) ?? [];
+        const seg = q.shift();
+        if (!seg) continue;
+
+        const nextData = { ...(seg.data ?? {}) };
+        const exprMap = { ...(nextData._expr ?? {}) };
+        let changed = false;
+
+        for (const [attr, token] of Object.entries(snap.attrs ?? {})) {
+            if (!isFormula(token)) continue;
+            const tokenVal = _resolveTokenNumber(token, vars);
+
+            let currentVal = NaN;
+            if (seg.type === 'circle') {
+                if (attr === 'cx') currentVal = Number(seg.data?.center?.x);
+                else if (attr === 'cy') currentVal = Number(seg.data?.center?.y);
+                else if (attr === 'r') currentVal = Number(seg.data?.radius);
+            } else {
+                currentVal = Number(seg.data?.[attr]);
+            }
+            if (!isEq(tokenVal, currentVal)) continue;
+
+            exprMap[attr] = token;
+            changed = true;
+            if (seg.type === 'circle' && attr === 'r') nextData.radiusExpr = token;
+        }
+
+        if (!changed) continue;
+        nextData._expr = exprMap;
+        updates.push({ id: seg.id, changes: { data: nextData } });
+    }
+
+    if (updates.length > 0) state.updateSegments(updates);
 }
 
 /**
@@ -294,11 +395,13 @@ export default class ProfileEditor {
         this._onClose   = onClose ?? null;
         this._pathEditor = pathEditor;
         this._formulaPath = pathEditor?.getContoursRawPath?.() || profilePath;
+        const shapeFormulaSnapshot = pathEditor?.getShapeParamSnapshot?.() ?? [];
 
         log.info("Entering profile edit mode");
 
         // 1. Initialize state
         this.state = new EditorStateManager({ profilePath, variableValues });
+        _restoreShapeFormulasIntoState(this.state, shapeFormulaSnapshot, variableValues);
 
         // 2. Initialize canvas extension
         this.editorCanvas = new EditorCanvas(canvasManager, this.state);

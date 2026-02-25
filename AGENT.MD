@@ -671,6 +671,50 @@ ellipse → <ellipse cx cy rx ry/>
 - Исправлена персистентность collapsed/expanded состояния (в т.ч. при регенерации contourId).
 - Формулы/переменные приоритетны: при неизменённом значении токен формулы сохраняется или восстанавливается.
 
+### 6.6 TODO: Консистентность формул для параметров shape/команд (в работе)
+
+Наблюдение:
+- Для path/polyline формулы уже сохраняются стабильно.
+- Для shape-параметров (особенно при переходах preview ↔ edit ↔ preview) поведение пока частично неконсистентно: отдельные параметры могут временно отображаться числом в edit-mode или терять формульный токен при сериализации.
+
+Что уже сделано:
+- Добавлен formula-priority merge для path/polyline (сравнение по численной эквивалентности, допуск `1e-4`).
+- Добавлены локальные улучшения для shape:
+  - хранение shape-выражений в `data._expr`;
+  - snapshot/restore формул shape-параметров при входе в edit-mode;
+  - улучшенная сериализация/десериализация circle (`cx/cy/r`) в raw-path.
+- Синк `PathEditor ↔ ProfileEditor` переведён в non-destructive режим с fallback rebuild.
+
+Ограничение текущего подхода:
+- Логика формул распределена по нескольким точкам (PathEditor, ProfileEditor, BitsManager, export/import), из-за чего при добавлении новых shape/tool кейсов приходится делать точечные патчи.
+
+### 6.7 План: Universal Param Wrapper (обязательный архитектурный шаг)
+
+Цель: ввести универсальную обёртку для **каждого параметра любой команды/элемента** (аналогично тому, как `evaluateMathExpression` можно применить к любому input).
+
+#### Контракт обёртки `ParamValue`
+- `raw: string` — исходный токен (число/`{var}`/выражение)
+- `value: number` — вычисленное числовое значение
+- `meta: { isFormula:boolean, source:'user'|'import'|'sync', key:string }`
+- API:
+  - `fromInput(raw, ctx)`
+  - `fromNumeric(value, prevRaw, ctx)`
+  - `isEquivalent(a, b, eps=1e-4)`
+  - `preferRawWhenEquivalent(prevRaw, nextNumeric, ctx)`
+
+#### Где применить
+- Path-команды: все токены параметров (`M/L/H/V/A/...`).
+- Shape-элементы: все атрибуты (`circle`, `rect`, `ellipse`, будущие элементы).
+- Import/export/sync: хранение и восстановление raw/value через единый API без специальных кейсов на тип.
+
+#### TODO-чеклист внедрения
+- [ ] Создать модуль `ParamWrapper` (`src/editor/param/ParamWrapper.js` или `src/utils/ParamWrapper.js`).
+- [ ] Перевести shape-атрибуты (`_expr`, `radiusExpr` и др.) на единый `ParamValue`-слой.
+- [ ] Унифицировать merge логики в `PathEditor/ProfileEditor/BitsManager` через `ParamWrapper`.
+- [ ] Унифицировать import/export токенов (path + shape) через `ParamWrapper`.
+- [ ] Добавить regression-сценарии: preview→edit→preview для всех параметров `circle/rect/ellipse` и mixed path+shape кейсов.
+- [ ] Для новых инструментов/элементов использовать только `ParamWrapper` (запрет ad-hoc formula логики в tool-коде).
+
 ---
 
 ## Следующие шаги (после Этапа 5)
