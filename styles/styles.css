@@ -2203,6 +2203,57 @@ html {
   color: #bb8fce;
 }
 
+/* Element creation buttons — color-coded by type */
+.path-suggestion-btn.elem-btn { font-weight: 600; }
+
+.path-suggestion-btn.elem-btn-path {
+  color: #3498db;
+  border-color: rgba(52, 152, 219, 0.3);
+  background: rgba(52, 152, 219, 0.06);
+}
+.path-suggestion-btn.elem-btn-path:hover {
+  background: rgba(52, 152, 219, 0.18);
+  border-color: rgba(52, 152, 219, 0.5);
+}
+
+.path-suggestion-btn.elem-btn-circle {
+  color: #9b59b6;
+  border-color: rgba(155, 89, 182, 0.3);
+  background: rgba(155, 89, 182, 0.06);
+}
+.path-suggestion-btn.elem-btn-circle:hover {
+  background: rgba(155, 89, 182, 0.18);
+  border-color: rgba(155, 89, 182, 0.5);
+}
+
+.path-suggestion-btn.elem-btn-rect {
+  color: #27ae60;
+  border-color: rgba(39, 174, 96, 0.3);
+  background: rgba(39, 174, 96, 0.06);
+}
+.path-suggestion-btn.elem-btn-rect:hover {
+  background: rgba(39, 174, 96, 0.18);
+  border-color: rgba(39, 174, 96, 0.5);
+}
+
+.path-suggestion-btn.elem-btn-ellipse {
+  color: #e67e22;
+  border-color: rgba(230, 126, 34, 0.3);
+  background: rgba(230, 126, 34, 0.06);
+}
+.path-suggestion-btn.elem-btn-ellipse:hover {
+  background: rgba(230, 126, 34, 0.18);
+  border-color: rgba(230, 126, 34, 0.5);
+}
+
+.path-cmd-label {
+  font-size: 9px;
+  font-weight: 400;
+  opacity: 0.7;
+  margin-left: 2px;
+  font-family: sans-serif;
+}
+
 /* ===== CUSTOM FIELD MODAL ===== */
 .custom-field-modal {
   position: fixed;

@@ -1788,17 +1788,13 @@ export default class BitsManager {
             // handler and restores it on exit, so it works in both modes.
             // Preview mode: row click highlights row + canvas marker.
             // Shift+click adds to selection (multi-select), plain click replaces.
-            pathEditorInstance.onLineClick = (rowIdx, e) => {
-                if (e?.shiftKey) {
-                    // Toggle the clicked row: add if absent, remove if present
-                    const idx = previewSelectedRows.indexOf(rowIdx);
-                    if (idx >= 0) {
-                        previewSelectedRows = previewSelectedRows.filter(r => r !== rowIdx);
-                    } else {
-                        previewSelectedRows = [...previewSelectedRows, rowIdx];
-                    }
+            pathEditorInstance.onLineClick = (rowRef, _e, selectedRefs = null) => {
+                if (Array.isArray(selectedRefs)) {
+                    previewSelectedRows = selectedRefs.filter(r => r != null);
+                } else if (rowRef != null) {
+                    previewSelectedRows = [rowRef];
                 } else {
-                    previewSelectedRows = [rowIdx];
+                    previewSelectedRows = [];
                 }
                 pathEditorInstance.setSelectedLines(previewSelectedRows);
                 drawAnchorAndAxis(previewRenderState.shape);

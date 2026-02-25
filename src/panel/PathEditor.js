@@ -76,6 +76,7 @@ export default class PathEditor {
      * @param {Function}           [options.onLineClick]         — (segId, MouseEvent)
      * @param {Function}           [options.onShapeElementChange]— (segId, changes|null)
      * @param {Function}           [options.onShapeElementClick] — (segId, MouseEvent)
+    * @param {Function}           [options.onElementOrderChange] — (order) top-level reorder callback
      */
     constructor(options = {}) {
         this.container             = options.container;
@@ -92,6 +93,8 @@ export default class PathEditor {
         this.onShapeElementClick   = options.onShapeElementClick   || null;
         /** @type {((segIds:string[], e:MouseEvent)=>void)|null} */
         this.onPathElemClick       = options.onPathElemClick       || null;
+        /** @type {((order:Array<object>)=>void)|null} */
+        this.onElementOrderChange  = options.onElementOrderChange  || null;
         /** @type {((e:MouseEvent)=>void)|null} Called when user clicks on the empty elements container background */
         this.onDeactivate          = options.onDeactivate          || null;
 
@@ -121,6 +124,12 @@ export default class PathEditor {
         this._activeElemId = null;
         /** @type {object|null} lineData descriptor of the currently selected sub-line */
         this._activeSubLine = null;
+        /** @type {object|null} lineData of last-clicked sub-line (anchor for SHIFT range-select) */
+        this._lastSelectedLine = null;
+        /** @type {string|number|null} stable anchor for SHIFT range-select across DOM rebuilds */
+        this._lastSelectedLineRef = null;
+        /** @type {string|null} stable anchor for SHIFT range-select on top-level rows */
+        this._lastSelectedElemRef = null;
         /** @type {{parentElem:object, fromIndex:number}|null} active drag-sort state */
         this._dragState = null;
 
@@ -198,23 +207,17 @@ export default class PathEditor {
      */
     setElements(elements) {
         if (!elements) return;
-        // Preserve user-defined display order: sort incoming elements by current order.
-        // New elements (not in current list) fall to the end.
-        if (this._elements.length > 0) {
-            const orderMap = new Map();
-            this._elements.forEach((e, i) => {
-                const id = (e.type === 'path' || e.type === 'polyline')
-                    ? `cid:${e.contourId}` : `sid:${e.segId}`;
-                orderMap.set(id, i);
-            });
-            elements = [...elements].sort((a, b) => {
-                const aId = (a.type === 'path' || a.type === 'polyline') ? `cid:${a.contourId}` : `sid:${a.segId}`;
-                const bId = (b.type === 'path' || b.type === 'polyline') ? `cid:${b.contourId}` : `sid:${b.segId}`;
-                const aPos = orderMap.has(aId) ? orderMap.get(aId) : Infinity;
-                const bPos = orderMap.has(bId) ? orderMap.get(bId) : Infinity;
-                return aPos - bPos;
-            });
+        const prevActiveElemId = this._activeElemId;
+        let prevActivePathPos = -1;
+        if (prevActiveElemId?.startsWith('path:')) {
+            const prevActiveCid = Number(prevActiveElemId.slice(5));
+            const prevPathElems = this._elements.filter(e => e.type === 'path' || e.type === 'polyline');
+            prevActivePathPos = prevPathElems.findIndex(e => e.contourId === prevActiveCid);
         }
+        // Keep incoming order as the single source of truth.
+        // IDs (especially contourId) are not stable across all mode transitions,
+        // so re-sorting by previous IDs can swap rows incorrectly.
+        elements = [...elements];
 
         // Snapshot expanded state and existing line texts (to survive re-render).
         // Also record the positional order of path elements (by index among path/polyline
@@ -222,19 +225,27 @@ export default class PathEditor {
         // restore expanded state by position — the N-th path stays expanded if the
         // N-th path was expanded before.
         const prevExpanded  = new Set(this._expandedContours);
+        const prevExpandedBySig = new Map();
         const prevPathOrder = []; // [{contourId, expanded, lines}] ordered by position
-        const prevLineTexts = new Map(); // contourId -> [{text, segId}]
+        const prevLineTexts = new Map(); // contourId -> [{text, segId, formulaText}]
         for (const elem of this._elements) {
             if (elem.type === 'path' || elem.type === 'polyline') {
-                const lineSnap = elem.lines.map(l => ({ text: l.text, segId: l.segId }));
+                const lineSnap = elem.lines.map(l => ({
+                    text: l.text,
+                    segId: l.segId,
+                    formulaText: l._formulaText ?? (this._hasFormulaToken(l.text) ? l.text : null),
+                }));
                 prevPathOrder.push({ contourId: elem.contourId, expanded: prevExpanded.has(elem.contourId), lines: lineSnap });
                 prevLineTexts.set(elem.contourId, lineSnap);
+                const sig = this._contourSignatureFromLines(lineSnap);
+                if (sig) prevExpandedBySig.set(sig, prevExpanded.has(elem.contourId));
             }
         }
         let pathElemIndex = 0; // incremented for each path/polyline in the incoming list
 
         // Reset active sub-line ref (stale after rebuild)
         this._activeSubLine = null;
+        this._lastSelectedLine = null;
         this._elements = elements.map(elem => {
             if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
                 return { type: elem.type, segId: elem.segId, data: { ...elem.data }, _elem: null };
@@ -244,13 +255,22 @@ export default class PathEditor {
             // Positional slot — used when contourId changed (e.g. after _importPath).
             const slot = prevPathOrder[pathElemIndex];
             pathElemIndex++;
-            // Expanded state: exact match by contourId first; if the cid is new fall
-            // back to the positional slot so the N-th path keeps its expanded state.
-            const expanded = prevExpanded.has(cid) || (!prevExpanded.has(cid) && (slot?.expanded ?? false));
             let lines;
             if (elem.path != null) {
                 // Canvas-originated: rebuild from numeric path string
                 lines = this._buildLinesFromPath(elem.path, elem.lineSegIds ?? [], elem.segIds ?? []);
+                const prevTexts = prevLineTexts.has(cid) ? prevLineTexts.get(cid) : (slot?.lines ?? null);
+                if (prevTexts && prevTexts.length === lines.length) {
+                    lines = lines.map((line, i) => {
+                        const prevText = prevTexts[i]?.text ?? null;
+                        const prevFormula = prevTexts[i]?.formulaText ?? null;
+                        const chosenText = this._chooseLineTextWithFormulaPriority(prevText, prevFormula, line.text);
+                        if (chosenText !== line.text) {
+                            return { ...line, text: chosenText, _formulaText: prevFormula ?? (this._hasFormulaToken(chosenText) ? chosenText : null) };
+                        }
+                        return { ...line, _formulaText: prevFormula ?? (this._hasFormulaToken(chosenText) ? chosenText : null) };
+                    });
+                }
             } else {
                 // Text-originated: preserve text.  Try exact cid match first, then
                 // positional slot (handles regenerated contourIds after _importPath).
@@ -262,12 +282,21 @@ export default class PathEditor {
                     lines = prevTexts.map((l, i) => ({
                         text:  l.text,
                         segId: lsids ? (lsids[i] ?? null) : (elem.segIds[i] ?? l.segId ?? null),
+                        _formulaText: l.formulaText ?? (this._hasFormulaToken(l.text) ? l.text : null),
                         _elem: null,
                     }));
                 } else {
                     lines = [];
                 }
             }
+            // Expanded-state restore priority:
+            // 1) exact contourId match
+            // 2) signature match (stable when contourId is regenerated)
+            // 3) positional fallback
+            const sig = this._contourSignatureFromLines(lines);
+            const expanded = prevExpanded.has(cid)
+                || (sig ? (prevExpandedBySig.get(sig) ?? false) : false)
+                || (slot?.expanded ?? false);
             return { type: elem.type, contourId: cid, segIds: elem.segIds ?? [], expanded, lines, _elem: null };
         });
 
@@ -279,6 +308,25 @@ export default class PathEditor {
                 .filter(e => (e.type === 'path' || e.type === 'polyline') && e.expanded)
                 .map(e => e.contourId)
         );
+
+        // Preserve active element across contourId regeneration (e.g. after _importPath).
+        if (prevActiveElemId?.startsWith('shape:')) {
+            const segId = prevActiveElemId.slice(6);
+            const exists = this._elements.some(e =>
+                (e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse') && e.segId === segId);
+            this._activeElemId = exists ? prevActiveElemId : null;
+        } else if (prevActiveElemId?.startsWith('path:')) {
+            const prevActiveCid = Number(prevActiveElemId.slice(5));
+            const hasExact = this._elements.some(e =>
+                (e.type === 'path' || e.type === 'polyline') && e.contourId === prevActiveCid);
+            if (hasExact) {
+                this._activeElemId = prevActiveElemId;
+            } else {
+                const nextPathElems = this._elements.filter(e => e.type === 'path' || e.type === 'polyline');
+                const fallback = prevActivePathPos >= 0 ? nextPathElems[prevActivePathPos] : null;
+                this._activeElemId = fallback ? `path:${fallback.contourId}` : null;
+            }
+        }
 
         this._renderElements();
         this._renderSuggestions();
@@ -297,8 +345,129 @@ export default class PathEditor {
         return this._splitPathIntoCommands(pathStr).map((text, i) => ({
             text:  text.trim(),
             segId: lineSegIds[i] ?? null,
+            _formulaText: null,
             _elem: null,
         }));
+    }
+
+    /** @private */
+    _hasFormulaToken(text) {
+        return typeof text === 'string' && /\{[^}]+\}/.test(text);
+    }
+
+    /**
+     * True when existing line text (possibly with formulas) evaluates to the same
+     * command/params as the incoming line text.
+     * @param {string} existingText
+     * @param {string} incomingText
+     * @returns {boolean}
+     * @private
+     */
+    _shouldPreserveLineText(existingText, incomingText) {
+        const oldParsed = this.parseLine(existingText || '');
+        const newParsed = this.parseLine(incomingText || '');
+        if (!oldParsed || !newParsed) return false;
+        if (oldParsed.cmdUpper !== newParsed.cmdUpper) return false;
+        if ((oldParsed.params?.length ?? 0) !== (newParsed.params?.length ?? 0)) return false;
+        for (let i = 0; i < oldParsed.params.length; i++) {
+            const oldTok = oldParsed.params[i];
+            const newTok = newParsed.params[i];
+            const oldVal = Number(this.evaluateToken(oldTok));
+            const newVal = Number(this.evaluateToken(newTok));
+            if (!isNaN(oldVal) && !isNaN(newVal)) {
+                if (Math.abs(oldVal - newVal) > 1e-4) return false;
+            } else if (String(oldTok).trim() !== String(newTok).trim()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Compare two param tokens by evaluated numeric value when possible.
+     * Falls back to strict text equality for non-numeric tokens.
+     * @param {string} oldTok
+     * @param {string} incomingTok
+     * @returns {boolean}
+     * @private
+     */
+    _paramTokenEquivalent(oldTok, incomingTok) {
+        const oldVal = Number(this.evaluateToken(oldTok));
+        const newVal = Number(this.evaluateToken(incomingTok));
+        if (!isNaN(oldVal) && !isNaN(newVal)) return Math.abs(oldVal - newVal) <= 1e-4;
+        return String(oldTok).trim() === String(incomingTok).trim();
+    }
+
+    /**
+     * Merge line text with parameter-level formula priority.
+     * Preserves formula tokens for unchanged parameters even if other parameters
+     * on the same command changed (e.g. moving arc keeps radius formula while x/y change).
+     *
+     * @param {string|null} currentText
+     * @param {string|null} formulaText
+     * @param {string} incomingText
+     * @returns {string}
+     * @private
+     */
+    _mergeLineTextPreferFormula(currentText, formulaText, incomingText) {
+        const inParsed = this.parseLine(incomingText || '');
+        if (!inParsed) return incomingText;
+
+        const curParsed = currentText ? this.parseLine(currentText) : null;
+        const frmParsed = formulaText ? this.parseLine(formulaText) : null;
+
+        const compatible = (p) => p && p.cmdUpper === inParsed.cmdUpper
+            && (p.params?.length ?? 0) === (inParsed.params?.length ?? 0);
+
+        if (!compatible(curParsed) && !compatible(frmParsed)) return incomingText;
+
+        const mergedParams = inParsed.params.map((inTok, i) => {
+            const curTok = compatible(curParsed) ? curParsed.params[i] : null;
+            const frmTok = compatible(frmParsed) ? frmParsed.params[i] : null;
+            if (curTok != null && this._paramTokenEquivalent(curTok, inTok)) return curTok;
+            if (frmTok != null && this._paramTokenEquivalent(frmTok, inTok)) return frmTok;
+            return inTok;
+        });
+
+        return mergedParams.length > 0 ? `${inParsed.cmd} ${mergedParams.join(' ')}` : inParsed.cmd;
+    }
+
+    /**
+     * Choose text with formula priority: current text, then formula backup, then incoming.
+     * @param {string|null} currentText
+     * @param {string|null} formulaText
+     * @param {string} incomingText
+     * @returns {string}
+     * @private
+     */
+    _chooseLineTextWithFormulaPriority(currentText, formulaText, incomingText) {
+        return this._mergeLineTextPreferFormula(currentText, formulaText, incomingText);
+    }
+
+    /**
+     * Build a stable contour signature from command texts.
+     * Numeric values are ignored; only command flow matters.
+     * @param {string[]} cmds
+     * @returns {string}
+     * @private
+     */
+    _contourSignatureFromCommands(cmds) {
+        if (!Array.isArray(cmds) || cmds.length === 0) return '';
+        return cmds.map(cmdText => {
+            const parsed = this.parseLine(cmdText || '');
+            if (!parsed) return '?';
+            return `${parsed.cmdUpper}:${parsed.params?.length ?? 0}`;
+        }).join('|');
+    }
+
+    /**
+     * Build contour signature from line descriptors.
+     * @param {Array<{text:string}>} lines
+     * @returns {string}
+     * @private
+     */
+    _contourSignatureFromLines(lines) {
+        return this._contourSignatureFromCommands((lines ?? []).map(l => l?.text ?? ''));
     }
 
     /**
@@ -410,16 +579,195 @@ export default class PathEditor {
         // Row click → select + activate
         row.addEventListener('click', (e) => {
             if (e.target.closest('.path-cell') || e.target.closest('.path-line-delete')) return;
-            this.clearAllSelection();
-            row.classList.add('path-line-selected');
+            const rowRef = this._getTopLevelRef(elem);
+            this._applyTopLevelSelection(row, rowRef, e);
             this._setActiveElem(`shape:${elem.segId}`);
-            if (this.onShapeElementClick) this.onShapeElementClick(elem.segId, e);
+            if (this.onShapeElementClick) {
+                const selectedSegIds = this._collectSelectedTopLevelSegIds();
+                this.onShapeElementClick(elem.segId, e, selectedSegIds);
+            }
         });
 
         // Drag to reorder top-level elements
         this._attachElemDrag(row, elem);
 
         return row;
+    }
+
+    /**
+     * Return a flat ordered list of all visible sub-line entries across all
+     * path/polyline elements.  Used by SHIFT+click range-select logic.
+     * @returns {Array<{data:object, el:HTMLElement, parentElem:object}>}
+     * @private
+     */
+    _getAllSubLines() {
+        const result = [];
+        for (const elem of this._elements) {
+            if ((elem.type === 'path' || elem.type === 'polyline') && elem.expanded) {
+                for (const line of elem.lines) {
+                    if (line._elem) {
+                        result.push({
+                            data: line,
+                            el: line._elem,
+                            parentElem: elem,
+                            ref: this._getLineRef(line, elem),
+                        });
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Build a stable reference for a sub-line that survives setElements rebuilds.
+     * Prefers segId; falls back to contour+line index for M/Z rows.
+     * @param {{segId:string|null}} lineData
+     * @param {object} parentElem
+     * @returns {string|number|null}
+     * @private
+     */
+    _getLineRef(lineData, parentElem) {
+        if (lineData?.segId != null) return lineData.segId;
+        const idx = parentElem?.lines?.indexOf(lineData) ?? -1;
+        if (idx < 0) return null;
+        return `cid:${parentElem.contourId}:idx:${idx}`;
+    }
+
+    /**
+     * Build a stable top-level row reference for shape/path element.
+     * @param {object} elem
+     * @returns {string|null}
+     * @private
+     */
+    _getTopLevelRef(elem) {
+        if (!elem) return null;
+        if (elem.type === 'path' || elem.type === 'polyline') return `path:${elem.contourId}`;
+        if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') return `shape:${elem.segId}`;
+        return null;
+    }
+
+    /**
+     * Return top-level row descriptors in visual order.
+     * @returns {Array<{ref:string, elem:object, rowEl:HTMLElement|null}>}
+     * @private
+     */
+    _getAllTopLevelRows() {
+        const rows = [];
+        for (const elem of this._elements) {
+            const ref = this._getTopLevelRef(elem);
+            if (!ref) continue;
+            const rowEl = (elem.type === 'path' || elem.type === 'polyline')
+                ? elem._elem?.querySelector?.('.pe-path-header') ?? null
+                : elem._elem ?? null;
+            rows.push({ ref, elem, rowEl });
+        }
+        return rows;
+    }
+
+    /**
+     * Collect selected segIds represented by selected top-level rows.
+     * @returns {string[]}
+     * @private
+     */
+    _collectSelectedTopLevelSegIds() {
+        const segIds = [];
+        for (const { elem, rowEl } of this._getAllTopLevelRows()) {
+            if (!rowEl?.classList.contains('path-line-selected')) continue;
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                if (Array.isArray(elem.segIds)) segIds.push(...elem.segIds);
+            } else if (elem.segId) {
+                segIds.push(elem.segId);
+            }
+        }
+        return [...new Set(segIds.filter(Boolean))];
+    }
+
+    /**
+     * Apply click selection semantics for top-level rows.
+     * @param {HTMLElement} rowEl
+     * @param {string} clickedRef
+     * @param {MouseEvent} e
+     * @private
+     */
+    _applyTopLevelSelection(rowEl, clickedRef, e) {
+        const isAlreadySelected = rowEl.classList.contains('path-line-selected');
+        if (e?.ctrlKey || e?.metaKey) {
+            if (isAlreadySelected) rowEl.classList.remove('path-line-selected');
+            else                   rowEl.classList.add('path-line-selected');
+        } else if (e?.shiftKey && this._lastSelectedElemRef) {
+            const rows = this._getAllTopLevelRows();
+            const from = rows.findIndex(r => r.ref === this._lastSelectedElemRef);
+            const to   = rows.findIndex(r => r.ref === clickedRef);
+            if (from !== -1 && to !== -1) {
+                const lo = Math.min(from, to), hi = Math.max(from, to);
+                for (let i = lo; i <= hi; i++) rows[i].rowEl?.classList.add('path-line-selected');
+            }
+        } else {
+            if (isAlreadySelected) {
+                rowEl.classList.remove('path-line-selected');
+            } else {
+                this.clearAllSelection();
+                rowEl.classList.add('path-line-selected');
+            }
+        }
+        this._lastSelectedElemRef = clickedRef;
+    }
+
+    /**
+     * Return selected sub-lines as segIds where available, otherwise flat line indexes.
+     * @returns {Array<string|number>}
+     * @private
+     */
+    _collectSelectedLineRefs() {
+        const refs = [];
+        const allLines = this._elements.flatMap(e =>
+            (e.type === 'path' || e.type === 'polyline') ? e.lines : []);
+        allLines.forEach((line, index) => {
+            if (line._elem?.classList.contains('path-line-selected')) {
+                refs.push(index);
+            }
+        });
+        return refs;
+    }
+
+    /**
+     * Detect path/polyline elements that are intentionally kept in editor text form
+     * and are not yet representable as drawable segments in canvas state.
+     * Examples: empty contour, `M ...`, `M ... Z`.
+     * @returns {boolean}
+     */
+    hasPlaceholderContours() {
+        return this._elements.some(elem => {
+            if (elem.type !== 'path' && elem.type !== 'polyline') return false;
+            if (!elem.lines?.length) return true;
+            return elem.lines.every(line => {
+                const parsed = this.parseLine(line.text || '');
+                if (!parsed) return true;
+                const cmd = parsed.cmdUpper;
+                return cmd === 'M' || cmd === 'Z';
+            });
+        });
+    }
+
+    /**
+     * Classify a contour's display label based on command content.
+     * Returns 'Path' if any arcs/curves are present, otherwise 'Polyline'.
+     * @param {Array<{text:string}>} lines
+     * @returns {string}
+     * @private
+     */
+    _classifyContourLabel(lines) {
+        if (!Array.isArray(lines) || lines.length === 0) return 'Polyline';
+        for (const line of lines) {
+            const parsed = this.parseLine(line.text || '');
+            if (!parsed) continue;
+            const cmd = parsed.cmdUpper;
+            if (cmd === 'A' || cmd === 'C' || cmd === 'S' || cmd === 'Q' || cmd === 'T') {
+                return 'Path';
+            }
+        }
+        return 'Polyline';
     }
 
     /**
@@ -431,7 +779,7 @@ export default class PathEditor {
      */
     _buildPathGroup(elem, rowNum) {
         const type  = elem.type;
-        const label = type === 'path' ? 'Path' : 'Polyline';
+        const label = this._classifyContourLabel(elem.lines);
 
         // Outer container (grouping wrapper, not pe-elem itself)
         const wrap = document.createElement('div');
@@ -452,6 +800,8 @@ export default class PathEditor {
         expandBtn.type = 'button';
         expandBtn.className = `path-cell path-cell-cmd pe-type-${type}`;
         expandBtn.textContent = label + (elem.expanded ? ' ▼' : ' ►');
+        // Store label for live updates
+        expandBtn.dataset.baseLabel = label;
         header.appendChild(expandBtn);
 
         const delBtn = document.createElement('button');
@@ -488,7 +838,8 @@ export default class PathEditor {
         expandBtn.addEventListener('click', (e) => {
             e.stopPropagation(); // don't bubble to header click handler
             elem.expanded = !elem.expanded;
-            expandBtn.textContent = label + (elem.expanded ? ' ▼' : ' ►');
+            const currentLabel = this._classifyContourLabel(elem.lines);
+            expandBtn.textContent = currentLabel + (elem.expanded ? ' ▼' : ' ►');
             body.style.display = elem.expanded ? '' : 'none';
             if (elem.expanded) this._expandedContours.add(elem.contourId);
             else               this._expandedContours.delete(elem.contourId);
@@ -499,21 +850,16 @@ export default class PathEditor {
             if (e.target.closest('.path-line-delete')) return;
             if (e.target === expandBtn || e.target.closest('button') === expandBtn) return;
 
-            // ── Clear old selection + activate path elem ─────────────────────
-            this.clearAllSelection();
+            // ── Update selection + activate path elem ─────────────────────
+            const rowRef = this._getTopLevelRef(elem);
+            this._applyTopLevelSelection(header, rowRef, e);
             this._activeSubLine = null;
             this._setActiveElem(`path:${elem.contourId}`);
 
             // ── Canvas callback (may trigger DOM rebuild) ─────────────────────
-            // If it triggers syncToPathEditor → setElements → setSelectedElements,
-            // the header row will get path-line-selected from setSelectedElements.
             if (this.onPathElemClick && elem.segIds?.length) {
-                this.onPathElemClick(elem.segIds, e);
-            } else {
-                // No canvas callback — manually highlight the live header node.
-                const liveHeader = this.elementsContainer
-                    ?.querySelector(`.pe-path-header[data-contour-id="${elem.contourId}"]`);
-                (liveHeader ?? header).classList.add('path-line-selected');
+                const selectedSegIds = this._collectSelectedTopLevelSegIds();
+                this.onPathElemClick(elem.segIds, e, selectedSegIds);
             }
         });
 
@@ -564,9 +910,17 @@ export default class PathEditor {
             const [moved] = this._elements.splice(fromIndex, 1);
             this._elements.splice(toIndex, 0, moved);
             this._renderElements();
-            // NOTE: do NOT call _fireOnChange() here — element order is display-only;
-            // calling onChange would trigger _importPath() in ProfileEditor which
-            // drops all shape segments (circles, rects, etc.) from the canvas state.
+            const order = this._elements.map(elem =>
+                (elem.type === 'path' || elem.type === 'polyline')
+                    ? { kind: 'contour', contourId: elem.contourId }
+                    : { kind: 'shape', segId: elem.segId }
+            );
+            if (this.onElementOrderChange) {
+                this.onElementOrderChange(order);
+            } else {
+                // Preview mode: persist reordered structure into hidden/raw path.
+                this._fireOnChange();
+            }
         });
     }
 
@@ -622,12 +976,35 @@ export default class PathEditor {
         // ── Click → visual select + canvas callback + track active sub-line ──
         lineEl.addEventListener('click', (e) => {
             if (e.target.closest('.path-cell') || e.target.closest('.path-line-delete')) return;
-            if (!e.shiftKey) {
-                this.elementsContainer?.querySelectorAll('.path-line-selected')
-                    .forEach(el => el.classList.remove('path-line-selected'));
+            const isAlreadySelected = lineEl.classList.contains('path-line-selected');
+
+            if (e.ctrlKey || e.metaKey) {
+                // CTRL+click: toggle this row without clearing others (multi-select).
+                if (isAlreadySelected) lineEl.classList.remove('path-line-selected');
+                else                   lineEl.classList.add('path-line-selected');
+            } else if (e.shiftKey && this._lastSelectedLineRef != null) {
+                // SHIFT+click: range-select from last-clicked to this line.
+                const all  = this._getAllSubLines();
+                const clickedRef = this._getLineRef(lineData, parentElem);
+                const from = all.findIndex(l => l.ref === this._lastSelectedLineRef);
+                const to   = all.findIndex(l => l.ref === clickedRef);
+                if (from !== -1 && to !== -1) {
+                    const lo = Math.min(from, to), hi = Math.max(from, to);
+                    for (let i = lo; i <= hi; i++) all[i].el.classList.add('path-line-selected');
+                }
+            } else {
+                // Plain click: exclusive select; second click on same row → deselect.
+                if (isAlreadySelected) {
+                    lineEl.classList.remove('path-line-selected');
+                } else {
+                    this.elementsContainer?.querySelectorAll('.path-line-selected')
+                        .forEach(el => el.classList.remove('path-line-selected'));
+                    lineEl.classList.add('path-line-selected');
+                }
             }
-            lineEl.classList.add('path-line-selected');
-            // Track active sub-line so new commands insert after it
+
+            this._lastSelectedLine = lineData;
+            this._lastSelectedLineRef = this._getLineRef(lineData, parentElem);
             this._activeSubLine = lineData;
             // Set parent path as active element (shows command suggestions)
             this._setActiveElem(`path:${parentElem.contourId}`);
@@ -636,7 +1013,8 @@ export default class PathEditor {
                 const allLines = this._elements.flatMap(el =>
                     (el.type === 'path' || el.type === 'polyline') ? el.lines : []);
                 const flatIdx = allLines.indexOf(lineData);
-                this.onLineClick(lineData.segId ?? flatIdx, e);
+                const selectedRefs = this._collectSelectedLineRefs();
+                this.onLineClick(lineData.segId ?? flatIdx, e, selectedRefs);
             }
         });
         return lineEl;
@@ -854,6 +1232,7 @@ export default class PathEditor {
     /**
      * Rebuild all sub-line DOM inside a path/polyline group.
      * Called after drag-sort or delete so line numbers stay correct.
+     * Also updates header label (path vs polyline) based on content.
      * @param {object} parentElem
      * @private
      */
@@ -867,6 +1246,13 @@ export default class PathEditor {
             const subEl = this._buildSubLine(lineData, parentElem);
             lineData._elem = subEl;
             body.appendChild(subEl);
+        }
+        // Update header label live based on new command composition
+        const expandBtn = parentElem._elem.querySelector('.path-cell-cmd');
+        if (expandBtn) {
+            const newLabel = this._classifyContourLabel(parentElem.lines);
+            const isExpanded = parentElem.expanded ?? false;
+            expandBtn.textContent = newLabel + (isExpanded ? ' ▼' : ' ►');
         }
     }
 
@@ -904,7 +1290,10 @@ export default class PathEditor {
         const fullPath = parts.join(' ');
         if (this.hiddenInput)    this.hiddenInput.value = fullPath;
         if (this.rawHiddenInput) this.rawHiddenInput.value = rawParts.join(' ');
-        this.onChange(fullPath);
+        this.onChange(fullPath, {
+            selectedLineRefs: this._collectSelectedLineRefs(),
+            activeElemId: this._activeElemId,
+        });
     }
 
     // ─── Input bar ────────────────────────────────────────────────────────────
@@ -941,16 +1330,18 @@ export default class PathEditor {
                 : -1;
             if (activeIdx !== -1) {
                 activeElem.lines.splice(activeIdx + 1, 0, lineData);
-                this._activeSubLine = lineData; // advance selection to new line
             } else {
                 activeElem.lines.push(lineData);
             }
+            this._activeSubLine = lineData;
             // Rebuild body so new sub-line gets correct line number
             this._rebuildPathBody(activeElem);
             // Auto-select the newly added sub-line
             if (lineData._elem) {
                 this.clearAllSelection();
                 lineData._elem.classList.add('path-line-selected');
+                this._lastSelectedLine = lineData;
+                this._lastSelectedLineRef = this._getLineRef(lineData, activeElem);
             }
             // Ensure expanded state is tracked BEFORE fireOnChange triggers setElements rebuild.
             activeElem.expanded = true;
@@ -970,7 +1361,12 @@ export default class PathEditor {
             this._expandedContours.add(cid);
             newElem._elem = this._buildPathGroup(newElem, this._elements.length);
             this.elementsContainer.appendChild(newElem._elem);
+            this.clearAllSelection();
+            lineData._elem?.classList.add('path-line-selected');
+            this._lastSelectedLine = lineData;
+            this._lastSelectedLineRef = this._getLineRef(lineData, newElem);
             this._setActiveElem(`path:${cid}`);
+            this._renderSuggestions();
             return true;
         }
         return false;
@@ -994,14 +1390,22 @@ export default class PathEditor {
         const parts          = this.splitBySpaces(inputVal);
         const hasCmd         = parts.length > 0 && parts[0].length === 1 && SVG_COMMANDS.has(parts[0]);
         const activePathElem = this._getActivePathElem();
+        const hasActivePathSelection = !!activePathElem && (() => {
+            const headerEl = activePathElem._elem?.querySelector?.('.pe-path-header');
+            if (headerEl?.classList.contains('path-line-selected')) return true;
+            return activePathElem.lines?.some(line => line._elem?.classList.contains('path-line-selected')) ?? false;
+        })();
 
         let html = '';
 
-        if (activePathElem) {
+        if (activePathElem && hasActivePathSelection) {
             // ── Path is active: show command palette + variable hints ─────
-            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Path cmds:</span>';
+            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Commands:</span>';
             Object.entries(SVG_COMMAND_DEFS).forEach(([cmd, def]) => {
-                html += `<button type="button" class="path-suggestion-btn cmd-btn" data-cmd="${cmd}" title="${def.label}">${cmd}</button>`;
+                html += `<button type="button" class="path-suggestion-btn cmd-btn" data-cmd="${cmd}" title="${def.label}">${cmd}`;
+                // html += `<span class="path-cmd-label">${def.label}</span>`;
+                html += `</button>`;
+
             });
             html += '</div>';
 
@@ -1026,12 +1430,12 @@ export default class PathEditor {
                 }
             }
         } else {
-            // ── Nothing active: show element creation chips ───────────────
-            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Add:</span>';
-            html += `<button type="button" class="path-suggestion-btn elem-btn" data-elem="circle"  title="Add circle">○ Circle</button>`;
-            html += `<button type="button" class="path-suggestion-btn elem-btn" data-elem="rect"    title="Add rect">□ Rect</button>`;
-            html += `<button type="button" class="path-suggestion-btn elem-btn" data-elem="ellipse" title="Add ellipse">⬬ Ellipse</button>`;
-            html += `<button type="button" class="path-suggestion-btn elem-btn" data-elem="path"    title="Add path">╲ Path</button>`;
+            // ── Nothing active: show element creation buttons ─────────────
+            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Add element:</span>';
+            html += `<button type="button" class="path-suggestion-btn elem-btn elem-btn-path"    data-elem="path"    title="New path contour">Path</button>`;
+            html += `<button type="button" class="path-suggestion-btn elem-btn elem-btn-circle"  data-elem="circle"  title="Circle">Circle</button>`;
+            html += `<button type="button" class="path-suggestion-btn elem-btn elem-btn-rect"    data-elem="rect"    title="Rectangle">Rect</button>`;
+            html += `<button type="button" class="path-suggestion-btn elem-btn elem-btn-ellipse" data-elem="ellipse" title="Ellipse">Ellipse</button>`;
             html += '</div>';
         }
 
@@ -1066,7 +1470,12 @@ export default class PathEditor {
                     this._expandedContours.add(cid);
                     newElem._elem = this._buildPathGroup(newElem, this._elements.length);
                     this.elementsContainer.appendChild(newElem._elem);
+                    this.clearAllSelection();
+                    const header = newElem._elem?.querySelector?.('.pe-path-header');
+                    header?.classList.add('path-line-selected');
+                    this._lastSelectedElemRef = this._getTopLevelRef(newElem);
                     this._setActiveElem(`path:${cid}`);
+                    this._renderSuggestions();
                 } else {
                     // Delegate shape creation to the caller via a special change event
                     if (this.onShapeElementChange) this.onShapeElementChange(null, { _create: type });
@@ -1129,7 +1538,10 @@ export default class PathEditor {
      */
     setSelectedElements(ids) {
         this.clearAllSelection();
-        if (!ids || !ids.size) return;
+        if (!ids || !ids.size) {
+            this._renderSuggestions();
+            return;
+        }
         for (const elem of this._elements) {
             if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
                 if (ids.has(elem.segId)) elem._elem?.classList.add('path-line-selected');
@@ -1147,6 +1559,7 @@ export default class PathEditor {
                 }
             }
         }
+        this._renderSuggestions();
     }
 
     /** Remove all selection highlights. */
@@ -1454,6 +1867,17 @@ export default class PathEditor {
     setPath(pathStr) {
         if (!pathStr) return;
 
+        // Preserve expand/collapse state by path position across preview refreshes.
+        const prevPathExpandedByPos = this._elements
+            .filter(e => e.type === 'path' || e.type === 'polyline')
+            .map(e => !!e.expanded);
+        const prevPathExpandedBySig = new Map(
+            this._elements
+                .filter(e => e.type === 'path' || e.type === 'polyline')
+                .map(e => [this._contourSignatureFromLines(e.lines), !!e.expanded])
+                .filter(([sig]) => !!sig)
+        );
+
         // ── Split the flat path string into M-separated sub-paths ────────────
         const allCmds  = this._splitPathIntoCommands(pathStr);
         const subPaths = [];
@@ -1472,6 +1896,7 @@ export default class PathEditor {
 
         let cid = 1;
         for (const cmds of subPaths) {
+            const pathPos = cid - 1;
             // Detect M-A-A-Z circle pattern:
             //   M cx-r -cy  A r r 0 1 0 cx+r -cy  A r r 0 1 0 cx-r -cy  Z
             const isCircle = cmds.length === 4
@@ -1493,13 +1918,17 @@ export default class PathEditor {
                     data: { center: { x: cx, y: cy }, radius }, _elem: null,
                 });
             } else {
+                const sig = this._contourSignatureFromCommands(cmds);
+                const expanded = prevPathExpandedBySig.has(sig)
+                    ? !!prevPathExpandedBySig.get(sig)
+                    : (prevPathExpandedByPos[pathPos] ?? true);
                 const pathElem = {
-                    type: 'path', contourId: cid, segIds: [], expanded: true,
+                    type: 'polyline', contourId: cid, segIds: [], expanded,
                     lines: cmds.map(text => ({ text: text.trim(), segId: null, _elem: null })),
                     _elem: null,
                 };
                 this._elements.push(pathElem);
-                this._expandedContours.add(cid);
+                if (expanded) this._expandedContours.add(cid);
             }
             cid++;
         }
@@ -1514,6 +1943,38 @@ export default class PathEditor {
      * @returns {string}
      */
     getPath() {
+        const fromRawInput = this.rawHiddenInput?.value?.trim();
+        if (fromRawInput) return fromRawInput;
+
+        const parts = [];
+        for (const elem of this._elements) {
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                const text = elem.lines.map(l => l.text).filter(Boolean).join(' ');
+                if (text) parts.push(text);
+            } else if (elem.type === 'circle') {
+                const { center, radius } = elem.data ?? {};
+                if (center != null && radius != null) {
+                    const r6 = v => +Number(v).toFixed(6);
+                    const cx = center.x, cy = center.y, rad = radius;
+                    const circleCmd =
+                        `M ${r6(cx - rad)} ${r6(-cy)}` +
+                        ` A ${r6(rad)} ${r6(rad)} 0 1 0 ${r6(cx + rad)} ${r6(-cy)}` +
+                        ` A ${r6(rad)} ${r6(rad)} 0 1 0 ${r6(cx - rad)} ${r6(-cy)}` +
+                        ` Z`;
+                    parts.push(circleCmd);
+                }
+            }
+        }
+        return parts.join(' ');
+    }
+
+    /**
+     * Return raw path text for contour rows only (path/polyline), excluding standalone
+     * shape rows. Used by ProfileEditor formula cache to align with
+     * EditorStateManager.exportPathWithMap({skipShapes:true}).
+     * @returns {string}
+     */
+    getContoursRawPath() {
         const parts = [];
         for (const elem of this._elements) {
             if (elem.type === 'path' || elem.type === 'polyline') {
@@ -1522,6 +1983,204 @@ export default class PathEditor {
             }
         }
         return parts.join(' ');
+    }
+
+    /**
+     * Non-destructively bind editor rows to external segment IDs.
+     *
+     * This method updates `line.segId`, `elem.segIds` and shape `elem.segId`
+     * without rebuilding DOM or touching order/expanded state.
+     *
+     * Used by ProfileEditor in edit mode to keep one PathEditor structure
+     * across preview/edit transitions while still enabling canvas selection mapping.
+     *
+     * @param {{lineSegIds?: Array<string|null>, shapeSegIds?: string[]}} [bindings]
+     */
+    bindSegmentIds(bindings = {}) {
+        const lineSegIds = Array.isArray(bindings.lineSegIds) ? bindings.lineSegIds : [];
+        const shapeSegIds = Array.isArray(bindings.shapeSegIds) ? bindings.shapeSegIds : [];
+
+        let lineIndex = 0;
+        let shapeIndex = 0;
+        for (const elem of this._elements) {
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                const segIds = [];
+                for (const line of elem.lines) {
+                    const sid = lineSegIds[lineIndex] ?? null;
+                    line.segId = sid;
+                    if (sid && typeof sid === 'string' && !sid.startsWith('m:') && !segIds.includes(sid)) {
+                        segIds.push(sid);
+                    }
+                    lineIndex++;
+                }
+                elem.segIds = segIds;
+            } else if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
+                const sid = shapeSegIds[shapeIndex] ?? null;
+                if (sid) elem.segId = sid;
+                shapeIndex++;
+            }
+        }
+    }
+
+    /**
+     * Return true when incoming elements require full structural rebuild.
+     *
+     * Structural rebuild is required when top-level rows differ (count/order/type),
+     * path command counts differ, contour IDs differ, or shape display attributes
+     * changed (including newly created/deleted shapes).
+     *
+     * @param {Array} elements
+     * @returns {boolean}
+     */
+    needsElementsRebuild(elements) {
+        if (!Array.isArray(elements)) return true;
+        if (elements.length !== this._elements.length) return true;
+
+        for (let i = 0; i < elements.length; i++) {
+            const incoming = elements[i];
+            const current = this._elements[i];
+            if (!incoming || !current) return true;
+            if (incoming.type !== current.type) return true;
+
+            if (incoming.type === 'path' || incoming.type === 'polyline') {
+                if (incoming.contourId !== current.contourId) return true;
+                const incomingLineCount = incoming.path != null
+                    ? this._splitPathIntoCommands(incoming.path).length
+                    : (Array.isArray(incoming.lines) ? incoming.lines.length : current.lines.length);
+                if ((current.lines?.length ?? 0) !== incomingLineCount) return true;
+                continue;
+            }
+
+            if (incoming.type === 'circle' || incoming.type === 'rect' || incoming.type === 'ellipse') {
+                if (incoming.segId !== current.segId) return true;
+                const attrs = PathEditor.SHAPE_DEFS[incoming.type]?.attrs ?? [];
+                for (const attr of attrs) {
+                    const a = this._shapeAttrValue(incoming.type, current.data ?? {}, attr);
+                    const b = this._shapeAttrValue(incoming.type, incoming.data ?? {}, attr);
+                    if (a !== b) return true;
+                }
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Update existing path/polyline sub-lines in place from a flat path string.
+     *
+     * Returns `true` only when the command structure is compatible (same command
+     * count and same command letters in order). In that case DOM is preserved and
+     * only cell values are refreshed. Otherwise returns `false` so caller can
+     * fallback to full `setElements()` rebuild.
+     *
+     * @param {string} pathStr
+     * @param {Array<string|null>} [lineSegIds=[]]
+     * @returns {boolean}
+     */
+    updatePathLinesInPlace(pathStr, lineSegIds = []) {
+        const cmds = this._splitPathIntoCommands(pathStr || '');
+        const allLines = [];
+        for (const elem of this._elements) {
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                for (const line of elem.lines) allLines.push(line);
+            }
+        }
+        if (cmds.length !== allLines.length) return false;
+
+        for (let i = 0; i < cmds.length; i++) {
+            const oldParsed = this.parseLine(allLines[i]?.text ?? '');
+            const newParsed = this.parseLine(cmds[i] ?? '');
+            if (!oldParsed || !newParsed || oldParsed.cmdUpper !== newParsed.cmdUpper) {
+                return false;
+            }
+        }
+
+        for (let i = 0; i < allLines.length; i++) {
+            const lineData = allLines[i];
+            const incomingText = (cmds[i] ?? '').trim();
+            const formulaBackup = lineData._formulaText ?? (this._hasFormulaToken(lineData.text) ? lineData.text : null);
+            const chosenText = this._chooseLineTextWithFormulaPriority(lineData.text, formulaBackup, incomingText);
+            if (chosenText !== incomingText) {
+                lineData._formulaText = formulaBackup ?? (this._hasFormulaToken(chosenText) ? chosenText : null);
+            } else if (this._hasFormulaToken(lineData.text)) {
+                lineData._formulaText = lineData.text;
+            }
+            lineData.text = chosenText;
+            lineData.segId = lineSegIds[i] ?? null;
+            if (lineData._elem) {
+                const parentElem = this._elements.find(e =>
+                    (e.type === 'path' || e.type === 'polyline') && e.lines.includes(lineData));
+                if (parentElem) this._buildLineCellsInElem(lineData._elem, lineData, parentElem);
+            }
+        }
+
+        for (const elem of this._elements) {
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                const segIds = [];
+                for (const line of elem.lines) {
+                    const sid = line.segId;
+                    if (sid && typeof sid === 'string' && !sid.startsWith('m:') && !segIds.includes(sid)) {
+                        segIds.push(sid);
+                    }
+                }
+                elem.segIds = segIds;
+                const expandBtn = elem._elem?.querySelector?.('.path-cell-cmd');
+                if (expandBtn) {
+                    const label = this._classifyContourLabel(elem.lines);
+                    const isExpanded = elem.expanded ?? false;
+                    expandBtn.textContent = label + (isExpanded ? ' ▼' : ' ►');
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Update existing shape rows in place from incoming elements.
+     *
+     * Returns `true` when all shape rows were updated without structural changes
+     * (same row count/order/cell layout). Returns `false` when caller must fallback
+     * to full `setElements()` rebuild.
+     *
+     * @param {Array} elements
+     * @returns {boolean}
+     */
+    updateShapeRowsInPlace(elements) {
+        if (!Array.isArray(elements) || elements.length !== this._elements.length) return false;
+        for (let i = 0; i < elements.length; i++) {
+            const incoming = elements[i];
+            const current = this._elements[i];
+            if (!incoming || !current) return false;
+            if (incoming.type !== current.type) return false;
+            if (!(incoming.type === 'circle' || incoming.type === 'rect' || incoming.type === 'ellipse')) continue;
+
+            const rowEl = current._elem;
+            if (!rowEl) return false;
+
+            current.segId = incoming.segId;
+            current.data = { ...(incoming.data ?? {}) };
+            rowEl.dataset.segId = current.segId;
+
+            const def = PathEditor.SHAPE_DEFS[incoming.type];
+            const paramCells = [...rowEl.querySelectorAll('.path-cell-param')];
+            let cellIndex = 0;
+            for (const attrKey of def.attrs) {
+                const val = this._shapeAttrValue(incoming.type, current.data, attrKey);
+                if (val === '' && (attrKey === 'rx' || attrKey === 'ry')) continue;
+                const cell = paramCells[cellIndex];
+                if (!cell) return false;
+                cell.dataset.attr = attrKey;
+                cell.title = attrKey;
+                cell.textContent = val || attrKey;
+                cell.classList.toggle('cell-empty', !val);
+                cellIndex++;
+            }
+            if (cellIndex !== paramCells.length) return false;
+        }
+        return true;
     }
 
     /** @deprecated Use setElements() instead */
@@ -1533,16 +2192,37 @@ export default class PathEditor {
      */
     setSelectedLines(indices) {
         this.clearAllSelection();
-        if (!indices?.length) return;
+        if (!indices?.length) {
+            this._lastSelectedLine = null;
+            this._lastSelectedLineRef = null;
+            this._renderSuggestions();
+            return;
+        }
         const allLines = this._elements.flatMap(e =>
             (e.type === 'path' || e.type === 'polyline') ? e.lines : []);
+        let lastSelected = null;
         for (const idx of indices) {
             if (typeof idx === 'number') {
-                allLines[idx]?._elem?.classList.add('path-line-selected');
+                const line = allLines[idx];
+                line?._elem?.classList.add('path-line-selected');
+                if (line) lastSelected = line;
             } else if (idx != null) {
-                allLines.find(l => l.segId === idx)?._elem?.classList.add('path-line-selected');
+                const line = allLines.find(l => l.segId === idx);
+                line?._elem?.classList.add('path-line-selected');
+                if (line) lastSelected = line;
             }
         }
+        if (lastSelected) {
+            this._activeSubLine = lastSelected;
+            this._lastSelectedLine = lastSelected;
+            const parentElem = this._elements.find(e =>
+                (e.type === 'path' || e.type === 'polyline') && e.lines.includes(lastSelected));
+            if (parentElem) {
+                this._lastSelectedLineRef = this._getLineRef(lastSelected, parentElem);
+                this._setActiveElem(`path:${parentElem.contourId}`);
+            }
+        }
+        this._renderSuggestions();
     }
 
     /** Alias for clearAllSelection */
@@ -1593,11 +2273,13 @@ export default class PathEditor {
             if (save) {
                 const val = input.value.trim();
                 if (val) {
+                    const prevVal = this._shapeAttrValue(elem.type, elem.data, attrKey);
                     const changes = this._shapeAttrToChanges(elem.type, elem.data, attrKey, val);
                     if (this.onShapeElementChange) this.onShapeElementChange(elem.segId, changes);
                     Object.assign(elem.data, changes);
                     cell.textContent = val;
                     cell.classList.remove('cell-empty');
+                    if (!this.onShapeElementChange && prevVal !== val) this._fireOnChange();
                 } else {
                     cell.textContent = attrKey;
                     cell.classList.add('cell-empty');

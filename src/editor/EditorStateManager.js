@@ -391,9 +391,10 @@ export default class EditorStateManager {
                 const embedded = this.segments.filter(
                     s => (s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse') && (s.contourId ?? 0) === cid
                 );
-                const hasArc = chain.some(s => s.type === 'arc');
+                // Always use 'polyline' type; PathEditor will classify the label
+                // dynamically as "Path" or "Polyline" based on command content.
                 elements.push({
-                    type: hasArc ? 'path' : 'polyline',
+                    type: 'polyline',
                     contourId: cid,
                     segIds: [...chain.map(s => s.id), ...embedded.map(s => s.id)],
                 });

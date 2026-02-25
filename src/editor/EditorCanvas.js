@@ -421,9 +421,13 @@ export default class EditorCanvas {
             // the user drag the arc's midpoint to reshape it.
             if (selected && seg.data.arcMode) {
                 const { center } = seg.data;
-                // Use stored pt3 if available; compute the geometric midpoint otherwise
-                // (needed for arcs imported from existing paths that lack pt3).
-                const pt3 = seg.data.pt3 ?? _computeArcMidpoint(seg.data);
+                // arc2pt handle must follow current geometry after text/radius edits.
+                // For arc3pt preserve explicit pt3 if available.
+                const pt3 = seg.data.arcMode === "arc2pt"
+                    ? _computeArcMidpoint(seg.data)
+                    : (seg.data.pt3 ?? _computeArcMidpoint(seg.data));
+                // Keep cached handle consistent for hit-test/move tools.
+                seg.data.pt3 = pt3;
 
                 // Construction-style visuals: two dashed radius lines
                 // center → start and center → end, matching the ghost drawn
@@ -459,7 +463,20 @@ export default class EditorCanvas {
             g.appendChild(circ);
 
             if (seg.selected) {
-                const pt3 = seg.data.pt3 ?? { x: center.x + radius, y: center.y };
+                let pt3 = seg.data.pt3;
+                if (!pt3) {
+                    pt3 = { x: center.x + radius, y: center.y };
+                } else {
+                    const dx = pt3.x - center.x;
+                    const dy = pt3.y - center.y;
+                    const dist = Math.hypot(dx, dy);
+                    if (Math.abs(dist - radius) > 1e-4) {
+                        const ang = dist > 1e-9 ? Math.atan2(dy, dx) : 0;
+                        pt3 = { x: center.x + Math.cos(ang) * radius, y: center.y + Math.sin(ang) * radius };
+                    }
+                }
+                // Keep cached handle consistent for hit-test/move tools.
+                seg.data.pt3 = pt3;
                 // Dashed radius line: center → pt3
                 const dash = document.createElementNS(SVG_NS, "line");
                 dash.setAttribute("x1", center.x); dash.setAttribute("y1", center.y);

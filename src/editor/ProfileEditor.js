@@ -10,6 +10,7 @@ import ArcTool from "./tools/ArcTool.js";
 import CircleTool from "./tools/CircleTool.js";
 import RectTool from "./tools/RectTool.js";
 import EllipseTool from "./tools/EllipseTool.js";
+import { evaluateMathExpression } from "../utils/utils.js";
 
 const log = LoggerFactory.createLogger("ProfileEditor");
 
@@ -29,21 +30,79 @@ const log = LoggerFactory.createLogger("ProfileEditor");
  */
 function _mergeFormulaPath(numericPath, formulaPath, vars) {
     if (!formulaPath) return numericPath;
-    // Tokenise: SVG command letters and numeric/formula values treated as separate tokens.
-    const re = /[MmLlHhVvAaZzCcSsQqTt]|\{[a-zA-Z_][a-zA-Z0-9_]*\}|[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g;
-    const numTok = numericPath.match(re) ?? [];
-    const fmtTok = formulaPath.match(re) ?? [];
-    if (numTok.length !== fmtTok.length) return numericPath; // structure changed
-    const VAR_RE = /^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/;
-    return numTok.map((n, i) => {
-        const f = fmtTok[i];
-        const vm = VAR_RE.exec(f);
-        if (vm) {
-            const resolved = Number(vars[vm[1]]);
-            if (!isNaN(resolved) && Math.abs(resolved - Number(n)) < 1e-4) return f;
+    const tokenize = (str) => {
+        const tokens = [];
+        let i = 0;
+        while (i < str.length) {
+            while (i < str.length && /[\s,]/.test(str[i])) i++;
+            if (i >= str.length) break;
+            if (/[MmLlHhVvZzCcSsQqTtAa]/.test(str[i])) {
+                tokens.push({ type: 'cmd', value: str[i++] });
+                continue;
+            }
+            if ((str[i] === '-' || str[i] === '+') && str[i + 1] === '{') {
+                const end = str.indexOf('}', i + 1);
+                const k = end >= 0 ? end + 1 : str.length;
+                tokens.push({ type: 'param', value: str.slice(i, k) });
+                i = k;
+                continue;
+            }
+            if (str[i] === '{') {
+                const end = str.indexOf('}', i);
+                const k = end >= 0 ? end + 1 : str.length;
+                tokens.push({ type: 'param', value: str.slice(i, k) });
+                i = k;
+                continue;
+            }
+            let j = i;
+            if (str[j] === '-' || str[j] === '+') j++;
+            while (j < str.length && /[\d.eE]/.test(str[j])) {
+                if ((str[j] === 'e' || str[j] === 'E') && j + 1 < str.length &&
+                    (str[j + 1] === '-' || str[j + 1] === '+')) j++;
+                j++;
+            }
+            const numStr = str.slice(i, j);
+            if (numStr) tokens.push({ type: 'param', value: numStr });
+            i = j > i ? j : j + 1;
         }
-        return n;
-    }).join(' ');
+        return tokens;
+    };
+
+    const resolveParam = (token) => {
+        const t = String(token ?? '').trim();
+        if (!t) return NaN;
+        if (/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t)) return Number(t);
+        const m = t.match(/^([+-]?)\{([\s\S]+)\}$/);
+        if (m) {
+            const sign = m[1] === '-' ? -1 : 1;
+            const expr = m[2];
+            try {
+                return sign * Number(evaluateMathExpression(expr, vars));
+            } catch (_) {
+                return NaN;
+            }
+        }
+        return NaN;
+    };
+
+    const numTok = tokenize(numericPath);
+    const fmtTok = tokenize(formulaPath);
+    if (numTok.length !== fmtTok.length) return numericPath;
+
+    const merged = [];
+    for (let i = 0; i < numTok.length; i++) {
+        const n = numTok[i];
+        const f = fmtTok[i];
+        if (n.type === 'cmd') {
+            merged.push(n.value);
+            continue;
+        }
+        const nVal = Number(n.value);
+        const fVal = resolveParam(f.value);
+        if (!isNaN(nVal) && !isNaN(fVal) && Math.abs(nVal - fVal) < 1e-4) merged.push(f.value);
+        else merged.push(n.value);
+    }
+    return merged.join(' ');
 }
 
 // ─── Module-level pure helpers ────────────────────────────────────────────────
@@ -168,11 +227,17 @@ export default class ProfileEditor {
         /** Guard flag: true while a text-editor change is being processed (prevents setPath() round-trip). @type {boolean} */
         this._pathEditorIsSource = false;
 
+        /** Guard flag: true after initial enter() sync is armed.
+         *  If sync is invoked before that point, only lightweight ID/selection binding runs. @type {boolean} */
+        this._initialSyncDone = false;
+
         /** Saved PathEditor.onChange before edit mode — restored on exit. @type {Function|null} */
         this._origPathEditorOnChange = null;
 
         /** Saved PathEditor.onLineClick before edit mode — restored on exit. @type {Function|null} */
         this._origPathEditorOnLineClick = null;
+        /** Saved PathEditor.onElementOrderChange before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnElementOrderChange = null;
 
         /** The SVG <circle> dot drawn on the canvas overlay when an M row is selected in edit mode.
          *  Cleared when a segment is selected or edit mode exits. @type {SVGCircleElement|null} */
@@ -228,7 +293,7 @@ export default class ProfileEditor {
         this._onSave    = onSave;
         this._onClose   = onClose ?? null;
         this._pathEditor = pathEditor;
-        this._formulaPath = profilePath; // initial formula path (may have {tokens} from saved data)
+        this._formulaPath = pathEditor?.getContoursRawPath?.() || profilePath;
 
         log.info("Entering profile edit mode");
 
@@ -256,13 +321,14 @@ export default class ProfileEditor {
         // Selection change: re-render canvas + sync PathEditor row highlighting.
         this.state.onSelectionChange = () => {
             this.editorCanvas.renderAllSegments(this.state.segments);
-            this._syncToPathEditor();
+            this._syncPathEditorSelectionOnly();
         };
 
-        // 6. Initial render — sync element structure WITHOUT replacing PathEditor text.
-        // PathEditor already holds the raw formula path loaded by BitsManager.
+        // 6. Initial render.
+        // Use the same sync pipeline as normal edit updates so preview/edit stay unified.
         this.editorCanvas.renderAllSegments(this.state.segments);
-        this._rebuildPathEditorElements();
+        this._initialSyncDone = true;
+        this._syncToPathEditor();
 
         // 7. Re-draw M-dot at updated scale whenever the user zooms/pans.
         // The dot radius is zoom-dependent (3px screen = 3/zoom SVG units),
@@ -343,6 +409,7 @@ export default class ProfileEditor {
             this._clearMDot();
             this._pathEditor.onChange               = this._origPathEditorOnChange    ?? (() => {});
             this._pathEditor.onLineClick            = this._origPathEditorOnLineClick ?? null;
+            this._pathEditor.onElementOrderChange   = this._origPathEditorOnElementOrderChange ?? null;
             this._pathEditor.onShapeElementChange   = null;
             this._pathEditor.onShapeElementClick    = null;
             this._pathEditor.onPathElemClick        = null;
@@ -376,6 +443,7 @@ export default class ProfileEditor {
         this.editorCanvas = null;
 
         this.state = null;
+        this._initialSyncDone = false;
 
         // Restore keyboard
         if (this._keyHandler) {
@@ -422,42 +490,147 @@ export default class ProfileEditor {
         // overwriting the editor’s line segments in the bits layer).
         this._origPathEditorOnChange    = pathEditor.onChange;
         this._origPathEditorOnLineClick = pathEditor.onLineClick;
+        this._origPathEditorOnElementOrderChange = pathEditor.onElementOrderChange;
+
+        pathEditor.onElementOrderChange = (order) => {
+            if (!Array.isArray(order) || !this.state) return;
+            const used = new Set();
+            const reordered = [];
+            for (const item of order) {
+                if (item?.kind === 'contour') {
+                    const cid = Number(item.contourId);
+                    const group = this.state.segments.filter(s => !used.has(s.id) && (s.contourId ?? 0) === cid);
+                    for (const seg of group) {
+                        reordered.push(seg);
+                        used.add(seg.id);
+                    }
+                } else if (item?.kind === 'shape' && typeof item.segId === 'string') {
+                    const seg = this.state.segments.find(s => !used.has(s.id) && s.id === item.segId);
+                    if (seg) {
+                        reordered.push(seg);
+                        used.add(seg.id);
+                    }
+                }
+            }
+            const tail = this.state.segments.filter(s => !used.has(s.id));
+            const next = [...reordered, ...tail];
+            const prevIds = this.state.segments.map(s => s.id);
+            const nextIds = next.map(s => s.id);
+            const changed = prevIds.length !== nextIds.length || prevIds.some((id, i) => id !== nextIds[i]);
+            if (!changed) return;
+
+            this._pathEditorIsSource = true;
+            this.state.segments = next;
+            this.state._pushHistory("Reorder elements");
+            this.state._notifySegments();
+            this._pathEditorIsSource = false;
+        };
 
         // PathEditor → canvas: user edited the text — re-import into state.
-        pathEditor.onChange = (newPath) => {
+        pathEditor.onChange = (newPath, meta = null) => {
             // Suppress re-entry caused by setPath() calls from _syncToPathEditor.
             if (this._syncingToPathEditor) return;
             // Keep the formula path in sync with what the user typed.
-            this._formulaPath = newPath;
+            this._formulaPath = this._pathEditor?.getContoursRawPath?.() ?? newPath;
             // Mark that this change originated in the text editor so that
             // _syncToPathEditor does NOT overwrite PathEditor content.
             this._pathEditorIsSource = true;
             this.state._importPath(newPath, { resetHistory: false });
+
+            // Preserve row selection from PathEditor after text import.
+            // PathEditor emits flat selected line indexes; convert them via fresh lineSegIds.
+            const selectedRefs = meta?.selectedLineRefs;
+            if (Array.isArray(selectedRefs) && selectedRefs.length > 0) {
+                const { lineSegIds } = this.state.exportPathWithMap({ skipShapes: true });
+                const selectedIds = [];
+                for (const ref of selectedRefs) {
+                    if (typeof ref === 'number') {
+                        const mapped = lineSegIds?.[ref] ?? null;
+                        if (mapped) selectedIds.push(mapped);
+                    } else if (typeof ref === 'string' && ref.length > 0) {
+                        selectedIds.push(ref);
+                    }
+                }
+                this.state.setSelection([...new Set(selectedIds)]);
+            }
+
+            // Keep PathEditor row highlight/source selection exactly as user left it,
+            // including rows that do not map to canvas segments yet (e.g. first `M`).
+            if (Array.isArray(selectedRefs)) {
+                this._pathEditor?.setSelectedLines(selectedRefs);
+            }
             this._pathEditorIsSource = false;
         };
 
         // PathEditor row click → canvas selection (unified API: segId is always passed).
-        pathEditor.onLineClick = (segId, e) => {
-            if (typeof segId === 'string' && segId.startsWith('m:')) {
+        pathEditor.onLineClick = (segRef, e, selectedRefs = null) => {
+            const resolveSegRef = (ref) => {
+                if (typeof ref === 'number') return this._lineSegIds?.[ref] ?? null;
+                return ref ?? null;
+            };
+
+            const clickedSegId = resolveSegRef(segRef);
+
+            // Unified mode: PathEditor is the source of truth for row selection state.
+            // Apply the full selected set (toggle/range/plain) exactly as provided.
+            if (Array.isArray(selectedRefs)) {
+                const resolvedSelected = [...new Set(
+                    selectedRefs
+                        .map(resolveSegRef)
+                        .filter(id => typeof id === 'string' && id.length > 0)
+                )];
+
+                if (resolvedSelected.length === 0) {
+                    this.state.activeContourId  = null;
+                    this.state.insertAfterSegId = null;
+                    this._clearMDot();
+                    this._pathEditorIsSource = true;
+                    this.state.clearSelection();
+                    this._pathEditorIsSource = false;
+                    return;
+                }
+
+                if (typeof clickedSegId === 'string' && clickedSegId.startsWith('m:')) {
+                    const contourId = Number(clickedSegId.slice(2));
+                    this.state.activeContourId  = contourId;
+                    this.state.insertAfterSegId = null;
+                } else {
+                    const focusSegId = (typeof clickedSegId === 'string' && !clickedSegId.startsWith('m:'))
+                        ? clickedSegId
+                        : resolvedSelected.find(id => !id.startsWith('m:')) ?? null;
+                    const seg = focusSegId ? this.state.segments.find(s => s.id === focusSegId) : null;
+                    this.state.activeContourId  = seg?.contourId ?? null;
+                    this.state.insertAfterSegId = focusSegId;
+                }
+
+                this._clearMDot();
+                this._pathEditorIsSource = true;
+                this.state.setSelection(resolvedSelected);
+                this._pathEditorIsSource = false;
+                return;
+            }
+
+            if (typeof clickedSegId === 'string' && clickedSegId.startsWith('m:')) {
                 // M row: synthetic segId encodes contourId as "m:<contourId>".
                 // Routed through setSelection identically to L/A rows so that
                 // state.clearSelection() fires correctly on Escape / empty-canvas click.
-                const contourId = Number(segId.slice(2));
+                const contourId = Number(clickedSegId.slice(2));
                 this.state.activeContourId  = contourId;
                 this.state.insertAfterSegId = null;
                 this._pathEditorIsSource = true;
-                this.state.setSelection(segId);
+                this.state.setSelection(clickedSegId);
                 this._pathEditorIsSource = false;
                 return;
             }
             // Normal segment row (line/arc).
-            const seg = this.state.segments.find(s => s.id === segId);
+            const seg = this.state.segments.find(s => s.id === clickedSegId);
             this.state.activeContourId  = seg?.contourId ?? null;
-            this.state.insertAfterSegId = segId;
+            this.state.insertAfterSegId = clickedSegId;
             this._clearMDot();
             this._pathEditorIsSource = true;
-            if (e?.shiftKey) this.state.toggleSelection(segId);
-            else              this.state.setSelection(segId);
+            // CTRL/Meta+click or Shift+click → toggle; plain click → exclusive select.
+            if (e?.ctrlKey || e?.metaKey || e?.shiftKey) this.state.toggleSelection(clickedSegId);
+            else                                          this.state.setSelection(clickedSegId);
             this._pathEditorIsSource = false;
         };
 
@@ -467,10 +640,26 @@ export default class ProfileEditor {
                 this.state.deleteSegments([segId]);
                 return;
             }
+            // Handle shape creation triggered by PathEditor “Add” buttons.
+            // segId is null here; changes._create carries the type string.
+            if (changes._create) {
+                this._createDefaultShape(changes._create);
+                return;
+            }
             // Merge changes into existing data (updateSegments replaces `data` at top level).
             const seg = this.state.segments.find(s => s.id === segId);
             if (!seg) return;
             const mergedData = { ...seg.data, ...changes };
+            if (seg.type === 'circle' && (Object.prototype.hasOwnProperty.call(changes, 'radius')
+                    || Object.prototype.hasOwnProperty.call(changes, 'center'))) {
+                const center = mergedData.center ?? seg.data.center;
+                const radius = mergedData.radius ?? seg.data.radius ?? 0;
+                const prevPt3 = seg.data.pt3 ?? { x: center.x + radius, y: center.y };
+                const dx = prevPt3.x - center.x;
+                const dy = prevPt3.y - center.y;
+                const ang = Math.atan2(dy, dx);
+                mergedData.pt3 = { x: center.x + Math.cos(ang) * radius, y: center.y + Math.sin(ang) * radius };
+            }
             // Explicitly remove radiusExpr when the caller passes `radiusExpr: undefined`.
             if (Object.prototype.hasOwnProperty.call(changes, 'radiusExpr') && changes.radiusExpr === undefined) {
                 delete mergedData.radiusExpr;
@@ -483,19 +672,24 @@ export default class ProfileEditor {
 
         // Shape element row click: select on canvas.
         // Clear activeContourId so new segments aren’t incorrectly appended to a path.
-        pathEditor.onShapeElementClick = (segId, e) => {
+        pathEditor.onShapeElementClick = (segId, e, selectedSegIds = null) => {
             this.state.activeContourId  = null;
             this.state.insertAfterSegId = null;
             this._clearMDot();
             this._pathEditorIsSource = true;
-            if (e?.shiftKey) this.state.toggleSelection(segId);
-            else             this.state.setSelection(segId);
+            if (Array.isArray(selectedSegIds)) {
+                this.state.setSelection(selectedSegIds);
+            } else if (e?.ctrlKey || e?.metaKey || e?.shiftKey) {
+                this.state.toggleSelection(segId);
+            } else {
+                this.state.setSelection(segId);
+            }
             this._pathEditorIsSource = false;
         };
 
         // Path element header click: select all segments in the path and set
         // activeContourId so that drawing can continue into this path.
-        pathEditor.onPathElemClick = (segIds, e) => {
+        pathEditor.onPathElemClick = (segIds, e, selectedSegIds = null) => {
             const firstSeg = this.state.segments.find(s => s.id === segIds[0]);
             this.state.activeContourId  = firstSeg?.contourId ?? null;
             // Insert after the last line/arc segment of this path.
@@ -506,8 +700,13 @@ export default class ProfileEditor {
             this.state.insertAfterSegId = lastLineSegId ?? null;
             this._clearMDot();
             this._pathEditorIsSource = true;
-            if (e?.shiftKey) this.state.setSelection([...this.state.selectedIds, ...segIds]);
-            else             this.state.setSelection(segIds);
+            if (Array.isArray(selectedSegIds)) {
+                this.state.setSelection(selectedSegIds);
+            } else if (e?.shiftKey) {
+                this.state.setSelection([...this.state.selectedIds, ...segIds]);
+            } else {
+                this.state.setSelection(segIds);
+            }
             this._pathEditorIsSource = false;
         };
 
@@ -523,17 +722,17 @@ export default class ProfileEditor {
     }
 
     /**
-     * Push the current canvas state to PathEditor and sync row highlighting.
+     * Push current canvas/model state to PathEditor and sync row highlighting.
      *
-     * Two modes depending on which side originated the last change:
-     * - **Canvas-originated** (`_pathEditorIsSource === false`): export a numeric path,
-     *   merge formula tokens back via `_mergeFormulaPath`, and call `pathEditor.setElements()`
-     *   so the text editor displays current geometry without losing `{varname}` tokens.
-     * - **Text-originated** (`_pathEditorIsSource === true`): pass the fresh `lineSegIds`
-     *   map to `setElements()` but strip per-element `path` strings so the user’s typed
-     *   text is preserved verbatim.
+     * Canvas-originated updates:
+     * - Merge formula tokens back into exported contour path.
+     * - Prefer in-place row updates; fallback to full `setElements()` only when
+     *   structure changed.
      *
-     * Also redraws the M-dot for any selected M-row segId (`"m:<cid>"`).
+     * Text-originated updates:
+     * - Keep PathEditor structure as source of truth; only hard-clear when state path is empty.
+     *
+     * Always refreshes ID binding and M-row anchor-dot visualization.
      * @private
      */
     _syncToPathEditor() {
@@ -544,26 +743,52 @@ export default class ProfileEditor {
 
         const elements = this.state.getElements();
 
+        // If sync is called before initial enter() synchronization is armed,
+        // keep it lightweight and avoid structural updates.
+        if (!this._initialSyncDone) {
+            this._bindPathEditorSegmentIdsOnly();
+            return;
+        }
+
         if (!this._pathEditorIsSource) {
             // Canvas-originated: rebuild sub-line content, merging formula tokens back.
             const mergedPath = _mergeFormulaPath(path, this._formulaPath, this.state.variableValues);
             const elemsWithPaths = _buildElemsWithPaths(elements, mergedPath, lineSegIds);
-            this._syncingToPathEditor = true;
-            this._pathEditor.setElements(elemsWithPaths);
-            this._syncingToPathEditor = false;
+            const needsRebuild = this._pathEditor.needsElementsRebuild?.(elemsWithPaths) ?? true;
+            if (needsRebuild) {
+                this._syncingToPathEditor = true;
+                this._pathEditor.setElements(elemsWithPaths);
+                this._syncingToPathEditor = false;
+            } else {
+                const updatedInPlace = this._pathEditor.updatePathLinesInPlace?.(mergedPath, lineSegIds) ?? false;
+                const shapesUpdatedInPlace = this._pathEditor.updateShapeRowsInPlace?.(elemsWithPaths) ?? false;
+                if (!updatedInPlace || !shapesUpdatedInPlace) {
+                    this._syncingToPathEditor = true;
+                    this._pathEditor.setElements(elemsWithPaths);
+                    this._syncingToPathEditor = false;
+                }
+            }
         } else {
-            // Text-originated: update lineSegIds map without overwriting formula text.
-            // Strip per-element path strings so PathEditor keeps the user-typed content.
-            const elemsWithLineIds = _buildElemsWithPaths(elements, path, lineSegIds).map(e =>
-                (e.type === 'path' || e.type === 'polyline') ? { ...e, path: null } : e
-            );
-            this._pathEditor.setElements(elemsWithLineIds);
+            // Text-originated: keep PathEditor structure as the source of truth.
+            // We only clear the editor when the exported path is truly empty.
+            if (!path) {
+                // Truly empty state — sync the clear to PathEditor.
+                this._pathEditor.setElements([]);
+            }
+            // else: non-empty text edits are already reflected in PathEditor DOM.
         }
-        // Unified selection highlighting.
-        this._pathEditor.setSelectedElements(this.state.selectedIds);
+        this._bindPathEditorSegmentIdsOnly();
+    }
 
-        // Show canvas anchor dot for any selected M row ("m:<contourId>" segId).
-        // _clearMDot() was already called at the top of this method.
+    /**
+     * Lightweight sync used for selection-only updates.
+     * Never rebuilds PathEditor structure.
+     * @private
+     */
+    _syncPathEditorSelectionOnly() {
+        if (!this._pathEditor) return;
+        this._clearMDot();
+        this._pathEditor.setSelectedElements(this.state.selectedIds);
         for (const id of this.state.selectedIds) {
             if (typeof id === 'string' && id.startsWith('m:')) {
                 this._showMDotForContour(Number(id.slice(2)));
@@ -573,24 +798,50 @@ export default class ProfileEditor {
     }
 
     /**
-     * Sync element structure to PathEditor on initial entry WITHOUT clobbering
-     * any formula text already loaded there by BitsManager.
-     *
-     * Passes elements with their per-element `lineSegIds` maps (so M rows receive
-     * their synthetic `"m:<cid>"` segId) but strips per-element `path` strings so
-     * PathEditor preserves the raw formula text it already holds.
+     * Bind current EditorState segment IDs to existing PathEditor rows without
+     * rebuilding PathEditor element structure.
      * @private
      */
-    _rebuildPathEditorElements() {
-        if (!this._pathEditor) return;
-        const { path, lineSegIds } = this.state.exportPathWithMap({ skipShapes: true });
+    _bindPathEditorSegmentIdsOnly() {
+        if (!this._pathEditor || !this.state) return;
+        const { lineSegIds } = this.state.exportPathWithMap({ skipShapes: true });
         this._lineSegIds = lineSegIds;
-        const elements = this.state.getElements();
-        const elemsWithLineIds = _buildElemsWithPaths(elements, path, lineSegIds).map(e =>
-            (e.type === 'path' || e.type === 'polyline') ? { ...e, path: null } : e
-        );
-        this._pathEditor.setElements(elemsWithLineIds);
-        this._pathEditor.clearAllSelection?.();
+        const shapeSegIds = this.state.getElements()
+            .filter(e => e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse')
+            .map(e => e.segId)
+            .filter(Boolean);
+        this._pathEditor.bindSegmentIds?.({ lineSegIds, shapeSegIds });
+        this._syncPathEditorSelectionOnly();
+    }
+
+    // ─── Default shape creation ──────────────────────────────────────────────────────
+
+    /**
+     * Create a new shape segment in the canvas state with sensible default dimensions.
+     * Called when the user clicks an “Add <shape>” button in PathEditor suggestions
+     * while the editor is in edit mode.
+     *
+     * @param {'circle'|'rect'|'ellipse'} type
+     * @private
+     */
+    _createDefaultShape(type) {
+        if (!this.state) return;
+        let segData;
+        switch (type) {
+            case 'circle':
+                segData = { type: 'circle',  data: { center: { x: 0, y: 0 }, radius: 10 } };
+                break;
+            case 'rect':
+                segData = { type: 'rect',    data: { x: -15, y: -10, width: 30, height: 20, rx: 0 } };
+                break;
+            case 'ellipse':
+                segData = { type: 'ellipse', data: { cx: 0, cy: 0, rx: 20, ry: 10 } };
+                break;
+            default: return;
+        }
+        // addSegment handles contourId assignment and fires onSegmentsChange.
+        this.state.addSegment(segData);
+        this.state._pushHistory(`Add ${type}`);
     }
     // ─── M-row canvas selection ──────────────────────────────────────────────────
 
