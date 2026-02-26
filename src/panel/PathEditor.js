@@ -55,6 +55,14 @@ const SVG_COMMANDS = new Set([...Object.keys(SVG_COMMAND_DEFS), ...Object.keys(S
  *   setSelectedLines, clearLineSelection, clearShapeSelection, setMirrorStartIndex
  */
 export default class PathEditor {
+    static MOD_COMMANDS = [
+        { code: 'TR', label: 'translate()' },
+        { code: 'SC', label: 'scale()' },
+        { code: 'RT', label: 'rotate()' },
+        { code: 'SX', label: 'skewX()' },
+        { code: 'SY', label: 'skewY()' },
+        { code: 'MT', label: 'matrix()' },
+    ];
     /**
      * Icons and attribute definitions for each shape type.
      * @type {Object.<string, {icon:string, label:string, attrs:string[]}>}
@@ -70,6 +78,7 @@ export default class PathEditor {
      * @param {HTMLElement}         options.container
      * @param {HTMLInputElement}   [options.hiddenInput]
      * @param {HTMLInputElement}   [options.rawHiddenInput]
+        * @param {HTMLInputElement}   [options.transformsHiddenInput]
      * @param {Function}           [options.onChange]            — receives evaluated path string
      * @param {Object}             [options.variableValues]
      * @param {Function}           [options.getVariableList]
@@ -82,6 +91,7 @@ export default class PathEditor {
         this.container             = options.container;
         this.hiddenInput           = options.hiddenInput    ?? null;
         this.rawHiddenInput        = options.rawHiddenInput ?? null;
+        this.transformsHiddenInput = options.transformsHiddenInput ?? null;
         this.onChange              = options.onChange              || (() => {});
         this.variableValues        = options.variableValues        || {};
         this.getVariableList       = options.getVariableList       || (() => []);
@@ -97,6 +107,14 @@ export default class PathEditor {
         this.onElementOrderChange  = options.onElementOrderChange  || null;
         /** @type {((e:MouseEvent)=>void)|null} Called when user clicks on the empty elements container background */
         this.onDeactivate          = options.onDeactivate          || null;
+
+        /**
+         * Coordinate space of shape data currently stored in `_elements`.
+         * - 'bit': profile path space (Y-up)
+         * - 'canvas': editor canvas space (Y-down)
+         * @type {'bit'|'canvas'}
+         */
+        this._shapeDataSpace = 'bit';
 
         // ── DOM refs ──────────────────────────────────────────────────────
         /** @type {HTMLElement|null} */
@@ -139,6 +157,8 @@ export default class PathEditor {
         this.activeEditArgIndex  = null;
         /** @type {HTMLInputElement|null} */
         this.activeEditInput     = null;
+        /** @type {{elem:object, fromIndex:number}|null} */
+        this._modDragState       = null;
 
         this.init();
     }
@@ -207,6 +227,10 @@ export default class PathEditor {
      */
     setElements(elements) {
         if (!elements) return;
+        const prevShapeSpace = this._shapeDataSpace;
+        // Elements pushed from ProfileEditor/EditorStateManager carry shape coordinates
+        // in canvas SVG space (Y-down).
+        const incomingShapeSpace = 'canvas';
         const prevActiveElemId = this._activeElemId;
         let prevActivePathPos = -1;
         if (prevActiveElemId?.startsWith('path:')) {
@@ -228,6 +252,8 @@ export default class PathEditor {
         const prevExpandedBySig = new Map();
         const prevPathOrder = []; // [{contourId, expanded, lines}] ordered by position
         const prevLineTexts = new Map(); // contourId -> [{text, segId, formulaText}]
+        const prevTransformsByPathCid = new Map();
+        const prevTransformsByShapeSid = new Map();
         const prevShapeOrder = [];       // [{type, segId, attrs}]
         const prevShapeBySegId = new Map();
         for (const elem of this._elements) {
@@ -238,7 +264,9 @@ export default class PathEditor {
                     formulaText: l._formulaText ?? (this._hasFormulaToken(l.text) ? l.text : null),
                 }));
                 prevPathOrder.push({ contourId: elem.contourId, expanded: prevExpanded.has(elem.contourId), lines: lineSnap });
+                prevPathOrder[prevPathOrder.length - 1].transforms = Array.isArray(elem.transforms) ? [...elem.transforms] : [];
                 prevLineTexts.set(elem.contourId, lineSnap);
+                prevTransformsByPathCid.set(elem.contourId, Array.isArray(elem.transforms) ? [...elem.transforms] : []);
                 const sig = this._contourSignatureFromLines(lineSnap);
                 if (sig) prevExpandedBySig.set(sig, prevExpanded.has(elem.contourId));
             } else if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
@@ -246,10 +274,12 @@ export default class PathEditor {
                 const snap = {
                     type: elem.type,
                     segId: elem.segId,
-                    attrs: Object.fromEntries(attrs.map(a => [a, this._shapeAttrValue(elem.type, elem.data ?? {}, a)])),
+                    attrs: Object.fromEntries(attrs.map(a => [a, this._shapeAttrValueForSpace(elem.type, elem.data ?? {}, a, prevShapeSpace)])),
+                    transforms: Array.isArray(elem.transforms) ? [...elem.transforms] : [],
                 };
                 prevShapeOrder.push(snap);
                 if (elem.segId) prevShapeBySegId.set(elem.segId, snap);
+                if (elem.segId) prevTransformsByShapeSid.set(elem.segId, Array.isArray(elem.transforms) ? [...elem.transforms] : []);
             }
         }
         let pathElemIndex = 0; // incremented for each path/polyline in the incoming list
@@ -262,18 +292,21 @@ export default class PathEditor {
             if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
                 const nextData = { ...(elem.data ?? {}) };
                 const prevShape = prevShapeBySegId.get(elem.segId) ?? prevShapeOrder[shapeElemIndex++] ?? null;
+                const transforms = Array.isArray(elem.transforms)
+                    ? [...elem.transforms]
+                    : (prevTransformsByShapeSid.get(elem.segId) ?? (prevShape?.transforms ?? []));
                 const attrs = PathEditor.SHAPE_DEFS[elem.type]?.attrs ?? [];
                 if (prevShape?.type === elem.type) {
                     for (const attr of attrs) {
                         const prevVal = prevShape.attrs?.[attr] ?? '';
-                        const incomingVal = this._shapeAttrValue(elem.type, nextData, attr);
+                        const incomingVal = this._shapeAttrValueForSpace(elem.type, nextData, attr, incomingShapeSpace);
                         const chosenVal = this._chooseShapeAttrWithFormulaPriority(prevVal, incomingVal);
                         if (chosenVal !== incomingVal) {
-                            Object.assign(nextData, this._shapeAttrToChanges(elem.type, nextData, attr, chosenVal));
+                            Object.assign(nextData, this._shapeAttrToChangesForSpace(elem.type, nextData, attr, chosenVal, incomingShapeSpace));
                         }
                     }
                 }
-                return { type: elem.type, segId: elem.segId, data: nextData, _elem: null };
+                return { type: elem.type, segId: elem.segId, data: nextData, transforms, _elem: null };
             }
             // path / polyline
             const cid = elem.contourId;
@@ -322,7 +355,10 @@ export default class PathEditor {
             const expanded = prevExpanded.has(cid)
                 || (sig ? (prevExpandedBySig.get(sig) ?? false) : false)
                 || (slot?.expanded ?? false);
-            return { type: elem.type, contourId: cid, segIds: elem.segIds ?? [], expanded, lines, _elem: null };
+            const transforms = Array.isArray(elem.transforms)
+                ? [...elem.transforms]
+                : (prevTransformsByPathCid.get(cid) ?? (slot?.transforms ?? []));
+            return { type: elem.type, contourId: cid, segIds: elem.segIds ?? [], expanded, lines, transforms, _elem: null };
         });
 
         // Rebuild _expandedContours from the resolved expanded flags.
@@ -353,6 +389,7 @@ export default class PathEditor {
             }
         }
 
+        this._shapeDataSpace = incomingShapeSpace;
         this._renderElements();
         this._renderSuggestions();
     }
@@ -593,16 +630,18 @@ export default class PathEditor {
         typeBtn.title = def.label;
         row.appendChild(typeBtn);
 
+        this._appendElemModCells(elem, row);
+
         // Attribute param cells
         for (const attrKey of def.attrs) {
-            const val = this._shapeAttrValue(elem.type, elem.data, attrKey);
+            const val = this._shapeAttrDisplayValue(elem.type, elem.data, attrKey);
             if (val === '' && (attrKey === 'rx' || attrKey === 'ry')) continue;
 
             const cell = document.createElement('button');
             cell.type = 'button';
             cell.className = 'path-cell path-cell-param' + (val ? '' : ' cell-empty');
             cell.dataset.attr = attrKey;
-            cell.title = attrKey;
+            this._setParamCellTitle(cell, attrKey, val);
             cell.textContent = val || attrKey;
             cell.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -857,6 +896,8 @@ export default class PathEditor {
         // Store label for live updates
         expandBtn.dataset.baseLabel = label;
         header.appendChild(expandBtn);
+
+        this._appendElemModCells(elem, header);
 
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
@@ -1116,15 +1157,13 @@ export default class PathEditor {
         for (let i = 0; i < maxCells; i++) {
             const paramVal  = params[i] || '';
             const argLabel  = expectedArgs[i] || `arg${i + 1}`;
-            const evaluated = paramVal ? this.evaluateToken(paramVal) : '';
-            const hasFormula = paramVal && paramVal !== evaluated;
 
             const cell = document.createElement('button');
             cell.type = 'button';
             cell.className = 'path-cell path-cell-param';
             cell.dataset.argIndex = i;
             cell.dataset.argLabel = argLabel;
-            cell.title = hasFormula ? `${argLabel}=${evaluated}` : argLabel;
+            this._setParamCellTitle(cell, argLabel, paramVal);
             if (paramVal) { cell.textContent = paramVal; }
             else          { cell.textContent = argLabel; cell.classList.add('cell-empty'); }
             cell.addEventListener('click', (e) =>
@@ -1359,10 +1398,89 @@ export default class PathEditor {
         const fullPath = parts.join(' ');
         if (this.hiddenInput)    this.hiddenInput.value = fullPath;
         if (this.rawHiddenInput) this.rawHiddenInput.value = rawParts.join(' ');
+        if (this.transformsHiddenInput) {
+            this.transformsHiddenInput.value = JSON.stringify(this.getElementTransformsSnapshot());
+        }
         this.onChange(fullPath, {
             selectedLineRefs: this._collectSelectedLineRefs(),
             activeElemId: this._activeElemId,
+            elementTransforms: this.getElementTransformsSnapshot(),
         });
+    }
+
+    /**
+     * Snapshot modifier lists for all top-level elements in current order.
+     * @returns {Array<{kind:'path'|'shape', contourId?:number, segId?:string, transforms:Array<object>}>
+     * }
+     */
+    getElementTransformsSnapshot() {
+        return this._elements.map((elem) => {
+            const transforms = Array.isArray(elem.transforms)
+                ? elem.transforms.map(t => ({
+                    type: String(t?.type ?? '').toUpperCase(),
+                    raw: String(t?.raw ?? ''),
+                    params: Array.isArray(t?.params) ? [...t.params] : [],
+                }))
+                : [];
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                return { kind: 'path', contourId: Number(elem.contourId), transforms };
+            }
+            return { kind: 'shape', segId: String(elem.segId ?? ''), transforms };
+        });
+    }
+
+    /**
+     * Apply top-level element transforms snapshot to current rows.
+     * Matching is positional within path rows and shape rows.
+     * @param {Array<{kind:'path'|'shape', contourId?:number, segId?:string, transforms:Array<object>}>} snapshot
+     */
+    setElementTransformsSnapshot(snapshot) {
+        if (!Array.isArray(snapshot) || snapshot.length === 0) {
+            for (const elem of this._elements) elem.transforms = [];
+            this._renderElements();
+            this._fireOnChange();
+            return;
+        }
+
+        // Backward compatibility: legacy flat MOD list (e.g. [{type:'RT',...}])
+        // produced before snapshot structure `{ kind, transforms }` was introduced.
+        const looksLikeLegacyFlat = snapshot.some(s => typeof s?.type === 'string')
+            && !snapshot.some(s => s?.kind === 'path' || s?.kind === 'shape');
+        if (looksLikeLegacyFlat) {
+            const legacyTransforms = snapshot.map(t => ({
+                type: String(t?.type ?? '').toUpperCase(),
+                raw: String(t?.raw ?? ''),
+                params: Array.isArray(t?.params) ? [...t.params] : [],
+            }));
+            for (const elem of this._elements) elem.transforms = [];
+            const firstPathElem = this._elements.find(e => e.type === 'path' || e.type === 'polyline');
+            if (firstPathElem) firstPathElem.transforms = legacyTransforms;
+            this._renderElements();
+            this._fireOnChange();
+            return;
+        }
+
+        const norm = (arr) => (Array.isArray(arr) ? arr : []).map(t => ({
+            type: String(t?.type ?? '').toUpperCase(),
+            raw: String(t?.raw ?? ''),
+            params: Array.isArray(t?.params) ? [...t.params] : [],
+        }));
+
+        const pathSnap = snapshot.filter(s => s?.kind === 'path');
+        const shapeSnap = snapshot.filter(s => s?.kind === 'shape');
+        const pathElems = this._elements.filter(e => e.type === 'path' || e.type === 'polyline');
+        const shapeElems = this._elements.filter(e => e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse');
+
+        for (let i = 0; i < pathElems.length; i++) {
+            pathElems[i].transforms = norm(pathSnap[i]?.transforms);
+        }
+        for (let i = 0; i < shapeElems.length; i++) {
+            const byId = shapeSnap.find(s => String(s?.segId ?? '') === String(shapeElems[i].segId ?? ''));
+            shapeElems[i].transforms = norm(byId?.transforms ?? shapeSnap[i]?.transforms);
+        }
+
+        this._renderElements();
+        this._fireOnChange();
     }
 
     // ─── Input bar ────────────────────────────────────────────────────────────
@@ -1384,6 +1502,31 @@ export default class PathEditor {
      * @private
      */
     _tryAddLine(text) {
+        const activeTopElem = this._getActiveTopLevelElem();
+        if (activeTopElem && this._isTopLevelElemSelected(activeTopElem)) {
+            const modInput = this._parseModifierInput(text);
+            if (modInput) {
+                if (modInput.type !== 'RT') {
+                    this.input.style.borderColor = 'red';
+                    setTimeout(() => { this.input.style.borderColor = ''; }, 1000);
+                    return false;
+                }
+                const angle = String(modInput.params?.[0] ?? '').trim();
+                const next = Array.isArray(activeTopElem.transforms) ? [...activeTopElem.transforms] : [];
+                next.push({
+                    type: 'RT',
+                    raw: angle ? `MOD RT ${angle}` : 'MOD RT',
+                    params: [angle],
+                });
+                activeTopElem.transforms = next;
+                this._renderElements();
+                const ref = this._getTopLevelRef(activeTopElem);
+                if (ref) this._setActiveElem(ref);
+                this._fireOnChange();
+                return true;
+            }
+        }
+
         const activeElem = this._getActivePathElem();
         if (activeElem) {
             const parsed = this.parseLine(text);
@@ -1449,15 +1592,203 @@ export default class PathEditor {
             (e.type === 'path' || e.type === 'polyline') && e.contourId === cid) ?? null;
     }
 
+    /** @returns {object|null} active top-level element (path or shape) */
+    _getActiveTopLevelElem() {
+        if (!this._activeElemId) return null;
+        if (this._activeElemId.startsWith('path:')) {
+            const cid = Number(this._activeElemId.slice(5));
+            return this._elements.find(e => (e.type === 'path' || e.type === 'polyline') && e.contourId === cid) ?? null;
+        }
+        if (this._activeElemId.startsWith('shape:')) {
+            const sid = this._activeElemId.slice(6);
+            return this._elements.find(e => (e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse') && e.segId === sid) ?? null;
+        }
+        return null;
+    }
+
+    /**
+     * Return true if the given top-level element row is selected.
+     * @param {object|null} elem
+     * @returns {boolean}
+     * @private
+     */
+    _isTopLevelElemSelected(elem) {
+        if (!elem) return false;
+        if (elem.type === 'path' || elem.type === 'polyline') {
+            const headerEl = elem._elem?.querySelector?.('.pe-path-header');
+            return !!headerEl?.classList.contains('path-line-selected');
+        }
+        return !!elem._elem?.classList?.contains('path-line-selected');
+    }
+
+    /**
+     * Parse MOD input entered via the main input.
+     * Supports: `RT 45` and `MOD RT 45`.
+     * @param {string} text
+     * @returns {{type:string, params:string[]} | null}
+     * @private
+     */
+    _parseModifierInput(text) {
+        const parts = this.splitBySpaces(String(text ?? '').trim());
+        if (!parts.length) return null;
+
+        let type = '';
+        let params = [];
+
+        if (parts[0].toUpperCase() === 'MOD') {
+            if (parts.length < 2) return null;
+            type = parts[1].toUpperCase();
+            params = parts.slice(2);
+        } else {
+            type = parts[0].toUpperCase();
+            params = parts.slice(1);
+        }
+
+        if (!PathEditor.MOD_COMMANDS.some(m => m.code === type)) return null;
+        return { type, params };
+    }
+
+    /**
+     * Build lightweight modifier draft from current input for suggestions.
+     * @param {string[]} parts
+     * @returns {{type:string, params:string[]} | null}
+     * @private
+     */
+    _parseModifierDraft(parts) {
+        if (!Array.isArray(parts) || parts.length === 0) return null;
+        const p0 = String(parts[0] ?? '').toUpperCase();
+        if (p0 === 'MOD') {
+            if (parts.length < 2) return null;
+            const type = String(parts[1] ?? '').toUpperCase();
+            if (!PathEditor.MOD_COMMANDS.some(m => m.code === type)) return null;
+            return { type, params: parts.slice(2) };
+        }
+        if (!PathEditor.MOD_COMMANDS.some(m => m.code === p0)) return null;
+        return { type: p0, params: parts.slice(1) };
+    }
+
+    /**
+     * Append transform modifier controls (e.g. RT angle) to a top-level row.
+     * @param {object} elem
+     * @param {HTMLElement} row
+     * @private
+     */
+    _appendElemModCells(elem, row) {
+        const transforms = Array.isArray(elem?.transforms) ? elem.transforms : [];
+        for (let i = 0; i < transforms.length; i++) {
+            const tr = transforms[i];
+            const type = String(tr?.type ?? '').toUpperCase();
+            if (!type) continue;
+
+            const modWrap = document.createElement('span');
+            modWrap.className = 'path-mod-item';
+            modWrap.draggable = true;
+            modWrap.dataset.modIndex = String(i);
+            modWrap.title = 'Drag to reorder modifier';
+
+            modWrap.addEventListener('dragstart', (e) => {
+                this._modDragState = { elem, fromIndex: i };
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', '');
+                requestAnimationFrame(() => modWrap.classList.add('path-mod-dragging'));
+            });
+            modWrap.addEventListener('dragend', () => {
+                this._modDragState = null;
+                modWrap.classList.remove('path-mod-dragging');
+                row.querySelectorAll('.path-mod-drop-over').forEach(el => el.classList.remove('path-mod-drop-over'));
+            });
+            modWrap.addEventListener('dragover', (e) => {
+                if (!this._modDragState || this._modDragState.elem !== elem) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                modWrap.classList.add('path-mod-drop-over');
+            });
+            modWrap.addEventListener('dragleave', () => {
+                modWrap.classList.remove('path-mod-drop-over');
+            });
+            modWrap.addEventListener('drop', (e) => {
+                e.preventDefault();
+                modWrap.classList.remove('path-mod-drop-over');
+                if (!this._modDragState || this._modDragState.elem !== elem) return;
+                const fromIndex = this._modDragState.fromIndex;
+                const toIndex = i;
+                if (fromIndex === toIndex) return;
+                const current = Array.isArray(elem.transforms) ? [...elem.transforms] : [];
+                if (fromIndex < 0 || fromIndex >= current.length || toIndex < 0 || toIndex >= current.length) return;
+                const [moved] = current.splice(fromIndex, 1);
+                current.splice(toIndex, 0, moved);
+                elem.transforms = current;
+                this._renderElements();
+                const ref = this._getTopLevelRef(elem);
+                if (ref) this._setActiveElem(ref);
+                this._fireOnChange();
+            });
+
+            const cmdBtn = document.createElement('button');
+            cmdBtn.type = 'button';
+            cmdBtn.className = 'path-cell path-cell-cmd path-cell-mod-cmd';
+            cmdBtn.title = `Modifier ${type}`;
+            cmdBtn.textContent = type;
+            modWrap.appendChild(cmdBtn);
+
+            if (type === 'RT') {
+                const angle = String(tr?.params?.[0] ?? '').trim();
+                const cell = document.createElement('button');
+                cell.type = 'button';
+                cell.className = 'path-cell path-cell-param path-cell-mod-param' + (angle ? '' : ' cell-empty');
+                cell.dataset.modType = 'RT';
+                cell.dataset.modIndex = String(i);
+                cell.dataset.modParam = '0';
+                this._setParamCellTitle(cell, 'angle', angle);
+                cell.textContent = angle || 'angle';
+                cell.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._activateModParamEdit(elem, i, 0, 'angle', cell);
+                });
+                modWrap.appendChild(cell);
+            }
+
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'path-cell path-cell-mod-del';
+            delBtn.title = `Delete modifier ${type}`;
+            delBtn.textContent = '×';
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const current = Array.isArray(elem.transforms) ? [...elem.transforms] : [];
+                if (i < 0 || i >= current.length) return;
+                current.splice(i, 1);
+                elem.transforms = current;
+                this._renderElements();
+                const ref = this._getTopLevelRef(elem);
+                if (ref) this._setActiveElem(ref);
+                this._fireOnChange();
+            });
+            modWrap.appendChild(delBtn);
+            row.appendChild(modWrap);
+        }
+    }
+
+    /** @param {object} elem @returns {string} */
+    _getElemModDisplay(elem) {
+        const tr = Array.isArray(elem?.transforms) ? elem.transforms : [];
+        if (tr.length === 0) return 'MOD';
+        const first = tr[0];
+        if (!first) return 'MOD';
+        const p0 = first.params?.[0] ?? '';
+        return p0 ? `MOD ${first.type} ${p0}` : `MOD ${first.type}`;
+    }
+
     // ─── Suggestions ──────────────────────────────────────────────────────────
 
     /** @private */
     _renderSuggestions() {
-        if (this.activeEditType === 'param' || this.activeEditType === 'shape-param') return;
+        if (this.activeEditType === 'param' || this.activeEditType === 'shape-param' || this.activeEditType === 'mod-param') return;
 
         const inputVal       = this.input?.value?.trim() ?? '';
         const parts          = this.splitBySpaces(inputVal);
         const hasCmd         = parts.length > 0 && parts[0].length === 1 && SVG_COMMANDS.has(parts[0]);
+        const modDraft       = this._parseModifierDraft(parts);
         const activePathElem = this._getActivePathElem();
         const hasActivePathSelection = !!activePathElem && (() => {
             const headerEl = activePathElem._elem?.querySelector?.('.pe-path-header');
@@ -1466,6 +1797,10 @@ export default class PathEditor {
         })();
 
         let html = '';
+
+        const activeElem = this._getActiveTopLevelElem();
+        const hasActiveElemSelection = !!activeElem;
+        const hasSelectedTopLevelElem = this._isTopLevelElemSelected(activeElem);
 
         if (activePathElem && hasActivePathSelection) {
             // ── Path is active: show command palette + variable hints ─────
@@ -1498,6 +1833,53 @@ export default class PathEditor {
                     }
                 }
             }
+
+            if (hasSelectedTopLevelElem && modDraft?.type === 'RT') {
+                if ((modDraft.params?.length ?? 0) < 1) {
+                    html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Next: <em>angle</em></span></div>';
+                }
+                const vars = this.getAvailableVariables();
+                if (vars.length > 0) {
+                    html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Variables:</span>';
+                    vars.forEach(v => {
+                        const val = this.variableValues[v.varName];
+                        const vs  = val !== undefined ? `=${val}` : '';
+                        html += `<button type="button" class="path-suggestion-btn var-btn" data-var="${v.varName}">{${v.varName}}${vs}</button>`;
+                    });
+                    html += '</div>';
+                }
+            }
+
+            if (hasSelectedTopLevelElem) {
+                html += '<div class="path-suggestions-group"><span class="path-suggestions-label">MOD:</span>';
+                for (const mod of PathEditor.MOD_COMMANDS) {
+                    const enabled = mod.code === 'RT';
+                    html += `<button type="button" class="path-suggestion-btn mod-btn${enabled ? '' : ' cell-empty'}" data-mod="${mod.code}" title="${mod.label}${enabled ? '' : ' (soon)'}">${mod.code}</button>`;
+                }
+                html += '</div>';
+            }
+        } else if (hasActiveElemSelection && hasSelectedTopLevelElem) {
+            if (modDraft?.type === 'RT') {
+                if ((modDraft.params?.length ?? 0) < 1) {
+                    html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Next: <em>angle</em></span></div>';
+                }
+                const vars = this.getAvailableVariables();
+                if (vars.length > 0) {
+                    html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Variables:</span>';
+                    vars.forEach(v => {
+                        const val = this.variableValues[v.varName];
+                        const vs  = val !== undefined ? `=${val}` : '';
+                        html += `<button type="button" class="path-suggestion-btn var-btn" data-var="${v.varName}">{${v.varName}}${vs}</button>`;
+                    });
+                    html += '</div>';
+                }
+            }
+            html += '<div class="path-suggestions-group"><span class="path-suggestions-label">MOD:</span>';
+            for (const mod of PathEditor.MOD_COMMANDS) {
+                const enabled = mod.code === 'RT';
+                html += `<button type="button" class="path-suggestion-btn mod-btn${enabled ? '' : ' cell-empty'}" data-mod="${mod.code}" title="${mod.label}${enabled ? '' : ' (soon)'}">${mod.code}</button>`;
+            }
+            html += '</div>';
         } else {
             // ── Nothing active: show element creation buttons ─────────────
             html += '<div class="path-suggestions-group"><span class="path-suggestions-label">Add element:</span>';
@@ -1551,6 +1933,112 @@ export default class PathEditor {
                 }
             });
         });
+
+        this.suggestionsEl.querySelectorAll('.mod-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const modCode = String(btn.dataset.mod || '').toUpperCase();
+                const elem = this._getActiveTopLevelElem();
+                if (!elem) return;
+                if (modCode !== 'RT') {
+                    this.input.placeholder = `MOD ${modCode} ... (soon)`;
+                    return;
+                }
+
+                const existing = Array.isArray(elem.transforms) ? [...elem.transforms] : [];
+                const rt = { type: 'RT', raw: 'MOD RT', params: [''] };
+                elem.transforms = [...existing, rt];
+                this._renderElements();
+                const ref = this._getTopLevelRef(elem);
+                if (ref) this._setActiveElem(ref);
+                this._fireOnChange();
+
+                const refreshedElem = this._getActiveTopLevelElem();
+                const modIndex = (refreshedElem?.transforms?.length ?? 1) - 1;
+                const cell = refreshedElem?._elem?.querySelector?.(`.path-cell-mod-param[data-mod-index="${modIndex}"][data-mod-param="0"]`);
+                if (refreshedElem && cell) {
+                    this._activateModParamEdit(refreshedElem, modIndex, 0, 'angle', cell);
+                }
+            });
+        });
+    }
+
+    /**
+     * Show inline editor for a MOD parameter cell (currently RT angle).
+     * @param {object} elem
+     * @param {number} modIndex
+     * @param {number} paramIndex
+     * @param {string} label
+     * @param {HTMLElement} cell
+     * @private
+     */
+    _activateModParamEdit(elem, modIndex, paramIndex, label, cell) {
+        if (this.activeEditType === 'mod-param'
+                && this.activeEditLineData === elem
+                && this.activeEditArgIndex === (modIndex * 100 + paramIndex)) {
+            return;
+        }
+        this._clearActiveEdit();
+        this.activeEditLineData = elem;
+        this.activeEditType = 'mod-param';
+        this.activeEditArgIndex = modIndex * 100 + paramIndex;
+
+        const tr = Array.isArray(elem.transforms) ? elem.transforms[modIndex] : null;
+        const cur = String(tr?.params?.[paramIndex] ?? '');
+
+        cell.classList.add('active-edit');
+        cell.innerHTML = '';
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'path-cell-inline-input';
+        input.value = cur;
+        input.placeholder = label;
+        cell.appendChild(input);
+
+        const resize = () => {
+            input.style.width = Math.max(25, Math.ceil(this.measureTextWidth(input.value || input.placeholder)) + 6) + 'px';
+        };
+        resize();
+        input.addEventListener('input', resize);
+
+        requestAnimationFrame(() => { input.focus(); input.select(); });
+
+        const finish = (save = true) => {
+            if (save) {
+                const val = input.value.trim();
+                const arr = Array.isArray(elem.transforms) ? elem.transforms : [];
+                if (!arr[modIndex]) arr[modIndex] = { type: 'RT', raw: 'MOD RT', params: [] };
+                const next = { ...arr[modIndex] };
+                const params = Array.isArray(next.params) ? [...next.params] : [];
+                params[paramIndex] = val;
+                next.params = params;
+                next.raw = `MOD ${next.type} ${params.join(' ').trim()}`.trim();
+                arr[modIndex] = next;
+                elem.transforms = arr;
+                cell.textContent = val || label;
+                cell.classList.toggle('cell-empty', !val);
+                this._setParamCellTitle(cell, label, val);
+                this._fireOnChange();
+            } else {
+                const oldVal = String(elem.transforms?.[modIndex]?.params?.[paramIndex] ?? '');
+                cell.textContent = oldVal || label;
+                cell.classList.toggle('cell-empty', !oldVal);
+                this._setParamCellTitle(cell, label, oldVal);
+            }
+            this._clearActiveEdit();
+            this._renderSuggestions();
+        };
+
+        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter')  { e.preventDefault(); finish(true); }
+            if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        });
+        input.addEventListener('input', e => e.stopPropagation());
+
+        this.activeEditInput = input;
+        this._renderVariableSuggestions(label);
     }
 
     /** @private */
@@ -1744,6 +2232,30 @@ export default class PathEditor {
     }
 
     /**
+     * Update param cell title with formula preview: label or "label=evaluated".
+     * @param {HTMLElement} cell
+     * @param {string} label
+     * @param {string} rawValue
+     * @private
+     */
+    _setParamCellTitle(cell, label, rawValue) {
+        const val = String(rawValue ?? '').trim();
+        const evaluated = val ? this.evaluateToken(val) : '';
+        const hasFormula = val && val !== evaluated;
+        cell.title = hasFormula ? `${label}=${evaluated}` : label;
+    }
+
+    /**
+     * Shape data in PathEditor is stored in SVG/canvas space (Y-down)
+     * in both preview and edit flows.
+     * @returns {boolean}
+     * @private
+     */
+    _isCanvasShapeSpace() {
+        return true;
+    }
+
+    /**
      * Transform parameters when changing command type
      * Preserves values by argument name (x, y) rather than position
      * 
@@ -1874,22 +2386,39 @@ export default class PathEditor {
      * @private
      */
     _shapeAttrValue(type, data, attrKey) {
+        return this._shapeAttrValueForSpace(type, data, attrKey, this._shapeDataSpace);
+    }
+
+    /**
+     * Get an attribute value from shape element data as a display string
+     * for an explicit coordinate space.
+     * @param {string} type
+     * @param {object} data
+     * @param {string} attrKey
+     * @param {'bit'|'canvas'} shapeSpace
+     * @returns {string}
+     * @private
+     */
+    _shapeAttrValueForSpace(type, data, attrKey, shapeSpace = this._shapeDataSpace) {
         const exprVal = data?._expr?.[attrKey];
         if (exprVal != null && exprVal !== '') return String(exprVal);
+        const ySign = shapeSpace === 'canvas' ? -1 : 1;
         if (type === 'circle') {
             if (attrKey === 'cx') return String(parseFloat((data.center?.x ?? 0).toFixed(4)));
-            if (attrKey === 'cy') return String(parseFloat((data.center?.y ?? 0).toFixed(4)));
+            if (attrKey === 'cy') return String(parseFloat(((data.center?.y ?? 0) * ySign).toFixed(4)));
             if (attrKey === 'r')  return data.radiusExpr ?? String(parseFloat((data.radius ?? 0).toFixed(4)));
         }
         if (type === 'rect') {
             // data uses w/h directly (not width/height)
             const key = attrKey === 'w' ? 'w' : attrKey === 'h' ? 'h' : attrKey;
-            const v = data[key];
+            const raw = data[key];
+            const v = (attrKey === 'y') ? Number(raw ?? 0) * ySign : raw;
             return v !== undefined ? String(parseFloat(Number(v).toFixed(4))) : '';
         }
         if (type === 'ellipse') {
             const map = { cx: 'cx', cy: 'cy', rx: 'rx', ry: 'ry' };
-            const v = data[map[attrKey]];
+            const raw = data[map[attrKey]];
+            const v = (attrKey === 'cy') ? Number(raw ?? 0) * ySign : raw;
             return v !== undefined ? String(parseFloat(Number(v).toFixed(4))) : '';
         }
         return '';
@@ -1905,8 +2434,24 @@ export default class PathEditor {
      * @private
      */
     _shapeAttrToChanges(type, data, attrKey, val) {
+        return this._shapeAttrToChangesForSpace(type, data, attrKey, val, this._shapeDataSpace);
+    }
+
+    /**
+     * Build a change-object from a modified attribute value string for
+     * an explicit coordinate space.
+     * @param {string} type
+     * @param {object} data
+     * @param {string} attrKey
+     * @param {string} val
+     * @param {'bit'|'canvas'} shapeSpace
+     * @returns {object}
+     * @private
+     */
+    _shapeAttrToChangesForSpace(type, data, attrKey, val, shapeSpace = this._shapeDataSpace) {
         const toNum  = s => parseFloat(this.evaluateToken(s));
         const isFormula = s => typeof s === 'string' && /\{[^}]+\}/.test(s.trim());
+        const ySign = shapeSpace === 'canvas' ? -1 : 1;
         const withExprMap = (key, rawVal) => {
             const map = { ...(data?._expr ?? {}) };
             if (isFormula(rawVal)) map[key] = rawVal.trim();
@@ -1920,7 +2465,7 @@ export default class PathEditor {
                 _expr: withExprMap('cx', val),
             };
             if (attrKey === 'cy') return {
-                center: { ...data.center, y: toNum(val) },
+                center: { ...data.center, y: toNum(val) * ySign },
                 _expr: withExprMap('cy', val),
             };
             if (attrKey === 'r') {
@@ -1932,12 +2477,75 @@ export default class PathEditor {
         }
         if (type === 'rect') {
             // data uses w/h directly
-            return { [attrKey]: toNum(val), _expr: withExprMap(attrKey, val) };
+            const nextVal = attrKey === 'y' ? toNum(val) * ySign : toNum(val);
+            return { [attrKey]: nextVal, _expr: withExprMap(attrKey, val) };
         }
         if (type === 'ellipse') {
-            return { [attrKey]: toNum(val), _expr: withExprMap(attrKey, val) };
+            const nextVal = attrKey === 'cy' ? toNum(val) * ySign : toNum(val);
+            return { [attrKey]: nextVal, _expr: withExprMap(attrKey, val) };
         }
         return {};
+    }
+
+    /**
+     * Return true for shape attributes that represent Y coordinate in UI.
+     * @param {string} attrKey
+     * @returns {boolean}
+     * @private
+     */
+    _isShapeYAttr(attrKey) {
+        return attrKey === 'cy' || attrKey === 'y';
+    }
+
+    /**
+     * Negate a numeric/formula token for UI display/edit round-trip.
+     * Applying twice returns the original token (for common token forms).
+     * @param {string} token
+     * @returns {string}
+     * @private
+     */
+    _negateShapeToken(token) {
+        const t = String(token ?? '').trim();
+        if (!t) return '';
+        const numeric = Number(t);
+        if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
+            return String(parseFloat(String(-numeric)));
+        }
+        const wrappedNeg = t.match(/^-\((.*)\)$/);
+        if (wrappedNeg) return wrappedNeg[1].trim();
+        if (t.startsWith('-')) return t.slice(1).trim();
+        return `-(${t})`;
+    }
+
+    /**
+     * Preview-only UI conversion for shape param value presentation.
+     * Geometry/storage remains unchanged.
+     * @param {string} type
+     * @param {object} data
+     * @param {string} attrKey
+     * @returns {string}
+     * @private
+     */
+    _shapeAttrDisplayValue(type, data, attrKey) {
+        const rawVal = this._shapeAttrValue(type, data, attrKey);
+        if (this._shapeDataSpace === 'bit' && this._isShapeYAttr(attrKey) && rawVal !== '') {
+            return this._negateShapeToken(rawVal);
+        }
+        return rawVal;
+    }
+
+    /**
+     * Convert user-entered UI token back to storage token for preview-only Y inversion.
+     * @param {string} attrKey
+     * @param {string} uiValue
+     * @returns {string}
+     * @private
+     */
+    _shapeInputTokenToStorage(attrKey, uiValue) {
+        if (this._shapeDataSpace === 'bit' && this._isShapeYAttr(attrKey)) {
+            return this._negateShapeToken(uiValue);
+        }
+        return String(uiValue ?? '');
     }
 
     // ─── Backward-compat stubs ────────────────────────────────────────────────
@@ -1951,6 +2559,9 @@ export default class PathEditor {
      */
     setPath(pathStr) {
         if (!pathStr) return;
+
+        // Path text is stored in profile bit-space (Y-up).
+        this._shapeDataSpace = 'bit';
 
         // Preserve expand/collapse state by path position across preview refreshes.
         const prevPathExpandedByPos = this._elements
@@ -2074,11 +2685,11 @@ export default class PathEditor {
                 const { center, radius } = elem.data ?? {};
                 if (center != null && radius != null) {
                     const r6 = v => +Number(v).toFixed(6);
-                    const cx = center.x, cy = center.y;
+                    const cx = center.x;
                     const radNum = Number(radius);
-                    const cxRaw = elem.data?._expr?.cx ?? r6(cx);
-                    const cyRaw = elem.data?._expr?.cy ?? r6(cy);
-                    const radRaw = elem.data?.radiusExpr ?? elem.data?._expr?.r ?? r6(radNum);
+                    const cxRaw = this._shapeAttrValue('circle', elem.data ?? {}, 'cx') || r6(cx);
+                    const cyRaw = this._shapeAttrValue('circle', elem.data ?? {}, 'cy') || r6(0);
+                    const radRaw = this._shapeAttrValue('circle', elem.data ?? {}, 'r') || r6(radNum);
                     const circleCmd =
                         `M (${cxRaw})-(${radRaw}) -(${cyRaw})` +
                         ` A ${radRaw} ${radRaw} 0 1 0 (${cxRaw})+(${radRaw}) -(${cyRaw})` +
@@ -2278,7 +2889,7 @@ export default class PathEditor {
                 }
             }
         }
-        return true;
+        return this._shapeDataSpace === 'canvas';
     }
 
     /**
@@ -2318,15 +2929,15 @@ export default class PathEditor {
             rowEl.dataset.segId = current.segId;
 
             const def = PathEditor.SHAPE_DEFS[incoming.type];
-            const paramCells = [...rowEl.querySelectorAll('.path-cell-param')];
+            const paramCells = [...rowEl.querySelectorAll('.path-cell-param[data-attr]')];
             let cellIndex = 0;
             for (const attrKey of def.attrs) {
-                const val = this._shapeAttrValue(incoming.type, current.data, attrKey);
+                const val = this._shapeAttrDisplayValue(incoming.type, current.data, attrKey);
                 if (val === '' && (attrKey === 'rx' || attrKey === 'ry')) continue;
                 const cell = paramCells[cellIndex];
                 if (!cell) return false;
                 cell.dataset.attr = attrKey;
-                cell.title = attrKey;
+                this._setParamCellTitle(cell, attrKey, val);
                 cell.textContent = val || attrKey;
                 cell.classList.toggle('cell-empty', !val);
                 cellIndex++;
@@ -2403,7 +3014,7 @@ export default class PathEditor {
         this.activeEditLineData = { shapeSegId: elem.segId, attrKey };
         this.activeEditType = 'shape-param';
 
-        const currentVal = this._shapeAttrValue(elem.type, elem.data, attrKey);
+        const currentVal = this._shapeAttrDisplayValue(elem.type, elem.data, attrKey);
         cell.classList.add('active-edit');
         cell.innerHTML = '';
 
@@ -2426,21 +3037,25 @@ export default class PathEditor {
             if (save) {
                 const val = input.value.trim();
                 if (val) {
-                    const prevVal = this._shapeAttrValue(elem.type, elem.data, attrKey);
-                    const changes = this._shapeAttrToChanges(elem.type, elem.data, attrKey, val);
+                    const prevVal = this._shapeAttrDisplayValue(elem.type, elem.data, attrKey);
+                    const storageVal = this._shapeInputTokenToStorage(attrKey, val);
+                    const changes = this._shapeAttrToChanges(elem.type, elem.data, attrKey, storageVal);
                     if (this.onShapeElementChange) this.onShapeElementChange(elem.segId, changes);
                     Object.assign(elem.data, changes);
                     cell.textContent = val;
                     cell.classList.remove('cell-empty');
+                    this._setParamCellTitle(cell, attrKey, val);
                     if (!this.onShapeElementChange && prevVal !== val) this._fireOnChange();
                 } else {
                     cell.textContent = attrKey;
                     cell.classList.add('cell-empty');
+                    this._setParamCellTitle(cell, attrKey, '');
                 }
             } else {
-                const prev = this._shapeAttrValue(elem.type, elem.data, attrKey);
+                const prev = this._shapeAttrDisplayValue(elem.type, elem.data, attrKey);
                 cell.textContent = prev || attrKey;
                 if (!prev) cell.classList.add('cell-empty');
+                this._setParamCellTitle(cell, attrKey, prev);
             }
             this._clearActiveEdit();
             this._renderSuggestions();

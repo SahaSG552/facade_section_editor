@@ -169,8 +169,34 @@ function _pointToArcDist(p, { start, end, radius, largeArc, sweep }, toleranceUn
 
 import SnapManager from "./snaps/SnapManager.js";
 import { arc2ptData, circumcenter, arcFlagsViaPoint } from "./tools/ArcTool.js";
+import { evalAngle } from "./transforms/TransformCommands.js";
 
 const log = LoggerFactory.createLogger("EditorCanvas");
+
+/** @param {import("./EditorStateManager.js").PathSegment} seg @param {Record<string,number>} vars */
+function _getRtAngle(seg, vars = {}) {
+    const list = Array.isArray(seg?.transforms) ? seg.transforms : [];
+    let angle = 0;
+    for (const t of list) {
+        if (String(t?.type ?? '').toUpperCase() !== 'RT') continue;
+        const v = evalAngle(t?.params?.[0] ?? '', vars);
+        if (Number.isFinite(v)) angle += v;
+    }
+    return angle;
+}
+
+/** @param {{x:number,y:number}} point @param {import("./EditorStateManager.js").PathSegment} seg @param {Record<string,number>} vars */
+function _toSegmentLocal(point, seg, vars = {}) {
+    const angle = _getRtAngle(seg, vars);
+    if (!Number.isFinite(angle) || Math.abs(angle) < 1e-9) return point;
+    const rad = -angle * Math.PI / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return {
+        x: point.x * cos - point.y * sin,
+        y: point.x * sin + point.y * cos,
+    };
+}
 
 /**
  * EditorCanvas — wraps a CanvasManager instance and adds editor-specific functionality.
@@ -369,6 +395,7 @@ export default class EditorCanvas {
      * @returns {SVGGElement|null}
      */
     _buildSegmentElement(seg) {
+        const rtAngle = _getRtAngle(seg, this.state?.variableValues ?? {});
         if (seg.type === "line") {
             const { start, end } = seg.data;
             const selected = seg.selected;
@@ -391,6 +418,8 @@ export default class EditorCanvas {
             // Endpoint circles
             _appendEndpoint(g, start.x, start.y, selected, false, "start");
             _appendEndpoint(g, end.x,   end.y,   selected, false, "end");
+
+            if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
 
             return g;
         }
@@ -444,6 +473,8 @@ export default class EditorCanvas {
                 _appendArcHandle(g, pt3.x, pt3.y, "pt3");
             }
 
+            if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
+
             return g;
         }
 
@@ -487,6 +518,7 @@ export default class EditorCanvas {
                 _appendArcCenter(g, center.x, center.y);
                 _appendArcHandle(g, pt3.x, pt3.y, "pt3");
             }
+            if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
             return g;
         }
 
@@ -513,6 +545,7 @@ export default class EditorCanvas {
                     _appendArcHandle(g, cx, cy, "corner");
                 }
             }
+            if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
             return g;
         }
 
@@ -542,6 +575,7 @@ export default class EditorCanvas {
                     _appendArcHandle(g, hx, hy, "axis");
                 }
             }
+            if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
             return g;
         }
 
@@ -565,32 +599,33 @@ export default class EditorCanvas {
         let bestDist = Infinity;
 
         for (const seg of segments) {
+            const localPoint = _toSegmentLocal(point, seg, this.state?.variableValues ?? {});
             let dist = Infinity;
 
             if (seg.type === "line") {
-                dist = _pointToSegmentDist(point, seg.data.start, seg.data.end);
+                dist = _pointToSegmentDist(localPoint, seg.data.start, seg.data.end);
             } else if (seg.type === "arc") {
-                dist = _pointToArcDist(point, seg.data, toleranceUnits);
+                dist = _pointToArcDist(localPoint, seg.data, toleranceUnits);
             } else if (seg.type === "circle") {
                 const { center, radius } = seg.data;
-                dist = Math.abs(Math.hypot(point.x - center.x, point.y - center.y) - radius);
+                dist = Math.abs(Math.hypot(localPoint.x - center.x, localPoint.y - center.y) - radius);
             } else if (seg.type === "rect") {
                 // Distance to nearest edge of the rectangle.
                 const { x, y, w, h } = seg.data;
-                const nearX = Math.max(x, Math.min(point.x, x + w));
-                const nearY = Math.max(y, Math.min(point.y, y + h));
-                const inside = point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h;
+                const nearX = Math.max(x, Math.min(localPoint.x, x + w));
+                const nearY = Math.max(y, Math.min(localPoint.y, y + h));
+                const inside = localPoint.x >= x && localPoint.x <= x + w && localPoint.y >= y && localPoint.y <= y + h;
                 if (inside) {
                     // Minimum distance to any of the 4 edges
-                    dist = Math.min(point.x - x, x + w - point.x, point.y - y, y + h - point.y);
+                    dist = Math.min(localPoint.x - x, x + w - localPoint.x, localPoint.y - y, y + h - localPoint.y);
                 } else {
-                    dist = Math.hypot(point.x - nearX, point.y - nearY);
+                    dist = Math.hypot(localPoint.x - nearX, localPoint.y - nearY);
                 }
             } else if (seg.type === "ellipse") {
                 // Approximate distance from point to ellipse outline.
                 const { cx, cy, rx, ry } = seg.data;
-                const nx = (point.x - cx) / (rx || 1);
-                const ny = (point.y - cy) / (ry || 1);
+                const nx = (localPoint.x - cx) / (rx || 1);
+                const ny = (localPoint.y - cy) / (ry || 1);
                 const len = Math.hypot(nx, ny);
                 // Scale back to SVG space (avg radius approximation)
                 dist = Math.abs(len - 1) * Math.min(rx, ry);
@@ -620,13 +655,14 @@ export default class EditorCanvas {
         let bestDist = Infinity;
 
         for (const seg of this.state.segments) {
+            const localPoint = _toSegmentLocal(point, seg, this.state?.variableValues ?? {});
             if (seg.type === "line" || seg.type === "arc") {
                 const pts = [
                     { key: "start", pt: seg.data.start },
                     { key: "end",   pt: seg.data.end   },
                 ];
                 for (const { key, pt } of pts) {
-                    const d = Math.hypot(point.x - pt.x, point.y - pt.y);
+                    const d = Math.hypot(localPoint.x - pt.x, localPoint.y - pt.y);
                     if (d <= tol && d < bestDist) {
                         bestDist = d;
                         bestRef  = { segId: seg.id, pointKey: key };
@@ -638,7 +674,7 @@ export default class EditorCanvas {
             // selected so the handle is visible in the rendered overlay.
             if (seg.type === "arc" && seg.data.arcMode && seg.selected) {
                 const pt3 = seg.data.pt3 ?? _computeArcMidpoint(seg.data);
-                const d = Math.hypot(point.x - pt3.x, point.y - pt3.y);
+                const d = Math.hypot(localPoint.x - pt3.x, localPoint.y - pt3.y);
                 if (d <= tol && d < bestDist) {
                     bestDist = d;
                     bestRef  = { segId: seg.id, pointKey: "pt3" };
@@ -648,7 +684,7 @@ export default class EditorCanvas {
             // Circle pt3 handle — only while selected.
             if (seg.type === "circle" && seg.selected) {
                 const pt3 = seg.data.pt3 ?? { x: seg.data.center.x + seg.data.radius, y: seg.data.center.y };
-                const d = Math.hypot(point.x - pt3.x, point.y - pt3.y);
+                const d = Math.hypot(localPoint.x - pt3.x, localPoint.y - pt3.y);
                 if (d <= tol && d < bestDist) {
                     bestDist = d;
                     bestRef  = { segId: seg.id, pointKey: "pt3" };
@@ -675,19 +711,20 @@ export default class EditorCanvas {
     updateArcFromPt3(segId, newPos) {
         const seg = this.state.segments.find(s => s.id === segId);
         if (!seg || seg.type !== "arc" || !seg.data.arcMode) return;
+        const localPos = _toSegmentLocal(newPos, seg, this.state?.variableValues ?? {});
 
         const { start, end } = seg.data;
         // Always use circumcenter so the handle moves freely regardless of
         // whether the arc was originally drawn as arc2pt or arc3pt.
-        const c = circumcenter(start, end, newPos);
+        const c = circumcenter(start, end, localPos);
         if (!c) return; // collinear — skip
-        const flags = arcFlagsViaPoint(start, end, newPos, c.cx, c.cy);
+        const flags = arcFlagsViaPoint(start, end, localPos, c.cx, c.cy);
         const newData = {
             ...seg.data,
             center:     { x: c.cx, y: c.cy },
             radius:     c.r,
             ...flags,
-            pt3:        { ...newPos },
+            pt3:        { ...localPos },
             arcMode:    "arc3pt",
             radiusExpr: undefined, // radius changed — drop any formula token
         };
@@ -732,12 +769,13 @@ export default class EditorCanvas {
     updateCircleFromPt3(segId, newPos) {
         const seg = this.state.segments.find(s => s.id === segId);
         if (!seg || seg.type !== 'circle') return;
-        const newRadius = Math.hypot(newPos.x - seg.data.center.x, newPos.y - seg.data.center.y);
+        const localPos = _toSegmentLocal(newPos, seg, this.state?.variableValues ?? {});
+        const newRadius = Math.hypot(localPos.x - seg.data.center.x, localPos.y - seg.data.center.y);
         if (newRadius < 1e-6) return;
         this.state.updateSegments([{ id: segId, changes: { data: {
             ...seg.data,
             radius:     newRadius,
-            pt3:        { ...newPos },
+            pt3:        { ...localPos },
             radiusExpr: undefined,
         }}}]);
     }

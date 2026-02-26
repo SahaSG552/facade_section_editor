@@ -107,16 +107,18 @@ class SelectionManager {
 
         bit.group.replaceChild(newShapeGroup, shapeGroup);
 
-        const newBitShape = newShapeGroup.querySelector(".bit-shape");
+        const newBitShapes = newShapeGroup.querySelectorAll(".bit-shape");
         const newShankShape = newShapeGroup.querySelector(".shank-shape");
         const thickness = Math.max(
             0.1,
             0.5 / Math.sqrt(this.mainCanvasManager.zoomLevel)
         );
 
-        if (newBitShape) {
-            newBitShape.setAttribute("stroke", "#00BFFF");
-            newBitShape.setAttribute("stroke-width", thickness);
+        if (newBitShapes?.length) {
+            newBitShapes.forEach((shape) => {
+                shape.setAttribute("stroke", "#00BFFF");
+                shape.setAttribute("stroke-width", thickness);
+            });
         }
         if (newShankShape) {
             newShankShape.setAttribute("stroke", "#00BFFF");
@@ -150,11 +152,13 @@ class SelectionManager {
             0.1,
             0.5 / Math.sqrt(this.mainCanvasManager.zoomLevel)
         );
-        const newBitShape = newShapeGroup.querySelector(".bit-shape");
+        const newBitShapes = newShapeGroup.querySelectorAll(".bit-shape");
         const newShankShape = newShapeGroup.querySelector(".shank-shape");
 
-        if (newBitShape) {
-            newBitShape.setAttribute("stroke-width", thickness);
+        if (newBitShapes?.length) {
+            newBitShapes.forEach((shape) => {
+                shape.setAttribute("stroke-width", thickness);
+            });
         }
         if (newShankShape) {
             newShankShape.setAttribute("stroke", "black");

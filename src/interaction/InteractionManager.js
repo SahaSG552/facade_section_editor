@@ -190,8 +190,8 @@ export default class InteractionManager {
             for (let i = 0; i < bitsOnCanvas.length; i++) {
                 const bit = bitsOnCanvas[i];
                 if (bit?.group) {
-                    const shape = bit.group.querySelector(".bit-shape");
-                    if (shape) {
+                    const shapes = bit.group.querySelectorAll(".bit-shape");
+                    if (shapes?.length) {
                         const transform = bit.group.getAttribute("transform");
                         let dx = 0,
                             dy = 0;
@@ -207,8 +207,19 @@ export default class InteractionManager {
 
                         const localX = svgCoords.x - dx;
                         const localY = svgCoords.y - dy;
+                        let hit = false;
 
-                        if (shape.isPointInFill(new DOMPoint(localX, localY))) {
+                        for (const shape of shapes) {
+                            if (
+                                shape.isPointInFill(new DOMPoint(localX, localY)) ||
+                                shape.isPointInFill(new DOMPoint(svgCoords.x, svgCoords.y))
+                            ) {
+                                hit = true;
+                                break;
+                            }
+                        }
+
+                        if (hit) {
                             const bitCenterX = bit.baseAbsX + dx;
                             const bitCenterY = bit.baseAbsY + dy;
                             const distance = Math.sqrt(
@@ -256,10 +267,10 @@ export default class InteractionManager {
                 for (let i = 0; i < phantomBits.length; i++) {
                     const phantomGroup = phantomBits[i];
                     // Get the actual shape element inside the group
-                    const phantomShape =
-                        phantomGroup.querySelector(".bit-shape");
+                    const phantomShapes =
+                        phantomGroup.querySelectorAll(".bit-shape");
 
-                    if (phantomShape) {
+                    if (phantomShapes?.length) {
                         const transform =
                             phantomGroup.getAttribute("transform");
                         let dx = 0,
@@ -276,12 +287,19 @@ export default class InteractionManager {
 
                         const localX = svgCoords.x - dx;
                         const localY = svgCoords.y - dy;
+                        let hit = false;
 
-                        if (
-                            phantomShape.isPointInFill(
-                                new DOMPoint(localX, localY)
-                            )
-                        ) {
+                        for (const phantomShape of phantomShapes) {
+                            if (
+                                phantomShape.isPointInFill(new DOMPoint(localX, localY)) ||
+                                phantomShape.isPointInFill(new DOMPoint(svgCoords.x, svgCoords.y))
+                            ) {
+                                hit = true;
+                                break;
+                            }
+                        }
+
+                        if (hit) {
                             // Find the parent bit index
                             const bitIndex = phantomGroup.__bitIndex;
                             if (bitIndex !== undefined) {

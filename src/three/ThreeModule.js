@@ -631,6 +631,7 @@ export default class ThreeModule extends BaseModule {
             y: b.y,
             op: b.operation,
             profile:
+                b.bitData?.profileSvg ||
                 b.bitData?.profilePath ||
                 b.bitData?.name ||
                 b.bitData?.id ||

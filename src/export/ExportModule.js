@@ -1825,14 +1825,16 @@ class DXFExporter {
             }
         }
 
-        const shape = bit.group.querySelector(".bit-shape");
-        if (!shape) return;
+        const shapes = bit.group.querySelectorAll(".bit-shape");
+        if (!shapes?.length) return;
 
         // Convert SVG coordinates to DXF coordinates (flip Y axis)
         const convertY = (y) => -y;
 
-        // Export based on actual SVG element type, not bit type
-        this.writeSVGShape(shape, offsetX, offsetY, layerName, convertY);
+        // Export all shape parts for multi-part bits (e.g. profile with per-element MOD)
+        shapes.forEach((shape) => {
+            this.writeSVGShape(shape, offsetX, offsetY, layerName, convertY);
+        });
 
         // Add XDATA for bit information
         this.addBitXDATA(bit);

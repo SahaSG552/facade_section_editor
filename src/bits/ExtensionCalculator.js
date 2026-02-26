@@ -127,8 +127,8 @@ export class ExtensionCalculator {
                 bit.group.querySelectorAll(".bit-pocket-fill");
             existingPocketFills.forEach((ext) => ext.remove());
 
-            const element = bit.group.querySelector(".bit-shape");
-            if (!element) return;
+            const elements = bit.group.querySelectorAll(".bit-shape");
+            if (!elements?.length) return;
 
             // Get bit position from transform
             const transform = bit.group.getAttribute("transform");
@@ -144,8 +144,24 @@ export class ExtensionCalculator {
                 }
             }
 
-            // Get bit bounding box in local coordinates
-            const bbox = element.getBBox();
+            // Get combined bounding box in local coordinates
+            let bbox = null;
+            elements.forEach((el) => {
+                try {
+                    const b = el.getBBox();
+                    if (!bbox) bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+                    else {
+                        const minX = Math.min(bbox.x, b.x);
+                        const minY = Math.min(bbox.y, b.y);
+                        const maxX = Math.max(bbox.x + bbox.width, b.x + b.width);
+                        const maxY = Math.max(bbox.y + bbox.height, b.y + b.height);
+                        bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+                    }
+                } catch (_) {
+                    // ignore invalid element bbox
+                }
+            });
+            if (!bbox) return;
             const bitWidth = bbox.width;
             const bitTopY = bitY + bbox.y; // Top of the bit in canvas coordinates
 
@@ -426,10 +442,26 @@ export class ExtensionCalculator {
                 }
             }
 
-            const element = bit.group.querySelector(".bit-shape");
-            if (!element) return;
+            const elements = bit.group.querySelectorAll(".bit-shape");
+            if (!elements?.length) return;
 
-            const bbox = element.getBBox();
+            let bbox = null;
+            elements.forEach((el) => {
+                try {
+                    const b = el.getBBox();
+                    if (!bbox) bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+                    else {
+                        const minX = Math.min(bbox.x, b.x);
+                        const minY = Math.min(bbox.y, b.y);
+                        const maxX = Math.max(bbox.x + bbox.width, b.x + b.width);
+                        const maxY = Math.max(bbox.y + bbox.height, b.y + b.height);
+                        bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+                    }
+                } catch (_) {
+                    // ignore invalid element bbox
+                }
+            });
+            if (!bbox) return;
             const bitWidth = bbox.width;
 
             // Position input at center between main bit and phantom bit

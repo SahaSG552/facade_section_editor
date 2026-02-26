@@ -267,6 +267,49 @@ function _restoreShapeFormulasIntoState(state, snapshot, vars) {
 }
 
 /**
+ * Sync top-level element transforms from PathEditor into segment metadata
+ * without modifying segment geometry.
+ *
+ * @param {EditorStateManager} state
+ * @param {Array<{kind:'path'|'shape', contourId?:number, segId?:string, transforms:Array<object>}>} transformsMeta
+ */
+function _syncElementTransformsToState(state, transformsMeta) {
+    if (!state || !Array.isArray(transformsMeta)) return;
+
+    const normalize = (arr) => (Array.isArray(arr) ? arr : []).map(t => ({
+        type: String(t?.type ?? '').toUpperCase(),
+        raw: String(t?.raw ?? ''),
+        params: Array.isArray(t?.params) ? [...t.params] : [],
+    }));
+    const same = (a, b) => JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
+
+    const updates = [];
+    const metaPaths = transformsMeta.filter(m => m?.kind === 'path');
+    const statePaths = state.getElements().filter(e => e.type === 'path' || e.type === 'polyline');
+
+    for (let i = 0; i < statePaths.length; i++) {
+        const elem = statePaths[i];
+        const tr = normalize(metaPaths[i]?.transforms);
+        for (const seg of state.segments) {
+            if ((seg.contourId ?? 0) !== (elem.contourId ?? 0)) continue;
+            if (!same(seg.transforms, tr)) updates.push({ id: seg.id, changes: { transforms: tr } });
+        }
+    }
+
+    const metaShapes = transformsMeta.filter(m => m?.kind === 'shape');
+    const stateShapes = state.segments.filter(s => s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse');
+    for (let i = 0; i < stateShapes.length; i++) {
+        const seg = stateShapes[i];
+        const byId = metaShapes.find(m => typeof m.segId === 'string' && m.segId === seg.id);
+        const tr = normalize(byId?.transforms ?? metaShapes[i]?.transforms);
+        if (!same(seg.transforms, tr)) updates.push({ id: seg.id, changes: { transforms: tr } });
+    }
+
+    if (updates.length > 0) state.updateSegments(updates);
+}
+
+
+/**
  * ProfileEditor — top-level orchestrator for the profile cross-section editor.
  *
  * Manages the full lifecycle of edit mode inside the bit modal:
@@ -402,6 +445,7 @@ export default class ProfileEditor {
         // 1. Initialize state
         this.state = new EditorStateManager({ profilePath, variableValues });
         _restoreShapeFormulasIntoState(this.state, shapeFormulaSnapshot, variableValues);
+        _syncElementTransformsToState(this.state, pathEditor?.getElementTransformsSnapshot?.() ?? []);
 
         // 2. Initialize canvas extension
         this.editorCanvas = new EditorCanvas(canvasManager, this.state);
@@ -662,6 +706,9 @@ export default class ProfileEditor {
             if (Array.isArray(selectedRefs)) {
                 this._pathEditor?.setSelectedLines(selectedRefs);
             }
+
+            _syncElementTransformsToState(this.state, meta?.elementTransforms ?? []);
+
             this._pathEditorIsSource = false;
         };
 

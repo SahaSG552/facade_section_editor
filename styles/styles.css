@@ -1721,9 +1721,26 @@ html {
   border-color: rgba(230, 57, 70, 0.6);
 }
 
+.path-cell-mod-cmd {
+  background-color: rgba(245, 183, 0, 0.16);
+  border-color: rgba(245, 183, 0, 0.42);
+  color: #b07400;
+}
+
+.path-cell-mod-cmd:hover {
+  background-color: rgba(245, 183, 0, 0.28);
+  border-color: rgba(245, 183, 0, 0.58);
+}
+
 .dark .path-cell-cmd {
   background-color: rgba(255, 107, 107, 0.15);
   color: #ff6b6b;
+}
+
+.dark .path-cell-mod-cmd {
+  background-color: rgba(255, 210, 70, 0.2);
+  border-color: rgba(255, 210, 70, 0.45);
+  color: #ffd65c;
 }
 
 /* Parameter cell - teal accent */
@@ -1753,12 +1770,71 @@ html {
   padding: 0;
 }
 
+.path-cell-mod-param {
+  background-color: rgba(245, 183, 0, 0.12);
+  border-color: rgba(245, 183, 0, 0.3);
+}
+
+.path-cell-mod-param:hover {
+  background-color: rgba(245, 183, 0, 0.22);
+  border-color: rgba(245, 183, 0, 0.48);
+}
+
+.path-cell-mod-param.active-edit {
+  background-color: rgba(245, 183, 0, 0.28);
+  border-color: rgba(245, 183, 0, 0.55);
+}
+
 .dark .path-cell-param {
   background-color: rgba(78, 205, 196, 0.1);
 }
 
 .dark .path-cell-param.cell-empty {
   background-color: rgba(255, 255, 255, 0.04);
+}
+
+.dark .path-cell-mod-param {
+  background-color: rgba(255, 210, 70, 0.14);
+  border-color: rgba(255, 210, 70, 0.32);
+}
+
+.path-cell-mod-del {
+  background-color: rgba(245, 183, 0, 0.12);
+  border: 1px solid rgba(245, 183, 0, 0.38);
+  color: #a96e00;
+  font-weight: 700;
+  font-size: 11px;
+  line-height: 1;
+  padding: 1px 4px;
+  min-width: 16px;
+  border-radius: 3px;
+}
+
+.path-cell-mod-del:hover {
+  background-color: rgba(245, 183, 0, 0.24);
+  border-color: rgba(245, 183, 0, 0.58);
+}
+
+.path-mod-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 4px;
+}
+
+.path-mod-item.path-mod-dragging {
+  opacity: 0.45;
+}
+
+.path-mod-item.path-mod-drop-over {
+  outline: 1px dashed rgba(245, 183, 0, 0.7);
+  outline-offset: 1px;
+}
+
+.dark .path-cell-mod-del {
+  background-color: rgba(255, 210, 70, 0.16);
+  border-color: rgba(255, 210, 70, 0.45);
+  color: #ffd65c;
 }
 
 /* Inline input - override .modal-content input */
@@ -2195,12 +2271,30 @@ html {
   border-color: rgba(155, 89, 182, 0.5);
 }
 
+.path-suggestion-btn.mod-btn {
+  color: #b07400;
+  border-color: rgba(245, 183, 0, 0.42);
+  background-color: rgba(245, 183, 0, 0.14);
+  font-weight: 600;
+}
+
+.path-suggestion-btn.mod-btn:hover {
+  background-color: rgba(245, 183, 0, 0.26);
+  border-color: rgba(245, 183, 0, 0.58);
+}
+
 .dark .path-suggestion-btn.cmd-btn {
   color: #ff6b6b;
 }
 
 .dark .path-suggestion-btn.var-btn {
   color: #bb8fce;
+}
+
+.dark .path-suggestion-btn.mod-btn {
+  color: #ffd65c;
+  border-color: rgba(255, 210, 70, 0.45);
+  background-color: rgba(255, 210, 70, 0.2);
 }
 
 /* Element creation buttons — color-coded by type */

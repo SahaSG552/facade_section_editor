@@ -12,6 +12,10 @@ import { fitAllVisibleElements } from "../canvas/zoomUtils.js";
 import variablesManager from "../data/VariablesManager.js";
 import PathEditor from "./PathEditor.js";
 import ProfileEditor from "../editor/ProfileEditor.js";
+import {
+    evalAngle,
+    modListToSvgTransform,
+} from "../editor/transforms/TransformCommands.js";
 
 /**
  * Merge a new numeric SVG path with the original formula path.
@@ -112,6 +116,284 @@ function mergePathWithFormulas(newPath, rawPath, pathEditor) {
 }
 
 const svgNS = "http://www.w3.org/2000/svg";
+
+function buildTransformVariableMap(bit = {}) {
+    const vars = {
+        d: Number(bit.diameter ?? 0),
+        l: Number(bit.length ?? 0),
+        a: Number(bit.angle ?? 0),
+        h: Number(bit.height ?? 0),
+        cr: Number(bit.cornerRadius ?? 0),
+        f: Number(bit.flat ?? 0),
+        sd: Number(bit.shankDiameter ?? 0),
+        tl: Number(bit.totalLength ?? 0),
+        tn: Number(bit.toolNumber ?? 0),
+    };
+    const custom = bit.customValues ?? {};
+    for (const [k, v] of Object.entries(custom)) {
+        const n = Number(v);
+        if (!Number.isNaN(n) && Number.isFinite(n)) vars[k] = n;
+    }
+    return vars;
+}
+
+function normalizeProfileTransformsSnapshot(profileTransforms) {
+    if (!Array.isArray(profileTransforms) || profileTransforms.length === 0) return [];
+
+    const normTransform = (t) => ({
+        type: String(t?.type ?? "").toUpperCase(),
+        raw: String(t?.raw ?? ""),
+        params: Array.isArray(t?.params) ? [...t.params] : [],
+    });
+
+    // Legacy format: flat transform list [{type:'RT',...}]
+    if (
+        profileTransforms.some((t) => typeof t?.type === "string") &&
+        !profileTransforms.some((t) => t?.kind === "path" || t?.kind === "shape")
+    ) {
+        return [{ kind: "path", transforms: profileTransforms.map(normTransform) }];
+    }
+
+    return profileTransforms.map((entry) => ({
+        kind: entry?.kind === "shape" ? "shape" : "path",
+        contourId: entry?.contourId,
+        segId: entry?.segId,
+        transforms: Array.isArray(entry?.transforms)
+            ? entry.transforms.map(normTransform)
+            : [],
+    }));
+}
+
+function getTransformsForProfileElement(profileTransforms, elementIndex, elementCount) {
+    const snapshot = normalizeProfileTransformsSnapshot(profileTransforms);
+    if (snapshot.length === 0) return [];
+
+    // Exact order match (preferred)
+    if (snapshot.length === elementCount) {
+        return Array.isArray(snapshot[elementIndex]?.transforms)
+            ? snapshot[elementIndex].transforms
+            : [];
+    }
+
+    // Fallback to path-only entries count
+    const pathOnly = snapshot.filter((s) => s?.kind === "path");
+    if (pathOnly.length === elementCount) {
+        return Array.isArray(pathOnly[elementIndex]?.transforms)
+            ? pathOnly[elementIndex].transforms
+            : [];
+    }
+
+    // Legacy/single-entry fallback
+    if (snapshot.length === 1) {
+        return Array.isArray(snapshot[0]?.transforms) ? snapshot[0].transforms : [];
+    }
+
+    return [];
+}
+
+function sumRtAngleDeg(transforms, vars = {}) {
+    if (!Array.isArray(transforms) || transforms.length === 0) return 0;
+    let total = 0;
+    for (const t of transforms) {
+        if (String(t?.type ?? "").toUpperCase() !== "RT") continue;
+        const token = String(t?.params?.[0] ?? "").trim();
+        const angle = evalAngle(token, vars);
+        if (Number.isFinite(angle)) total += angle;
+    }
+    return total;
+}
+
+function splitPathByMoveCommands(pathData) {
+    const src = String(pathData ?? "").trim();
+    if (!src) return [];
+    const commands = src.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi) || [];
+    const subPaths = [];
+    let current = [];
+    for (const cmd of commands) {
+        if (/^[Mm]/.test(cmd) && current.length > 0) {
+            subPaths.push(current.join(" "));
+            current = [];
+        }
+        current.push(cmd.trim());
+    }
+    if (current.length > 0) subPaths.push(current.join(" "));
+    return subPaths;
+}
+
+function rotatePointAround(pointX, pointY, centerX, centerY, cosA, sinA) {
+    const dx = pointX - centerX;
+    const dy = pointY - centerY;
+    return {
+        x: centerX + dx * cosA - dy * sinA,
+        y: centerY + dx * sinA + dy * cosA,
+    };
+}
+
+function rotateNumericPathData(pathData, angleDeg, centerX = 0, centerY = 0) {
+    if (!pathData) return "";
+    if (!Number.isFinite(angleDeg) || Math.abs(angleDeg) < 1e-9) return pathData;
+
+    const commands = String(pathData).match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
+    if (!commands) return pathData;
+
+    const angleRad = (angleDeg * Math.PI) / 180;
+    const cosA = Math.cos(angleRad);
+    const sinA = Math.sin(angleRad);
+    const fmt = (v) => Number(v.toFixed(6));
+
+    const out = [];
+    let cx = 0;
+    let cy = 0;
+    let subX = 0;
+    let subY = 0;
+
+    for (const cmd of commands) {
+        const type = cmd[0].toUpperCase();
+        const nums = cmd
+            .slice(1)
+            .trim()
+            .split(/[\s,]+/)
+            .filter(Boolean)
+            .map(Number)
+            .filter((n) => !Number.isNaN(n));
+
+        if (type === "Z") {
+            out.push("Z");
+            cx = subX;
+            cy = subY;
+            continue;
+        }
+
+        const vals = [];
+        let i = 0;
+
+        if (type === "M" || type === "L" || type === "T") {
+            while (i + 1 < nums.length) {
+                const p = rotatePointAround(nums[i], nums[i + 1], centerX, centerY, cosA, sinA);
+                vals.push(fmt(p.x), fmt(p.y));
+                cx = p.x;
+                cy = p.y;
+                if (type === "M" && i === 0) {
+                    subX = cx;
+                    subY = cy;
+                }
+                i += 2;
+            }
+        } else if (type === "H") {
+            while (i < nums.length) {
+                const p = rotatePointAround(nums[i], cy, centerX, centerY, cosA, sinA);
+                vals.push(fmt(p.x), fmt(p.y));
+                cx = p.x;
+                cy = p.y;
+                i += 1;
+            }
+            out.push(`L ${vals.join(" ")}`);
+            continue;
+        } else if (type === "V") {
+            while (i < nums.length) {
+                const p = rotatePointAround(cx, nums[i], centerX, centerY, cosA, sinA);
+                vals.push(fmt(p.x), fmt(p.y));
+                cx = p.x;
+                cy = p.y;
+                i += 1;
+            }
+            out.push(`L ${vals.join(" ")}`);
+            continue;
+        } else if (type === "C") {
+            while (i + 5 < nums.length) {
+                const p1 = rotatePointAround(nums[i], nums[i + 1], centerX, centerY, cosA, sinA);
+                const p2 = rotatePointAround(nums[i + 2], nums[i + 3], centerX, centerY, cosA, sinA);
+                const p = rotatePointAround(nums[i + 4], nums[i + 5], centerX, centerY, cosA, sinA);
+                vals.push(fmt(p1.x), fmt(p1.y), fmt(p2.x), fmt(p2.y), fmt(p.x), fmt(p.y));
+                cx = p.x;
+                cy = p.y;
+                i += 6;
+            }
+        } else if (type === "S" || type === "Q") {
+            while (i + 3 < nums.length) {
+                const p1 = rotatePointAround(nums[i], nums[i + 1], centerX, centerY, cosA, sinA);
+                const p = rotatePointAround(nums[i + 2], nums[i + 3], centerX, centerY, cosA, sinA);
+                vals.push(fmt(p1.x), fmt(p1.y), fmt(p.x), fmt(p.y));
+                cx = p.x;
+                cy = p.y;
+                i += 4;
+            }
+        } else if (type === "A") {
+            while (i + 6 < nums.length) {
+                const rx = nums[i];
+                const ry = nums[i + 1];
+                const axisRot = nums[i + 2];
+                const largeArc = nums[i + 3];
+                const sweep = nums[i + 4];
+                const end = rotatePointAround(nums[i + 5], nums[i + 6], centerX, centerY, cosA, sinA);
+                vals.push(
+                    fmt(rx),
+                    fmt(ry),
+                    fmt(axisRot + angleDeg),
+                    largeArc,
+                    sweep,
+                    fmt(end.x),
+                    fmt(end.y)
+                );
+                cx = end.x;
+                cy = end.y;
+                i += 7;
+            }
+        } else {
+            out.push(cmd.trim());
+            continue;
+        }
+
+        out.push(`${type} ${vals.join(" ")}`.trim());
+    }
+
+    return out.join(" ");
+}
+
+function buildTransformedProfileSubPaths(profilePath, profileTransforms, vars = {}) {
+    const subPaths = splitPathByMoveCommands(profilePath);
+    if (subPaths.length === 0) return [];
+
+    const transformed = [];
+    for (let i = 0; i < subPaths.length; i++) {
+        const elementTransforms = getTransformsForProfileElement(
+            profileTransforms,
+            i,
+            subPaths.length
+        );
+        const rtAngle = sumRtAngleDeg(elementTransforms, vars);
+        transformed.push(rotateNumericPathData(subPaths[i], rtAngle, 0, 0));
+    }
+    return transformed;
+}
+
+function buildTransformedProfilePath(profilePath, profileTransforms, vars = {}) {
+    return buildTransformedProfileSubPaths(profilePath, profileTransforms, vars).join(" ");
+}
+
+function flattenTransformsSnapshot(profileTransforms) {
+    const snapshot = normalizeProfileTransformsSnapshot(profileTransforms);
+    const out = [];
+    for (const entry of snapshot) {
+        if (Array.isArray(entry?.transforms)) out.push(...entry.transforms);
+    }
+    return out;
+}
+
+function escapeSvgAttr(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+}
+
+function ensurePathClosed(pathData) {
+    const src = String(pathData ?? "").trim();
+    if (!src) return "";
+    if (/[Zz]\s*$/.test(src)) return src;
+    return `${src} Z`;
+}
 
 /**
  * Parse an evaluated (numeric-only) SVG path string into a row-indexed array
@@ -421,6 +703,7 @@ export default class BitsManager {
         isSelected = false,
         includeShank = true,
         strokeWidth = 1,
+        renderProfileAsElements = false,
     ) {
         // Create a group to contain bit and shank shapes
         const group = document.createElementNS(svgNS, "g");
@@ -530,21 +813,68 @@ export default class BitsManager {
             case "profile": {
                 // Profile cutter: custom profile defined by SVG path
                 if (!bit.profilePath) return group;
-                
-                // Parse the profile path and transform it
-                // The profilePath is defined with origin at bottom-center, Y pointing up
-                // We need to: 1) flip Y (SVG Y is down), 2) translate to position
+
+                const vars = buildTransformVariableMap(bit);
+                const sourceProfilePath = bit.profilePathSource || bit.profilePath;
+                const profileSubPaths = splitPathByMoveCommands(sourceProfilePath);
+
+                if (profileSubPaths.length > 0) {
+                    const parts = [];
+                    for (let i = 0; i < profileSubPaths.length; i++) {
+                        const closedSubPath = ensurePathClosed(profileSubPaths[i]);
+                        const elementTransforms = getTransformsForProfileElement(
+                            bit.profileTransforms,
+                            i,
+                            profileSubPaths.length
+                        );
+                        const transformedPath = this.transformProfilePath(
+                            closedSubPath,
+                            x,
+                            y,
+                            bit.diameter
+                        );
+                        if (!transformedPath) continue;
+                        const part = document.createElementNS(svgNS, "path");
+                        part.setAttribute("d", transformedPath);
+                        const rtAngle = sumRtAngleDeg(elementTransforms, vars);
+                        if (Number.isFinite(rtAngle) && Math.abs(rtAngle) > 1e-9) {
+                            if (renderProfileAsElements) {
+                                // Preview: profile path is around origin, rotate around (0,0)
+                                part.setAttribute("transform", `rotate(${rtAngle})`);
+                            } else {
+                                // Canvas: path is already translated to (x,y), rotate around bit anchor
+                                part.setAttribute("transform", `rotate(${rtAngle} ${x} ${y})`);
+                            }
+                        }
+                        part.setAttribute("fill", fillColor);
+                        part.setAttribute("stroke", "black");
+                        part.setAttribute("stroke-width", strokeWidth);
+                        part.classList.add("bit-shape");
+                        parts.push(part);
+                    }
+                    if (parts.length === 0) return group;
+                    for (const part of parts) group.appendChild(part);
+                    bitShape = null;
+                    break;
+                }
+
+                // Fallback: a single profile path.
                 const transformedPath = this.transformProfilePath(
-                    bit.profilePath,
+                    ensurePathClosed(sourceProfilePath),
                     x,
                     y,
                     bit.diameter
                 );
-                
                 if (!transformedPath) return group;
-                
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute("d", transformedPath);
+                if (renderProfileAsElements) {
+                    const transformAttr = modListToSvgTransform(
+                        flattenTransformsSnapshot(bit.profileTransforms),
+                        vars
+                    );
+                    if (transformAttr) bitShape.setAttribute("transform", transformAttr);
+                }
                 bitShape.setAttribute("fill", fillColor);
                 break;
             }
@@ -778,6 +1108,9 @@ export default class BitsManager {
 
             if (groupName) {
                 deleteBit(groupName, bit.id);
+                if (this.onDeleteCanvasBits) {
+                    this.onDeleteCanvasBits(bit.id);
+                }
             }
         }
     }
@@ -1025,6 +1358,17 @@ export default class BitsManager {
             if (profilePathInput && profilePathInput.value.trim()) {
                 bitParams.profilePath = profilePathInput.value.trim();
             }
+            const profileTransformsInput = modalElement.querySelector("#bit-profileTransforms");
+            if (profileTransformsInput?.value?.trim()) {
+                try {
+                    const parsed = JSON.parse(profileTransformsInput.value);
+                    bitParams.profileTransforms = normalizeProfileTransformsSnapshot(parsed);
+                } catch (_) {
+                    bitParams.profileTransforms = [];
+                }
+            } else {
+                bitParams.profileTransforms = [];
+            }
         }
 
         return bitParams;
@@ -1211,10 +1555,22 @@ export default class BitsManager {
             const profilePathInput = modalElement.querySelector("#bit-profilePath");
             if (profilePathInput && profilePathInput.value.trim()) {
                 payload.profilePath = profilePathInput.value.trim();
+                payload.profilePathSource = payload.profilePath;
             }
             const rawProfilePathInput = modalElement.querySelector("#bit-rawProfilePath");
             if (rawProfilePathInput && rawProfilePathInput.value.trim()) {
                 payload.rawProfilePath = rawProfilePathInput.value.trim();
+            }
+            const profileTransformsInput = modalElement.querySelector("#bit-profileTransforms");
+            if (profileTransformsInput?.value?.trim()) {
+                try {
+                    const parsed = JSON.parse(profileTransformsInput.value);
+                    payload.profileTransforms = normalizeProfileTransformsSnapshot(parsed);
+                } catch (_) {
+                    payload.profileTransforms = [];
+                }
+            } else {
+                payload.profileTransforms = [];
             }
         }
         
@@ -1249,6 +1605,7 @@ export default class BitsManager {
         
         // Use rawName if available, otherwise use name
         const displayName = bit?.rawName || bit?.name || "";
+        const normalizedProfileTransforms = normalizeProfileTransformsSnapshot(bit?.profileTransforms || []);
         
         const defaultValues = {
             name: displayName,
@@ -1260,8 +1617,9 @@ export default class BitsManager {
             height: rawVals.height !== undefined ? rawVals.height : (bit ? bit.height : ""),
             cornerRadius: rawVals.cornerRadius !== undefined ? rawVals.cornerRadius : (bit ? bit.cornerRadius : ""),
             flat: rawVals.flat !== undefined ? rawVals.flat : (bit ? bit.flat : ""),
-            profilePath: bit ? bit.profilePath : "",
-            rawProfilePath: bit ? (bit.rawProfilePath || bit.profilePath) : "", // raw path with formulas
+            profilePath: bit ? (bit.profilePathSource || bit.profilePath) : "",
+            rawProfilePath: bit ? (bit.rawProfilePath || bit.profilePathSource || bit.profilePath) : "", // raw path with formulas
+            profileTransforms: normalizedProfileTransforms,
             toolNumber: bit && bit.toolNumber !== undefined ? bit.toolNumber : 1,
             color: bit && bit.fillColor ? bit.fillColor : "#cccccc",
             customValues: customVals,
@@ -1357,9 +1715,11 @@ export default class BitsManager {
             const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoomLevel));
 
             const previewBitsLayer = previewCanvasManager.getLayer("bits");
-            const bitShape = previewBitsLayer?.querySelector(".bit-shape");
+            const bitShapes = previewBitsLayer?.querySelectorAll(".bit-shape");
             const shankShape = previewBitsLayer?.querySelector(".shank-shape");
-            if (bitShape) bitShape.setAttribute("stroke-width", thickness);
+            if (bitShapes?.length) {
+                bitShapes.forEach((shape) => shape.setAttribute("stroke-width", thickness));
+            }
             if (shankShape) shankShape.setAttribute("stroke-width", thickness);
 
             if (previewRenderState.shape) {
@@ -1499,10 +1859,15 @@ export default class BitsManager {
             }
 
             const bitParams = this.collectBitParameters(form, groupName, modal);
+            const profileTransformsValue =
+                groupName === "profile"
+                    ? modal.querySelector("#bit-profileTransforms")?.value || ""
+                    : "";
             const renderSignature = JSON.stringify({
                 groupName,
                 bitParams,
                 color: modal.querySelector("#bit-color")?.value,
+                profileTransformsValue,
             });
 
             if (previewRenderState.signature === renderSignature && previewRenderState.shape) {
@@ -1521,6 +1886,7 @@ export default class BitsManager {
                 bitParams, groupName,
                 0, 0,   // anchor → origin
                 true, true, strokeWidth,
+                groupName === "profile",
             );
 
             previewBitsLayer.appendChild(shape);
@@ -1726,17 +2092,21 @@ export default class BitsManager {
                             // updateBitPreview() reads it. Formula tokens like {d} passed to
                             // transformProfilePath() cause getBBox() to freeze the browser.
                             if (pathEditorInstance) {
+                                const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
                                 const savedOnChange = pathEditorInstance.onChange;
                                 pathEditorInstance.onChange = () => {};   // suppress during reload
                                 pathEditorInstance.setPath(merged);
+                                pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
                                 pathEditorInstance.onChange = savedOnChange;
                             }
                         } else if (pathEditorInstance) {
                             // No edits were made (canUndo = false) — still need to restore
                             // PathEditor to preview-mode structure (clears editor-mode segIds).
                             const savedOnChange = pathEditorInstance.onChange;
+                            const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
                             pathEditorInstance.onChange = () => {};
                             pathEditorInstance.setPath(originalRawPath);
+                            pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
                             pathEditorInstance.onChange = savedOnChange;
                         }
                         updateBitPreview();
@@ -1750,8 +2120,10 @@ export default class BitsManager {
                             // Cancel: restore the path that was in the PathEditor before
                             // editing started (preserving any formula tokens).
                             const savedOnChange = pathEditorInstance.onChange;
+                            const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
                             pathEditorInstance.onChange = () => {};
                             pathEditorInstance.setPath(originalRawPath);
+                            pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
                             pathEditorInstance.onChange = savedOnChange;
                         }
                         previewRenderState.signature = null;
@@ -1786,12 +2158,14 @@ export default class BitsManager {
             // Get variable values for the path editor
             const getVariableValues = () => this.collectVariableValues(form, groupName);
             const rawProfilePathInput = modal.querySelector("#bit-rawProfilePath");
+            const profileTransformsInput = modal.querySelector("#bit-profileTransforms");
             
             // Create PathEditor instance
             pathEditorInstance = new PathEditor({
                 container: pathEditorContainer,
                 hiddenInput: profilePathInput,           // evaluated path (for rendering)
                 rawHiddenInput: rawProfilePathInput,     // raw path with formulas (for saving)
+                transformsHiddenInput: profileTransformsInput,
                 onChange: (path) => {
                     updateBitPreview();
                 },
@@ -1799,9 +2173,20 @@ export default class BitsManager {
             });
             
             // Set initial path - prefer rawProfilePath (has formulas), fallback to profilePath
+            const initialTransformsRaw = profileTransformsInput?.value || "[]";
             const initialPath = defaultValues.rawProfilePath || defaultValues.profilePath;
             if (initialPath) {
                 pathEditorInstance.setPath(initialPath);
+            }
+            try {
+                const savedTransforms = JSON.parse(initialTransformsRaw);
+                if (Array.isArray(savedTransforms) && savedTransforms.length > 0) {
+                    pathEditorInstance.setElementTransformsSnapshot(
+                        normalizeProfileTransformsSnapshot(savedTransforms)
+                    );
+                }
+            } catch (_) {
+                // ignore invalid stored transforms payload
             }
 
             // Preview mode: clicking a PathEditor row highlights it AND draws
@@ -1904,14 +2289,13 @@ export default class BitsManager {
 
         // OK button click handler
         modal.querySelector("#ok-btn").addEventListener("click", async () => {
-            const name = form.querySelector("#bit-name").value.trim();
+            const payload = this.buildBitPayload(form, groupName, modal);
+            const evaluatedName = payload?.name || "";
 
-            if (await this.isBitNameDuplicate(name, isEdit ? bit?.id : null)) {
+            if (await this.isBitNameDuplicate(evaluatedName, isEdit ? bit?.id : null)) {
                 alert("A bit with this name already exists. Please choose a different name.");
                 return;
             }
-
-            const payload = this.buildBitPayload(form, groupName, modal);
 
             let updatedBit;
             if (isEdit) {
@@ -1938,12 +2322,14 @@ export default class BitsManager {
     generateProfilePathHtml(defaultValues) {
         const profilePathValue = defaultValues.profilePath || "";
         const rawProfilePathValue = defaultValues.rawProfilePath || profilePathValue;
+        const profileTransformsValue = JSON.stringify(defaultValues.profileTransforms || []).replace(/"/g, '&quot;');
         return `
             <div class="profile-path-section">
                 <div class="profile-path-header">Profile Path:</div>
                 <div id="path-editor-container"></div>
                 <input type="hidden" id="bit-profilePath" value="${profilePathValue}">
                 <input type="hidden" id="bit-rawProfilePath" value="${rawProfilePathValue}">
+                <input type="hidden" id="bit-profileTransforms" value="${profileTransformsValue}">
             </div>
         `;
     }
@@ -2219,6 +2605,42 @@ export default class BitsManager {
         bits.forEach((bit) => {
             // Use bit.bitData as the bit parameters
             const bitParams = bit.bitData;
+
+            // Profile bits: keep source path untouched and provide separate SVG fragment
+            // (with per-element transforms) for 3D/extrusion consumers.
+            if (bit.groupName === "profile" && bitParams?.profilePath) {
+                const vars = buildTransformVariableMap(bitParams);
+                const sourceProfilePath = bitParams.profilePathSource || bitParams.profilePath;
+                const subPaths = splitPathByMoveCommands(sourceProfilePath);
+                const svgParts = [];
+
+                if (subPaths.length > 0) {
+                    for (let i = 0; i < subPaths.length; i++) {
+                        const d = ensurePathClosed(subPaths[i]);
+                        if (!d) continue;
+                        const transformAttr = modListToSvgTransform(
+                            getTransformsForProfileElement(bitParams.profileTransforms, i, subPaths.length),
+                            vars
+                        );
+                        svgParts.push(
+                            transformAttr
+                                ? `<path d="${escapeSvgAttr(d)}" transform="${escapeSvgAttr(transformAttr)}"/>`
+                                : `<path d="${escapeSvgAttr(d)}"/>`
+                        );
+                    }
+                }
+
+                const fallbackPath = ensurePathClosed(sourceProfilePath);
+                const profileSvg = svgParts.length > 0
+                    ? svgParts.join("")
+                    : `<path d="${escapeSvgAttr(fallbackPath)}"/>`;
+
+                if (!bit.bitData) bit.bitData = {};
+                bit.bitData.profilePathSource = sourceProfilePath;
+                bit.bitData.profileSvg = profileSvg;
+                return;
+            }
+
             // Create temporary bit shape at origin (0,0) without shank
             const group = this.createBitShapeElement(
                 bitParams,

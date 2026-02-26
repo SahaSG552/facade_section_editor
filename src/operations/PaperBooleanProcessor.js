@@ -206,18 +206,58 @@ function extractPathData(element) {
     }
 }
 
+function getCombinedBBox(elements) {
+    let bbox = null;
+    elements.forEach((element) => {
+        try {
+            const b = element.getBBox();
+            if (!bbox) bbox = { x: b.x, y: b.y, width: b.width, height: b.height };
+            else {
+                const minX = Math.min(bbox.x, b.x);
+                const minY = Math.min(bbox.y, b.y);
+                const maxX = Math.max(bbox.x + bbox.width, b.x + b.width);
+                const maxY = Math.max(bbox.y + bbox.height, b.y + b.height);
+                bbox = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+            }
+        } catch (_) {
+            // ignore element without valid bbox
+        }
+    });
+    return bbox;
+}
+
+function applyElementTransformToPaperPath(path, element) {
+    if (!path || !element) return;
+    const transform = element.getAttribute("transform") || "";
+    if (!transform) return;
+
+    const rotateMatch = transform.match(
+        /rotate\(\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*(?:[,\s]+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*[,\s]+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?))?\s*\)/i
+    );
+    if (!rotateMatch) return;
+
+    const angle = Number(rotateMatch[1]);
+    const cx = rotateMatch[2] !== undefined ? Number(rotateMatch[2]) : 0;
+    const cy = rotateMatch[3] !== undefined ? Number(rotateMatch[3]) : 0;
+    if (!Number.isFinite(angle) || !Number.isFinite(cx) || !Number.isFinite(cy)) return;
+
+    path.rotate(angle, new paper.Point(cx, cy));
+}
+
 /**
  * Создать Paper.js path из SVG элемента с учётом transform
  */
 function createPaperPath(obj, options = {}) {
     let element,
+        elements = [],
         moveX = 0,
         moveY = 0;
 
     // Определяем элемент и его трансформацию
     if (obj.group) {
         // bit object
-        element = obj.group.querySelector(".bit-shape");
+        elements = Array.from(obj.group.querySelectorAll(".bit-shape"));
+        element = elements[0] || null;
         const transform = obj.group.getAttribute("transform");
         if (transform) {
             const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
@@ -233,12 +273,26 @@ function createPaperPath(obj, options = {}) {
         moveY = options.y || 0;
     }
 
-    const pathData = extractPathData(element);
-    if (!pathData) return null;
-
     try {
-        // Создаём Paper.js path из SVG path data
-        const path = new paper.Path(pathData);
+        let path = null;
+
+        if (elements.length > 1) {
+            const compound = new paper.CompoundPath();
+            for (const el of elements) {
+                const pathData = extractPathData(el);
+                if (!pathData) continue;
+                const child = new paper.Path(pathData);
+                applyElementTransformToPaperPath(child, el);
+                compound.addChild(child);
+            }
+            if (compound.children.length === 0) return null;
+            path = compound;
+        } else {
+            const pathData = extractPathData(element);
+            if (!pathData) return null;
+            path = new paper.Path(pathData);
+            applyElementTransformToPaperPath(path, element);
+        }
 
         // Применяем трансформацию
         if (moveX !== 0 || moveY !== 0) {
@@ -258,8 +312,8 @@ function createPaperPath(obj, options = {}) {
 function createBitExtension(bitObj, materialTopY, materialBottomY) {
     if (!bitObj.group) return null;
 
-    const element = bitObj.group.querySelector(".bit-shape");
-    if (!element) return null;
+    const elements = Array.from(bitObj.group.querySelectorAll(".bit-shape"));
+    if (elements.length === 0) return null;
 
     // Получаем позицию бита
     const transform = bitObj.group.getAttribute("transform");
@@ -274,13 +328,8 @@ function createBitExtension(bitObj, materialTopY, materialBottomY) {
     }
 
     // Получаем bounding box бита
-    let bbox;
-    try {
-        bbox = element.getBBox();
-    } catch (e) {
-        console.error("Failed to get bbox for extension:", e);
-        return null;
-    }
+    const bbox = getCombinedBBox(elements);
+    if (!bbox) return null;
 
     const bitWidth = bbox.width;
     const bitTopY = bitY + bbox.y; // Верх бита в canvas координатах
@@ -351,8 +400,8 @@ function createBitExtension(bitObj, materialTopY, materialBottomY) {
 function createPocketFill(bitObj, materialTopY, materialBottomY) {
     if (!bitObj.group) return null;
 
-    const element = bitObj.group.querySelector(".bit-shape");
-    if (!element) return null;
+    const elements = Array.from(bitObj.group.querySelectorAll(".bit-shape"));
+    if (elements.length === 0) return null;
 
     // Позиция бита
     const transform = bitObj.group.getAttribute("transform");
@@ -367,13 +416,8 @@ function createPocketFill(bitObj, materialTopY, materialBottomY) {
     }
 
     // Bounding box
-    let bbox;
-    try {
-        bbox = element.getBBox();
-    } catch (e) {
-        console.error("Failed to get bbox for pocket fill:", e);
-        return null;
-    }
+    const bbox = getCombinedBBox(elements);
+    if (!bbox) return null;
 
     const bitWidth = bbox.width;
     const pocketOffset = bitObj.pocketOffset || 0;
@@ -405,8 +449,8 @@ function createPocketFill(bitObj, materialTopY, materialBottomY) {
 function createPocketExpansion(bitObj, materialTopY, materialBottomY) {
     if (!bitObj.group) return null;
 
-    const element = bitObj.group.querySelector(".bit-shape");
-    if (!element) return null;
+    const elements = Array.from(bitObj.group.querySelectorAll(".bit-shape"));
+    if (elements.length === 0) return null;
 
     // Позиция бита
     const transform = bitObj.group.getAttribute("transform");
@@ -421,13 +465,8 @@ function createPocketExpansion(bitObj, materialTopY, materialBottomY) {
     }
 
     // Bounding box
-    let bbox;
-    try {
-        bbox = element.getBBox();
-    } catch (e) {
-        console.error("Failed to get bbox for pocket expansion:", e);
-        return null;
-    }
+    const bbox = getCombinedBBox(elements);
+    if (!bbox) return null;
 
     const bitWidth = bbox.width;
     const bitTopY = bitY + bbox.y; // верх фрезы в canvas координатах

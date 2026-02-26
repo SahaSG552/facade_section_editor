@@ -377,7 +377,12 @@ export default class EditorStateManager {
                 const cid = seg.contourId ?? 0;
                 if (!lineArcContours.has(cid)) {
                     // Standalone shape — own contour with no line/arc siblings.
-                    elements.push({ type: seg.type, segId: seg.id, data: { ...seg.data } });
+                    elements.push({
+                        type: seg.type,
+                        segId: seg.id,
+                        data: { ...seg.data },
+                        transforms: Array.isArray(seg.transforms) ? [...seg.transforms] : [],
+                    });
                 }
                 // Embedded shapes (sharing contourId with a line/arc chain) are
                 // included in the chain’s segIds below.
@@ -397,6 +402,7 @@ export default class EditorStateManager {
                     type: 'polyline',
                     contourId: cid,
                     segIds: [...chain.map(s => s.id), ...embedded.map(s => s.id)],
+                    transforms: Array.isArray(chain[0]?.transforms) ? [...chain[0].transforms] : [],
                 });
             }
         }

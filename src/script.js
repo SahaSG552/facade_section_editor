@@ -598,6 +598,8 @@ function initializeSVG() {
             bitsManager.createBitShapeElement.bind(bitsManager)
         );
     bitsManager.onUpdateCanvasBits = (bitId) => updateCanvasBitsForBitId(bitId);
+    bitsManager.onDeleteCanvasBits = (bitId) =>
+        deleteCanvasBitsByLibraryBitId(bitId);
     bitsManager.onUpdateCanvasBitWithParams = (bitId, newParams, groupName) =>
         updateCanvasBitWithParams(bitId, newParams, groupName);
 
@@ -706,8 +708,8 @@ function initializeSVG() {
 
                     // Apply highlight stroke if selected
                     if (isSelected) {
-                        const newBitShape =
-                            newShapeGroup.querySelector(".bit-shape");
+                        const newBitShapes =
+                            newShapeGroup.querySelectorAll(".bit-shape");
                         const newShankShape =
                             newShapeGroup.querySelector(".shank-shape");
                         const thickness = Math.max(
@@ -715,12 +717,14 @@ function initializeSVG() {
                             0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
                         );
 
-                        if (newBitShape) {
-                            newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-                            newBitShape.setAttribute(
-                                "stroke-width",
-                                getAdaptiveStrokeWidth()
-                            );
+                        if (newBitShapes?.length) {
+                            newBitShapes.forEach((shape) => {
+                                shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                                shape.setAttribute(
+                                    "stroke-width",
+                                    getAdaptiveStrokeWidth()
+                                );
+                            });
                         }
                         if (newShankShape) {
                             newShankShape.setAttribute("stroke", "#00BFFF");
@@ -1808,7 +1812,7 @@ function createpanelAnchorButton(anchor) {
 // Update canvas bits when a bit in the library is changed
 async function updateCanvasBitsForBitId(bitId) {
     // Get the updated bit from the library
-    const allBits = getBits();
+    const allBits = await getBits();
     let updatedBitData = null;
     for (const group in allBits) {
         const found = allBits[group].find((b) => b.id === bitId);
@@ -1843,8 +1847,8 @@ async function updateCanvasBitsForBitId(bitId) {
 
                 // Apply highlight stroke if selected
                 if (isSelected) {
-                    const newBitShape =
-                        newShapeGroup.querySelector(".bit-shape");
+                    const newBitShapes =
+                        newShapeGroup.querySelectorAll(".bit-shape");
                     const newShankShape =
                         newShapeGroup.querySelector(".shank-shape");
                     const thickness = Math.max(
@@ -1852,12 +1856,14 @@ async function updateCanvasBitsForBitId(bitId) {
                         0.5 / Math.sqrt(mainCanvasManager.zoomLevel)
                     );
 
-                    if (newBitShape) {
-                        newBitShape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
-                        newBitShape.setAttribute(
-                            "stroke-width",
-                            getAdaptiveStrokeWidth()
-                        );
+                    if (newBitShapes?.length) {
+                        newBitShapes.forEach((shape) => {
+                            shape.setAttribute("stroke", "#00BFFF"); // Deep sky blue
+                            shape.setAttribute(
+                                "stroke-width",
+                                getAdaptiveStrokeWidth()
+                            );
+                        });
                     }
                     if (newShankShape) {
                         newShankShape.setAttribute("stroke", "#00BFFF");
@@ -1899,6 +1905,41 @@ async function updateCanvasBitsForBitId(bitId) {
             window.threeModule.showBasePanel();
             scheduleCsgIfNeeded(bitId);
         }
+    }
+}
+
+function deleteCanvasBitsByLibraryBitId(bitId) {
+    if (!bitId) return;
+
+    const toRemove = bitsOnCanvas.filter((b) => b?.bitData?.id === bitId);
+    if (toRemove.length === 0) return;
+
+    toRemove.forEach((bit) => {
+        if (bit.group && bit.group.parentNode) {
+            bit.group.parentNode.removeChild(bit.group);
+        }
+    });
+
+    bitsOnCanvas = bitsOnCanvas.filter((b) => b?.bitData?.id !== bitId);
+    bitRegistry.bits = bitsOnCanvas;
+    operationsRows = operationsRows.filter(
+        (row) => row.rowType !== "bit" || row.bit?.bitData?.id !== bitId
+    );
+
+    selectionManager.clearSelection();
+    updateBitsSheet();
+    redrawBitsOnCanvas();
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
+
+    if (window.threeModule) {
+        updateThreeView(bitId).then((didUpdate) => {
+            if (showPart && didUpdate) {
+                window.threeModule.showBasePanel();
+                scheduleCsgIfNeeded(bitId);
+            }
+        });
     }
 }
 
@@ -2731,11 +2772,13 @@ function updateStrokeWidths(zoomLevel = mainCanvasManager?.zoomLevel) {
         partFront.setAttribute("stroke-width", thickness);
     }
     bitsOnCanvas.forEach((bit) => {
-        const shape = bit.group?.querySelector(".bit-shape");
+        const shapes = bit.group?.querySelectorAll(".bit-shape");
         const shankShape = bit.group?.querySelector(".shank-shape");
         const extensionShapes = bit.group?.querySelectorAll(".bit-extension");
-        if (shape) {
-            shape.setAttribute("stroke-width", thickness);
+        if (shapes?.length) {
+            shapes.forEach((shape) => {
+                shape.setAttribute("stroke-width", thickness);
+            });
         }
         if (shankShape) {
             shankShape.setAttribute("stroke-width", thickness);
