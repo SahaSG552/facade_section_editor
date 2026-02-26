@@ -190,8 +190,16 @@ export default class EllipseTool extends BaseTool {
     onPointerUp(_pos, _e) {}
 
     onConfirm(_pos, _e) {
-        if (this._phase > 0) { this._reset(); return true; }
-        return false;
+        if (this._phase === 0) return false;
+        if (this._mode === "ellipse3pt" && this._phase === 2) {
+            this._phase = 1;
+            this._rx = 0;
+            this._removePopup();
+            if (this._cursorPos && this._center) this.ctx.canvas.setGhost(buildEllipseGhost(this._center, Math.hypot(this._cursorPos.x - this._center.x, this._cursorPos.y - this._center.y), Math.hypot(this._cursorPos.x - this._center.x, this._cursorPos.y - this._center.y)));
+            return true;
+        }
+        this._reset();
+        return true;
     }
 
     onKeyDown(e) {

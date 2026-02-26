@@ -304,8 +304,16 @@ export default class ArcTool extends BaseTool {
     onPointerUp(_pos, _e) {}
 
     onConfirm(_pos, _e) {
-        if (this._phase > 0) { this._reset(); return true; }
-        return false;
+        if (this._phase === 0) return false;
+        if (this._phase === 2) {
+            this._phase = 1;
+            this._pt2 = null;
+            this._removePopup();
+            if (this._cursorPos && this._pt1) this.ctx.canvas.setGhost(buildLineGhost(this._pt1, this._cursorPos));
+            return true;
+        }
+        this._reset();
+        return true;
     }
 
     onKeyDown(e) {
