@@ -76,7 +76,7 @@ function _appendEndpoint(g, cx, cy, selected, mirror = false, pointKey = "") {
     c.setAttribute("cy", cy);
     c.setAttribute("r", EV.r.endpoint);
     c.classList.add(EV.cls.endpoint);
-    if (mirror)   c.classList.add(EV.cls.endpointMirror);
+    if (mirror) c.classList.add(EV.cls.endpointMirror);
     if (selected) c.classList.add(EV.cls.endpointSelected);
     if (pointKey) c.setAttribute("data-point-key", pointKey);
     c.setAttribute("pointer-events", "none");
@@ -110,12 +110,12 @@ function _pointToSegmentDist(p, a, b) {
 // A hidden off-screen SVG is created lazily and reused for every hit-test call.
 // Using the browser's own geometry engine avoids all manual largeArc/sweep math.
 const _SVG_NS = "http://www.w3.org/2000/svg";
-let _arcHitSvg  = null;
+let _arcHitSvg = null;
 let _arcHitPath = null;
 
 function _ensureArcHitHelper() {
     if (_arcHitSvg) return;
-    _arcHitSvg  = document.createElementNS(_SVG_NS, "svg");
+    _arcHitSvg = document.createElementNS(_SVG_NS, "svg");
     _arcHitPath = document.createElementNS(_SVG_NS, "path");
     _arcHitPath.setAttribute("fill", "none");
     _arcHitPath.setAttribute("stroke", "black");
@@ -163,7 +163,7 @@ function _pointToArcDist(p, { start, end, radius, largeArc, sweep }, toleranceUn
     if (inStroke) return 0;
     return Math.min(
         Math.hypot(p.x - start.x, p.y - start.y),
-        Math.hypot(p.x - end.x,   p.y - end.y),
+        Math.hypot(p.x - end.x, p.y - end.y),
     );
 }
 
@@ -290,12 +290,12 @@ export default class EditorCanvas {
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
         // SVG user-space from viewBox
-        const vbWidth  = rect.width  / this.cm.zoomLevel;
+        const vbWidth = rect.width / this.cm.zoomLevel;
         const vbHeight = rect.height / this.cm.zoomLevel;
-        const vbX = this.cm.panX - vbWidth  / 2;
+        const vbX = this.cm.panX - vbWidth / 2;
         const vbY = this.cm.panY - vbHeight / 2;
         return {
-            x: vbX + (px / rect.width)  * vbWidth,
+            x: vbX + (px / rect.width) * vbWidth,
             y: vbY + (py / rect.height) * vbHeight,
         };
     }
@@ -417,7 +417,7 @@ export default class EditorCanvas {
 
             // Endpoint circles
             _appendEndpoint(g, start.x, start.y, selected, false, "start");
-            _appendEndpoint(g, end.x,   end.y,   selected, false, "end");
+            _appendEndpoint(g, end.x, end.y, selected, false, "end");
 
             if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
 
@@ -442,7 +442,7 @@ export default class EditorCanvas {
             g.appendChild(path);
 
             _appendEndpoint(g, start.x, start.y, selected, false, "start");
-            _appendEndpoint(g, end.x,   end.y,   selected, false, "end");
+            _appendEndpoint(g, end.x, end.y, selected, false, "end");
 
             // ── Arc control handle ──────────────────────────────────────────
             // Only render when the arc is selected and its construction mode
@@ -464,7 +464,7 @@ export default class EditorCanvas {
                 for (const pt of [start, end]) {
                     const dash = document.createElementNS(SVG_NS, "line");
                     dash.setAttribute("x1", center.x); dash.setAttribute("y1", center.y);
-                    dash.setAttribute("x2", pt.x);     dash.setAttribute("y2", pt.y);
+                    dash.setAttribute("x2", pt.x); dash.setAttribute("y2", pt.y);
                     dash.classList.add("editor-ghost-radius");
                     dash.setAttribute("pointer-events", "none");
                     g.appendChild(dash);
@@ -511,7 +511,7 @@ export default class EditorCanvas {
                 // Dashed radius line: center → pt3
                 const dash = document.createElementNS(SVG_NS, "line");
                 dash.setAttribute("x1", center.x); dash.setAttribute("y1", center.y);
-                dash.setAttribute("x2", pt3.x);    dash.setAttribute("y2", pt3.y);
+                dash.setAttribute("x2", pt3.x); dash.setAttribute("y2", pt3.y);
                 dash.classList.add("editor-ghost-radius");
                 dash.setAttribute("pointer-events", "none");
                 g.appendChild(dash);
@@ -530,7 +530,7 @@ export default class EditorCanvas {
             const rect = document.createElementNS(SVG_NS, "rect");
             rect.setAttribute("x", x);
             rect.setAttribute("y", y);
-            rect.setAttribute("width",  w);
+            rect.setAttribute("width", w);
             rect.setAttribute("height", h);
             rect.setAttribute("rx", rx);
             rect.setAttribute("fill", "none");
@@ -593,9 +593,9 @@ export default class EditorCanvas {
      */
     hitTest(point, tolerancePx = 8) {
         const toleranceUnits = tolerancePx / this.cm.zoomLevel;
-        const segments       = this.state.segments;
+        const segments = this.state.segments;
 
-        let bestId   = null;
+        let bestId = null;
         let bestDist = Infinity;
 
         for (const seg of segments) {
@@ -633,7 +633,7 @@ export default class EditorCanvas {
 
             if (dist < toleranceUnits && dist < bestDist) {
                 bestDist = dist;
-                bestId   = seg.id;
+                bestId = seg.id;
             }
         }
 
@@ -651,7 +651,7 @@ export default class EditorCanvas {
      */
     hitTestPoint(point, tolerancePx = 8) {
         const tol = tolerancePx / this.cm.zoomLevel;
-        let bestRef  = null;
+        let bestRef = null;
         let bestDist = Infinity;
 
         for (const seg of this.state.segments) {
@@ -659,13 +659,13 @@ export default class EditorCanvas {
             if (seg.type === "line" || seg.type === "arc") {
                 const pts = [
                     { key: "start", pt: seg.data.start },
-                    { key: "end",   pt: seg.data.end   },
+                    { key: "end", pt: seg.data.end },
                 ];
                 for (const { key, pt } of pts) {
                     const d = Math.hypot(localPoint.x - pt.x, localPoint.y - pt.y);
                     if (d <= tol && d < bestDist) {
                         bestDist = d;
-                        bestRef  = { segId: seg.id, pointKey: key };
+                        bestRef = { segId: seg.id, pointKey: key };
                     }
                 }
             }
@@ -677,7 +677,7 @@ export default class EditorCanvas {
                 const d = Math.hypot(localPoint.x - pt3.x, localPoint.y - pt3.y);
                 if (d <= tol && d < bestDist) {
                     bestDist = d;
-                    bestRef  = { segId: seg.id, pointKey: "pt3" };
+                    bestRef = { segId: seg.id, pointKey: "pt3" };
                 }
             }
 
@@ -687,7 +687,7 @@ export default class EditorCanvas {
                 const d = Math.hypot(localPoint.x - pt3.x, localPoint.y - pt3.y);
                 if (d <= tol && d < bestDist) {
                     bestDist = d;
-                    bestRef  = { segId: seg.id, pointKey: "pt3" };
+                    bestRef = { segId: seg.id, pointKey: "pt3" };
                 }
             }
         }
@@ -721,11 +721,11 @@ export default class EditorCanvas {
         const flags = arcFlagsViaPoint(start, end, localPos, c.cx, c.cy);
         const newData = {
             ...seg.data,
-            center:     { x: c.cx, y: c.cy },
-            radius:     c.r,
+            center: { x: c.cx, y: c.cy },
+            radius: c.r,
             ...flags,
-            pt3:        { ...localPos },
-            arcMode:    "arc3pt",
+            pt3: { ...localPos },
+            arcMode: "arc3pt",
             radiusExpr: undefined, // radius changed — drop any formula token
         };
         this.state.updateSegments([{ id: segId, changes: { data: newData } }]);
@@ -750,8 +750,10 @@ export default class EditorCanvas {
         const { center } = result;
         const dcLen = Math.hypot(sideHint.x - center.x, sideHint.y - center.y);
         const newPt3 = dcLen > 1e-9
-            ? { x: center.x + newRadius * (sideHint.x - center.x) / dcLen,
-                y: center.y + newRadius * (sideHint.y - center.y) / dcLen }
+            ? {
+                x: center.x + newRadius * (sideHint.x - center.x) / dcLen,
+                y: center.y + newRadius * (sideHint.y - center.y) / dcLen
+            }
             : _computeArcMidpoint({ ...result, arcMode: "arc2pt" });
 
         // Clear any stored variable expression: user explicitly set a numeric radius.
@@ -772,12 +774,16 @@ export default class EditorCanvas {
         const localPos = _toSegmentLocal(newPos, seg, this.state?.variableValues ?? {});
         const newRadius = Math.hypot(localPos.x - seg.data.center.x, localPos.y - seg.data.center.y);
         if (newRadius < 1e-6) return;
-        this.state.updateSegments([{ id: segId, changes: { data: {
-            ...seg.data,
-            radius:     newRadius,
-            pt3:        { ...localPos },
-            radiusExpr: undefined,
-        }}}]);
+        this.state.updateSegments([{
+            id: segId, changes: {
+                data: {
+                    ...seg.data,
+                    radius: newRadius,
+                    pt3: { ...localPos },
+                    radiusExpr: undefined,
+                }
+            }
+        }]);
     }
 
     /**
@@ -792,8 +798,10 @@ export default class EditorCanvas {
         const { center, pt3 } = seg.data;
         const dcLen = Math.hypot(pt3.x - center.x, pt3.y - center.y);
         const newPt3 = dcLen > 1e-9
-            ? { x: center.x + newRadius * (pt3.x - center.x) / dcLen,
-                y: center.y + newRadius * (pt3.y - center.y) / dcLen }
+            ? {
+                x: center.x + newRadius * (pt3.x - center.x) / dcLen,
+                y: center.y + newRadius * (pt3.y - center.y) / dcLen
+            }
             : { x: center.x + newRadius, y: center.y };
         const { radiusExpr: _dropped, ...restData } = seg.data;
         this.state.updateSegments([{ id: segId, changes: { data: { ...restData, radius: newRadius, pt3: newPt3 } } }]);
@@ -811,7 +819,7 @@ export default class EditorCanvas {
         if (!layer) return;
         // Match line, path (arcs), circle, rect, and ellipse children.
         layer.querySelectorAll(`[data-seg-id="${segId}"] line, [data-seg-id="${segId}"] path, [data-seg-id="${segId}"] circle.editor-segment, [data-seg-id="${segId}"] rect.editor-segment, [data-seg-id="${segId}"] ellipse.editor-segment`)
-             .forEach(el => el.classList.toggle("editor-segment-hover", active));
+            .forEach(el => el.classList.toggle("editor-segment-hover", active));
     }
 
     /**

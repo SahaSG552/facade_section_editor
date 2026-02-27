@@ -20,12 +20,12 @@ const EPS = 1e-6;
 function _segDataEqual(a, b) {
     if (!a || !b) return false;
     const p = (u, v) => Math.abs(u.x - v.x) < EPS && Math.abs(u.y - v.y) < EPS;
-    if (a.start  && (!b.start  || !p(a.start,  b.start)))  return false;
-    if (a.end    && (!b.end    || !p(a.end,    b.end)))    return false;
+    if (a.start && (!b.start || !p(a.start, b.start))) return false;
+    if (a.end && (!b.end || !p(a.end, b.end))) return false;
     if (a.center && (!b.center || !p(a.center, b.center))) return false;
-    if (typeof a.radius   === 'number' && Math.abs(a.radius - b.radius)     > EPS) return false;
-    if (typeof a.largeArc === 'number' && a.largeArc !== b.largeArc)               return false;
-    if (typeof a.sweep    === 'number' && a.sweep    !== b.sweep)                   return false;
+    if (typeof a.radius === 'number' && Math.abs(a.radius - b.radius) > EPS) return false;
+    if (typeof a.largeArc === 'number' && a.largeArc !== b.largeArc) return false;
+    if (typeof a.sweep === 'number' && a.sweep !== b.sweep) return false;
     return true;
 }
 
@@ -152,7 +152,7 @@ export default class MoveTool extends BaseTool {
             if (seg && seg.data.arcMode) {
                 // Capture origin data for Escape-restore.
                 this._movingPt3 = {
-                    segId:  seg.id,
+                    segId: seg.id,
                     origin: JSON.parse(JSON.stringify(seg.data)),
                 };
                 this._mode = "moving-pt3";
@@ -182,16 +182,16 @@ export default class MoveTool extends BaseTool {
                         if (s) this._movingOrigins.set(id, JSON.parse(JSON.stringify(s.data)));
                     }
                     this._movingSegIds = selectedIds;
-                    this._anchorSegId  = pointHit.segId;
-                    const anchorPoint  = seg.data[pointHit.pointKey];
-                    this._moveOffset   = { dx: pos.x - anchorPoint.x, dy: pos.y - anchorPoint.y };
-                    this._mode         = "moving-seg";
+                    this._anchorSegId = pointHit.segId;
+                    const anchorPoint = seg.data[pointHit.pointKey];
+                    this._moveOffset = { dx: pos.x - anchorPoint.x, dy: pos.y - anchorPoint.y };
+                    this._mode = "moving-seg";
                     log.debug("MoveTool: moving", selectedIds.length, "segs via endpoint anchor");
                 } else {
                     // Single: move the clicked vertex AND all segments that share
                     // the same position (welded-vertex — adjacent endpoints move together).
                     const vertexPt = seg.data[pointHit.pointKey];
-                    const allRefs  = this.ctx.state.getSegmentsAtVertex(vertexPt);
+                    const allRefs = this.ctx.state.getSegmentsAtVertex(vertexPt);
                     this._movingPoints = allRefs;
                     this._movingPointsOrigins.clear();
                     for (const ref of allRefs) {
@@ -212,7 +212,7 @@ export default class MoveTool extends BaseTool {
             if (e.shiftKey) {
                 // Toggle the entire chain as a single unit.
                 const chainIds = this.ctx.state.getChain(hitId).map(s => s.id);
-                const allSel   = chainIds.every(id => this.ctx.state.selectedIds.has(id));
+                const allSel = chainIds.every(id => this.ctx.state.selectedIds.has(id));
                 if (allSel) {
                     const keep = [...this.ctx.state.selectedIds].filter(id => !chainIds.includes(id));
                     this.ctx.state.setSelection(keep);
@@ -234,7 +234,7 @@ export default class MoveTool extends BaseTool {
                 if (s) this._movingOrigins.set(id, JSON.parse(JSON.stringify(s.data)));
             }
             this._movingSegIds = selectedIds;
-            this._anchorSegId  = hitId;
+            this._anchorSegId = hitId;
 
             // Offset = cursor relative to anchor segment's start point (or center for circles)
             const anchorSeg = this._findSeg(hitId);
@@ -242,11 +242,11 @@ export default class MoveTool extends BaseTool {
                 const anchorRef =
                     anchorSeg.data.center && !anchorSeg.data.start
                         ? anchorSeg.data.center                              // circle
-                    : anchorSeg.data.cx !== undefined
-                        ? { x: anchorSeg.data.cx, y: anchorSeg.data.cy }    // ellipse
-                    : anchorSeg.data.x !== undefined && !anchorSeg.data.start
-                        ? { x: anchorSeg.data.x, y: anchorSeg.data.y }      // rect
-                        : anchorSeg.data.start;                              // line / arc
+                        : anchorSeg.data.cx !== undefined
+                            ? { x: anchorSeg.data.cx, y: anchorSeg.data.cy }    // ellipse
+                            : anchorSeg.data.x !== undefined && !anchorSeg.data.start
+                                ? { x: anchorSeg.data.x, y: anchorSeg.data.y }      // rect
+                                : anchorSeg.data.start;                              // line / arc
                 this._moveOffset = {
                     dx: pos.x - anchorRef.x,
                     dy: pos.y - anchorRef.y,
@@ -289,10 +289,19 @@ export default class MoveTool extends BaseTool {
             const anchorOrigin = this._movingOrigins.get(this._anchorSegId);
             if (!anchorOrigin) return;
 
-            // Compute delta from anchor origin (circles use center; lines/arcs use start).
+            // Compute delta from anchor origin.
+            // - circle:  center
+            // - ellipse: cx/cy
+            // - rect:    x/y
+            // - line/arc:start
             const anchorRef = anchorOrigin.center && !anchorOrigin.start
                 ? anchorOrigin.center
-                : anchorOrigin.start;
+                : anchorOrigin.cx !== undefined
+                    ? { x: anchorOrigin.cx, y: anchorOrigin.cy }
+                    : anchorOrigin.x !== undefined && !anchorOrigin.start
+                        ? { x: anchorOrigin.x, y: anchorOrigin.y }
+                        : anchorOrigin.start;
+            if (!anchorRef) return;
             const newRefX = pos.x - this._moveOffset.dx;
             const newRefY = pos.y - this._moveOffset.dy;
             const dx = newRefX - anchorRef.x;
@@ -321,7 +330,7 @@ export default class MoveTool extends BaseTool {
                     newData = {
                         ...origin,
                         start: { x: origin.start.x + dx, y: origin.start.y + dy },
-                        end:   { x: origin.end.x   + dx, y: origin.end.y   + dy },
+                        end: { x: origin.end.x + dx, y: origin.end.y + dy },
                     };
                     // Translate arc center and pt3 control handle.
                     if (origin.center) {
@@ -344,22 +353,22 @@ export default class MoveTool extends BaseTool {
                 const origin = this._movingPointsOrigins.get(ref.segId);
                 if (!origin) continue;
 
-                const newPt   = { x: pos.x, y: pos.y };
+                const newPt = { x: pos.x, y: pos.y };
                 const newData = { ...origin, [ref.pointKey]: newPt };
 
                 // Recompute arc geometry whenever an endpoint of an arc is moved.
                 // Detect arcs by the presence of a numeric radius + center.
                 const isArc = typeof origin.radius === "number" && origin.center;
                 if (isArc) {
-                    const s  = newData.start;
+                    const s = newData.start;
                     const en = newData.end;
 
                     // Use stored pt3 if available; otherwise synthesise one from the
                     // original arc's midpoint so we always have a third reference point.
                     let pt3 = origin.pt3 ?? null;
                     if (!pt3) {
-                        const mx  = (origin.start.x + origin.end.x) / 2;
-                        const my  = (origin.start.y + origin.end.y) / 2;
+                        const mx = (origin.start.x + origin.end.x) / 2;
+                        const my = (origin.start.y + origin.end.y) / 2;
                         const dmx = mx - origin.center.x;
                         const dmy = my - origin.center.y;
                         const dmLen = Math.hypot(dmx, dmy);
@@ -382,16 +391,22 @@ export default class MoveTool extends BaseTool {
                                 // side-hint stays valid for subsequent operations.
                                 const dcLen = Math.hypot(pt3.x - result.center.x, pt3.y - result.center.y);
                                 const newPt3 = dcLen > 1e-9
-                                    ? { x: result.center.x + origin.radius * (pt3.x - result.center.x) / dcLen,
-                                        y: result.center.y + origin.radius * (pt3.y - result.center.y) / dcLen }
+                                    ? {
+                                        x: result.center.x + origin.radius * (pt3.x - result.center.x) / dcLen,
+                                        y: result.center.y + origin.radius * (pt3.y - result.center.y) / dcLen
+                                    }
                                     : { x: result.center.x + origin.radius, y: result.center.y };
-                                updates.push({ id: ref.segId, changes: { data: {
-                                    ...newData,
-                                    center:   result.center,
-                                    largeArc: result.largeArc,
-                                    sweep:    result.sweep,
-                                    pt3:      newPt3,
-                                }}});
+                                updates.push({
+                                    id: ref.segId, changes: {
+                                        data: {
+                                            ...newData,
+                                            center: result.center,
+                                            largeArc: result.largeArc,
+                                            sweep: result.sweep,
+                                            pt3: newPt3,
+                                        }
+                                    }
+                                });
                                 continue;
                             }
                             // radius too small for new chord — fall through to circumcenter
@@ -401,15 +416,19 @@ export default class MoveTool extends BaseTool {
                         const c = circumcenter(s, en, pt3);
                         if (c) {
                             const flags = arcFlagsViaPoint(s, en, pt3, c.cx, c.cy);
-                            updates.push({ id: ref.segId, changes: { data: {
-                                ...newData,
-                                center:     { x: c.cx, y: c.cy },
-                                radius:     c.r,
-                                ...flags,
-                                pt3,
-                                arcMode:    "arc3pt",
-                                radiusExpr: undefined, // radius changed — drop formula token
-                            }}});
+                            updates.push({
+                                id: ref.segId, changes: {
+                                    data: {
+                                        ...newData,
+                                        center: { x: c.cx, y: c.cy },
+                                        radius: c.r,
+                                        ...flags,
+                                        pt3,
+                                        arcMode: "arc3pt",
+                                        radiusExpr: undefined, // radius changed — drop formula token
+                                    }
+                                }
+                            });
                             continue;
                         }
                     }
@@ -546,15 +565,15 @@ export default class MoveTool extends BaseTool {
 
     /** @private — reset state to idle (used after commit or Escape) */
     _reset() {
-        this._mode              = "idle";
-        this._movingSegIds      = [];
-        this._movingOrigins     = new Map();
-        this._moveOffset        = { dx: 0, dy: 0 };
-        this._anchorSegId         = null;
-        this._movingPoints        = [];
+        this._mode = "idle";
+        this._movingSegIds = [];
+        this._movingOrigins = new Map();
+        this._moveOffset = { dx: 0, dy: 0 };
+        this._anchorSegId = null;
+        this._movingPoints = [];
         this._movingPointsOrigins = new Map();
-        this._movingPt3           = null;
-        this._inputFocused        = false;
+        this._movingPt3 = null;
+        this._inputFocused = false;
         this._removeArcPopup();
     }
 
@@ -572,11 +591,11 @@ export default class MoveTool extends BaseTool {
         popup.appendChild(label);
 
         const inp = document.createElement("input");
-        inp.type      = "text";
+        inp.type = "text";
         inp.inputMode = "decimal";
         inp.className = "arc-radius-input";
         // Show stored expression if present, otherwise current numeric radius.
-        inp.value     = seg.data.radiusExpr ?? seg.data.radius.toFixed(3);
+        inp.value = seg.data.radiusExpr ?? seg.data.radius.toFixed(3);
         popup.appendChild(inp);
 
         const hint = document.createElement("small");
@@ -589,7 +608,7 @@ export default class MoveTool extends BaseTool {
         // No auto-focus: popup shows live radius while cursor follows.
 
         inp.addEventListener("focus", () => { this._inputFocused = true; inp.select(); });
-        inp.addEventListener("blur",  () => { this._inputFocused = false; });
+        inp.addEventListener("blur", () => { this._inputFocused = false; });
 
         inp.addEventListener("keydown", (ev) => {
             ev.stopPropagation();
@@ -620,14 +639,14 @@ export default class MoveTool extends BaseTool {
      * @private
      */
     _commitFromInput() {
-        const inp   = this._arcPopup?.querySelector("input");
-        const hint  = this._arcPopup?.querySelector(".arc-radius-hint");
-        const raw   = inp?.value?.trim() ?? "";
+        const inp = this._arcPopup?.querySelector("input");
+        const hint = this._arcPopup?.querySelector(".arc-radius-hint");
+        const raw = inp?.value?.trim() ?? "";
         const segId = this._movingPt3?.segId;
         if (!segId) return;
 
         const showError = (msg) => {
-            if (inp)  { inp.classList.add("arc-radius-error"); setTimeout(() => inp.classList.remove("arc-radius-error"), 2000); }
+            if (inp) { inp.classList.add("arc-radius-error"); setTimeout(() => inp.classList.remove("arc-radius-error"), 2000); }
             if (hint) hint.textContent = msg;
         };
 
@@ -646,9 +665,9 @@ export default class MoveTool extends BaseTool {
         } else {
             // Accept both bare "d" and "{d}" format; normalise to "{d}" for export.
             const varMatch = raw.match(/^\{([a-zA-Z_][a-zA-Z0-9_]*)\}$/) ??
-                             (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(raw) ? [null, raw] : null);
+                (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(raw) ? [null, raw] : null);
             if (varMatch) {
-                const varName    = varMatch[1];
+                const varName = varMatch[1];
                 const radiusExpr = `{${varName}}`;
                 const seg = this._findSeg(segId);
                 if (seg) {
@@ -689,7 +708,7 @@ export default class MoveTool extends BaseTool {
     _positionArcPopup(e) {
         if (!this._arcPopup) return;
         this._arcPopup.style.left = (e.clientX + 14) + "px";
-        this._arcPopup.style.top  = (e.clientY + 14) + "px";
+        this._arcPopup.style.top = (e.clientY + 14) + "px";
     }
 
     /** @private */
@@ -710,7 +729,7 @@ export default class MoveTool extends BaseTool {
                 this._hoverSegId = null;
             }
             if (!this._hoverPoint ||
-                this._hoverPoint.segId    !== pointHit.segId ||
+                this._hoverPoint.segId !== pointHit.segId ||
                 this._hoverPoint.pointKey !== pointHit.pointKey) {
                 if (this._hoverPoint) canvas.setHoverPoint(this._hoverPoint, false);
                 canvas.setHoverPoint(pointHit, true);
@@ -727,7 +746,7 @@ export default class MoveTool extends BaseTool {
         const hitId = canvas.hitTest(pos);
         if (hitId !== this._hoverSegId) {
             if (this._hoverSegId) canvas.setHoverSegment(this._hoverSegId, false);
-            if (hitId)            canvas.setHoverSegment(hitId, true);
+            if (hitId) canvas.setHoverSegment(hitId, true);
             this._hoverSegId = hitId;
         }
     }

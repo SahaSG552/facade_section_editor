@@ -78,7 +78,8 @@ export default class PathEditor {
      * @param {HTMLElement}         options.container
      * @param {HTMLInputElement}   [options.hiddenInput]
      * @param {HTMLInputElement}   [options.rawHiddenInput]
-        * @param {HTMLInputElement}   [options.transformsHiddenInput]
+      * @param {HTMLInputElement}   [options.transformsHiddenInput]
+      * @param {HTMLInputElement}   [options.elementsHiddenInput]
      * @param {Function}           [options.onChange]            — receives evaluated path string
      * @param {Object}             [options.variableValues]
      * @param {Function}           [options.getVariableList]
@@ -92,6 +93,7 @@ export default class PathEditor {
         this.hiddenInput           = options.hiddenInput    ?? null;
         this.rawHiddenInput        = options.rawHiddenInput ?? null;
         this.transformsHiddenInput = options.transformsHiddenInput ?? null;
+        this.elementsHiddenInput   = options.elementsHiddenInput ?? null;
         this.onChange              = options.onChange              || (() => {});
         this.variableValues        = options.variableValues        || {};
         this.getVariableList       = options.getVariableList       || (() => []);
@@ -1393,6 +1395,103 @@ export default class PathEditor {
                     parts.push(evaluatedCmd);
                     rawParts.push(rawCmd);
                 }
+            } else if (elem.type === 'rect') {
+                const r6 = v => +Number(v).toFixed(6);
+                const data = elem.data ?? {};
+                const xVal = Number(data.x ?? 0);
+                const yVal = Number(data.y ?? 0);
+                const wVal = Number(data.w ?? 0);
+                const hVal = Number(data.h ?? 0);
+                const rxVal = Number(data.rx ?? 0);
+
+                // Hidden path is always stored in bit-space (Y-up).
+                const xEval = xVal;
+                const yBit = this._shapeDataSpace === 'canvas' ? -yVal : yVal;
+                const wEval = Math.abs(wVal);
+                const hEval = Math.abs(hVal);
+                const rxEval = Number.isFinite(rxVal) ? Math.abs(rxVal) : 0;
+
+                if (![xEval, yBit, wEval, hEval].every(Number.isFinite)) continue;
+
+                const x2Eval = xEval + wEval;
+                const y2Eval = yBit - hEval;
+                const radEval = Math.max(0, Math.min(Number.isFinite(rxEval) ? rxEval : 0, Math.abs(wEval) / 2, Math.abs(hEval) / 2));
+
+                const rawToken = (key, fallback) => {
+                    const expr = elem.data?._expr?.[key];
+                    return (expr != null && String(expr).trim() !== '') ? String(expr).trim() : String(fallback);
+                };
+                const toBitYToken = (token) => this._shapeDataSpace === 'canvas'
+                    ? this._negateShapeToken(token)
+                    : String(token);
+                const xRaw = rawToken('x', r6(xEval));
+                const yExpr = elem.data?._expr?.y;
+                const yRaw = (yExpr != null && String(yExpr).trim() !== '')
+                    ? String(yExpr).trim()
+                    : toBitYToken(r6(yVal));
+                const wRaw = rawToken('w', r6(wEval));
+                const hRaw = rawToken('h', r6(hEval));
+                const rxRaw = rawToken('rx', r6(radEval));
+
+                if (radEval > 1e-9) {
+                    const evaluatedCmd =
+                        `M ${r6(xEval + radEval)} ${r6(yBit)}` +
+                        ` L ${r6(x2Eval - radEval)} ${r6(yBit)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(x2Eval)} ${r6(yBit - radEval)}` +
+                        ` L ${r6(x2Eval)} ${r6(y2Eval + radEval)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(x2Eval - radEval)} ${r6(y2Eval)}` +
+                        ` L ${r6(xEval + radEval)} ${r6(y2Eval)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(xEval)} ${r6(y2Eval + radEval)}` +
+                        ` L ${r6(xEval)} ${r6(yBit - radEval)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(xEval + radEval)} ${r6(yBit)}` +
+                        ` Z`;
+                    const rawCmd =
+                        `M (${xRaw})+(${rxRaw}) (${yRaw})` +
+                        ` L (${xRaw})+(${wRaw})-(${rxRaw}) (${yRaw})` +
+                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw})+(${wRaw}) (${yRaw})-(${rxRaw})` +
+                        ` L (${xRaw})+(${wRaw}) (${yRaw})-(${hRaw})+(${rxRaw})` +
+                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw})+(${wRaw})-(${rxRaw}) (${yRaw})-(${hRaw})` +
+                        ` L (${xRaw})+(${rxRaw}) (${yRaw})-(${hRaw})` +
+                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw}) (${yRaw})-(${hRaw})+(${rxRaw})` +
+                        ` L (${xRaw}) (${yRaw})-(${rxRaw})` +
+                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw})+(${rxRaw}) (${yRaw})` +
+                        ` Z`;
+                    parts.push(evaluatedCmd);
+                    rawParts.push(rawCmd);
+                } else {
+                    const evaluatedCmd =
+                        `M ${r6(xEval)} ${r6(yBit)}` +
+                        ` L ${r6(x2Eval)} ${r6(yBit)}` +
+                        ` L ${r6(x2Eval)} ${r6(y2Eval)}` +
+                        ` L ${r6(xEval)} ${r6(y2Eval)}` +
+                        ` Z`;
+                    const rawCmd =
+                        `M ${xRaw} ${yRaw}` +
+                        ` L (${xRaw})+(${wRaw}) ${yRaw}` +
+                        ` L (${xRaw})+(${wRaw}) (${yRaw})-(${hRaw})` +
+                        ` L ${xRaw} (${yRaw})-(${hRaw})` +
+                        ` Z`;
+                    parts.push(evaluatedCmd);
+                    rawParts.push(rawCmd);
+                }
+            } else if (elem.type === 'ellipse') {
+                const r6 = v => +Number(v).toFixed(6);
+                const data = elem.data ?? {};
+                const cxEval = Number(data.cx ?? 0);
+                const cyEvalCanvas = Number(data.cy ?? 0);
+                const rxEval = Math.abs(Number(data.rx ?? 0));
+                const ryEval = Math.abs(Number(data.ry ?? 0));
+                const cyBit = this._shapeDataSpace === 'canvas' ? -cyEvalCanvas : cyEvalCanvas;
+
+                if (![cxEval, cyEval, rxEval, ryEval].every(Number.isFinite)) continue;
+
+                const evaluatedCmd =
+                    `M ${r6(cxEval - rxEval)} ${r6(cyBit)}` +
+                    ` A ${r6(rxEval)} ${r6(ryEval)} 0 1 0 ${r6(cxEval + rxEval)} ${r6(cyBit)}` +
+                    ` A ${r6(rxEval)} ${r6(ryEval)} 0 1 0 ${r6(cxEval - rxEval)} ${r6(cyBit)}` +
+                    ` Z`;
+                parts.push(evaluatedCmd);
+                rawParts.push(evaluatedCmd);
             }
         }
         const fullPath = parts.join(' ');
@@ -1401,10 +1500,53 @@ export default class PathEditor {
         if (this.transformsHiddenInput) {
             this.transformsHiddenInput.value = JSON.stringify(this.getElementTransformsSnapshot());
         }
+        if (this.elementsHiddenInput) {
+            this.elementsHiddenInput.value = JSON.stringify(this.getElementsDebugSnapshot());
+        }
         this.onChange(fullPath, {
             selectedLineRefs: this._collectSelectedLineRefs(),
             activeElemId: this._activeElemId,
             elementTransforms: this.getElementTransformsSnapshot(),
+        });
+    }
+
+    /**
+     * Recompute hidden inputs from current in-memory elements without firing onChange callback.
+     * Used by ProfileEditor during canvas-originated in-place updates.
+     */
+    syncHiddenInputsFromElements() {
+        const savedOnChange = this.onChange;
+        this.onChange = () => {};
+        this._fireOnChange();
+        this.onChange = savedOnChange;
+    }
+
+    /**
+     * Debug snapshot of current PathEditor structure.
+     * @returns {Array<object>}
+     */
+    getElementsDebugSnapshot() {
+        return this._elements.map((elem) => {
+            const transforms = Array.isArray(elem.transforms) ? elem.transforms.map(t => ({
+                type: String(t?.type ?? '').toUpperCase(),
+                raw: String(t?.raw ?? ''),
+                params: Array.isArray(t?.params) ? [...t.params] : [],
+            })) : [];
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                return {
+                    type: elem.type,
+                    contourId: elem.contourId,
+                    segIds: Array.isArray(elem.segIds) ? [...elem.segIds] : [],
+                    lines: (elem.lines ?? []).map((line) => ({ text: line.text, segId: line.segId ?? null })),
+                    transforms,
+                };
+            }
+            return {
+                type: elem.type,
+                segId: elem.segId ?? null,
+                data: { ...(elem.data ?? {}) },
+                transforms,
+            };
         });
     }
 
@@ -2527,11 +2669,7 @@ export default class PathEditor {
      * @private
      */
     _shapeAttrDisplayValue(type, data, attrKey) {
-        const rawVal = this._shapeAttrValue(type, data, attrKey);
-        if (this._shapeDataSpace === 'bit' && this._isShapeYAttr(attrKey) && rawVal !== '') {
-            return this._negateShapeToken(rawVal);
-        }
-        return rawVal;
+        return this._shapeAttrValue(type, data, attrKey);
     }
 
     /**
@@ -2542,9 +2680,6 @@ export default class PathEditor {
      * @private
      */
     _shapeInputTokenToStorage(attrKey, uiValue) {
-        if (this._shapeDataSpace === 'bit' && this._isShapeYAttr(attrKey)) {
-            return this._negateShapeToken(uiValue);
-        }
         return String(uiValue ?? '');
     }
 
@@ -2593,6 +2728,199 @@ export default class PathEditor {
         let cid = 1;
         for (const cmds of subPaths) {
             const pathPos = cid - 1;
+            // Detect axis-aligned rectangle pattern:
+            //   M x0 y0  (L|H|V) ... (L|H|V) ... (L|H|V) ... Z
+            // in bit-space (Y-up). Reconstruct as a shape row instead of polyline.
+            const isRectCandidate = cmds.length === 5
+                && /^[Mm]/.test(cmds[0])
+                && /^[Zz]$/.test(cmds[4])
+                && /^[LlHhVv]/.test(cmds[1])
+                && /^[LlHhVv]/.test(cmds[2])
+                && /^[LlHhVv]/.test(cmds[3]);
+
+            if (isRectCandidate) {
+                const EPS = 1e-4;
+                const eq = (a, b) => Math.abs(a - b) < EPS;
+                const evalNum = (token) => Number(this.evaluateToken(String(token ?? '')));
+                const hasFormulaLike = (token) => {
+                    const t = String(token ?? '').trim();
+                    if (!t) return false;
+                    const n = Number(t);
+                    if (!Number.isNaN(n) && Number.isFinite(n)) return false;
+                    return /\{[^}]+\}|[+\-*/()]/.test(t);
+                };
+                const parseArgs = (cmd) => cmd
+                    .slice(1)
+                    .trim()
+                    .split(/[\s,]+/)
+                    .filter(Boolean);
+
+                const mArgs = parseArgs(cmds[0]);
+                let cx = evalNum(mArgs[0]);
+                let cy = evalNum(mArgs[1]);
+                let xTok = String(mArgs[0] ?? '').trim();
+                let yTok = String(mArgs[1] ?? '').trim();
+
+                const validStart = Number.isFinite(cx) && Number.isFinite(cy);
+                if (validStart) {
+                    const pts = [{ x: cx, y: cy }];
+                    const ptTokens = [{ x: xTok, y: yTok }];
+                    for (let i = 1; i <= 3; i++) {
+                        const cmd = cmds[i];
+                        const type = cmd[0].toUpperCase();
+                        const args = parseArgs(cmd);
+                        if (type === 'L') {
+                            if (args.length < 2) {
+                                cx = NaN;
+                                cy = NaN;
+                                break;
+                            }
+                            xTok = String(args[0] ?? '').trim();
+                            yTok = String(args[1] ?? '').trim();
+                            cx = evalNum(args[0]);
+                            cy = evalNum(args[1]);
+                        } else if (type === 'H') {
+                            if (args.length < 1) {
+                                cx = NaN;
+                                cy = NaN;
+                                break;
+                            }
+                            xTok = String(args[0] ?? '').trim();
+                            cx = evalNum(args[0]);
+                        } else if (type === 'V') {
+                            if (args.length < 1) {
+                                cx = NaN;
+                                cy = NaN;
+                                break;
+                            }
+                            yTok = String(args[0] ?? '').trim();
+                            cy = evalNum(args[0]);
+                        } else {
+                            cx = NaN;
+                            cy = NaN;
+                            break;
+                        }
+                        if (!Number.isFinite(cx) || !Number.isFinite(cy)) break;
+                        pts.push({ x: cx, y: cy });
+                        ptTokens.push({ x: xTok, y: yTok });
+                    }
+
+                    if (pts.length === 4 && Number.isFinite(cx) && Number.isFinite(cy)) {
+                        const p0 = pts[0];
+                        const p1 = pts[1];
+                        const p2 = pts[2];
+                        const p3 = pts[3];
+                        const axisAligned =
+                            ((eq(p0.y, p1.y) && eq(p1.x, p2.x) && eq(p2.y, p3.y) && eq(p3.x, p0.x)) ||
+                                (eq(p0.x, p1.x) && eq(p1.y, p2.y) && eq(p2.x, p3.x) && eq(p3.y, p0.y)));
+
+                        const xs = [p0.x, p1.x, p2.x, p3.x];
+                        const ys = [p0.y, p1.y, p2.y, p3.y];
+                        const xMin = Math.min(...xs);
+                        const xMax = Math.max(...xs);
+                        const yMin = Math.min(...ys);
+                        const yMax = Math.max(...ys);
+                        const w = xMax - xMin;
+                        const h = yMax - yMin;
+
+                        if (axisAligned && w > EPS && h > EPS) {
+                            const t0 = ptTokens[0] ?? { x: '', y: '' };
+                            const t1 = ptTokens[1] ?? { x: '', y: '' };
+                            const t2 = ptTokens[2] ?? { x: '', y: '' };
+                            const canonical =
+                                eq(p0.y, p1.y) && eq(p1.x, p2.x) && eq(p2.y, p3.y) && eq(p3.x, p0.x);
+                            const exprMap = {};
+                            if (canonical && t0.x) {
+                                const stripOuterParens = (value) => {
+                                    let out = String(value ?? '').trim();
+                                    const isWrapped = (src) => {
+                                        if (!(src.startsWith('(') && src.endsWith(')'))) return false;
+                                        let depth = 0;
+                                        for (let i = 0; i < src.length; i++) {
+                                            const ch = src[i];
+                                            if (ch === '(') depth++;
+                                            else if (ch === ')') depth--;
+                                            if (depth === 0 && i < src.length - 1) return false;
+                                        }
+                                        return depth === 0;
+                                    };
+                                    while (isWrapped(out)) out = out.slice(1, -1).trim();
+                                    return out;
+                                };
+                                const norm = (s) => stripOuterParens(s);
+                                const sameExpr = (a, b) => norm(a).replace(/\s+/g, '') === norm(b).replace(/\s+/g, '');
+                                const extractTail = (base, whole, op) => {
+                                    const src = String(whole ?? '').trim();
+                                    const b = norm(base);
+                                    const lhsVariants = [b, `(${b})`];
+                                    for (const lhs of lhsVariants) {
+                                        const prefix = `${lhs}${op}`;
+                                        if (src.startsWith(prefix)) {
+                                            return stripOuterParens(src.slice(prefix.length).trim());
+                                        }
+                                    }
+                                    return null;
+                                };
+                                const plusTail = (base, whole) => {
+                                    const src = String(whole ?? '').trim();
+                                    const b = norm(base);
+                                    const p1 = new RegExp(`^\\(${b.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\)\\+\\((.+)\\)$`);
+                                    const p2 = new RegExp(`^${b.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\+\\((.+)\\)$`);
+                                    const m = src.match(p1) || src.match(p2);
+                                    return m ? m[1].trim() : null;
+                                };
+                                const minusTail = (base, whole) => {
+                                    return extractTail(base, whole, '-');
+                                };
+                                const simplifySelfMinusChain = (base, token) => {
+                                    let out = String(token ?? '').trim();
+                                    let guard = 0;
+                                    while (out && guard < 8) {
+                                        const nested = extractTail(base, out, '-');
+                                        if (!nested) break;
+                                        out = nested;
+                                        guard++;
+                                    }
+                                    return out;
+                                };
+
+                                if (hasFormulaLike(t0.x)) exprMap.x = t0.x;
+                                if (hasFormulaLike(t0.y)) exprMap.y = t0.y;
+
+                                const wDirect = plusTail(t0.x, t1.x);
+                                if (wDirect && (hasFormulaLike(wDirect) || hasFormulaLike(t1.x) || hasFormulaLike(t0.x))) {
+                                    exprMap.w = wDirect;
+                                } else if (hasFormulaLike(t1.x) || hasFormulaLike(t0.x)) {
+                                    exprMap.w = sameExpr(t1.x, t0.x) ? '0' : `(${t1.x})-(${t0.x})`;
+                                }
+
+                                const hDirect = simplifySelfMinusChain(t0.y, minusTail(t0.y, t2.y));
+                                if (hDirect && (hasFormulaLike(hDirect) || hasFormulaLike(t2.y) || hasFormulaLike(t0.y))) {
+                                    exprMap.h = hDirect;
+                                } else if (hasFormulaLike(t0.y) || hasFormulaLike(t2.y)) {
+                                    exprMap.h = sameExpr(t0.y, t2.y) ? '0' : `(${t0.y})-(${t2.y})`;
+                                }
+                            }
+                            this._elements.push({
+                                type: 'rect',
+                                segId: `preview-rect-${cid}`,
+                                data: {
+                                    x: xMin,
+                                    y: yMax,
+                                    w,
+                                    h,
+                                    rx: 0,
+                                    ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : {}),
+                                },
+                                _elem: null,
+                            });
+                            cid++;
+                            continue;
+                        }
+                    }
+                }
+            }
+
             // Detect M-A-A-Z circle pattern:
             //   M cx-r -cy  A r r 0 1 0 cx+r -cy  A r r 0 1 0 cx-r -cy  Z
             const PARAM_RE = String.raw`(?:[-+]?\{[^}]+\}|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)`;

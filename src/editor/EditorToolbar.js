@@ -25,25 +25,25 @@ const _saved = {
 /** @type {ToolDefinition[]} */
 const TOOL_DEFINITIONS = [
     // Draw tools
-    { id: "cursor",   label: "Select",                         icon: "↖", group: "draw", key: "s" },
-    { id: "move",     label: "Move",                           icon: "✥", group: "draw", key: "m" },
-    { id: "line",     label: "Line",                           icon: "╱", group: "draw", key: "l" },
-    { id: "arc",      label: "Arc (3pt + R)",                   icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt" },
-    { id: "circle",   label: "Circle (LMB: 2pt · RMB: 3pt)",  icon: "○", group: "draw", key: "c", lmbTool: "circle2pt", rmbTool: "circle3pt" },
-    { id: "rect",     label: "Rect (LMB: 2pt · RMB: 3pt)",      icon: "▭", group: "draw", key: "r", lmbTool: "rect2pt",      rmbTool: "rect3pt"      },
-    { id: "ellipse",  label: "Ellipse (LMB: 2pt · RMB: 3pt)",   icon: "⬭", group: "draw", key: "e", lmbTool: "ellipse2pt",   rmbTool: "ellipse3pt"   },
+    { id: "cursor", label: "Select", icon: "↖", group: "draw", key: "s" },
+    { id: "move", label: "Move", icon: "✥", group: "draw", key: "m" },
+    { id: "line", label: "Line", icon: "╱", group: "draw", key: "l" },
+    { id: "arc", label: "Arc (3pt + R)", icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt" },
+    { id: "circle", label: "Circle (LMB: 2pt · RMB: 3pt)", icon: "○", group: "draw", key: "c", lmbTool: "circle2pt", rmbTool: "circle3pt" },
+    { id: "rect", label: "Rect (LMB: 2pt · RMB: 3pt)", icon: "▭", group: "draw", key: "r", lmbTool: "rect2pt", rmbTool: "rect3pt" },
+    { id: "ellipse", label: "Ellipse (LMB: 2pt · RMB: 3pt)", icon: "⬭", group: "draw", key: "e", lmbTool: "ellipse2pt", rmbTool: "ellipse3pt" },
     // Edit tools
-    { id: "fillet",   label: "Fillet",    icon: "⌔", group: "edit", key: "f" },
-    { id: "chamfer",  label: "Chamfer",   icon: "⌐", group: "edit" },
-    { id: "trim",     label: "Trim",      icon: "✂", group: "edit", key: "t" },
-    { id: "extend",   label: "Extend",    icon: "↔", group: "edit" },
-    { id: "offset",   label: "Offset",    icon: "⊙", group: "edit", key: "o" },
-    { id: "mirror",   label: "Mirror",    icon: "⊳", group: "edit" },
-    { id: "join",     label: "Join",      icon: "⊕", group: "edit", key: "j" },
-    { id: "explode",  label: "Explode",   icon: "⊗", group: "edit" },
-    { id: "close",    label: "Close",     icon: "⬡", group: "edit" },
-    { id: "bool",     label: "Boolean",   icon: "⊔", group: "edit" },
-    { id: "aux",      label: "Aux Line",  icon: "⋯", group: "edit" },
+    { id: "fillet", label: "Fillet", icon: "⌔", group: "edit", key: "f" },
+    { id: "chamfer", label: "Chamfer", icon: "⌐", group: "edit" },
+    { id: "trim", label: "Trim", icon: "✂", group: "edit", key: "t" },
+    { id: "extend", label: "Extend", icon: "↔", group: "edit" },
+    { id: "offset", label: "Offset", icon: "⊙", group: "edit", key: "o" },
+    { id: "mirror", label: "Mirror", icon: "⊳", group: "edit" },
+    { id: "join", label: "Join", icon: "⊕", group: "edit", key: "j" },
+    { id: "explode", label: "Explode", icon: "⊗", group: "edit" },
+    { id: "close", label: "Close", icon: "⬡", group: "edit" },
+    { id: "bool", label: "Boolean", icon: "⊔", group: "edit" },
+    { id: "aux", label: "Aux Line", icon: "⋯", group: "edit" },
 ];
 
 /**
@@ -80,10 +80,10 @@ export default class EditorToolbar {
         /** @type {HTMLElement} */
         this.container = container;
 
-        this.onToolChange     = onToolChange;
-        this.onDone           = onDone;
-        this.onCancel         = onCancel;
-        this.onSnapChange     = onSnapChange;
+        this.onToolChange = onToolChange;
+        this.onDone = onDone;
+        this.onCancel = onCancel;
+        this.onSnapChange = onSnapChange;
         this.onGridSizeChange = onGridSizeChange;
 
         /** @type {HTMLElement|null} */
@@ -204,17 +204,17 @@ export default class EditorToolbar {
             </div>
             <div class="editor-toolbar-separator"></div>
             <div class="editor-toolbar-section editor-snap-controls">
-                <button class="editor-snap-btn${_saved.snaps.grid  ? " active" : ""}" data-snap="grid"  title="Snap to grid">Grid</button>
+                <button class="editor-snap-btn${_saved.snaps.grid ? " active" : ""}" data-snap="grid"  title="Snap to grid">Grid</button>
                 <select class="editor-grid-select" title="Grid scale">
                     <option value="10"${_saved.gridSize === 10 ? " selected" : ""}>10</option>
-                    <option value="5"${_saved.gridSize  ===  5 ? " selected" : ""}>5</option>
-                    <option value="1"${_saved.gridSize  ===  1 ? " selected" : ""}> 1</option>
+                    <option value="5"${_saved.gridSize === 5 ? " selected" : ""}>5</option>
+                    <option value="1"${_saved.gridSize === 1 ? " selected" : ""}> 1</option>
                     <option value="0.5"${_saved.gridSize === 0.5 ? " selected" : ""}>0.5</option>
                     <option value="0.1"${_saved.gridSize === 0.1 ? " selected" : ""}>0.1</option>
                     <option value="0.01"${_saved.gridSize === 0.01 ? " selected" : ""}>0.01</option>
                 </select>
                 <button class="editor-snap-btn${_saved.snaps.ortho ? " active" : ""}" data-snap="ortho" title="Ortho snap (O)">Ortho</button>
-                <button class="editor-snap-btn${_saved.snaps.obj   ? " active" : ""}" data-snap="obj"   title="Object snap">Obj</button>
+                <button class="editor-snap-btn${_saved.snaps.obj ? " active" : ""}" data-snap="obj"   title="Object snap">Obj</button>
             </div>
             <div class="editor-toolbar-spacer"></div>
             <div class="editor-toolbar-section editor-actions">
@@ -243,7 +243,7 @@ export default class EditorToolbar {
 
         this._toolbar.querySelectorAll("[data-tool]").forEach(btn => {
             const toolId = btn.dataset.tool;
-            const def    = TOOL_DEFINITIONS.find(t => t.id === toolId);
+            const def = TOOL_DEFINITIONS.find(t => t.id === toolId);
 
             if (def?.lmbTool) {
                 // Button has an explicit lmbTool (and optionally rmbTool).
@@ -294,7 +294,7 @@ export default class EditorToolbar {
 
         const doneBtn = this._toolbar.querySelector("#editor-done-btn");
         const cancelBtn = this._toolbar.querySelector("#editor-cancel-btn");
-        if (doneBtn)   doneBtn.addEventListener("click", () => this.onDone?.());
+        if (doneBtn) doneBtn.addEventListener("click", () => this.onDone?.());
         if (cancelBtn) cancelBtn.addEventListener("click", () => this.onCancel?.());
     }
 

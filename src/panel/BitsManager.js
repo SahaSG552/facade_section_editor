@@ -47,13 +47,13 @@ function mergePathWithFormulas(newPath, rawPath, pathEditor) {
             } else if ((str[i] === '-' || str[i] === '+') && str[i + 1] === '{') {
                 // e.g. -{h}
                 const end = str.indexOf('}', i + 1);
-                const k   = end >= 0 ? end + 1 : str.length;
+                const k = end >= 0 ? end + 1 : str.length;
                 tokens.push({ type: 'param', value: str.slice(i, k) });
                 i = k;
             } else if (str[i] === '{') {
                 // e.g. {d/2}
                 const end = str.indexOf('}', i);
-                const k   = end >= 0 ? end + 1 : str.length;
+                const k = end >= 0 ? end + 1 : str.length;
                 tokens.push({ type: 'param', value: str.slice(i, k) });
                 i = k;
             } else {
@@ -415,11 +415,11 @@ function ensurePathClosed(pathData) {
  */
 function parseEvaluatedPathRows(pathStr) {
     if (!pathStr) return [];
-    const rows      = [];
+    const rows = [];
     const commandRe = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
     let cx = 0, cy = 0, subX = 0, subY = 0, m;
     while ((m = commandRe.exec(pathStr)) !== null) {
-        const cmd  = m[1].toUpperCase();
+        const cmd = m[1].toUpperCase();
         const args = m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number).filter(n => !isNaN(n));
         if (cmd === 'M') {
             for (let i = 0; i + 1 < args.length; i += 2) {
@@ -454,12 +454,14 @@ function parseEvaluatedPathRows(pathStr) {
         } else if (cmd === 'A') {
             // A rx ry x-rotation large-arc-flag sweep-flag x y  (7 args per arc)
             for (let i = 0; i + 6 < args.length; i += 7) {
-                const r        = args[i];           // rx (treat as circular)
+                const r = args[i];           // rx (treat as circular)
                 const largeArc = args[i + 3];
-                const sweep    = args[i + 4];
+                const sweep = args[i + 4];
                 const ex = args[i + 5], ey = args[i + 6];
-                rows.push({ type: 'arc', start: { x: cx, y: cy }, end: { x: ex, y: ey },
-                            radius: r, largeArc, sweep });
+                rows.push({
+                    type: 'arc', start: { x: cx, y: cy }, end: { x: ex, y: ey },
+                    radius: r, largeArc, sweep
+                });
                 cx = ex; cy = ey;
             }
         }
@@ -668,7 +670,7 @@ export default class BitsManager {
             bull: ['height', 'cornerRadius', 'flat'],
             profile: [] // profile uses profilePath instead of numeric params
         };
-        
+
         // Check base required params
         for (const param of required) {
             const val = bit[param];
@@ -676,7 +678,7 @@ export default class BitsManager {
                 return false;
             }
         }
-        
+
         // Check type-specific params
         const specific = typeSpecific[groupName] || [];
         for (const param of specific) {
@@ -685,12 +687,12 @@ export default class BitsManager {
                 return false;
             }
         }
-        
+
         // Profile type requires profilePath
         if (groupName === 'profile' && !bit.profilePath) {
             return false;
         }
-        
+
         return true;
     }
 
@@ -709,12 +711,12 @@ export default class BitsManager {
         const group = document.createElementNS(svgNS, "g");
 
         let bitShape;
-        
+
         // Validate ALL required parameters before creating any SVG elements
         if (!bit || !this.validateBitShapeParams(bit, groupName)) {
             return group; // Return empty group - don't create invalid paths
         }
-        
+
         // Get the fill color with proper opacity
         const fillColor = this.getBitFillColor(bit, isSelected);
 
@@ -754,16 +756,14 @@ export default class BitsManager {
                 const arcRad =
                     bit.height / 2 +
                     (this.distancePtToPt(A, B) * this.distancePtToPt(A, B)) /
-                        (8 * bit.height);
+                    (8 * bit.height);
                 // Validate arc radius
                 if (isNaN(arcRad) || !isFinite(arcRad) || arcRad <= 0) return group;
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
                     "d",
-                    `M ${x + bit.diameter / 2} ${
-                        y - bit.height
-                    } A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${
-                        y - bit.height
+                    `M ${x + bit.diameter / 2} ${y - bit.height
+                    } A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${y - bit.height
                     }
         L ${x - bit.diameter / 2} ${y - bit.length}
         L ${x + bit.diameter / 2} ${y - bit.length} Z`,
@@ -780,8 +780,7 @@ export default class BitsManager {
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
                     "d",
-                    `M ${x + bit.diameter / 2} ${
-                        y - bit.height
+                    `M ${x + bit.diameter / 2} ${y - bit.height
                     } A ${arcRad} ${arcRad} 0 0 0 ${x + effectiveFlat / 2} ${y}
         L ${x - effectiveFlat / 2} ${y}
         A ${arcRad} ${arcRad} 0 0 0 ${x - bit.diameter / 2} ${y - bit.height}
@@ -799,8 +798,7 @@ export default class BitsManager {
                 bitShape = document.createElementNS(svgNS, "path");
                 bitShape.setAttribute(
                     "d",
-                    `M ${x + bit.diameter / 2} ${
-                        y - bit.height
+                    `M ${x + bit.diameter / 2} ${y - bit.height
                     } A ${arcRad} ${arcRad} 0 0 1 ${x + bit.flat / 2} ${y}
         L ${x - bit.flat / 2} ${y}
         A ${arcRad} ${arcRad} 0 0 1 ${x - bit.diameter / 2} ${y - bit.height}
@@ -1136,15 +1134,15 @@ export default class BitsManager {
     // Helper method to evaluate a field value (handles formulas and variables)
     evaluateFieldValue(value, variableValues = {}) {
         if (!value || !value.trim()) return null;
-        
+
         const trimmed = value.trim();
-        
+
         // Check if it's a simple number
         const num = parseFloat(trimmed);
         if (!isNaN(num) && isFinite(num)) {
             return num;
         }
-        
+
         // Check if it contains variable references {varName}
         let expression = trimmed;
         if (/\{[a-zA-Z][a-zA-Z0-9]*\}/.test(trimmed)) {
@@ -1156,7 +1154,7 @@ export default class BitsManager {
                 return "0"; // Default to 0 if variable not found
             });
         }
-        
+
         // Try to evaluate the expression
         try {
             const result = evaluateMathExpression(expression);
@@ -1166,7 +1164,7 @@ export default class BitsManager {
         } catch (e) {
             // Evaluation failed
         }
-        
+
         return null;
     }
 
@@ -1176,7 +1174,7 @@ export default class BitsManager {
         const rawExpressions = {};
         const fieldToVarMap = {
             diameter: "d",
-            length: "l", 
+            length: "l",
             shankDiameter: "sd",
             totalLength: "tl",
             toolnumber: "tn",
@@ -1185,7 +1183,7 @@ export default class BitsManager {
             cornerRadius: "cr",
             flat: "f",
         };
-        
+
         // First pass: collect all raw values (numbers and expressions) from standard fields
         Object.keys(fieldToVarMap).forEach(fieldId => {
             const input = form.querySelector(`#bit-${fieldId}`);
@@ -1193,7 +1191,7 @@ export default class BitsManager {
                 const varName = fieldToVarMap[fieldId];
                 const value = input.value.trim();
                 rawExpressions[varName] = value;
-                
+
                 // If it's a simple number, store it immediately
                 const num = parseFloat(value);
                 if (!isNaN(num) && isFinite(num) && value === num.toString()) {
@@ -1201,7 +1199,7 @@ export default class BitsManager {
                 }
             }
         });
-        
+
         // Collect custom variable values if groupName is provided
         if (groupName) {
             const customVars = variablesManager.getCustomVariables(groupName);
@@ -1210,7 +1208,7 @@ export default class BitsManager {
                 if (input && input.value.trim()) {
                     const value = input.value.trim();
                     rawExpressions[v.varName] = value;
-                    
+
                     // If it's a simple number, store it immediately
                     const num = parseFloat(value);
                     if (!isNaN(num) && isFinite(num) && value === num.toString()) {
@@ -1219,22 +1217,22 @@ export default class BitsManager {
                 }
             });
         }
-        
+
         // Resolve dependencies - multiple passes until no more changes
         let changed = true;
         let iterations = 0;
         const maxIterations = 10; // Prevent infinite loops
-        
+
         while (changed && iterations < maxIterations) {
             changed = false;
             iterations++;
-            
+
             Object.keys(rawExpressions).forEach(varName => {
                 // Skip if already resolved
                 if (values[varName] !== undefined) return;
-                
+
                 let expression = rawExpressions[varName];
-                
+
                 // Replace variable references {varName} with their resolved values
                 expression = expression.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, refVar) => {
                     if (values[refVar] !== undefined) {
@@ -1242,10 +1240,10 @@ export default class BitsManager {
                     }
                     return match; // Keep reference if not yet resolved
                 });
-                
+
                 // Check if all variables were resolved
                 const hasUnresolvedVars = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(expression);
-                
+
                 if (!hasUnresolvedVars) {
                     // Try to evaluate
                     try {
@@ -1260,7 +1258,7 @@ export default class BitsManager {
                 }
             });
         }
-        
+
         return values;
     }
 
@@ -1268,10 +1266,10 @@ export default class BitsManager {
     // modalElement is needed for profile type to find profilePath input (it's outside form)
     collectBitParameters(form, groupName, modalElement = null) {
         const name = form.querySelector("#bit-name").value.trim();
-        
+
         // Collect variable values for formula evaluation (pass groupName for custom vars)
         const variableValues = this.collectVariableValues(form, groupName);
-        
+
         // Evaluate required fields
         const diameter = this.evaluateFieldValue(
             form.querySelector("#bit-diameter")?.value,
@@ -1289,12 +1287,12 @@ export default class BitsManager {
         // Color picker is now in the toolbar, not in the form
         const colorInput = document.querySelector("#bit-color");
         const color = colorInput ? colorInput.value : "#cccccc";
-        
+
         let bitParams = {
             name,
             fillColor: color,
         };
-        
+
         // Only add numeric values
         if (diameter !== null && !isNaN(diameter)) bitParams.diameter = diameter;
         if (length !== null && !isNaN(length)) bitParams.length = length;
@@ -1338,13 +1336,13 @@ export default class BitsManager {
                 variableValues
             );
             if (height !== null && !isNaN(height)) bitParams.height = height;
-            
+
             const cornerRadius = this.evaluateFieldValue(
                 form.querySelector("#bit-cornerRadius")?.value,
                 variableValues
             );
             if (cornerRadius !== null && !isNaN(cornerRadius)) bitParams.cornerRadius = cornerRadius;
-            
+
             const flat = this.evaluateFieldValue(
                 form.querySelector("#bit-flat")?.value,
                 variableValues
@@ -1416,10 +1414,10 @@ export default class BitsManager {
 
         // Now check if we can actually evaluate the values for drawing (pass groupName for custom vars)
         const variableValues = this.collectVariableValues(form, groupName);
-        
+
         const evaluatedDiameter = this.evaluateFieldValue(diameter, variableValues);
         const evaluatedLength = this.evaluateFieldValue(length, variableValues);
-        
+
         // Must have valid diameter and length for drawing
         if (evaluatedDiameter === null || evaluatedLength === null) return false;
         if (evaluatedDiameter <= 0 || evaluatedLength <= 0) return false;
@@ -1432,37 +1430,37 @@ export default class BitsManager {
     buildBitPayload(form, groupName, modalElement = null) {
         // Get resolved variable values (pass groupName for custom vars)
         const variableValues = this.collectVariableValues(form, groupName);
-        
+
         // Helper to get raw value from input
         const getRawValue = (fieldId) => {
             const input = form.querySelector(`#bit-${fieldId}`);
             return input ? input.value.trim() : "";
         };
-        
+
         // Helper to get evaluated value
         const getEvaluatedValue = (fieldId, varName) => {
             const raw = getRawValue(fieldId);
             if (!raw) return null;
-            
+
             // Simple number
             const num = parseFloat(raw);
             if (!isNaN(num) && isFinite(num) && raw === num.toString()) {
                 return num;
             }
-            
+
             // Use resolved variable value if available
             if (varName && variableValues[varName] !== undefined) {
                 return variableValues[varName];
             }
-            
+
             // Try to evaluate
             return this.evaluateFieldValue(raw, variableValues);
         };
-        
+
         // Helper to evaluate name with variables
         const evaluateName = (rawName) => {
             if (!rawName) return "";
-            
+
             // Replace variable references {varName} with their values
             let evaluated = rawName.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
                 if (variableValues[varName] !== undefined) {
@@ -1470,34 +1468,37 @@ export default class BitsManager {
                 }
                 return match; // Keep original if variable not found
             });
-            
+
             return evaluated;
         };
 
         // Color picker is now in the toolbar, not in the form
         const colorInput = document.querySelector("#bit-color");
         const color = colorInput ? colorInput.value : "#cccccc";
-        
+
         // Get raw name and evaluated name
         const rawName = form.querySelector("#bit-name").value.trim();
         const evaluatedName = evaluateName(rawName);
-        
+
         const payload = {
             name: evaluatedName || rawName,
             fillColor: color,
             toolNumber: parseInt(getEvaluatedValue("toolnumber", "tn")) || 1,
         };
-        
-        // Store raw name if it contains variables
+
+        // Store raw formula name only when it actually contains variables.
+        // Explicitly clear stale rawName on update (updateBit merges patches).
         if (rawName !== evaluatedName && /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(rawName)) {
             payload.rawName = rawName;
+        } else {
+            payload.rawName = null;
         }
 
         // Store raw values (formulas) for future editing
         const rawValues = {};
         const fieldToVarMap = {
             diameter: "d",
-            length: "l", 
+            length: "l",
             shankDiameter: "sd",
             totalLength: "tl",
             angle: "a",
@@ -1505,20 +1506,20 @@ export default class BitsManager {
             cornerRadius: "cr",
             flat: "f",
         };
-        
+
         // Collect raw values - store empty string if empty, not skip
         Object.keys(fieldToVarMap).forEach(fieldId => {
             const raw = getRawValue(fieldId);
             rawValues[fieldId] = raw; // Always store, even if empty
         });
-        
+
         // Store raw values in payload
         payload.rawValues = rawValues;
 
         // Store evaluated numeric values for geometry - use 0 if empty/invalid
         const diameter = getEvaluatedValue("diameter", "d");
         const length = getEvaluatedValue("length", "l");
-        
+
         payload.diameter = diameter !== null ? diameter : 0;
         payload.length = length !== null ? length : 0;
 
@@ -1541,14 +1542,14 @@ export default class BitsManager {
         if (groupName === "fillet" || groupName === "bull") {
             const height = getEvaluatedValue("height", "h");
             payload.height = height !== null ? height : 0;
-            
+
             const cornerRadius = getEvaluatedValue("cornerRadius", "cr");
             payload.cornerRadius = cornerRadius !== null ? cornerRadius : 0;
-            
+
             const flat = getEvaluatedValue("flat", "f");
             payload.flat = flat !== null ? flat : 0;
         }
-        
+
         // Profile type: store profilePath (evaluated) and rawProfilePath (with formulas)
         // Inputs are in modal, not in form
         if (groupName === "profile" && modalElement) {
@@ -1573,7 +1574,7 @@ export default class BitsManager {
                 payload.profileTransforms = [];
             }
         }
-        
+
         // Store custom variable values
         const customVars = variablesManager.getCustomVariables(groupName);
         const customValues = {};
@@ -1598,15 +1599,15 @@ export default class BitsManager {
     // Unified create/edit modal with new flex grid layout
     openBitModal(groupName, bit = null) {
         const isEdit = !!bit;
-        
+
         // Use rawValues if available (formulas), otherwise fall back to numeric values
         const rawVals = bit?.rawValues || {};
         const customVals = bit?.customValues || {};
-        
+
         // Use rawName if available, otherwise use name
         const displayName = bit?.rawName || bit?.name || "";
         const normalizedProfileTransforms = normalizeProfileTransformsSnapshot(bit?.profileTransforms || []);
-        
+
         const defaultValues = {
             name: displayName,
             diameter: rawVals.diameter !== undefined ? rawVals.diameter : (bit ? bit.diameter : ""),
@@ -1632,7 +1633,7 @@ export default class BitsManager {
         // Generate form rows without profile path (will be added separately)
         const formRows = this.generateFormRows(groupName, defaultValues, variables, false);
         const profilePathHtml = groupName === "profile" ? this.generateProfilePathHtml(defaultValues) : "";
-        
+
         const modal = document.createElement("div");
         modal.className = "modal";
         modal.innerHTML = `
@@ -1745,7 +1746,7 @@ export default class BitsManager {
                 try {
                     const bbox = bitShape.getBBox();
                     if (isFinite(bbox.y)) topY = bbox.y - 5;
-                } catch (e) {}
+                } catch (e) { }
             }
 
             const zoom = previewCanvasManager.zoomLevel || 1;
@@ -1761,7 +1762,7 @@ export default class BitsManager {
             axisLine.setAttribute("y2", topY);
             axisLine.setAttribute("stroke", "gray");
             axisLine.setAttribute("stroke-width", axisStrokeWidth);
-            axisLine.setAttribute("stroke-dasharray", `${3/zoom},${3/zoom}`);
+            axisLine.setAttribute("stroke-dasharray", `${3 / zoom},${3 / zoom}`);
             axisLine.classList.add("bit-preview-axis");
             overlayLayer.appendChild(axisLine);
 
@@ -1797,7 +1798,7 @@ export default class BitsManager {
                         const dot = document.createElementNS(svgNS, "circle");
                         dot.setAttribute("cx", seg.x);
                         dot.setAttribute("cy", -seg.y);
-                        dot.setAttribute("r",  Math.max(0.5, 3 / zoom));
+                        dot.setAttribute("r", Math.max(0.5, 3 / zoom));
                         dot.setAttribute("fill", "#2196F3");
                         dot.setAttribute("fill-opacity", "0.85");
                         dot.setAttribute("stroke", "#1565C0");
@@ -1808,9 +1809,9 @@ export default class BitsManager {
                         // A command: draw a highlighted arc path.
                         // Path is stored in Y-up bit-space; negate Y and flip sweep for SVG Y-down.
                         const sw = Math.max(0.05, 1.5 / zoom);
-                        const d  = `M ${seg.start.x} ${-seg.start.y} ` +
-                                   `A ${seg.radius} ${seg.radius} 0 ${seg.largeArc} ${1 - seg.sweep} ` +
-                                   `${seg.end.x} ${-seg.end.y}`;
+                        const d = `M ${seg.start.x} ${-seg.start.y} ` +
+                            `A ${seg.radius} ${seg.radius} 0 ${seg.largeArc} ${1 - seg.sweep} ` +
+                            `${seg.end.x} ${-seg.end.y}`;
                         const hl = document.createElementNS(svgNS, "path");
                         hl.setAttribute("d", d);
                         hl.setAttribute("fill", "none");
@@ -1823,9 +1824,9 @@ export default class BitsManager {
                         // L / H / V / Z command: draw a highlighted line
                         const sw = Math.max(0.05, 1.5 / zoom);
                         const hl = document.createElementNS(svgNS, "line");
-                        hl.setAttribute("x1",  seg.start.x);
+                        hl.setAttribute("x1", seg.start.x);
                         hl.setAttribute("y1", -seg.start.y);
-                        hl.setAttribute("x2",  seg.end.x);
+                        hl.setAttribute("x2", seg.end.x);
                         hl.setAttribute("y2", -seg.end.y);
                         hl.setAttribute("stroke", "#2196F3");
                         hl.setAttribute("stroke-width", sw);
@@ -1907,10 +1908,10 @@ export default class BitsManager {
         const updateFormulaResults = () => {
             // Use the same dependency resolution as collectVariableValues (pass groupName for custom vars)
             const variableValues = this.collectVariableValues(form, groupName);
-            
+
             const fieldToVarMap = {
                 diameter: "d",
-                length: "l", 
+                length: "l",
                 shankDiameter: "sd",
                 totalLength: "tl",
                 toolnumber: "tn",
@@ -1936,7 +1937,7 @@ export default class BitsManager {
 
                 // Get the field ID
                 const fieldId = input.id.replace("bit-", "");
-                
+
                 // Special handling for name field - show evaluated name
                 if (fieldId === "name") {
                     const hasVariableRef = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(value);
@@ -1948,7 +1949,7 @@ export default class BitsManager {
                             }
                             return match;
                         });
-                        
+
                         if (evaluated !== value) {
                             resultEl.textContent = `= ${evaluated}`;
                             resultEl.classList.add("visible");
@@ -1976,17 +1977,17 @@ export default class BitsManager {
 
                 // Get the variable name for this field - check both standard and custom fields
                 let varName = fieldToVarMap[fieldId];
-                
+
                 // If not in standard mapping, check if it's a custom variable (fieldId IS the varName)
                 if (!varName) {
                     varName = fieldId;
                 }
-                
+
                 // Check if we have a resolved value for this variable
                 if (variableValues[varName] !== undefined) {
                     const resolved = variableValues[varName];
                     const numValue = parseFloat(value);
-                    
+
                     // Show result if it's different from the raw input
                     if (isNaN(numValue) || Math.abs(resolved - numValue) > 0.0001) {
                         resultEl.textContent = `= ${resolved.toFixed(2)}`;
@@ -2054,7 +2055,7 @@ export default class BitsManager {
                 // Use the evaluated path from the hidden input (set by PathEditor).
                 // Fall back to defaultValues.profilePath (bit.profilePath for existing bits).
                 const evaluatedInput = modal.querySelector("#bit-profilePath");
-                const profilePath    = (evaluatedInput?.value?.trim()) || defaultValues.profilePath || "";
+                const profilePath = (evaluatedInput?.value?.trim()) || defaultValues.profilePath || "";
 
                 // Snapshot the raw formula path BEFORE entering edit (setPath will overwrite it).
                 const originalRawPath = pathEditorInstance?.getPath() ?? "";
@@ -2076,38 +2077,8 @@ export default class BitsManager {
                     pathEditor: pathEditorInstance,
                     onSave: (newPath) => {
                         editSaved = true;
-                        if (newPath !== null) {
-                            // Merge numeric canvas result with the latest formula-aware
-                            // contour path from PathEditor. This keeps formulas for unchanged
-                            // tokens even when topology changed during edit (e.g. added element).
-                            const formulaBasePath = pathEditorInstance?.getContoursRawPath?.()
-                                || pathEditorInstance?.getPath?.()
-                                || originalRawPath;
-                            const merged = mergePathWithFormulas(newPath, formulaBasePath, pathEditorInstance);
-                            // Reload the merged path into PathEditor with onChange suppressed.
-                            // updateHiddenInput() fires inside each addLine() call and writes:
-                            //   - hiddenInput    (#bit-profilePath)    <- EVALUATED numeric path
-                            //   - rawHiddenInput (#bit-rawProfilePath) <- raw formula path
-                            // CRITICAL: hiddenInput must be a pure numeric path before
-                            // updateBitPreview() reads it. Formula tokens like {d} passed to
-                            // transformProfilePath() cause getBBox() to freeze the browser.
-                            if (pathEditorInstance) {
-                                const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
-                                const savedOnChange = pathEditorInstance.onChange;
-                                pathEditorInstance.onChange = () => {};   // suppress during reload
-                                pathEditorInstance.setPath(merged);
-                                pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
-                                pathEditorInstance.onChange = savedOnChange;
-                            }
-                        } else if (pathEditorInstance) {
-                            // No edits were made (canUndo = false) — still need to restore
-                            // PathEditor to preview-mode structure (clears editor-mode segIds).
-                            const savedOnChange = pathEditorInstance.onChange;
-                            const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
-                            pathEditorInstance.onChange = () => {};
-                            pathEditorInstance.setPath(originalRawPath);
-                            pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
-                            pathEditorInstance.onChange = savedOnChange;
+                        if (newPath !== null && pathEditorInstance) {
+                            pathEditorInstance.syncHiddenInputsFromElements?.();
                         }
                         updateBitPreview();
                     },
@@ -2121,7 +2092,7 @@ export default class BitsManager {
                             // editing started (preserving any formula tokens).
                             const savedOnChange = pathEditorInstance.onChange;
                             const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
-                            pathEditorInstance.onChange = () => {};
+                            pathEditorInstance.onChange = () => { };
                             pathEditorInstance.setPath(originalRawPath);
                             pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
                             pathEditorInstance.onChange = savedOnChange;
@@ -2153,25 +2124,27 @@ export default class BitsManager {
         let pathEditorInstance = null;
         const profilePathInput = modal.querySelector("#bit-profilePath");
         const pathEditorContainer = modal.querySelector("#path-editor-container");
-        
+
         if (groupName === "profile" && pathEditorContainer && profilePathInput) {
             // Get variable values for the path editor
             const getVariableValues = () => this.collectVariableValues(form, groupName);
             const rawProfilePathInput = modal.querySelector("#bit-rawProfilePath");
             const profileTransformsInput = modal.querySelector("#bit-profileTransforms");
-            
+            const profileElementsInput = modal.querySelector("#bit-profileElements");
+
             // Create PathEditor instance
             pathEditorInstance = new PathEditor({
                 container: pathEditorContainer,
                 hiddenInput: profilePathInput,           // evaluated path (for rendering)
                 rawHiddenInput: rawProfilePathInput,     // raw path with formulas (for saving)
                 transformsHiddenInput: profileTransformsInput,
+                elementsHiddenInput: profileElementsInput,
                 onChange: (path) => {
                     updateBitPreview();
                 },
                 variableValues: getVariableValues()
             });
-            
+
             // Set initial path - prefer rawProfilePath (has formulas), fallback to profilePath
             const initialTransformsRaw = profileTransformsInput?.value || "[]";
             const initialPath = defaultValues.rawProfilePath || defaultValues.profilePath;
@@ -2205,12 +2178,12 @@ export default class BitsManager {
                 pathEditorInstance.setSelectedLines(previewSelectedRows);
                 drawAnchorAndAxis(previewRenderState.shape);
             };
-            
+
             // Update variable values when form inputs change
             const updatePathEditorVariables = () => {
                 pathEditorInstance.setVariableValues(getVariableValues());
             };
-            
+
             // Add listeners to update variables
             formGrid.querySelectorAll("input").forEach(input => {
                 input.addEventListener("input", updatePathEditorVariables);
@@ -2327,9 +2300,10 @@ export default class BitsManager {
             <div class="profile-path-section">
                 <div class="profile-path-header">Profile Path:</div>
                 <div id="path-editor-container"></div>
-                <input type="hidden" id="bit-profilePath" value="${profilePathValue}">
-                <input type="hidden" id="bit-rawProfilePath" value="${rawProfilePathValue}">
-                <input type="hidden" id="bit-profileTransforms" value="${profileTransformsValue}">
+                <input id="bit-profilePath" value="${profilePathValue}">
+                <input id="bit-rawProfilePath" value="${rawProfilePathValue}">
+                <input id="bit-profileTransforms" value="${profileTransformsValue}">
+                <input id="bit-profileElements" value="[]">
             </div>
         `;
     }
@@ -2374,12 +2348,12 @@ export default class BitsManager {
         // Tool number
         fieldConfigs.push({ id: "toolnumber", label: "Tool Number", varName: "tn", required: true, default: defaultValues.toolNumber, type: "text" });
 
-    // Generate rows for each field - all have 3 columns, delete button hidden for default fields
+        // Generate rows for each field - all have 3 columns, delete button hidden for default fields
         fieldConfigs.forEach(config => {
             const varInfo = variables.find(v => v.varName === config.varName);
             const varDisplay = varInfo ? `<span class="var-name">{${config.varName}}</span>` : "";
             const inputType = config.type || "text";
-            
+
             rows += `
                 <div class="bit-form-row" data-field="${config.id}">
                     <label for="bit-${config.id}">${config.label}:${varDisplay}</label>
@@ -2416,7 +2390,7 @@ export default class BitsManager {
     // Open modal to add custom field
     openAddCustomFieldModal(groupName, formGrid, onUpdate) {
         const availableVars = variablesManager.getAvailableCustomVariables(groupName);
-        
+
         const modal = document.createElement("div");
         modal.className = "custom-field-modal";
         modal.innerHTML = `
@@ -2662,9 +2636,8 @@ export default class BitsManager {
                     const w = parseFloat(bitShape.getAttribute("width"));
                     const h = parseFloat(bitShape.getAttribute("height"));
                     if (!isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
-                        pathData = `M ${x} ${y} L ${x + w} ${y} L ${x + w} ${
-                            y + h
-                        } L ${x} ${y + h} Z`;
+                        pathData = `M ${x} ${y} L ${x + w} ${y} L ${x + w} ${y + h
+                            } L ${x} ${y + h} Z`;
                     }
                 } else if (bitShape.tagName === "polygon") {
                     // Convert polygon points to path
@@ -2705,18 +2678,18 @@ export default class BitsManager {
     // SVG CS: origin at top-left, Y pointing down
     transformProfilePath(profilePath, x, y, diameter) {
         if (!profilePath) return null;
-        
+
         try {
             // Parse the path and transform coordinates
             // 1. Flip Y axis (multiply by -1)
             // 2. Translate to position (x, y)
             // 3. X=0 maps to center (x), so SVG x = x + profileX
-            
+
             const commands = profilePath.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi);
             if (!commands) return null;
-            
+
             const result = [];
-            
+
             commands.forEach((cmd) => {
                 const type = cmd[0].toUpperCase();
                 const params = cmd
@@ -2725,11 +2698,11 @@ export default class BitsManager {
                     .split(/[\s,]+/)
                     .map(Number)
                     .filter((n) => !isNaN(n));
-                
+
                 // Transform each coordinate
                 let transformedParams = [];
                 let i = 0;
-                
+
                 while (i < params.length) {
                     if (type === "M" || type === "L" || type === "T") {
                         // x y -> transform to SVG coords
@@ -2780,10 +2753,10 @@ export default class BitsManager {
                         break;
                     }
                 }
-                
+
                 result.push(type + " " + transformedParams.join(" "));
             });
-            
+
             return result.join(" ");
         } catch (e) {
             console.warn("Failed to transform profile path:", e);
@@ -2794,29 +2767,29 @@ export default class BitsManager {
     // Highlight SVG path syntax for display
     highlightPathSyntax(pathData) {
         if (!pathData) return "";
-        
+
         // Escape HTML entities first
         let escaped = pathData
             .replace(/&/g, "&")
             .replace(/</g, "<")
             .replace(/>/g, ">");
-        
+
         // Highlight commands (M, L, H, V, C, S, Q, T, A, Z)
         escaped = escaped.replace(/([MLHVCSQTAZmlhvcsqtaz])/g, '<span class="path-cmd">$1</span>');
-        
+
         // Highlight numbers (including negative and decimals)
         escaped = escaped.replace(/(-?\d+\.?\d*)/g, '<span class="path-num">$1</span>');
-        
+
         // Highlight commas
         escaped = escaped.replace(/,/g, '<span class="path-comma">,</span>');
-        
+
         return escaped;
     }
 
     // Parse path into commands for line-by-line editing
     parsePathToLines(pathData) {
         if (!pathData) return [];
-        
+
         const commands = pathData.match(/[MLHVCSQTAZ][^MLHVCSQTAZ]*/gi) || [];
         return commands.map((cmd, index) => {
             const type = cmd[0].toUpperCase();

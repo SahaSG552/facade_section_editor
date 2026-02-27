@@ -792,4 +792,77 @@ ellipse → <ellipse cx cy rx ry/>
 
 ---
 
+## ЭТАП 8: Полная совместимость Edit/Preview + Pivot Rotate (новый roadmap)
+
+### Цели
+
+1. `Rectangle` и другие primitives (`circle/rect/ellipse`) не деградируют в `polyline/path`
+   при любых циклах `edit ↔ preview`.
+2. `RT` поворачивает вокруг pivot-точки элемента (не вокруг глобального центра).
+3. Добавить CAD-подобный инструмент `Rotate` с hotkey `O`.
+4. Модификаторы не разрушают базовую параметрическую модель элемента
+   (ширина/высота/центр/радиус остаются каноническими параметрами).
+
+### Зафиксированные решения
+
+- **Источник истины**: канонический `profileElements` (primitives + transforms).
+- `profilePath/profileSvg` — **производные** данные для preview/export/legacy.
+- Hotkey: `R` остаётся у Rect, `Rotate` назначается на `O`.
+- Pivot в Rotate: **обязательный клик pivot** (без неявного default).
+- Scope Rotate (MVP+): top-level элементы + под-режим rotate сегментов.
+
+### План внедрения
+
+#### 8.1 Canonical model и persistence
+- [ ] Ввести/закрепить `profileElements` в сохранении bit (`BitsManager`, store, payload).
+- [ ] Гарантировать, что при наличии `profileElements` hydration в edit идёт из них, а не из path.
+- [ ] Оставить `profilePath`/`profileSvg` как derived outputs (для совместимости и 3D).
+
+#### 8.2 Устранение деградации Rectangle/Shape
+- [ ] Убрать path-only реконструкцию как основной путь при возврате в edit.
+- [ ] Использовать `setElements(...)`/canonical rehydrate для `PathEditor` и `ProfileEditor`.
+- [ ] Оставить `_importPath()` только как fallback для legacy данных без `profileElements`.
+- [ ] Добавить миграционный fallback: legacy path → one-time reconstruction → canonical save.
+
+#### 8.3 Pivot-aware RT как единая математика
+- [ ] Расширить contract RT: `params: [angle, px, py]` (legacy `angle` без pivot поддержать).
+- [ ] Централизовать transform math (world↔local с pivot) и применять везде одинаково:
+  - [ ] `EditorCanvas` (render + hitTest)
+  - [ ] `BitsManager` preview/profileSvg
+  - [ ] `TransformCommands` serialize/parse/eval
+- [ ] Убрать повороты вокруг глобального origin как дефолт для элементов с заданным pivot.
+
+#### 8.4 Инструмент Rotate (CAD-like)
+- [ ] Добавить `Rotate` в `EditorToolbar` (hotkey `O`) и фабрику tools в `ProfileEditor`.
+- [ ] Реализовать tool-фазы:
+  1) activate/select,
+  2) click pivot,
+  3) drag angle (фантом фигуры + фантом угол/радиус),
+  4) input angle,
+  5) commit/cancel.
+- [ ] Использовать существующие ghost/overlay подходы (по аналогии с ArcTool).
+- [ ] Добавить под-режим поворота сегментов path-группы.
+
+#### 8.5 UX и редактирование после модификатора
+- [ ] Обеспечить редактирование/перемещение в базовой системе координат элемента
+      (модификатор влияет на отображение, а не «ломает» локальные параметры).
+- [ ] Для `rect` сохранить параметричность (`w/h/rx`) после RT и после mode switches.
+
+#### 8.6 Тест-критерии (обязательные)
+- [ ] Цикл 10+ раз: `edit → preview → edit` без деградации `rect/circle/ellipse`.
+- [ ] RT pivot test: явный pivot не в центре, drag + numeric angle → совпадает в edit/preview/reopen.
+- [ ] Legacy test: `MOD RT angle` (без pivot) корректно загружается и работает по fallback.
+- [ ] Undo/redo, selection, hit-test не ломаются после Rotate.
+- [ ] `npm run build` проходит.
+
+### Порядок выполнения (итеративно)
+
+1) Canonical model + no-degradation pipeline
+2) Pivot-aware RT end-to-end
+3) Rotate tool MVP
+4) Rotate segment-mode
+5) Stabilization + regression suite
+
+---
+
 *Последнее обновление: 28.06.2026*

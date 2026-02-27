@@ -268,7 +268,7 @@ export default class EditorStateManager {
      */
     _sortChains() {
         const EPS = 1e-6;
-        const eq  = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+        const eq = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
 
         // Group segments by contourId.  Includes both lines and arcs.
         const groups = new Map();
@@ -297,12 +297,12 @@ export default class EditorStateManager {
             if (!segs.length) continue;
 
             // Build endSet for THIS contour only.
-            const fmt    = p => `${parseFloat(p.x.toFixed(6))},${parseFloat(p.y.toFixed(6))}`;
+            const fmt = p => `${parseFloat(p.x.toFixed(6))},${parseFloat(p.y.toFixed(6))}`;
             const endSet = new Set(segs.map(s => fmt(s.data.end)));
             const isHead = s => !endSet.has(fmt(s.data.start));
 
             const visited = new Set();
-            const sorted  = [];
+            const sorted = [];
 
             // Pass 1: heads (open chains / break points).
             for (const seg of segs) {
@@ -335,7 +335,7 @@ export default class EditorStateManager {
         // adjacent to their contour (required for _buildElemsWithPaths range logic).
         const nonChain = this.segments.filter(s => s.type !== 'line' && s.type !== 'arc');
         const chainCids = new Set(result.map(s => s.contourId ?? 0));
-        const embedded  = nonChain.filter(s => chainCids.has(s.contourId ?? 0));
+        const embedded = nonChain.filter(s => chainCids.has(s.contourId ?? 0));
         const standalone = nonChain.filter(s => !chainCids.has(s.contourId ?? 0));
 
         // Insert each embedded shape immediately after the last segment of its contour.
@@ -421,25 +421,25 @@ export default class EditorStateManager {
      * @returns {PathSegment[]}
      */
     getChain(segId) {
-        const EPS  = 1e-6;
-        const eq   = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+        const EPS = 1e-6;
+        const eq = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
         const seed = this.segments.find(s => s.id === segId);
         if (!seed) return [];
         // Standalone closed shapes — return immediately without chain-walking.
         if (seed.type === 'circle' || seed.type === 'rect' || seed.type === 'ellipse') return [seed];
 
         // Work only within the same contour (lines and arcs).
-        const cid   = seed.contourId ?? 0;
+        const cid = seed.contourId ?? 0;
         const lines = this.segments.filter(
             s => (s.type === 'line' || s.type === 'arc') && (s.contourId ?? 0) === cid
         );
 
         const visited = new Set([seed.id]);
-        const chain   = [seed];
+        const chain = [seed];
 
         // Walk forward: seg.end → next.start (within contour)
         let cur = seed;
-        for (;;) {
+        for (; ;) {
             const next = lines.find(s => !visited.has(s.id) && eq(cur.data.end, s.data.start));
             if (!next) break;
             chain.push(next);
@@ -449,7 +449,7 @@ export default class EditorStateManager {
 
         // Walk backward: prev.end → chain-head.start (within contour)
         cur = seed;
-        for (;;) {
+        for (; ;) {
             const prev = lines.find(s => !visited.has(s.id) && eq(s.data.end, cur.data.start));
             if (!prev) break;
             chain.unshift(prev);
@@ -470,13 +470,13 @@ export default class EditorStateManager {
      */
     getSegmentsAtVertex(pt) {
         if (!pt) return [];   // guard: called with undefined when circle pt3 not yet stored
-        const EPS    = 1e-6;
+        const EPS = 1e-6;
         const result = [];
         for (const seg of this.segments) {
             if (seg.type !== 'line' && seg.type !== 'arc') continue;
             if (Math.abs(seg.data.start.x - pt.x) < EPS && Math.abs(seg.data.start.y - pt.y) < EPS)
                 result.push({ segId: seg.id, pointKey: 'start' });
-            if (Math.abs(seg.data.end.x   - pt.x) < EPS && Math.abs(seg.data.end.y   - pt.y) < EPS)
+            if (Math.abs(seg.data.end.x - pt.x) < EPS && Math.abs(seg.data.end.y - pt.y) < EPS)
                 result.push({ segId: seg.id, pointKey: 'end' });
         }
         return result;
@@ -599,14 +599,14 @@ export default class EditorStateManager {
 
         // Tokenize into commands
         const commandRe = /([MmLlHhVvZzCcSsQqTtAa])([^MmLlHhVvZzCcSsQqTtAa]*)/g;
-        const segments  = [];
+        const segments = [];
         let cx = 0, cy = 0, subX = 0, subY = 0;
         let contourId = this._nextContourId++;   // each M starts a new contour
         let m;
 
         while ((m = commandRe.exec(pathStr)) !== null) {
-            const cmd  = m[1];
-            const rel  = cmd === cmd.toLowerCase() && cmd.toLowerCase() !== "z";
+            const cmd = m[1];
+            const rel = cmd === cmd.toLowerCase() && cmd.toLowerCase() !== "z";
             const upper = cmd.toUpperCase();
             const args = m[2].trim()
                 .split(/[\s,]+/)
@@ -671,23 +671,38 @@ export default class EditorStateManager {
                     if (rel) { ex += cx; ey += cy; }
 
                     let r, radiusExpr = null;
+                    let rxVal = Number(rxTok);
+                    let ryVal = Number(ryTok);
                     const rxVar = VAR_RE.exec(rxTok);
                     if (rxVar) {
                         radiusExpr = rxTok;                         // "{d}"
                         r = this.variableValues[rxVar[1]] ?? 1;     // resolve or fallback
+                        rxVal = r;
+                        ryVal = r;
                     } else {
                         r = (Number(rxTok) + Number(ryTok)) / 2;   // treat ellipse as circle
+                        if (!Number.isFinite(rxVal)) rxVal = r;
+                        if (!Number.isFinite(ryVal)) ryVal = r;
                     }
 
                     const startBit = { x: cx, y: cy };
-                    const endBit   = { x: ex, y: ey };
+                    const endBit = { x: ex, y: ey };
                     // arcCenterFromEndpoints assumes Y-down SVG space (sweep=1 → CW).
                     // The path is stored in Y-up bit-space, so the sweep direction is
                     // reversed relative to SVG. Pass the flipped sweep so the center
                     // lands on the correct side of the chord.
                     const centerBit = arcCenterFromEndpoints(startBit, endBit, r, largeArc, 1 - sweepBit);
                     if (centerBit) {
-                        const segData = { start: startBit, end: endBit, center: centerBit, radius: r, largeArc, sweep: sweepBit };
+                        const segData = {
+                            start: startBit,
+                            end: endBit,
+                            center: centerBit,
+                            radius: r,
+                            rx: rxVal,
+                            ry: ryVal,
+                            largeArc,
+                            sweep: sweepBit,
+                        };
                         if (radiusExpr) segData.radiusExpr = radiusExpr;
                         segments.push({ type: 'arc', contourId, data: segData });
                     }
@@ -698,28 +713,30 @@ export default class EditorStateManager {
         }
 
         if (resetHistory) {
-            this._history      = [];
+            this._history = [];
             this._historyIndex = -1;
         }
         // Negate Y: path is stored in bit-space (Y-up), editor works in SVG-space (Y-down).
         this.segments = segments.map(s => {
             const base = {
-                id:        `seg-${this._nextSegmentId++}`,
-                selected:  false,
+                id: `seg-${this._nextSegmentId++}`,
+                selected: false,
                 contourId: s.contourId,
-                type:      s.type,
+                type: s.type,
             };
             if (s.type === 'arc') {
                 return {
                     ...base,
                     data: {
-                        start:    { x: s.data.start.x,  y: -s.data.start.y },
-                        end:      { x: s.data.end.x,    y: -s.data.end.y   },
-                        center:   { x: s.data.center.x, y: -s.data.center.y },
-                        radius:   s.data.radius,
+                        start: { x: s.data.start.x, y: -s.data.start.y },
+                        end: { x: s.data.end.x, y: -s.data.end.y },
+                        center: { x: s.data.center.x, y: -s.data.center.y },
+                        radius: s.data.radius,
+                        rx: s.data.rx,
+                        ry: s.data.ry,
                         largeArc: s.data.largeArc,
                         // Y-flip reverses winding direction, so flip sweep flag.
-                        sweep:    1 - s.data.sweep,
+                        sweep: 1 - s.data.sweep,
                         // Tag all imported arcs so the control handle is visible
                         // when selected. pt3 will be computed from arc midpoint
                         // on first render if not present.
@@ -735,7 +752,7 @@ export default class EditorStateManager {
                 cmdHint: s.cmdHint,  // preserve H / V / L / Z so export round-trips faithfully
                 data: {
                     start: { x: s.data.start.x, y: -s.data.start.y },
-                    end:   { x: s.data.end.x,   y: -s.data.end.y   },
+                    end: { x: s.data.end.x, y: -s.data.end.y },
                 },
             };
         });
@@ -745,48 +762,134 @@ export default class EditorStateManager {
         // contour where the second arc ends exactly where the first arc starts, both
         // on the same Y level with equal radii.
         {
-            const EPS   = 1e-4;
-            const eqPt  = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
-            const merged = [];
+            const EPS = 1e-4;
+            const eqPt = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+            const mergedArcs = [];
             let i = 0;
             while (i < this.segments.length) {
-                const s    = this.segments[i];
+                const s = this.segments[i];
                 const next = this.segments[i + 1];
                 if (
-                    s.type    === 'arc' && next?.type === 'arc' &&
+                    s.type === 'arc' && next?.type === 'arc' &&
                     s.contourId === next.contourId &&
                     s.data.largeArc === 1 && next.data.largeArc === 1 &&
                     Math.abs(s.data.radius - next.data.radius) < EPS &&
                     eqPt(s.data.start, next.data.end) &&
                     Math.abs(s.data.start.y - s.data.end.y) < EPS
                 ) {
-                    // Two diametrically-opposite half-arcs → circle
+                    // Two diametrically-opposite half-arcs → circle/ellipse
                     const cx = (s.data.start.x + s.data.end.x) / 2;
                     const cy = s.data.start.y;  // same as s.data.end.y
-                    merged.push({
-                        id:        s.id,
-                        selected:  false,
-                        contourId: s.contourId,
-                        type:      'circle',
-                        data: {
-                            center:  { x: cx, y: cy },
-                            radius:  s.data.radius,
-                            // arcMode marks the circle as having a draggable pt3 handle;
-                            // MoveTool checks this to enter moving-pt3 mode.
-                            arcMode: 'circle2pt',
-                            // Pre-compute pt3 at the right-most point so hitTestPoint
-                            // finds it immediately (before the first drag).
-                            pt3:     { x: cx + s.data.radius, y: cy },
-                            ...(s.data.radiusExpr && { radiusExpr: s.data.radiusExpr }),
-                        },
-                    });
+                    const rx = Number.isFinite(s.data.rx) ? Math.abs(s.data.rx) : Math.abs(s.data.radius);
+                    const ry = Number.isFinite(s.data.ry) ? Math.abs(s.data.ry) : Math.abs(s.data.radius);
+                    if (Math.abs(rx - ry) < EPS) {
+                        mergedArcs.push({
+                            id: s.id,
+                            selected: false,
+                            contourId: s.contourId,
+                            type: 'circle',
+                            data: {
+                                center: { x: cx, y: cy },
+                                radius: s.data.radius,
+                                arcMode: 'circle2pt',
+                                pt3: { x: cx + s.data.radius, y: cy },
+                                ...(s.data.radiusExpr && { radiusExpr: s.data.radiusExpr }),
+                            },
+                        });
+                    } else {
+                        mergedArcs.push({
+                            id: s.id,
+                            selected: false,
+                            contourId: s.contourId,
+                            type: 'ellipse',
+                            data: {
+                                cx,
+                                cy,
+                                rx,
+                                ry,
+                            },
+                        });
+                    }
                     i += 2; // consume both arcs
                 } else {
-                    merged.push(s);
+                    mergedArcs.push(s);
                     i++;
                 }
             }
-            this.segments = merged;
+            this.segments = mergedArcs;
+        }
+
+        // ── Reconstruct axis-aligned rectangles from M-L-L-L-Z pattern ──
+        {
+            const EPS = 1e-4;
+            const eq = (a, b) => Math.abs(a - b) < EPS;
+            const byContour = new Map();
+            for (const seg of this.segments) {
+                const cid = seg.contourId ?? 0;
+                if (!byContour.has(cid)) byContour.set(cid, []);
+                byContour.get(cid).push(seg);
+            }
+
+            const nextSegments = [];
+            for (const [cid, contourSegs] of byContour.entries()) {
+                const onlyLines = contourSegs.every(s => s.type === 'line');
+                if (!onlyLines || contourSegs.length !== 4) {
+                    nextSegments.push(...contourSegs);
+                    continue;
+                }
+
+                const [s1, s2, s3, s4] = contourSegs;
+                const hintsOk =
+                    (s1.cmdHint === 'L' || s1.cmdHint === 'H' || s1.cmdHint === 'V') &&
+                    (s2.cmdHint === 'L' || s2.cmdHint === 'H' || s2.cmdHint === 'V') &&
+                    (s3.cmdHint === 'L' || s3.cmdHint === 'H' || s3.cmdHint === 'V') &&
+                    s4.cmdHint === 'Z';
+                const closed =
+                    eq(s1.data.start.x, s4.data.end.x) &&
+                    eq(s1.data.start.y, s4.data.end.y) &&
+                    eq(s1.data.end.x, s2.data.start.x) &&
+                    eq(s1.data.end.y, s2.data.start.y) &&
+                    eq(s2.data.end.x, s3.data.start.x) &&
+                    eq(s2.data.end.y, s3.data.start.y) &&
+                    eq(s3.data.end.x, s4.data.start.x) &&
+                    eq(s3.data.end.y, s4.data.start.y);
+
+                const p0 = s1.data.start;
+                const p1 = s1.data.end;
+                const p2 = s2.data.end;
+                const p3 = s3.data.end;
+                const axisAligned =
+                    ((eq(p0.y, p1.y) && eq(p1.x, p2.x) && eq(p2.y, p3.y) && eq(p3.x, p0.x)) ||
+                        (eq(p0.x, p1.x) && eq(p1.y, p2.y) && eq(p2.x, p3.x) && eq(p3.y, p0.y)));
+
+                if (!hintsOk || !closed || !axisAligned) {
+                    nextSegments.push(...contourSegs);
+                    continue;
+                }
+
+                const xs = [p0.x, p1.x, p2.x, p3.x];
+                const ys = [p0.y, p1.y, p2.y, p3.y];
+                const xMin = Math.min(...xs);
+                const xMax = Math.max(...xs);
+                const yMin = Math.min(...ys);
+                const yMax = Math.max(...ys);
+                const w = xMax - xMin;
+                const h = yMax - yMin;
+
+                if (w > EPS && h > EPS) {
+                    nextSegments.push({
+                        id: s1.id,
+                        selected: false,
+                        contourId: cid,
+                        type: 'rect',
+                        data: { x: xMin, y: yMin, w, h, rx: 0 },
+                    });
+                } else {
+                    nextSegments.push(...contourSegs);
+                }
+            }
+
+            this.segments = nextSegments;
         }
 
         this._pushHistory("Import");
@@ -828,15 +931,15 @@ export default class EditorStateManager {
                 : { path: "", lineSegIds: [] };
         }
 
-        const r   = n => parseFloat(n.toFixed(4));
+        const r = n => parseFloat(n.toFixed(4));
         const EPS = 1e-6;
-        const eq  = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+        const eq = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
 
-        const parts      = [];
+        const parts = [];
         const lineSegIds = [];
         const shapeElements = [];
-        let prevEnd      = null;
-        let prevCid      = null;
+        let prevEnd = null;
+        let prevCid = null;
 
         // Build a processing order that keeps embedded shapes (shapes sharing a
         // contourId with a line/arc chain) adjacent to that chain's last segment.
@@ -845,8 +948,8 @@ export default class EditorStateManager {
         const _lineArcCids = new Set(
             this.segments.filter(s => s.type === 'line' || s.type === 'arc').map(s => s.contourId ?? 0)
         );
-        const _seenCids   = new Set();
-        const _ordered    = [];
+        const _seenCids = new Set();
+        const _ordered = [];
         for (const seg of this.segments) {
             if (seg.type === 'line' || seg.type === 'arc') {
                 _ordered.push(seg);
@@ -859,7 +962,7 @@ export default class EditorStateManager {
                     _seenCids.add(cid);
                     for (const sh of this.segments) {
                         if ((sh.type === 'circle' || sh.type === 'rect' || sh.type === 'ellipse')
-                                && (sh.contourId ?? 0) === cid) {
+                            && (sh.contourId ?? 0) === cid) {
                             _ordered.push(sh);
                         }
                     }
@@ -962,8 +1065,8 @@ export default class EditorStateManager {
             } else {
                 // line: choose command based on cmdHint + current geometry
                 const hint = seg.cmdHint;
-                const isH  = Math.abs(start.y - end.y) < EPS;
-                const isV  = Math.abs(start.x - end.x) < EPS;
+                const isH = Math.abs(start.y - end.y) < EPS;
+                const isV = Math.abs(start.x - end.x) < EPS;
 
                 if (hint === 'H') {
                     parts.push(isH ? `H ${r(end.x)}` : `L ${r(end.x)} ${r(-end.y)}`);
@@ -972,9 +1075,9 @@ export default class EditorStateManager {
                 } else if (hint === 'L' || hint === 'Z') {
                     parts.push(`L ${r(end.x)} ${r(-end.y)}`);
                 } else {
-                    if (isH)      parts.push(`H ${r(end.x)}`);
+                    if (isH) parts.push(`H ${r(end.x)}`);
                     else if (isV) parts.push(`V ${r(-end.y)}`);
-                    else          parts.push(`L ${r(end.x)} ${r(-end.y)}`);
+                    else parts.push(`L ${r(end.x)} ${r(-end.y)}`);
                 }
             }
 

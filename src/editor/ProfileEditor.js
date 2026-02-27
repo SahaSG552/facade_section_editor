@@ -171,13 +171,13 @@ function _buildElemsWithPaths(elements, mergedPath, lineSegIds) {
         // Include the preceding M command.  M rows carry a "m:<cid>" synthetic segId;
         // shape-element placeholder M rows carry null (but never appear in L/A positions).
         const prevSid = lineSegIds[lo - 1];
-        const isMRow  = prevSid === null || (typeof prevSid === 'string' && prevSid.startsWith('m:'));
+        const isMRow = prevSid === null || (typeof prevSid === 'string' && prevSid.startsWith('m:'));
         if (lo > 0 && isMRow && /^[Mm]/.test(cmds[lo - 1] ?? '')) lo--;
         // Include the trailing Z command (null segId).
         if (hi + 1 < cmds.length && /^[Zz]/.test(cmds[hi + 1] ?? '')) hi++;
         return {
             ...elem,
-            path:       cmds.slice(lo, hi + 1).join(' '),
+            path: cmds.slice(lo, hi + 1).join(' '),
             lineSegIds: lineSegIds.slice(lo, hi + 1),
         };
     });
@@ -432,10 +432,10 @@ export default class ProfileEditor {
             log.warn("ProfileEditor.enter() called while already active");
             return;
         }
-        this._active    = true;
-        this._modal     = modal;
-        this._onSave    = onSave;
-        this._onClose   = onClose ?? null;
+        this._active = true;
+        this._modal = modal;
+        this._onSave = onSave;
+        this._onClose = onClose ?? null;
         this._pathEditor = pathEditor;
         this._formulaPath = pathEditor?.getContoursRawPath?.() || profilePath;
         const shapeFormulaSnapshot = pathEditor?.getShapeParamSnapshot?.() ?? [];
@@ -499,7 +499,7 @@ export default class ProfileEditor {
                 // operation (e.g. moving objects), cancel the operation but stay on the
                 // current tool rather than switching to cursor.
                 if (toolId === "cursor" && this._currentTool?.hasActiveCommand()) {
-                    this._currentTool.onKeyDown({ key: "Escape", preventDefault() {}, stopPropagation() {} });
+                    this._currentTool.onKeyDown({ key: "Escape", preventDefault() { }, stopPropagation() { } });
                     return;
                 }
                 // Always keep selection when switching tools — clearing only happens
@@ -509,7 +509,7 @@ export default class ProfileEditor {
                 this._activateTool(toolId);
                 if (toolId !== "cursor") this._lastDrawToolId = toolId;
             },
-            onDone:   () => this.exit(true),
+            onDone: () => this.exit(true),
             onCancel: () => this.exit(false),
             onSnapChange: (type, active) => {
                 this.editorCanvas.snapManager.setEnabled(type, active);
@@ -554,15 +554,15 @@ export default class ProfileEditor {
         // (not the editor's _importPath handler).
         if (this._pathEditor) {
             this._clearMDot();
-            this._pathEditor.onChange               = this._origPathEditorOnChange    ?? (() => {});
-            this._pathEditor.onLineClick            = this._origPathEditorOnLineClick ?? null;
-            this._pathEditor.onElementOrderChange   = this._origPathEditorOnElementOrderChange ?? null;
-            this._pathEditor.onShapeElementChange   = null;
-            this._pathEditor.onShapeElementClick    = null;
-            this._pathEditor.onPathElemClick        = null;
-            this._pathEditor.onDeactivate           = null;
-            this.state.activeContourId              = null;
-            this.state.insertAfterSegId             = null;
+            this._pathEditor.onChange = this._origPathEditorOnChange ?? (() => { });
+            this._pathEditor.onLineClick = this._origPathEditorOnLineClick ?? null;
+            this._pathEditor.onElementOrderChange = this._origPathEditorOnElementOrderChange ?? null;
+            this._pathEditor.onShapeElementChange = null;
+            this._pathEditor.onShapeElementClick = null;
+            this._pathEditor.onPathElemClick = null;
+            this._pathEditor.onDeactivate = null;
+            this.state.activeContourId = null;
+            this.state.insertAfterSegId = null;
             this._pathEditor.setShapeElements([]);
             this._pathEditor.clearLineSelection();
             this._pathEditor.clearShapeSelection?.();
@@ -602,8 +602,8 @@ export default class ProfileEditor {
         if (this._modal) this._applyEditLayout(this._modal, false);
 
         const onClose = this._onClose;
-        this._modal   = null;
-        this._onSave  = null;
+        this._modal = null;
+        this._onSave = null;
         this._onClose = null;
         // Always notify the caller so it can restore preview rendering
         onClose?.();
@@ -635,7 +635,7 @@ export default class ProfileEditor {
         // Save the original handlers so exit() can restore them.
         // We do NOT invoke them while editing (prevents updateBitPreview from
         // overwriting the editor’s line segments in the bits layer).
-        this._origPathEditorOnChange    = pathEditor.onChange;
+        this._origPathEditorOnChange = pathEditor.onChange;
         this._origPathEditorOnLineClick = pathEditor.onLineClick;
         this._origPathEditorOnElementOrderChange = pathEditor.onElementOrderChange;
 
@@ -731,7 +731,7 @@ export default class ProfileEditor {
                 )];
 
                 if (resolvedSelected.length === 0) {
-                    this.state.activeContourId  = null;
+                    this.state.activeContourId = null;
                     this.state.insertAfterSegId = null;
                     this._clearMDot();
                     this._pathEditorIsSource = true;
@@ -742,14 +742,14 @@ export default class ProfileEditor {
 
                 if (typeof clickedSegId === 'string' && clickedSegId.startsWith('m:')) {
                     const contourId = Number(clickedSegId.slice(2));
-                    this.state.activeContourId  = contourId;
+                    this.state.activeContourId = contourId;
                     this.state.insertAfterSegId = null;
                 } else {
                     const focusSegId = (typeof clickedSegId === 'string' && !clickedSegId.startsWith('m:'))
                         ? clickedSegId
                         : resolvedSelected.find(id => !id.startsWith('m:')) ?? null;
                     const seg = focusSegId ? this.state.segments.find(s => s.id === focusSegId) : null;
-                    this.state.activeContourId  = seg?.contourId ?? null;
+                    this.state.activeContourId = seg?.contourId ?? null;
                     this.state.insertAfterSegId = focusSegId;
                 }
 
@@ -765,7 +765,7 @@ export default class ProfileEditor {
                 // Routed through setSelection identically to L/A rows so that
                 // state.clearSelection() fires correctly on Escape / empty-canvas click.
                 const contourId = Number(clickedSegId.slice(2));
-                this.state.activeContourId  = contourId;
+                this.state.activeContourId = contourId;
                 this.state.insertAfterSegId = null;
                 this._pathEditorIsSource = true;
                 this.state.setSelection(clickedSegId);
@@ -774,13 +774,13 @@ export default class ProfileEditor {
             }
             // Normal segment row (line/arc).
             const seg = this.state.segments.find(s => s.id === clickedSegId);
-            this.state.activeContourId  = seg?.contourId ?? null;
+            this.state.activeContourId = seg?.contourId ?? null;
             this.state.insertAfterSegId = clickedSegId;
             this._clearMDot();
             this._pathEditorIsSource = true;
             // CTRL/Meta+click or Shift+click → toggle; plain click → exclusive select.
             if (e?.ctrlKey || e?.metaKey || e?.shiftKey) this.state.toggleSelection(clickedSegId);
-            else                                          this.state.setSelection(clickedSegId);
+            else this.state.setSelection(clickedSegId);
             this._pathEditorIsSource = false;
         };
 
@@ -801,7 +801,7 @@ export default class ProfileEditor {
             if (!seg) return;
             const mergedData = { ...seg.data, ...changes };
             if (seg.type === 'circle' && (Object.prototype.hasOwnProperty.call(changes, 'radius')
-                    || Object.prototype.hasOwnProperty.call(changes, 'center'))) {
+                || Object.prototype.hasOwnProperty.call(changes, 'center'))) {
                 const center = mergedData.center ?? seg.data.center;
                 const radius = mergedData.radius ?? seg.data.radius ?? 0;
                 const prevPt3 = seg.data.pt3 ?? { x: center.x + radius, y: center.y };
@@ -823,7 +823,7 @@ export default class ProfileEditor {
         // Shape element row click: select on canvas.
         // Clear activeContourId so new segments aren’t incorrectly appended to a path.
         pathEditor.onShapeElementClick = (segId, e, selectedSegIds = null) => {
-            this.state.activeContourId  = null;
+            this.state.activeContourId = null;
             this.state.insertAfterSegId = null;
             this._clearMDot();
             this._pathEditorIsSource = true;
@@ -841,7 +841,7 @@ export default class ProfileEditor {
         // activeContourId so that drawing can continue into this path.
         pathEditor.onPathElemClick = (segIds, e, selectedSegIds = null) => {
             const firstSeg = this.state.segments.find(s => s.id === segIds[0]);
-            this.state.activeContourId  = firstSeg?.contourId ?? null;
+            this.state.activeContourId = firstSeg?.contourId ?? null;
             // Insert after the last line/arc segment of this path.
             const lastLineSegId = [...segIds].reverse().find(id => {
                 const s = this.state.segments.find(seg => seg.id === id);
@@ -862,7 +862,7 @@ export default class ProfileEditor {
 
         // PathEditor background click → clear canvas selection + active contour.
         pathEditor.onDeactivate = () => {
-            this.state.activeContourId  = null;
+            this.state.activeContourId = null;
             this.state.insertAfterSegId = null;
             this._clearMDot();
             this._pathEditorIsSource = true;
@@ -922,11 +922,16 @@ export default class ProfileEditor {
             // Text-originated: keep PathEditor structure as the source of truth.
             // We only clear the editor when the exported path is truly empty.
             if (!path) {
-                // Truly empty state — sync the clear to PathEditor.
-                this._pathEditor.setElements([]);
+                const hasShapeElements = elements.some(e =>
+                    e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse');
+                if (!hasShapeElements) {
+                    // Truly empty state — sync the clear to PathEditor.
+                    this._pathEditor.setElements([]);
+                }
             }
             // else: non-empty text edits are already reflected in PathEditor DOM.
         }
+        this._pathEditor.syncHiddenInputsFromElements?.();
         this._bindPathEditorSegmentIdsOnly();
     }
 
@@ -979,10 +984,10 @@ export default class ProfileEditor {
         let segData;
         switch (type) {
             case 'circle':
-                segData = { type: 'circle',  data: { center: { x: 0, y: 0 }, radius: 10 } };
+                segData = { type: 'circle', data: { center: { x: 0, y: 0 }, radius: 10 } };
                 break;
             case 'rect':
-                segData = { type: 'rect',    data: { x: -15, y: -10, width: 30, height: 20, rx: 0 } };
+                segData = { type: 'rect', data: { x: -15, y: -10, w: 30, h: 20, rx: 0 } };
                 break;
             case 'ellipse':
                 segData = { type: 'ellipse', data: { cx: 0, cy: 0, rx: 20, ry: 10 } };
@@ -1067,7 +1072,7 @@ export default class ProfileEditor {
         if (svgCanvas) svgCanvas.style.cursor = toolId === "cursor" ? "" : "crosshair";
 
         tool.activate({ state: this.state, canvas: this.editorCanvas });
-        this._currentTool  = tool;
+        this._currentTool = tool;
         this._currentToolId = toolId;
         this._bindCanvasEvents(tool);
     }
@@ -1082,15 +1087,15 @@ export default class ProfileEditor {
     _createTool(toolId) {
         switch (toolId) {
             case "cursor": return new CursorTool();
-            case "move":   return new MoveTool();
-            case "line":   return new LineTool();
+            case "move": return new MoveTool();
+            case "line": return new LineTool();
             case "mirror": return new MirrorTool();
             case "arc3pt":
-            case "arc":      return new ArcTool();
-            case "circle2pt":  return new CircleTool("circle2pt");
-            case "circle3pt":  return new CircleTool("circle3pt");
-            case "rect2pt":    return new RectTool("rect2pt");
-            case "rect3pt":    return new RectTool("rect3pt");
+            case "arc": return new ArcTool();
+            case "circle2pt": return new CircleTool("circle2pt");
+            case "circle3pt": return new CircleTool("circle3pt");
+            case "rect2pt": return new RectTool("rect2pt");
+            case "rect3pt": return new RectTool("rect3pt");
             case "ellipse2pt": return new EllipseTool("ellipse2pt");
             case "ellipse3pt": return new EllipseTool("ellipse3pt");
             default:
@@ -1114,11 +1119,11 @@ export default class ProfileEditor {
         const canvas = cm.canvas;
 
         // Remove old handlers
-        if (cm._editorMouseDown)   canvas.removeEventListener("mousedown",   cm._editorMouseDown);
-        if (cm._editorMouseMove)   canvas.removeEventListener("mousemove",   cm._editorMouseMove);
-        if (cm._editorMouseUp)     canvas.removeEventListener("mouseup",     cm._editorMouseUp);
-        if (cm._editorDblClick)    canvas.removeEventListener("dblclick",    cm._editorDblClick);
-        if (cm._editorRightClick)  canvas.removeEventListener("mousedown",   cm._editorRightClick,  { capture: true });
+        if (cm._editorMouseDown) canvas.removeEventListener("mousedown", cm._editorMouseDown);
+        if (cm._editorMouseMove) canvas.removeEventListener("mousemove", cm._editorMouseMove);
+        if (cm._editorMouseUp) canvas.removeEventListener("mouseup", cm._editorMouseUp);
+        if (cm._editorDblClick) canvas.removeEventListener("dblclick", cm._editorDblClick);
+        if (cm._editorRightClick) canvas.removeEventListener("mousedown", cm._editorRightClick, { capture: true });
         if (cm._editorContextMenu) canvas.removeEventListener("contextmenu", cm._editorContextMenu);
 
         const ecvs = this.editorCanvas;
@@ -1133,7 +1138,7 @@ export default class ProfileEditor {
                 return; // let CanvasManager handle panning normally
             }
             if (e.button !== 0) return;
-            const raw     = ecvs.screenToSVG(e);
+            const raw = ecvs.screenToSVG(e);
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             this._lastPoint = snapped;
             tool.onPointerDown(snapped, e);
@@ -1142,18 +1147,18 @@ export default class ProfileEditor {
             // While CanvasManager is panning (right-button drag), don't feed SVG
             // coordinates to the active tool — that would move objects during pan.
             if (cm.isDragging) return;
-            const raw     = ecvs.screenToSVG(e);
+            const raw = ecvs.screenToSVG(e);
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             tool.onPointerMove(snapped, e);
         };
         cm._editorMouseUp = (e) => {
             if (e.button !== 0) return;
-            const raw     = ecvs.screenToSVG(e);
+            const raw = ecvs.screenToSVG(e);
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             tool.onPointerUp(snapped, e);
         };
         cm._editorDblClick = (e) => {
-            const raw     = ecvs.screenToSVG(e);
+            const raw = ecvs.screenToSVG(e);
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             tool.onDblClick(snapped, e);
         };
@@ -1161,7 +1166,7 @@ export default class ProfileEditor {
         // Right-click: contextmenu fires after button is released.
         // If the mouse moved more than 6 px between down and up it was a pan drag —
         // in that case do NOT call onConfirm; only a genuine click triggers confirm.
-        cm._editorRightClick  = null; // no longer registered as capture-phase mousedown
+        cm._editorRightClick = null; // no longer registered as capture-phase mousedown
         cm._editorContextMenu = (e) => {
             e.preventDefault(); // always suppress browser context menu
             const dist = rightDownClient
@@ -1170,15 +1175,15 @@ export default class ProfileEditor {
             rightDownClient = null;
             if (dist > 6) return; // was a drag/pan, not a click
             if (!this._currentTool?.hasActiveCommand()) return;
-            const raw     = ecvs.screenToSVG(e);
+            const raw = ecvs.screenToSVG(e);
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             this._currentTool.onConfirm(snapped, e);
         };
 
-        canvas.addEventListener("mousedown",   cm._editorMouseDown);
-        canvas.addEventListener("mousemove",   cm._editorMouseMove);
-        canvas.addEventListener("mouseup",     cm._editorMouseUp);
-        canvas.addEventListener("dblclick",    cm._editorDblClick);
+        canvas.addEventListener("mousedown", cm._editorMouseDown);
+        canvas.addEventListener("mousemove", cm._editorMouseMove);
+        canvas.addEventListener("mouseup", cm._editorMouseUp);
+        canvas.addEventListener("dblclick", cm._editorDblClick);
         // NOTE: _editorRightClick (capture-phase) is intentionally NOT registered anymore.
         canvas.addEventListener("contextmenu", cm._editorContextMenu);
     }
@@ -1188,14 +1193,14 @@ export default class ProfileEditor {
         const cm = this.editorCanvas?.cm;
         if (!cm) return;
         const canvas = cm.canvas;
-        if (cm._editorMouseDown)   canvas.removeEventListener("mousedown",   cm._editorMouseDown);
-        if (cm._editorMouseMove)   canvas.removeEventListener("mousemove",   cm._editorMouseMove);
-        if (cm._editorMouseUp)     canvas.removeEventListener("mouseup",     cm._editorMouseUp);
-        if (cm._editorDblClick)    canvas.removeEventListener("dblclick",    cm._editorDblClick);
-        if (cm._editorRightClick)  canvas.removeEventListener("mousedown",   cm._editorRightClick,  { capture: true });
+        if (cm._editorMouseDown) canvas.removeEventListener("mousedown", cm._editorMouseDown);
+        if (cm._editorMouseMove) canvas.removeEventListener("mousemove", cm._editorMouseMove);
+        if (cm._editorMouseUp) canvas.removeEventListener("mouseup", cm._editorMouseUp);
+        if (cm._editorDblClick) canvas.removeEventListener("dblclick", cm._editorDblClick);
+        if (cm._editorRightClick) canvas.removeEventListener("mousedown", cm._editorRightClick, { capture: true });
         if (cm._editorContextMenu) canvas.removeEventListener("contextmenu", cm._editorContextMenu);
         cm._editorMouseDown = cm._editorMouseMove = cm._editorMouseUp =
-        cm._editorDblClick  = cm._editorRightClick = cm._editorContextMenu = null;
+            cm._editorDblClick = cm._editorRightClick = cm._editorContextMenu = null;
     }
 
     /** @type {{ x: number, y: number }|null} */
@@ -1246,7 +1251,7 @@ export default class ProfileEditor {
      * @private
      */
     _applyEditLayout(modal, editMode) {
-        const previewEl      = modal.querySelector("#bit-preview");
+        const previewEl = modal.querySelector("#bit-preview");
         const previewToolbar = modal.querySelector("#preview-toolbar");
 
         if (editMode) {

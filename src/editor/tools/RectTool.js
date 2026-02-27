@@ -95,6 +95,21 @@ function _orientedRectCorners(p1, p2, heightSigned) {
     ];
 }
 
+/**
+ * Rotate point around origin.
+ * @param {{x:number,y:number}} p
+ * @param {number} rad
+ * @returns {{x:number,y:number}}
+ */
+function _rotatePoint(p, rad) {
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return {
+        x: p.x * cos - p.y * sin,
+        y: p.x * sin + p.y * cos,
+    };
+}
+
 // ─── RectTool ─────────────────────────────────────────────────────────────────
 
 /**
@@ -117,7 +132,9 @@ function _orientedRectCorners(p1, p2, heightSigned) {
  * - **RMB**: return to previous step; if no previous step, cancel command.
  * - **ESC**: cancel command.
  *
- * Produced geometry: 4 line segments in one contour.
+ * Produced geometry:
+ * - rect2pt  → one `rect` shape segment
+ * - rect3pt  → one `rect` shape segment + RT transform
  */
 export default class RectTool extends BaseTool {
     /**
@@ -319,14 +336,12 @@ export default class RectTool extends BaseTool {
     _commitRect2ptFromCursor(cursor) {
         if (!this._pt1) return;
         if (this._phase === 1) {
-            const corners = _axisAlignedCorners(this._pt1, cursor);
-            this._commitAsLines(corners);
+            this._commitRect2ptShape(this._pt1, cursor);
             return;
         }
         if (this._phase === 2 && this._fixedWidth != null) {
             const p2 = this._rect2ptP2FromWidthAndCursor(this._fixedWidth, cursor);
-            const corners = _axisAlignedCorners(this._pt1, p2);
-            this._commitAsLines(corners);
+            this._commitRect2ptShape(this._pt1, p2);
         }
     }
 
@@ -335,9 +350,7 @@ export default class RectTool extends BaseTool {
         const hSigned = this._fixedHeight != null
             ? this._signedHeightFromMagnitude(this._fixedHeight, cursor)
             : this._rect3ptHeightSigned(cursor);
-        const corners = _orientedRectCorners(this._pt1, this._pt2, hSigned);
-        if (!corners) return;
-        this._commitAsLines(corners);
+        this._commitRect3ptShape(this._pt1, this._pt2, hSigned);
     }
 
     /**
@@ -394,40 +407,64 @@ export default class RectTool extends BaseTool {
     /**
      * @param {{x:number,y:number}[]} corners
      */
-    _commitAsLines(corners) {
-        if (!this.ctx?.state || !Array.isArray(corners) || corners.length !== 4) return;
-        const edges = [
-            [corners[0], corners[1]],
-            [corners[1], corners[2]],
-            [corners[2], corners[3]],
-            [corners[3], corners[0]],
-        ];
-        const minEdge = Math.min(...edges.map(([a, b]) => Math.hypot(b.x - a.x, b.y - a.y)));
-        if (minEdge < 1e-6) {
+    _commitRect2ptShape(p1, p2) {
+        if (!this.ctx?.state || !p1 || !p2) return;
+
+        const x = Math.min(p1.x, p2.x);
+        const y = Math.min(p1.y, p2.y);
+        const w = Math.abs(p2.x - p1.x);
+        const h = Math.abs(p2.y - p1.y);
+        if (w < 1e-6 || h < 1e-6) {
             log.warn("RectTool: degenerate rectangle — skipping");
             return;
         }
 
-        const st = this.ctx.state;
-        const contourId = st.activeContourId ?? st._nextContourId++;
-        const createdIds = [];
-        for (const [start, end] of edges) {
-            const id = `seg-${st._nextSegmentId++}`;
-            st.segments.push({
-                id,
-                selected: false,
-                contourId,
-                type: "line",
-                data: { start: { ...start }, end: { ...end } },
-                cmdHint: "L",
-            });
-            createdIds.push(id);
+        this.ctx.state.addSegment({
+            type: "rect",
+            data: { x, y, w, h, rx: 0 },
+            transforms: [],
+        });
+        log.debug("RectTool: committed rect2pt shape", { x, y, w, h });
+    }
+
+    /**
+     * Commit 3-point rectangle as a `rect` shape with RT modifier.
+     * Width axis is p1→p2; height is perpendicular signed distance.
+     * @param {{x:number,y:number}} p1
+     * @param {{x:number,y:number}} p2
+     * @param {number} hSigned
+     * @private
+     */
+    _commitRect3ptShape(p1, p2, hSigned) {
+        if (!this.ctx?.state || !p1 || !p2) return;
+
+        const vx = p2.x - p1.x;
+        const vy = p2.y - p1.y;
+        const w = Math.hypot(vx, vy);
+        if (w < 1e-6 || Math.abs(hSigned) < 1e-6) {
+            log.warn("RectTool: degenerate rectangle — skipping");
+            return;
         }
-        st.insertAfterSegId = createdIds[createdIds.length - 1] ?? null;
-        st._pushHistory("Add rectangle");
-        st._notifySegments();
-        st.setSelection(createdIds);
-        log.debug("RectTool: committed rectangle contour", { contourId });
+
+        const angleDeg = Math.atan2(vy, vx) * 180 / Math.PI;
+        const angleRad = angleDeg * Math.PI / 180;
+        const p1Local = _rotatePoint(p1, -angleRad);
+
+        const h = Math.abs(hSigned);
+        const x = p1Local.x;
+        const y = hSigned >= 0 ? p1Local.y : (p1Local.y - h);
+
+        const angleToken = String(parseFloat(angleDeg.toFixed(6)));
+        const transforms = Math.abs(angleDeg) > 1e-9
+            ? [{ type: "RT", raw: `MOD RT ${angleToken}`, params: [angleToken] }]
+            : [];
+
+        this.ctx.state.addSegment({
+            type: "rect",
+            data: { x, y, w, h, rx: 0 },
+            transforms,
+        });
+        log.debug("RectTool: committed rect3pt shape", { x, y, w, h, angleDeg });
     }
 
     // ─── Floating dimension / radius popup ────────────────────────────────────
@@ -512,7 +549,7 @@ export default class RectTool extends BaseTool {
                     x: this._pt1.x + ((cursor.x - this._pt1.x) >= 0 ? 1 : -1) * Math.abs(this._fixedWidth ?? 0),
                     y: this._pt1.y + yDir * Math.abs(val),
                 };
-                this._commitAsLines(_axisAlignedCorners(this._pt1, p2));
+                this._commitRect2ptShape(this._pt1, p2);
                 this._reset();
             }
             return;
