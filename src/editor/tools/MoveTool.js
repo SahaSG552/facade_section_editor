@@ -6,6 +6,8 @@ const log = LoggerFactory.createLogger("MoveTool");
 
 /** Epsilon for floating-point coordinate comparisons. */
 const EPS = 1e-6;
+/** Tolerance for formula-equivalence / no-op move detection (matches PathEditor logic). */
+const FORMULA_EQ_EPS = 1e-4;
 
 /**
  * Compare two segment data objects geometrically.
@@ -19,11 +21,19 @@ const EPS = 1e-6;
  */
 function _segDataEqual(a, b) {
     if (!a || !b) return false;
-    const p = (u, v) => Math.abs(u.x - v.x) < EPS && Math.abs(u.y - v.y) < EPS;
+    const p = (u, v) => Math.abs(u.x - v.x) <= FORMULA_EQ_EPS && Math.abs(u.y - v.y) <= FORMULA_EQ_EPS;
+    const n = (u, v) => Math.abs(Number(u) - Number(v)) <= FORMULA_EQ_EPS;
+    const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj ?? {}, key);
     if (a.start && (!b.start || !p(a.start, b.start))) return false;
     if (a.end && (!b.end || !p(a.end, b.end))) return false;
     if (a.center && (!b.center || !p(a.center, b.center))) return false;
-    if (typeof a.radius === 'number' && Math.abs(a.radius - b.radius) > EPS) return false;
+    // Rect / ellipse / generic numeric coordinate fields.
+    for (const key of ["x", "y", "w", "h", "rx", "ry", "cx", "cy"]) {
+        if (has(a, key) || has(b, key)) {
+            if (!(has(a, key) && has(b, key) && n(a[key], b[key]))) return false;
+        }
+    }
+    if (typeof a.radius === 'number' && Math.abs(a.radius - b.radius) > FORMULA_EQ_EPS) return false;
     if (typeof a.largeArc === 'number' && a.largeArc !== b.largeArc) return false;
     if (typeof a.sweep === 'number' && a.sweep !== b.sweep) return false;
     return true;
@@ -315,17 +325,43 @@ export default class MoveTool extends BaseTool {
                 let newData;
                 if (origin.center !== undefined && origin.start === undefined) {
                     // Circle: translate center (and pt3)
+                    const exprMap = { ...(origin._expr ?? {}) };
+                    const nextCx = origin.center.x + dx;
+                    const nextCy = origin.center.y + dy;
+                    if (Math.abs(nextCx - origin.center.x) > FORMULA_EQ_EPS) delete exprMap.cx;
+                    if (Math.abs(nextCy - origin.center.y) > FORMULA_EQ_EPS) delete exprMap.cy;
                     newData = {
                         ...origin,
-                        center: { x: origin.center.x + dx, y: origin.center.y + dy },
+                        center: { x: nextCx, y: nextCy },
                         ...(origin.pt3 && { pt3: { x: origin.pt3.x + dx, y: origin.pt3.y + dy } }),
+                        ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : { _expr: undefined }),
                     };
                 } else if (origin.cx !== undefined) {
                     // Ellipse: translate cx/cy
-                    newData = { ...origin, cx: origin.cx + dx, cy: origin.cy + dy };
+                    const exprMap = { ...(origin._expr ?? {}) };
+                    const nextCx = origin.cx + dx;
+                    const nextCy = origin.cy + dy;
+                    if (Math.abs(nextCx - origin.cx) > FORMULA_EQ_EPS) delete exprMap.cx;
+                    if (Math.abs(nextCy - origin.cy) > FORMULA_EQ_EPS) delete exprMap.cy;
+                    newData = {
+                        ...origin,
+                        cx: nextCx,
+                        cy: nextCy,
+                        ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : { _expr: undefined }),
+                    };
                 } else if (origin.x !== undefined && origin.start === undefined) {
                     // Rect: translate x/y
-                    newData = { ...origin, x: origin.x + dx, y: origin.y + dy };
+                    const exprMap = { ...(origin._expr ?? {}) };
+                    const nextX = origin.x + dx;
+                    const nextY = origin.y + dy;
+                    if (Math.abs(nextX - origin.x) > FORMULA_EQ_EPS) delete exprMap.x;
+                    if (Math.abs(nextY - origin.y) > FORMULA_EQ_EPS) delete exprMap.y;
+                    newData = {
+                        ...origin,
+                        x: nextX,
+                        y: nextY,
+                        ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : { _expr: undefined }),
+                    };
                 } else {
                     newData = {
                         ...origin,
@@ -521,6 +557,13 @@ export default class MoveTool extends BaseTool {
         return false;
     }
 
+    onConfirm(_pos, _e) {
+        if (this._mode === "moving-seg" || this._mode === "moving-point" || this._mode === "moving-pt3") {
+            return this.onKeyDown({ key: "Escape" });
+        }
+        return false;
+    }
+
     // ─── Internals ──────────────────────────────────────────────────────────
 
     /** @private */
@@ -546,6 +589,20 @@ export default class MoveTool extends BaseTool {
             });
         if (anyChanged) {
             this.ctx.state._pushHistory("Move");
+        } else {
+            // No-op move (cursor returned to origin): restore full origin payload,
+            // including formula metadata (_expr/radiusExpr), so PathEditor tokens
+            // remain unchanged.
+            const updates = [];
+            for (const id of this._movingSegIds) {
+                const origin = this._movingOrigins.get(id);
+                if (origin) updates.push({ id, changes: { data: origin } });
+            }
+            for (const ref of this._movingPoints) {
+                const origin = this._movingPointsOrigins.get(ref.segId);
+                if (origin) updates.push({ id: ref.segId, changes: { data: origin } });
+            }
+            if (updates.length > 0) this.ctx.state.updateSegments(updates);
         }
         this._reset();
     }

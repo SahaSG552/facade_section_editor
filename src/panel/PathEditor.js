@@ -294,9 +294,11 @@ export default class PathEditor {
             if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
                 const nextData = { ...(elem.data ?? {}) };
                 const prevShape = prevShapeBySegId.get(elem.segId) ?? prevShapeOrder[shapeElemIndex++] ?? null;
-                const transforms = Array.isArray(elem.transforms)
-                    ? [...elem.transforms]
-                    : (prevTransformsByShapeSid.get(elem.segId) ?? (prevShape?.transforms ?? []));
+                const incomingTransforms = Array.isArray(elem.transforms) ? [...elem.transforms] : null;
+                const prevTransforms = prevTransformsByShapeSid.get(elem.segId) ?? (prevShape?.transforms ?? []);
+                const transforms = incomingTransforms
+                    ? this._mergeTransformsWithFormulaPriority(prevTransforms, incomingTransforms)
+                    : prevTransforms;
                 const attrs = PathEditor.SHAPE_DEFS[elem.type]?.attrs ?? [];
                 if (prevShape?.type === elem.type) {
                     for (const attr of attrs) {
@@ -357,9 +359,11 @@ export default class PathEditor {
             const expanded = prevExpanded.has(cid)
                 || (sig ? (prevExpandedBySig.get(sig) ?? false) : false)
                 || (slot?.expanded ?? false);
-            const transforms = Array.isArray(elem.transforms)
-                ? [...elem.transforms]
-                : (prevTransformsByPathCid.get(cid) ?? (slot?.transforms ?? []));
+            const incomingTransforms = Array.isArray(elem.transforms) ? [...elem.transforms] : null;
+            const prevTransforms = prevTransformsByPathCid.get(cid) ?? (slot?.transforms ?? []);
+            const transforms = incomingTransforms
+                ? this._mergeTransformsWithFormulaPriority(prevTransforms, incomingTransforms)
+                : prevTransforms;
             return { type: elem.type, contourId: cid, segIds: elem.segIds ?? [], expanded, lines, transforms, _elem: null };
         });
 
@@ -417,6 +421,23 @@ export default class PathEditor {
     /** @private */
     _hasFormulaToken(text) {
         return typeof text === 'string' && /\{[^}]+\}/.test(text);
+    }
+
+    /**
+     * True when a single parameter token should be treated as formula/expression.
+     * Supports both `{var}` and plain math expressions like `(a+b)/2`.
+     * @param {string} token
+     * @returns {boolean}
+     * @private
+     */
+    _isFormulaParamToken(token) {
+        const t = String(token ?? '').trim();
+        if (!t) return false;
+        if (/\{[^}]+\}/.test(t)) return true;
+        const numeric = Number(t);
+        if (!Number.isNaN(numeric) && Number.isFinite(numeric)) return false;
+        return /[*/()]/.test(t)
+            || (/[+\-]/.test(t) && !/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t));
     }
 
     /**
@@ -485,10 +506,75 @@ export default class PathEditor {
      * @private
      */
     _chooseShapeAttrWithFormulaPriority(prevValue, incomingValue) {
-        if (this._hasFormulaToken(prevValue) && this._shapeTokenEquivalent(prevValue, incomingValue)) {
+        if (this._isFormulaParamToken(prevValue) && this._shapeTokenEquivalent(prevValue, incomingValue)) {
             return prevValue;
         }
         return incomingValue;
+    }
+
+    /**
+     * Universal wrapper: keep previous formula token when evaluated value is unchanged.
+     * @param {string} prevToken
+     * @param {string} incomingToken
+     * @returns {string}
+     * @private
+     */
+    _chooseParamTokenWithFormulaPriority(prevToken, incomingToken) {
+        if (this._isFormulaParamToken(prevToken) && this._paramTokenEquivalent(prevToken, incomingToken)) {
+            return String(prevToken ?? '').trim();
+        }
+        return String(incomingToken ?? '').trim();
+    }
+
+    /**
+     * Merge transform lists with parameter-level formula priority.
+     * If structure differs, incoming list is used as-is.
+     * @param {Array<object>} prevTransforms
+     * @param {Array<object>} incomingTransforms
+     * @returns {Array<object>}
+     * @private
+     */
+    _mergeTransformsWithFormulaPriority(prevTransforms, incomingTransforms) {
+        const prev = Array.isArray(prevTransforms) ? prevTransforms : [];
+        const next = Array.isArray(incomingTransforms) ? incomingTransforms : [];
+
+        if (prev.length !== next.length) {
+            return next.map(t => ({
+                ...(t ?? {}),
+                type: String(t?.type ?? '').toUpperCase(),
+                params: Array.isArray(t?.params) ? [...t.params] : [],
+                raw: String(t?.raw ?? ''),
+            }));
+        }
+
+        const out = [];
+        for (let i = 0; i < next.length; i++) {
+            const p = prev[i] ?? null;
+            const n = next[i] ?? null;
+            const pType = String(p?.type ?? '').toUpperCase();
+            const nType = String(n?.type ?? '').toUpperCase();
+            const pParams = Array.isArray(p?.params) ? p.params : [];
+            const nParams = Array.isArray(n?.params) ? n.params : [];
+
+            if (!n || pType !== nType || pParams.length !== nParams.length) {
+                out.push({
+                    ...(n ?? {}),
+                    type: nType,
+                    params: [...nParams],
+                    raw: String(n?.raw ?? ''),
+                });
+                continue;
+            }
+
+            const mergedParams = nParams.map((tok, idx) =>
+                this._chooseParamTokenWithFormulaPriority(pParams[idx], tok)
+            );
+            const raw = mergedParams.length > 0
+                ? `MOD ${nType} ${mergedParams.join(' ')}`
+                : `MOD ${nType}`;
+            out.push({ ...n, type: nType, params: mergedParams, raw });
+        }
+        return out;
     }
 
     /**
@@ -1594,9 +1680,12 @@ export default class PathEditor {
                 raw: String(t?.raw ?? ''),
                 params: Array.isArray(t?.params) ? [...t.params] : [],
             }));
+            const firstPathElem = this._elements.find(e => e.type === 'path' || e.type === 'polyline') ?? null;
+            const prevFirstPathTransforms = firstPathElem && Array.isArray(firstPathElem.transforms)
+                ? [...firstPathElem.transforms]
+                : [];
             for (const elem of this._elements) elem.transforms = [];
-            const firstPathElem = this._elements.find(e => e.type === 'path' || e.type === 'polyline');
-            if (firstPathElem) firstPathElem.transforms = legacyTransforms;
+            if (firstPathElem) firstPathElem.transforms = this._mergeTransformsWithFormulaPriority(prevFirstPathTransforms, legacyTransforms);
             this._renderElements();
             this._fireOnChange();
             return;
@@ -1614,11 +1703,17 @@ export default class PathEditor {
         const shapeElems = this._elements.filter(e => e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse');
 
         for (let i = 0; i < pathElems.length; i++) {
-            pathElems[i].transforms = norm(pathSnap[i]?.transforms);
+            pathElems[i].transforms = this._mergeTransformsWithFormulaPriority(
+                pathElems[i].transforms,
+                norm(pathSnap[i]?.transforms)
+            );
         }
         for (let i = 0; i < shapeElems.length; i++) {
             const byId = shapeSnap.find(s => String(s?.segId ?? '') === String(shapeElems[i].segId ?? ''));
-            shapeElems[i].transforms = norm(byId?.transforms ?? shapeSnap[i]?.transforms);
+            shapeElems[i].transforms = this._mergeTransformsWithFormulaPriority(
+                shapeElems[i].transforms,
+                norm(byId?.transforms ?? shapeSnap[i]?.transforms)
+            );
         }
 
         this._renderElements();
@@ -2336,7 +2431,7 @@ export default class PathEditor {
         let expr = token.trim();
         
         // Replace variable references {varName}
-        expr = expr.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+        expr = expr.replace(/\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g, (match, varName) => {
             const value = this.variableValues[varName];
             return value !== undefined && !isNaN(Number(value)) ? String(value) : '0';
         });
@@ -2592,7 +2687,7 @@ export default class PathEditor {
      */
     _shapeAttrToChangesForSpace(type, data, attrKey, val, shapeSpace = this._shapeDataSpace) {
         const toNum  = s => parseFloat(this.evaluateToken(s));
-        const isFormula = s => typeof s === 'string' && /\{[^}]+\}/.test(s.trim());
+        const isFormula = s => this._isFormulaParamToken(s);
         const ySign = shapeSpace === 'canvas' ? -1 : 1;
         const withExprMap = (key, rawVal) => {
             const map = { ...(data?._expr ?? {}) };

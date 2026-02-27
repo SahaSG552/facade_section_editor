@@ -17,6 +17,9 @@ import {
     modListToSvgTransform,
 } from "../editor/transforms/TransformCommands.js";
 
+const VAR_TOKEN_RE = /\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g;
+const VAR_TOKEN_TEST_RE = /\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}/;
+
 /**
  * Merge a new numeric SVG path with the original formula path.
  * For each coordinate token, if the new numeric value is numerically equal to
@@ -130,10 +133,40 @@ function buildTransformVariableMap(bit = {}) {
         tn: Number(bit.toolNumber ?? 0),
     };
     const custom = bit.customValues ?? {};
+
+    // First pass: direct numeric custom values.
     for (const [k, v] of Object.entries(custom)) {
         const n = Number(v);
         if (!Number.isNaN(n) && Number.isFinite(n)) vars[k] = n;
     }
+
+    // Second pass: resolve expression custom values (supports {var} references).
+    let changed = true;
+    let guard = 0;
+    while (changed && guard < 10) {
+        changed = false;
+        guard++;
+        for (const [k, v] of Object.entries(custom)) {
+            if (vars[k] !== undefined) continue;
+            const src = String(v ?? '').trim();
+            if (!src) continue;
+            try {
+                const expr = src.replace(VAR_TOKEN_RE, (_m, name) => {
+                    const vv = vars[name];
+                    return vv !== undefined && !Number.isNaN(Number(vv)) ? String(vv) : '{' + name + '}';
+                });
+                if (VAR_TOKEN_TEST_RE.test(expr)) continue;
+                const out = Number(evaluateMathExpression(expr));
+                if (!Number.isNaN(out) && Number.isFinite(out)) {
+                    vars[k] = out;
+                    changed = true;
+                }
+            } catch (_) {
+                // keep unresolved custom variable as-is
+            }
+        }
+    }
+
     return vars;
 }
 
@@ -1145,8 +1178,8 @@ export default class BitsManager {
 
         // Check if it contains variable references {varName}
         let expression = trimmed;
-        if (/\{[a-zA-Z][a-zA-Z0-9]*\}/.test(trimmed)) {
-            expression = trimmed.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+        if (VAR_TOKEN_TEST_RE.test(trimmed)) {
+            expression = trimmed.replace(VAR_TOKEN_RE, (match, varName) => {
                 const varValue = variableValues[varName];
                 if (varValue !== undefined && !isNaN(varValue)) {
                     return varValue;
@@ -1234,7 +1267,7 @@ export default class BitsManager {
                 let expression = rawExpressions[varName];
 
                 // Replace variable references {varName} with their resolved values
-                expression = expression.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, refVar) => {
+                expression = expression.replace(VAR_TOKEN_RE, (match, refVar) => {
                     if (values[refVar] !== undefined) {
                         return values[refVar];
                     }
@@ -1242,7 +1275,7 @@ export default class BitsManager {
                 });
 
                 // Check if all variables were resolved
-                const hasUnresolvedVars = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(expression);
+                const hasUnresolvedVars = VAR_TOKEN_TEST_RE.test(expression);
 
                 if (!hasUnresolvedVars) {
                     // Try to evaluate
@@ -1369,6 +1402,28 @@ export default class BitsManager {
             }
         }
 
+        // Include resolved custom variables so profile MOD formulas (e.g. RT {foo}+90)
+        // are evaluated against current form values in preview/runtime rendering.
+        const customVars = variablesManager.getCustomVariables(groupName);
+        if (customVars.length > 0) {
+            const customValues = {};
+            for (const v of customVars) {
+                const resolved = variableValues[v.varName];
+                if (resolved !== undefined && !Number.isNaN(Number(resolved)) && Number.isFinite(Number(resolved))) {
+                    customValues[v.varName] = Number(resolved);
+                    continue;
+                }
+                const raw = form.querySelector(`#bit-${v.varName}`)?.value?.trim();
+                const evaluated = this.evaluateFieldValue(raw, variableValues);
+                if (evaluated !== null && !Number.isNaN(Number(evaluated)) && Number.isFinite(Number(evaluated))) {
+                    customValues[v.varName] = Number(evaluated);
+                }
+            }
+            if (Object.keys(customValues).length > 0) {
+                bitParams.customValues = customValues;
+            }
+        }
+
         return bitParams;
     }
 
@@ -1462,7 +1517,7 @@ export default class BitsManager {
             if (!rawName) return "";
 
             // Replace variable references {varName} with their values
-            let evaluated = rawName.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+            let evaluated = rawName.replace(VAR_TOKEN_RE, (match, varName) => {
                 if (variableValues[varName] !== undefined) {
                     return variableValues[varName];
                 }
@@ -1488,7 +1543,7 @@ export default class BitsManager {
 
         // Store raw formula name only when it actually contains variables.
         // Explicitly clear stale rawName on update (updateBit merges patches).
-        if (rawName !== evaluatedName && /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(rawName)) {
+        if (rawName !== evaluatedName && VAR_TOKEN_TEST_RE.test(rawName)) {
             payload.rawName = rawName;
         } else {
             payload.rawName = null;
@@ -1940,10 +1995,10 @@ export default class BitsManager {
 
                 // Special handling for name field - show evaluated name
                 if (fieldId === "name") {
-                    const hasVariableRef = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(value);
+                    const hasVariableRef = VAR_TOKEN_TEST_RE.test(value);
                     if (hasVariableRef) {
                         // Evaluate name with variables
-                        let evaluated = value.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (match, varName) => {
+                        let evaluated = value.replace(VAR_TOKEN_RE, (match, varName) => {
                             if (variableValues[varName] !== undefined) {
                                 return variableValues[varName];
                             }
@@ -1965,7 +2020,7 @@ export default class BitsManager {
                 }
 
                 // Check if value contains a formula (has {varName} or math expression)
-                const hasVariableRef = /\{[a-zA-Z][a-zA-Z0-9]*\}/.test(value);
+                const hasVariableRef = VAR_TOKEN_TEST_RE.test(value);
                 const hasMathOps = /[+\-*/()]/.test(value) && !/^\d*\.?\d*$/.test(value);
 
                 if (!hasVariableRef && !hasMathOps) {
@@ -2410,7 +2465,7 @@ export default class BitsManager {
                     </div>
                     <div class="field-row">
                         <label for="custom-field-var">Variable Name:</label>
-                        <input type="text" id="custom-field-var" placeholder="e.g., tr" maxlength="3">
+                        <input type="text" id="custom-field-var" placeholder="e.g., tr_x" maxlength="32">
                     </div>
                     <div class="field-row">
                         <label for="custom-field-default">Default Value:</label>
@@ -2451,7 +2506,7 @@ export default class BitsManager {
         // Add button
         modal.querySelector("#custom-field-add").addEventListener("click", () => {
             const name = nameInput.value.trim();
-            const varName = varInput.value.trim().toLowerCase();
+            const varName = varInput.value.trim();
             const defaultValue = defaultInput.value.trim();
 
             if (!name || !varName) {
@@ -2459,8 +2514,8 @@ export default class BitsManager {
                 return;
             }
 
-            if (!/^[a-z][a-z0-9]*$/.test(varName)) {
-                alert("Variable name must start with a letter and contain only lowercase letters and numbers");
+            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(varName)) {
+                alert("Variable name must start with a letter or underscore and contain only letters, numbers, or underscores");
                 return;
             }
 

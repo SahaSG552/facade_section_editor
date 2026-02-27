@@ -31,95 +31,112 @@ const log = LoggerFactory.createLogger("ProfileEditor");
  */
 function _mergeFormulaPath(numericPath, formulaPath, vars) {
     if (!formulaPath) return numericPath;
+    const SVG_CMD = /[MmLlHhVvCcSsQqTtAaZz]/;
     const tokenize = (str) => {
-        const tokens = [];
+        const src = String(str ?? '');
+        const out = [];
         let i = 0;
-        while (i < str.length) {
-            while (i < str.length && /[\s,]/.test(str[i])) i++;
-            if (i >= str.length) break;
-            if (/[MmLlHhVvZzCcSsQqTtAa]/.test(str[i])) {
-                tokens.push({ type: 'cmd', value: str[i++] });
+        while (i < src.length) {
+            while (i < src.length && /[\s,]/.test(src[i])) i++;
+            if (i >= src.length) break;
+
+            if (SVG_CMD.test(src[i])) {
+                out.push({ type: 'cmd', value: src[i] });
+                i++;
                 continue;
             }
-            if ((str[i] === '-' || str[i] === '+') && str[i + 1] === '{') {
-                const end = str.indexOf('}', i + 1);
-                const k = end >= 0 ? end + 1 : str.length;
-                tokens.push({ type: 'param', value: str.slice(i, k) });
-                i = k;
-                continue;
-            }
-            if (str[i] === '{') {
-                const end = str.indexOf('}', i);
-                const k = end >= 0 ? end + 1 : str.length;
-                tokens.push({ type: 'param', value: str.slice(i, k) });
-                i = k;
-                continue;
-            }
+
             let j = i;
-            if (str[j] === '-' || str[j] === '+') j++;
-            while (j < str.length && /[\d.eE]/.test(str[j])) {
-                if ((str[j] === 'e' || str[j] === 'E') && j + 1 < str.length &&
-                    (str[j + 1] === '-' || str[j + 1] === '+')) j++;
+            let braceDepth = 0;
+            while (j < src.length) {
+                const ch = src[j];
+                if (ch === '{') {
+                    braceDepth++;
+                    j++;
+                    continue;
+                }
+                if (ch === '}') {
+                    braceDepth = Math.max(0, braceDepth - 1);
+                    j++;
+                    continue;
+                }
+                if (braceDepth === 0 && /[\s,]/.test(ch)) break;
+                if (braceDepth === 0 && SVG_CMD.test(ch)) break;
                 j++;
             }
-            const numStr = str.slice(i, j);
-            if (numStr) tokens.push({ type: 'param', value: numStr });
-            i = j > i ? j : j + 1;
+            const token = src.slice(i, j).trim();
+            if (token) out.push({ type: 'param', value: token });
+            i = j > i ? j : i + 1;
         }
-        return tokens;
+        return out;
+    };
+
+    const isFormulaToken = (token) => {
+        const t = String(token ?? '').trim();
+        if (!t) return false;
+        const direct = Number(t);
+        if (!Number.isNaN(direct) && Number.isFinite(direct)) return false;
+        return /\{[^}]+\}/.test(t)
+            || /[*/()]/.test(t)
+            || (/[+\-]/.test(t) && !/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t));
     };
 
     const resolveParam = (token) => {
         const t = String(token ?? '').trim();
         if (!t) return NaN;
-        if (/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t)) return Number(t);
-        const m = t.match(/^([+-]?)\{([\s\S]+)\}$/);
-        if (m) {
-            const sign = m[1] === '-' ? -1 : 1;
-            const expr = m[2];
-            try {
-                return sign * Number(evaluateMathExpression(expr, vars));
-            } catch (_) {
-                return NaN;
-            }
+        const direct = Number(t);
+        if (!Number.isNaN(direct) && Number.isFinite(direct)) return direct;
+        try {
+            const expr = t.replace(/\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g, (_, name) => {
+                const v = vars?.[name];
+                return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : '0';
+            });
+            const n = Number(evaluateMathExpression(expr));
+            return Number.isNaN(n) ? NaN : n;
+        } catch (_) {
+            return NaN;
         }
-        return NaN;
     };
 
-    const numTok = tokenize(numericPath);
-    const fmtTok = tokenize(formulaPath);
+    const numericTokens = tokenize(numericPath);
+    const formulaTokens = tokenize(formulaPath);
+    const sameCmd = (a, b) => String(a || '').toUpperCase() === String(b || '').toUpperCase();
 
     const merged = [];
     let fi = 0;
-    const sameCmd = (a, b) => String(a || '').toUpperCase() === String(b || '').toUpperCase();
-
-    for (let i = 0; i < numTok.length; i++) {
-        const n = numTok[i];
-        if (n.type === 'cmd') {
-            merged.push(n.value);
-            if (fmtTok[fi]?.type === 'cmd') {
-                if (sameCmd(fmtTok[fi].value, n.value)) {
+    for (let ni = 0; ni < numericTokens.length; ni++) {
+        const nTok = numericTokens[ni];
+        if (nTok.type === 'cmd') {
+            merged.push(nTok.value);
+            const fTok = formulaTokens[fi];
+            if (fTok?.type === 'cmd') {
+                if (sameCmd(fTok.value, nTok.value)) {
                     fi++;
                 } else {
                     let k = fi + 1;
-                    while (k < fmtTok.length && !(fmtTok[k].type === 'cmd' && sameCmd(fmtTok[k].value, n.value))) k++;
-                    if (k < fmtTok.length) fi = k + 1;
+                    while (k < formulaTokens.length && !(formulaTokens[k].type === 'cmd' && sameCmd(formulaTokens[k].value, nTok.value))) k++;
+                    if (k < formulaTokens.length) fi = k + 1;
                 }
             }
             continue;
         }
 
-        const f = fmtTok[fi];
-        if (f?.type === 'param') {
-            const nVal = Number(n.value);
-            const fVal = resolveParam(f.value);
-            if (!isNaN(nVal) && !isNaN(fVal) && Math.abs(nVal - fVal) < 1e-4) merged.push(f.value);
-            else merged.push(n.value);
+        const fTok = formulaTokens[fi];
+        if (fTok?.type === 'param' && isFormulaToken(fTok.value)) {
+            const nVal = resolveParam(nTok.value);
+            const fVal = resolveParam(fTok.value);
+            if (!Number.isNaN(nVal) && !Number.isNaN(fVal) && Math.abs(nVal - fVal) <= 1e-4) {
+                merged.push(String(fTok.value).trim());
+            } else {
+                merged.push(nTok.value);
+            }
             fi++;
         } else {
-            merged.push(n.value);
+            merged.push(nTok.value);
+            if (fTok?.type === 'param') fi++;
         }
     }
+
     return merged.join(' ');
 }
 
@@ -133,14 +150,33 @@ function _mergeFormulaPath(numericPath, formulaPath, vars) {
  * @returns {string[]}
  */
 function _splitCmds(str) {
-    const result = [];
-    let cur = '';
-    for (const c of str) {
-        if (/[A-Za-z]/.test(c) && cur.trim()) { result.push(cur.trim()); cur = c; }
-        else cur += c;
+    const src = String(str ?? '').trim();
+    if (!src) return [];
+    const out = [];
+    let current = '';
+    let braceDepth = 0;
+
+    const isCmd = (ch) => /[MmLlHhVvCcSsQqTtAaZz]/.test(ch);
+    const isBoundary = (ch) => !ch || /[\s,]/.test(ch);
+
+    for (let i = 0; i < src.length; i++) {
+        const ch = src[i];
+        if (ch === '{') braceDepth++;
+        if (ch === '}') braceDepth = Math.max(0, braceDepth - 1);
+
+        const prev = i > 0 ? src[i - 1] : '';
+        const startsCommand = braceDepth === 0 && isCmd(ch) && isBoundary(prev);
+
+        if (startsCommand && current.trim()) {
+            out.push(current.trim());
+            current = ch;
+        } else {
+            current += ch;
+        }
     }
-    if (cur.trim()) result.push(cur.trim());
-    return result;
+
+    if (current.trim()) out.push(current.trim());
+    return out;
 }
 
 /**
@@ -217,7 +253,15 @@ function _resolveTokenNumber(token, vars) {
 function _restoreShapeFormulasIntoState(state, snapshot, vars) {
     if (!state || !Array.isArray(snapshot) || snapshot.length === 0) return;
 
-    const isFormula = (v) => typeof v === 'string' && /\{[^}]+\}/.test(v);
+    const isFormula = (v) => {
+        const t = String(v ?? '').trim();
+        if (!t) return false;
+        const direct = Number(t);
+        if (!Number.isNaN(direct) && Number.isFinite(direct)) return false;
+        return /\{[^}]+\}/.test(t)
+            || /[*/()]/.test(t)
+            || (/[+\-]/.test(t) && !/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t));
+    };
     const isEq = (a, b) => !Number.isNaN(a) && !Number.isNaN(b) && Math.abs(a - b) <= 1e-4;
     const shapeSegs = state.segments.filter(s => s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse');
     if (shapeSegs.length === 0) return;
@@ -902,7 +946,11 @@ export default class ProfileEditor {
 
         if (!this._pathEditorIsSource) {
             // Canvas-originated: rebuild sub-line content, merging formula tokens back.
-            const mergedPath = _mergeFormulaPath(path, this._formulaPath, this.state.variableValues);
+            const currentVars = this._pathEditor?.variableValues && typeof this._pathEditor.variableValues === 'object'
+                ? this._pathEditor.variableValues
+                : this.state.variableValues;
+            this.state.variableValues = currentVars ?? {};
+            const mergedPath = _mergeFormulaPath(path, this._formulaPath, currentVars ?? {});
             const elemsWithPaths = _buildElemsWithPaths(elements, mergedPath, lineSegIds);
             const needsRebuild = this._pathEditor.needsElementsRebuild?.(elemsWithPaths) ?? true;
             if (needsRebuild) {

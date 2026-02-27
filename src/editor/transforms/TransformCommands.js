@@ -48,7 +48,7 @@ export function evalAngle(token, vars = {}) {
     if (!Number.isNaN(direct) && Number.isFinite(direct)) return direct;
 
     try {
-        const expr = raw.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_all, name) => {
+        const expr = raw.replace(/\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}/g, (_all, name) => {
             const v = vars?.[name];
             return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : "0";
         });
