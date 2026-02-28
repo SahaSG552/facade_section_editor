@@ -2,6 +2,7 @@ import BaseTool from "./BaseTool.js";
 import LoggerFactory from "../../core/LoggerFactory.js";
 import { EV } from "../EditorVisualConfig.js";
 import { evaluateMathExpression } from "../../utils/utils.js";
+import { VARIABLE_TOKEN_RE_GLOBAL } from "../../utils/variableTokens.js";
 
 const log = LoggerFactory.createLogger("RectTool");
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -581,7 +582,7 @@ export default class RectTool extends BaseTool {
 
         const vars = this.ctx?.state?.variableValues ?? {};
         try {
-            const expr = raw.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_, n) => {
+            const expr = raw.replace(VARIABLE_TOKEN_RE_GLOBAL, (_, n) => {
                 const v = vars[n];
                 return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : "0";
             });

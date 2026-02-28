@@ -8,6 +8,11 @@ import {
 } from "../data/bitsStore.js";
 import CanvasManager from "../canvas/CanvasManager.js";
 import { evaluateMathExpression } from "../utils/utils.js";
+import {
+    VARIABLE_TOKEN_RE_GLOBAL,
+    VARIABLE_TOKEN_TEST_RE,
+    isValidVariableName,
+} from "../utils/variableTokens.js";
 import { fitAllVisibleElements } from "../canvas/zoomUtils.js";
 import variablesManager from "../data/VariablesManager.js";
 import PathEditor from "./PathEditor.js";
@@ -16,9 +21,6 @@ import {
     evalAngle,
     modListToSvgTransform,
 } from "../editor/transforms/TransformCommands.js";
-
-const VAR_TOKEN_RE = /\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g;
-const VAR_TOKEN_TEST_RE = /\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}/;
 
 /**
  * Merge a new numeric SVG path with the original formula path.
@@ -151,11 +153,11 @@ function buildTransformVariableMap(bit = {}) {
             const src = String(v ?? '').trim();
             if (!src) continue;
             try {
-                const expr = src.replace(VAR_TOKEN_RE, (_m, name) => {
+                const expr = src.replace(VARIABLE_TOKEN_RE_GLOBAL, (_m, name) => {
                     const vv = vars[name];
                     return vv !== undefined && !Number.isNaN(Number(vv)) ? String(vv) : '{' + name + '}';
                 });
-                if (VAR_TOKEN_TEST_RE.test(expr)) continue;
+                if (VARIABLE_TOKEN_TEST_RE.test(expr)) continue;
                 const out = Number(evaluateMathExpression(expr));
                 if (!Number.isNaN(out) && Number.isFinite(out)) {
                     vars[k] = out;
@@ -1178,8 +1180,8 @@ export default class BitsManager {
 
         // Check if it contains variable references {varName}
         let expression = trimmed;
-        if (VAR_TOKEN_TEST_RE.test(trimmed)) {
-            expression = trimmed.replace(VAR_TOKEN_RE, (match, varName) => {
+        if (VARIABLE_TOKEN_TEST_RE.test(trimmed)) {
+            expression = trimmed.replace(VARIABLE_TOKEN_RE_GLOBAL, (match, varName) => {
                 const varValue = variableValues[varName];
                 if (varValue !== undefined && !isNaN(varValue)) {
                     return varValue;
@@ -1267,7 +1269,7 @@ export default class BitsManager {
                 let expression = rawExpressions[varName];
 
                 // Replace variable references {varName} with their resolved values
-                expression = expression.replace(VAR_TOKEN_RE, (match, refVar) => {
+                expression = expression.replace(VARIABLE_TOKEN_RE_GLOBAL, (match, refVar) => {
                     if (values[refVar] !== undefined) {
                         return values[refVar];
                     }
@@ -1275,7 +1277,7 @@ export default class BitsManager {
                 });
 
                 // Check if all variables were resolved
-                const hasUnresolvedVars = VAR_TOKEN_TEST_RE.test(expression);
+                const hasUnresolvedVars = VARIABLE_TOKEN_TEST_RE.test(expression);
 
                 if (!hasUnresolvedVars) {
                     // Try to evaluate
@@ -1517,7 +1519,7 @@ export default class BitsManager {
             if (!rawName) return "";
 
             // Replace variable references {varName} with their values
-            let evaluated = rawName.replace(VAR_TOKEN_RE, (match, varName) => {
+            let evaluated = rawName.replace(VARIABLE_TOKEN_RE_GLOBAL, (match, varName) => {
                 if (variableValues[varName] !== undefined) {
                     return variableValues[varName];
                 }
@@ -1543,7 +1545,7 @@ export default class BitsManager {
 
         // Store raw formula name only when it actually contains variables.
         // Explicitly clear stale rawName on update (updateBit merges patches).
-        if (rawName !== evaluatedName && VAR_TOKEN_TEST_RE.test(rawName)) {
+        if (rawName !== evaluatedName && VARIABLE_TOKEN_TEST_RE.test(rawName)) {
             payload.rawName = rawName;
         } else {
             payload.rawName = null;
@@ -1617,6 +1619,17 @@ export default class BitsManager {
             if (rawProfilePathInput && rawProfilePathInput.value.trim()) {
                 payload.rawProfilePath = rawProfilePathInput.value.trim();
             }
+            const profileElementsInput = modalElement.querySelector("#bit-profileElements");
+            if (profileElementsInput?.value?.trim()) {
+                try {
+                    const parsed = JSON.parse(profileElementsInput.value);
+                    payload.profileElements = Array.isArray(parsed) ? parsed : [];
+                } catch (_) {
+                    payload.profileElements = [];
+                }
+            } else {
+                payload.profileElements = [];
+            }
             const profileTransformsInput = modalElement.querySelector("#bit-profileTransforms");
             if (profileTransformsInput?.value?.trim()) {
                 try {
@@ -1662,6 +1675,7 @@ export default class BitsManager {
         // Use rawName if available, otherwise use name
         const displayName = bit?.rawName || bit?.name || "";
         const normalizedProfileTransforms = normalizeProfileTransformsSnapshot(bit?.profileTransforms || []);
+        const normalizedProfileElements = Array.isArray(bit?.profileElements) ? bit.profileElements : [];
 
         const defaultValues = {
             name: displayName,
@@ -1676,6 +1690,7 @@ export default class BitsManager {
             profilePath: bit ? (bit.profilePathSource || bit.profilePath) : "",
             rawProfilePath: bit ? (bit.rawProfilePath || bit.profilePathSource || bit.profilePath) : "", // raw path with formulas
             profileTransforms: normalizedProfileTransforms,
+            profileElements: normalizedProfileElements,
             toolNumber: bit && bit.toolNumber !== undefined ? bit.toolNumber : 1,
             color: bit && bit.fillColor ? bit.fillColor : "#cccccc",
             customValues: customVals,
@@ -1738,10 +1753,37 @@ export default class BitsManager {
             bitParams: null,
         };
 
-        // Indices of PathEditor rows currently selected (highlighted) in preview mode.
-        // Empty = no selection. Supports multi-selection via Shift+click.
-        // Reset when the bit editor modal opens or closes.
-        let previewSelectedRows = [];
+        // Unified preview selection model: selected canonical segIds (same concept as edit mode).
+        // Includes line/arc segIds and standalone shape segIds.
+        let previewSelectedSegIds = [];
+
+        const collectFlatPathLineSegIds = () => {
+            const snapshot = pathEditorInstance?.getElementsDebugSnapshot?.() || [];
+            const lineSegIds = [];
+            for (const elem of snapshot) {
+                if (!(elem?.type === "path" || elem?.type === "polyline")) continue;
+                const lines = Array.isArray(elem.lines) ? elem.lines : [];
+                for (const line of lines) lineSegIds.push(line?.segId ?? null);
+            }
+            return lineSegIds;
+        };
+
+        const toSelectedSegIds = (selectedRefs = []) => {
+            const refs = Array.isArray(selectedRefs) ? selectedRefs : [];
+            const flatSegIds = collectFlatPathLineSegIds();
+            const out = [];
+            for (const ref of refs) {
+                if (typeof ref === "string" && ref.trim()) {
+                    out.push(ref.trim());
+                    continue;
+                }
+                if (typeof ref === "number") {
+                    const sid = flatSegIds[ref] ?? null;
+                    if (typeof sid === "string" && sid.trim()) out.push(sid.trim());
+                }
+            }
+            return [...new Set(out)];
+        };
 
         // Initialize preview canvas with larger size
         const initializePreviewCanvas = () => {
@@ -1841,15 +1883,26 @@ export default class BitsManager {
 
             overlayLayer.appendChild(crossGroup);
 
-            // Re-draw all selected-row highlights (dot for M, line for L/H/V/Z).
-            // drawAnchorAndAxis clears the overlay, so highlights are re-appended every time.
-            if (previewSelectedRows.length > 0 && profilePathInput) {
-                const segRows = parseEvaluatedPathRows(profilePathInput.value);
-                for (const rowIdx of previewSelectedRows) {
-                    const seg = segRows[rowIdx];
-                    if (!seg) continue;
-                    if (seg.type === 'move') {
-                        // M command: draw a filled circle at the anchor point
+            // Re-draw selected rows by canonical segId (same selection model as edit mode).
+            if (previewSelectedSegIds.length > 0 && pathEditorInstance?.getElementsDebugSnapshot) {
+                const selectedSet = new Set(previewSelectedSegIds.map(String));
+                const snapshot = pathEditorInstance.getElementsDebugSnapshot() || [];
+
+                const contourRows = [];
+                for (const elem of snapshot) {
+                    if (!(elem?.type === "path" || elem?.type === "polyline")) continue;
+                    const lines = Array.isArray(elem.lines) ? elem.lines : [];
+                    const evaluatedLines = lines.map((line) => pathEditorInstance.evaluateLine(String(line?.text ?? "")));
+                    const segRows = parseEvaluatedPathRows(evaluatedLines.filter(Boolean).join(" "));
+                    for (let i = 0; i < segRows.length; i++) {
+                        contourRows.push({ segId: lines[i]?.segId ?? null, geom: segRows[i] ?? null });
+                    }
+                }
+
+                for (const row of contourRows) {
+                    if (!row?.geom || !row?.segId || !selectedSet.has(String(row.segId))) continue;
+                    const seg = row.geom;
+                    if (seg.type === "move") {
                         const dot = document.createElementNS(svgNS, "circle");
                         dot.setAttribute("cx", seg.x);
                         dot.setAttribute("cy", -seg.y);
@@ -1860,9 +1913,7 @@ export default class BitsManager {
                         dot.setAttribute("stroke-width", Math.max(0.05, 0.5 / zoom));
                         dot.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(dot);
-                    } else if (seg.type === 'arc') {
-                        // A command: draw a highlighted arc path.
-                        // Path is stored in Y-up bit-space; negate Y and flip sweep for SVG Y-down.
+                    } else if (seg.type === "arc") {
                         const sw = Math.max(0.05, 1.5 / zoom);
                         const d = `M ${seg.start.x} ${-seg.start.y} ` +
                             `A ${seg.radius} ${seg.radius} 0 ${seg.largeArc} ${1 - seg.sweep} ` +
@@ -1876,7 +1927,6 @@ export default class BitsManager {
                         hl.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(hl);
                     } else {
-                        // L / H / V / Z command: draw a highlighted line
                         const sw = Math.max(0.05, 1.5 / zoom);
                         const hl = document.createElementNS(svgNS, "line");
                         hl.setAttribute("x1", seg.start.x);
@@ -1886,6 +1936,76 @@ export default class BitsManager {
                         hl.setAttribute("stroke", "#2196F3");
                         hl.setAttribute("stroke-width", sw);
                         hl.setAttribute("stroke-linecap", "round");
+                        hl.classList.add("preview-seg-highlight");
+                        overlayLayer.appendChild(hl);
+                    }
+                }
+
+                const shapeElems = snapshot.filter((elem) =>
+                    (elem?.type === "circle" || elem?.type === "rect" || elem?.type === "ellipse")
+                    && selectedSet.has(String(elem?.segId ?? ""))
+                );
+
+                const sw = Math.max(0.05, 1.5 / zoom);
+                for (const elem of shapeElems) {
+                    if (elem.type === "circle") {
+                        const center = elem?.data?.center;
+                        const radius = Number(elem?.data?.radius ?? NaN);
+                        if (!center || !Number.isFinite(radius)) continue;
+                        const hl = document.createElementNS(svgNS, "circle");
+                        hl.setAttribute("cx", String(center.x));
+                        hl.setAttribute("cy", String(center.y));
+                        hl.setAttribute("r", String(Math.abs(radius)));
+                        hl.setAttribute("fill", "none");
+                        hl.setAttribute("stroke", "#2196F3");
+                        hl.setAttribute("stroke-width", String(sw));
+                        hl.classList.add("preview-seg-highlight");
+                        overlayLayer.appendChild(hl);
+                        continue;
+                    }
+
+                    if (elem.type === "ellipse") {
+                        const cx = Number(elem?.data?.cx ?? NaN);
+                        const cy = Number(elem?.data?.cy ?? NaN);
+                        const rx = Number(elem?.data?.rx ?? NaN);
+                        const ry = Number(elem?.data?.ry ?? NaN);
+                        if (![cx, cy, rx, ry].every(Number.isFinite)) continue;
+                        const hl = document.createElementNS(svgNS, "ellipse");
+                        hl.setAttribute("cx", String(cx));
+                        hl.setAttribute("cy", String(cy));
+                        hl.setAttribute("rx", String(Math.abs(rx)));
+                        hl.setAttribute("ry", String(Math.abs(ry)));
+                        hl.setAttribute("fill", "none");
+                        hl.setAttribute("stroke", "#2196F3");
+                        hl.setAttribute("stroke-width", String(sw));
+                        hl.classList.add("preview-seg-highlight");
+                        overlayLayer.appendChild(hl);
+                        continue;
+                    }
+
+                    if (elem.type === "rect") {
+                        const x = Number(elem?.data?.x ?? NaN);
+                        const y = Number(elem?.data?.y ?? NaN);
+                        const w = Number(elem?.data?.w ?? NaN);
+                        const h = Number(elem?.data?.h ?? NaN);
+                        const rx = Math.max(0, Number(elem?.data?.rx ?? 0));
+                        if (![x, y, w, h].every(Number.isFinite)) continue;
+
+                        const x0 = w >= 0 ? x : x + w;
+                        const y0 = h >= 0 ? y : y + h;
+                        const ww = Math.abs(w);
+                        const hh = Math.abs(h);
+                        const rr = Math.min(rx, ww / 2, hh / 2);
+
+                        const hl = document.createElementNS(svgNS, "rect");
+                        hl.setAttribute("x", String(x0));
+                        hl.setAttribute("y", String(y0));
+                        hl.setAttribute("width", String(ww));
+                        hl.setAttribute("height", String(hh));
+                        hl.setAttribute("rx", String(rr));
+                        hl.setAttribute("fill", "none");
+                        hl.setAttribute("stroke", "#2196F3");
+                        hl.setAttribute("stroke-width", String(sw));
                         hl.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(hl);
                     }
@@ -1995,10 +2115,10 @@ export default class BitsManager {
 
                 // Special handling for name field - show evaluated name
                 if (fieldId === "name") {
-                    const hasVariableRef = VAR_TOKEN_TEST_RE.test(value);
+                    const hasVariableRef = VARIABLE_TOKEN_TEST_RE.test(value);
                     if (hasVariableRef) {
                         // Evaluate name with variables
-                        let evaluated = value.replace(VAR_TOKEN_RE, (match, varName) => {
+                        let evaluated = value.replace(VARIABLE_TOKEN_RE_GLOBAL, (match, varName) => {
                             if (variableValues[varName] !== undefined) {
                                 return variableValues[varName];
                             }
@@ -2020,7 +2140,7 @@ export default class BitsManager {
                 }
 
                 // Check if value contains a formula (has {varName} or math expression)
-                const hasVariableRef = VAR_TOKEN_TEST_RE.test(value);
+                const hasVariableRef = VARIABLE_TOKEN_TEST_RE.test(value);
                 const hasMathOps = /[+\-*/()]/.test(value) && !/^\d*\.?\d*$/.test(value);
 
                 if (!hasVariableRef && !hasMathOps) {
@@ -2114,6 +2234,7 @@ export default class BitsManager {
 
                 // Snapshot the raw formula path BEFORE entering edit (setPath will overwrite it).
                 const originalRawPath = pathEditorInstance?.getPath() ?? "";
+                const originalElementsSnapshot = pathEditorInstance?.getElementsDebugSnapshot?.() ?? [];
 
 
                 // Track whether the user confirmed the edit (Done) or cancelled it.
@@ -2121,18 +2242,19 @@ export default class BitsManager {
 
                 // Clear preview-mode row selection so no stale blue highlights
                 // survive on the canvas or in the PathEditor when edit starts.
-                previewSelectedRows = [];
+                previewSelectedSegIds = [];
                 if (pathEditorInstance) pathEditorInstance.clearLineSelection();
 
                 profileEditor.enter({
                     modal,
                     canvasManager: previewCanvasManager,
                     profilePath,
+                    profileElements: pathEditorInstance?.getElementsDebugSnapshot?.() ?? [],
                     variableValues,
                     pathEditor: pathEditorInstance,
                     onSave: (newPath) => {
                         editSaved = true;
-                        if (newPath !== null && pathEditorInstance) {
+                        if (pathEditorInstance) {
                             pathEditorInstance.syncHiddenInputsFromElements?.();
                         }
                         updateBitPreview();
@@ -2141,14 +2263,18 @@ export default class BitsManager {
                     // EditorCanvas.destroy() clears bitsLayer.innerHTML, so the cached shape
                     // DOM element is detached. Reset the signature to force a full re-render.
                     onClose: () => {
-                        previewSelectedRows = [];  // clear canvas highlights when editor exits
+                        previewSelectedSegIds = [];  // clear canvas highlights when editor exits
                         if (!editSaved && pathEditorInstance) {
                             // Cancel: restore the path that was in the PathEditor before
                             // editing started (preserving any formula tokens).
                             const savedOnChange = pathEditorInstance.onChange;
                             const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
                             pathEditorInstance.onChange = () => { };
-                            pathEditorInstance.setPath(originalRawPath);
+                            if (Array.isArray(originalElementsSnapshot) && originalElementsSnapshot.length > 0) {
+                                pathEditorInstance.setElements(originalElementsSnapshot);
+                            } else {
+                                pathEditorInstance.setPath(originalRawPath);
+                            }
                             pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
                             pathEditorInstance.onChange = savedOnChange;
                         }
@@ -2202,8 +2328,19 @@ export default class BitsManager {
 
             // Set initial path - prefer rawProfilePath (has formulas), fallback to profilePath
             const initialTransformsRaw = profileTransformsInput?.value || "[]";
+            const initialElementsRaw = profileElementsInput?.value || "[]";
             const initialPath = defaultValues.rawProfilePath || defaultValues.profilePath;
-            if (initialPath) {
+            let elementsInitialized = false;
+            try {
+                const savedElements = JSON.parse(initialElementsRaw);
+                if (Array.isArray(savedElements) && savedElements.length > 0) {
+                    pathEditorInstance.setElements(savedElements);
+                    elementsInitialized = true;
+                }
+            } catch (_) {
+                // ignore invalid stored elements payload
+            }
+            if (!elementsInitialized && initialPath) {
                 pathEditorInstance.setPath(initialPath);
             }
             try {
@@ -2217,20 +2354,36 @@ export default class BitsManager {
                 // ignore invalid stored transforms payload
             }
 
+            // Keep hidden inputs consistent on modal open even when initialized
+            // from setElements() (which does not emit onChange by design).
+            pathEditorInstance.syncHiddenInputsFromElements?.();
+
             // Preview mode: clicking a PathEditor row highlights it AND draws
             // a marker on the preview canvas.  ProfileEditor.enter() saves this
             // handler and restores it on exit, so it works in both modes.
             // Preview mode: row click highlights row + canvas marker.
             // Shift+click adds to selection (multi-select), plain click replaces.
             pathEditorInstance.onLineClick = (rowRef, _e, selectedRefs = null) => {
-                if (Array.isArray(selectedRefs)) {
-                    previewSelectedRows = selectedRefs.filter(r => r != null);
-                } else if (rowRef != null) {
-                    previewSelectedRows = [rowRef];
-                } else {
-                    previewSelectedRows = [];
-                }
-                pathEditorInstance.setSelectedLines(previewSelectedRows);
+                const refs = Array.isArray(selectedRefs)
+                    ? selectedRefs
+                    : (rowRef != null ? [rowRef] : []);
+                previewSelectedSegIds = toSelectedSegIds(refs);
+                pathEditorInstance.setSelectedLines(refs);
+                drawAnchorAndAxis(previewRenderState.shape);
+            };
+
+            pathEditorInstance.onShapeElementClick = (_segId, _e, selectedSegIds = null) => {
+                previewSelectedSegIds = Array.isArray(selectedSegIds)
+                    ? [...new Set(selectedSegIds.map((id) => String(id ?? "")).filter(Boolean))]
+                    : [];
+                drawAnchorAndAxis(previewRenderState.shape);
+            };
+
+            pathEditorInstance.onPathElemClick = (segIds, _e, selectedSegIds = null) => {
+                const selected = Array.isArray(selectedSegIds)
+                    ? selectedSegIds
+                    : (Array.isArray(segIds) ? segIds : []);
+                previewSelectedSegIds = [...new Set(selected.map((id) => String(id ?? "")).filter(Boolean))];
                 drawAnchorAndAxis(previewRenderState.shape);
             };
 
@@ -2351,6 +2504,7 @@ export default class BitsManager {
         const profilePathValue = defaultValues.profilePath || "";
         const rawProfilePathValue = defaultValues.rawProfilePath || profilePathValue;
         const profileTransformsValue = JSON.stringify(defaultValues.profileTransforms || []).replace(/"/g, '&quot;');
+        const profileElementsValue = JSON.stringify(defaultValues.profileElements || []).replace(/"/g, '&quot;');
         return `
             <div class="profile-path-section">
                 <div class="profile-path-header">Profile Path:</div>
@@ -2358,7 +2512,7 @@ export default class BitsManager {
                 <input id="bit-profilePath" value="${profilePathValue}">
                 <input id="bit-rawProfilePath" value="${rawProfilePathValue}">
                 <input id="bit-profileTransforms" value="${profileTransformsValue}">
-                <input id="bit-profileElements" value="[]">
+                <input id="bit-profileElements" value="${profileElementsValue}">
             </div>
         `;
     }
@@ -2514,7 +2668,7 @@ export default class BitsManager {
                 return;
             }
 
-            if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(varName)) {
+            if (!isValidVariableName(varName)) {
                 alert("Variable name must start with a letter or underscore and contain only letters, numbers, or underscores");
                 return;
             }

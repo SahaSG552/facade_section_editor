@@ -1,4 +1,5 @@
 import { evaluateMathExpression } from "../../utils/utils.js";
+import { VARIABLE_TOKEN_RE_GLOBAL } from "../../utils/variableTokens.js";
 
 const MOD_CMD_RE = /^MOD\s+([A-Za-z]{2})\s*(.*)$/i;
 
@@ -48,7 +49,7 @@ export function evalAngle(token, vars = {}) {
     if (!Number.isNaN(direct) && Number.isFinite(direct)) return direct;
 
     try {
-        const expr = raw.replace(/\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}/g, (_all, name) => {
+        const expr = raw.replace(VARIABLE_TOKEN_RE_GLOBAL, (_all, name) => {
             const v = vars?.[name];
             return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : "0";
         });

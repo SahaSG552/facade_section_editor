@@ -9,6 +9,78 @@
 - [ ] Вынести в универсальную обёртку для текущих и будущих параметров.
 - [ ] Применить не только к `Path`, но и к shape-параметрам и параметрам модификаторов.
 
+## ✅ ИТОГИ РЕФАКТОРИНГА ПЕРЕД RX (28.02.2026)
+
+### Что выяснили по багфиксам
+- Корневая проблема была не в отдельных `X/Y`, а в рассинхронизации нескольких пайплайнов:
+  - разный парсинг команд между preview/edit,
+  - разный regex для переменных в разных модулях,
+  - локальные «частные» правила вместо общей обёртки эквивалентности.
+- Самый опасный регресс: split команд внутри формул (`{l}+{y}`) ломал строки PathEditor (`V {` / `l}+{y}`).
+- По модификаторам (`RT`) причина неконсистентности: резолв переменных и правила именования отличались от остальной системы.
+
+### Что упростили/унифицировали
+- Введён общий utility: `src/utils/variableTokens.js`.
+  - Единый формат имени переменной: `[A-Za-z_][A-Za-z0-9_]*`.
+  - Единая поддержка `{ var }` (с пробелами внутри фигурных скобок).
+- На utility переведены ключевые точки:
+  - `BitsManager` (валидация/резолв формул полей и custom vars),
+  - `PathEditor.evaluateToken`,
+  - `ProfileEditor` (merge формул),
+  - `TransformCommands.evalAngle` (`RT`),
+  - `RectTool` (ввод параметров в popup).
+- Убран лишний UI-ограничитель custom vars:
+  - `maxlength` увеличен до 32,
+  - имя custom переменной больше не принудительно lower-case,
+  - валидация имени приведена к единому правилу.
+
+### Правило на будущее (чтобы снова не разъехалось)
+- Любые изменения логики переменных/формул делать только через общий utility/обёртки,
+  а не через локальные regex в модулях.
+- Любой новый параметр (path/shape/modifier) должен проходить через один и тот же
+  путь: `raw token -> evaluate -> equivalence check -> keep formula when equal`.
+
+### Next
+- Переходим к багам и комментариям по `Rectangle.rx` на уже упрощённой базе,
+  без добавления новых частных веток по отдельным параметрам.
+
+## 🎯 NEXT: АРХИТЕКТУРНЫЙ РЕФАКТОРИНГ PIPELINE PREVIEW/EDIT (28.02.2026)
+
+- [ ] Ввести единый source-of-truth: `profileElements` (порядок top-level элементов + строки path/polyline + segId привязки).
+- [ ] Убрать fallback-реконструкцию структуры из `profilePath` при наличии валидного `profileElements`.
+- [ ] Унифицировать цикл данных без расхождения порядка:
+  - [ ] `saved -> preview` загружается из `profileElements`,
+  - [ ] `preview -> edit` передаёт текущий snapshot `profileElements`,
+  - [ ] `edit -> preview` всегда синкает hidden inputs из `PathEditor` структуры,
+  - [ ] `modal close(save)` сохраняет актуальный `profileElements` без пересборки.
+- [ ] Зафиксировать один канал для preview-highlight маппинга строк: только contours-only path rows (без shape-сериализации).
+- [x] Зафиксировать один канал для preview-highlight маппинга строк: canonical `segId` selection для path/shape.
+- [ ] Минимизировать legacy API-пути (`setPath`, path-based структурный rebuild) в runtime-переходах, оставить только как fallback для старых данных.
+
+### Принятые архитектурные решения (зафиксировано)
+
+- `profileElements` — структурный source-of-truth между режимами (`preview/edit/save`).
+  - `profilePath/rawProfilePath` остаются сериализованным представлением для рендера/совместимости,
+    но не должны реконструировать структуру при наличии валидного `profileElements`.
+
+- Единый lifecycle callback-ов PathEditor:
+  - При входе в `edit` все preview callback-и сохраняются,
+  - в edit-режиме подменяются,
+  - при выходе восстанавливаются полностью (`onChange`, `onLineClick`, `onElementOrderChange`,
+    `onShapeElementClick`, `onPathElemClick`, `onDeactivate`).
+
+- Единая модель selection mapping в preview:
+  - Канонический идентификатор выбора — `segId` (как в edit mode).
+  - `PathEditor` отдаёт selected refs как `segId` (fallback: index только если segId отсутствует).
+  - Preview highlight строится по выбранным `segId` для всех типов элементов
+    (path/polyline rows + shape rows), без двух параллельных моделей selection.
+
+- При canvas-originated sync порядок top-level элементов не берётся из произвольного
+  `state.getElements()` как абсолют, а приводится к текущему порядку PathEditor snapshot.
+
+- Сохранение формул остаётся универсальным инвариантом: для любого параметра любой сущности
+  (path command / shape attr / modifier param) при численной эквивалентности сохраняется исходный raw token.
+
 ## Описание задачи
 
 Добавление нового типа фрезы - **Profile** с произвольным профилем, который можно получить путём отрисовки в редакторе или импорте из другого формата.

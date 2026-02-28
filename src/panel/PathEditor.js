@@ -12,6 +12,7 @@
  */
 
 import { evaluateMathExpression } from "../utils/utils.js";
+import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
 
 /**
  * Valid SVG path commands with their argument counts and labels
@@ -345,6 +346,15 @@ export default class PathEditor {
                         text:  l.text,
                         segId: lsids ? (lsids[i] ?? null) : (elem.segIds[i] ?? l.segId ?? null),
                         _formulaText: l.formulaText ?? (this._hasFormulaToken(l.text) ? l.text : null),
+                        _elem: null,
+                    }));
+                } else if (Array.isArray(elem.lines) && elem.lines.length > 0) {
+                    // Direct structure restore (profileElements source-of-truth)
+                    // should use incoming line texts as-is.
+                    lines = elem.lines.map((l, i) => ({
+                        text: String(l?.text ?? '').trim(),
+                        segId: l?.segId ?? (elem.lineSegIds?.[i] ?? null),
+                        _formulaText: this._hasFormulaToken(String(l?.text ?? '')) ? String(l?.text ?? '').trim() : null,
                         _elem: null,
                     }));
                 } else {
@@ -906,7 +916,7 @@ export default class PathEditor {
             (e.type === 'path' || e.type === 'polyline') ? e.lines : []);
         allLines.forEach((line, index) => {
             if (line._elem?.classList.contains('path-line-selected')) {
-                refs.push(index);
+                refs.push(line?.segId ?? index);
             }
         });
         return refs;
@@ -2431,7 +2441,7 @@ export default class PathEditor {
         let expr = token.trim();
         
         // Replace variable references {varName}
-        expr = expr.replace(/\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g, (match, varName) => {
+        expr = expr.replace(VARIABLE_TOKEN_RE_GLOBAL, (match, varName) => {
             const value = this.variableValues[varName];
             return value !== undefined && !isNaN(Number(value)) ? String(value) : '0';
         });
@@ -2823,266 +2833,17 @@ export default class PathEditor {
         let cid = 1;
         for (const cmds of subPaths) {
             const pathPos = cid - 1;
-            // Detect axis-aligned rectangle pattern:
-            //   M x0 y0  (L|H|V) ... (L|H|V) ... (L|H|V) ... Z
-            // in bit-space (Y-up). Reconstruct as a shape row instead of polyline.
-            const isRectCandidate = cmds.length === 5
-                && /^[Mm]/.test(cmds[0])
-                && /^[Zz]$/.test(cmds[4])
-                && /^[LlHhVv]/.test(cmds[1])
-                && /^[LlHhVv]/.test(cmds[2])
-                && /^[LlHhVv]/.test(cmds[3]);
-
-            if (isRectCandidate) {
-                const EPS = 1e-4;
-                const eq = (a, b) => Math.abs(a - b) < EPS;
-                const evalNum = (token) => Number(this.evaluateToken(String(token ?? '')));
-                const hasFormulaLike = (token) => {
-                    const t = String(token ?? '').trim();
-                    if (!t) return false;
-                    const n = Number(t);
-                    if (!Number.isNaN(n) && Number.isFinite(n)) return false;
-                    return /\{[^}]+\}|[+\-*/()]/.test(t);
-                };
-                const parseArgs = (cmd) => cmd
-                    .slice(1)
-                    .trim()
-                    .split(/[\s,]+/)
-                    .filter(Boolean);
-
-                const mArgs = parseArgs(cmds[0]);
-                let cx = evalNum(mArgs[0]);
-                let cy = evalNum(mArgs[1]);
-                let xTok = String(mArgs[0] ?? '').trim();
-                let yTok = String(mArgs[1] ?? '').trim();
-
-                const validStart = Number.isFinite(cx) && Number.isFinite(cy);
-                if (validStart) {
-                    const pts = [{ x: cx, y: cy }];
-                    const ptTokens = [{ x: xTok, y: yTok }];
-                    for (let i = 1; i <= 3; i++) {
-                        const cmd = cmds[i];
-                        const type = cmd[0].toUpperCase();
-                        const args = parseArgs(cmd);
-                        if (type === 'L') {
-                            if (args.length < 2) {
-                                cx = NaN;
-                                cy = NaN;
-                                break;
-                            }
-                            xTok = String(args[0] ?? '').trim();
-                            yTok = String(args[1] ?? '').trim();
-                            cx = evalNum(args[0]);
-                            cy = evalNum(args[1]);
-                        } else if (type === 'H') {
-                            if (args.length < 1) {
-                                cx = NaN;
-                                cy = NaN;
-                                break;
-                            }
-                            xTok = String(args[0] ?? '').trim();
-                            cx = evalNum(args[0]);
-                        } else if (type === 'V') {
-                            if (args.length < 1) {
-                                cx = NaN;
-                                cy = NaN;
-                                break;
-                            }
-                            yTok = String(args[0] ?? '').trim();
-                            cy = evalNum(args[0]);
-                        } else {
-                            cx = NaN;
-                            cy = NaN;
-                            break;
-                        }
-                        if (!Number.isFinite(cx) || !Number.isFinite(cy)) break;
-                        pts.push({ x: cx, y: cy });
-                        ptTokens.push({ x: xTok, y: yTok });
-                    }
-
-                    if (pts.length === 4 && Number.isFinite(cx) && Number.isFinite(cy)) {
-                        const p0 = pts[0];
-                        const p1 = pts[1];
-                        const p2 = pts[2];
-                        const p3 = pts[3];
-                        const axisAligned =
-                            ((eq(p0.y, p1.y) && eq(p1.x, p2.x) && eq(p2.y, p3.y) && eq(p3.x, p0.x)) ||
-                                (eq(p0.x, p1.x) && eq(p1.y, p2.y) && eq(p2.x, p3.x) && eq(p3.y, p0.y)));
-
-                        const xs = [p0.x, p1.x, p2.x, p3.x];
-                        const ys = [p0.y, p1.y, p2.y, p3.y];
-                        const xMin = Math.min(...xs);
-                        const xMax = Math.max(...xs);
-                        const yMin = Math.min(...ys);
-                        const yMax = Math.max(...ys);
-                        const w = xMax - xMin;
-                        const h = yMax - yMin;
-
-                        if (axisAligned && w > EPS && h > EPS) {
-                            const t0 = ptTokens[0] ?? { x: '', y: '' };
-                            const t1 = ptTokens[1] ?? { x: '', y: '' };
-                            const t2 = ptTokens[2] ?? { x: '', y: '' };
-                            const canonical =
-                                eq(p0.y, p1.y) && eq(p1.x, p2.x) && eq(p2.y, p3.y) && eq(p3.x, p0.x);
-                            const exprMap = {};
-                            if (canonical && t0.x) {
-                                const stripOuterParens = (value) => {
-                                    let out = String(value ?? '').trim();
-                                    const isWrapped = (src) => {
-                                        if (!(src.startsWith('(') && src.endsWith(')'))) return false;
-                                        let depth = 0;
-                                        for (let i = 0; i < src.length; i++) {
-                                            const ch = src[i];
-                                            if (ch === '(') depth++;
-                                            else if (ch === ')') depth--;
-                                            if (depth === 0 && i < src.length - 1) return false;
-                                        }
-                                        return depth === 0;
-                                    };
-                                    while (isWrapped(out)) out = out.slice(1, -1).trim();
-                                    return out;
-                                };
-                                const norm = (s) => stripOuterParens(s);
-                                const sameExpr = (a, b) => norm(a).replace(/\s+/g, '') === norm(b).replace(/\s+/g, '');
-                                const extractTail = (base, whole, op) => {
-                                    const src = String(whole ?? '').trim();
-                                    const b = norm(base);
-                                    const lhsVariants = [b, `(${b})`];
-                                    for (const lhs of lhsVariants) {
-                                        const prefix = `${lhs}${op}`;
-                                        if (src.startsWith(prefix)) {
-                                            return stripOuterParens(src.slice(prefix.length).trim());
-                                        }
-                                    }
-                                    return null;
-                                };
-                                const plusTail = (base, whole) => {
-                                    const src = String(whole ?? '').trim();
-                                    const b = norm(base);
-                                    const p1 = new RegExp(`^\\(${b.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\)\\+\\((.+)\\)$`);
-                                    const p2 = new RegExp(`^${b.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}\\+\\((.+)\\)$`);
-                                    const m = src.match(p1) || src.match(p2);
-                                    return m ? m[1].trim() : null;
-                                };
-                                const minusTail = (base, whole) => {
-                                    return extractTail(base, whole, '-');
-                                };
-                                const simplifySelfMinusChain = (base, token) => {
-                                    let out = String(token ?? '').trim();
-                                    let guard = 0;
-                                    while (out && guard < 8) {
-                                        const nested = extractTail(base, out, '-');
-                                        if (!nested) break;
-                                        out = nested;
-                                        guard++;
-                                    }
-                                    return out;
-                                };
-
-                                if (hasFormulaLike(t0.x)) exprMap.x = t0.x;
-                                if (hasFormulaLike(t0.y)) exprMap.y = t0.y;
-
-                                const wDirect = plusTail(t0.x, t1.x);
-                                if (wDirect && (hasFormulaLike(wDirect) || hasFormulaLike(t1.x) || hasFormulaLike(t0.x))) {
-                                    exprMap.w = wDirect;
-                                } else if (hasFormulaLike(t1.x) || hasFormulaLike(t0.x)) {
-                                    exprMap.w = sameExpr(t1.x, t0.x) ? '0' : `(${t1.x})-(${t0.x})`;
-                                }
-
-                                const hDirect = simplifySelfMinusChain(t0.y, minusTail(t0.y, t2.y));
-                                if (hDirect && (hasFormulaLike(hDirect) || hasFormulaLike(t2.y) || hasFormulaLike(t0.y))) {
-                                    exprMap.h = hDirect;
-                                } else if (hasFormulaLike(t0.y) || hasFormulaLike(t2.y)) {
-                                    exprMap.h = sameExpr(t0.y, t2.y) ? '0' : `(${t0.y})-(${t2.y})`;
-                                }
-                            }
-                            this._elements.push({
-                                type: 'rect',
-                                segId: `preview-rect-${cid}`,
-                                data: {
-                                    x: xMin,
-                                    y: yMax,
-                                    w,
-                                    h,
-                                    rx: 0,
-                                    ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : {}),
-                                },
-                                _elem: null,
-                            });
-                            cid++;
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            // Detect M-A-A-Z circle pattern:
-            //   M cx-r -cy  A r r 0 1 0 cx+r -cy  A r r 0 1 0 cx-r -cy  Z
-            const PARAM_RE = String.raw`(?:[-+]?\{[^}]+\}|[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)`;
-            const arcCircleRe = new RegExp(`^A\\s+${PARAM_RE}\\s+${PARAM_RE}\\s+0\\s+1\\s+0`, 'i');
-            const isCircle = cmds.length === 4
-                && /^[Mm]/.test(cmds[0])
-                && /^[Zz]$/.test(cmds[3])
-                && arcCircleRe.test(cmds[1])
-                && arcCircleRe.test(cmds[2]);
-
-            if (isCircle) {
-                // Parse: M (cx-r) (-cy)  →  cx = mX + r,  cy = -mY
-                const mTokensRaw = cmds[0].replace(/^[Mm]\s*/, '').trim().split(/[\s,]+/);
-                const mNums  = mTokensRaw.map(v => Number(this.evaluateToken(v)));
-                const aTokens = cmds[1].replace(/^[Aa]\s*/, '').trim().split(/[\s,]+/);
-                // A rx ry x-rotation large-arc-flag sweep-flag x y
-                const radiusToken = aTokens[0];
-                const radius = Number(this.evaluateToken(radiusToken));
-                const cx     = mNums[0] + radius;
-                const cy     = -mNums[1];
-                const mXTok = String(mTokensRaw[0] ?? '').trim();
-                const mYTok = String(mTokensRaw[1] ?? '').trim();
-                const endXTok = String(aTokens[5] ?? '').trim();
-
-                const hasFormulaLike = (s) => /\{[^}]+\}|[+\-*/()]/.test(String(s ?? ''));
-                const isSameExpr = (a, b) => String(a ?? '').replace(/\s+/g, '') === String(b ?? '').replace(/\s+/g, '');
-
-                const leftMatch = mXTok.match(/^\((.+)\)-\((.+)\)$/);
-                const rightMatch = endXTok.match(/^\((.+)\)\+\((.+)\)$/);
-                const yMatch = mYTok.match(/^-\((.+)\)$/);
-
-                let cxExpr;
-                let cyExpr;
-                let rExpr;
-
-                if (hasFormulaLike(radiusToken)) rExpr = String(radiusToken);
-                if (leftMatch && (!rExpr || isSameExpr(leftMatch[2], rExpr))) cxExpr = leftMatch[1];
-                if (!cxExpr && rightMatch && (!rExpr || isSameExpr(rightMatch[2], rExpr))) cxExpr = rightMatch[1];
-                if (yMatch) cyExpr = yMatch[1];
-
-                const exprMap = {};
-                if (cxExpr) exprMap.cx = cxExpr;
-                if (cyExpr) exprMap.cy = cyExpr;
-                if (rExpr) exprMap.r = rExpr;
-                this._elements.push({
-                    type: 'circle', segId: `preview-circle-${cid}`,
-                    data: {
-                        center: { x: cx, y: cy },
-                        radius,
-                        ...(rExpr ? { radiusExpr: rExpr } : {}),
-                        ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : {}),
-                    },
-                    _elem: null,
-                });
-            } else {
-                const sig = this._contourSignatureFromCommands(cmds);
-                const expanded = prevPathExpandedBySig.has(sig)
-                    ? !!prevPathExpandedBySig.get(sig)
-                    : (prevPathExpandedByPos[pathPos] ?? true);
-                const pathElem = {
-                    type: 'polyline', contourId: cid, segIds: [], expanded,
-                    lines: cmds.map(text => ({ text: text.trim(), segId: null, _elem: null })),
-                    _elem: null,
-                };
-                this._elements.push(pathElem);
-                if (expanded) this._expandedContours.add(cid);
-            }
+            const sig = this._contourSignatureFromCommands(cmds);
+            const expanded = prevPathExpandedBySig.has(sig)
+                ? !!prevPathExpandedBySig.get(sig)
+                : (prevPathExpandedByPos[pathPos] ?? true);
+            const pathElem = {
+                type: 'polyline', contourId: cid, segIds: [], expanded,
+                lines: cmds.map(text => ({ text: text.trim(), segId: null, _elem: null })),
+                _elem: null,
+            };
+            this._elements.push(pathElem);
+            if (expanded) this._expandedContours.add(cid);
             cid++;
         }
 

@@ -11,6 +11,7 @@ import CircleTool from "./tools/CircleTool.js";
 import RectTool from "./tools/RectTool.js";
 import EllipseTool from "./tools/EllipseTool.js";
 import { evaluateMathExpression } from "../utils/utils.js";
+import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
 
 const log = LoggerFactory.createLogger("ProfileEditor");
 
@@ -87,7 +88,7 @@ function _mergeFormulaPath(numericPath, formulaPath, vars) {
         const direct = Number(t);
         if (!Number.isNaN(direct) && Number.isFinite(direct)) return direct;
         try {
-            const expr = t.replace(/\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}/g, (_, name) => {
+            const expr = t.replace(VARIABLE_TOKEN_RE_GLOBAL, (_, name) => {
                 const v = vars?.[name];
                 return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : '0';
             });
@@ -220,6 +221,56 @@ function _buildElemsWithPaths(elements, mergedPath, lineSegIds) {
 }
 
 /**
+ * Reorder exported state elements to match the current PathEditor top-level order.
+ * This keeps preview/edit order stable when canvas-originated updates occur.
+ *
+ * @param {Array} elements
+ * @param {Array} editorSnapshot
+ * @returns {Array}
+ */
+function _orderElementsLikePathEditor(elements, editorSnapshot) {
+    if (!Array.isArray(elements) || elements.length === 0) return [];
+    if (!Array.isArray(editorSnapshot) || editorSnapshot.length === 0) return [...elements];
+
+    const pool = [...elements];
+    const ordered = [];
+
+    const takeFromPool = (predicate) => {
+        const idx = pool.findIndex(predicate);
+        if (idx < 0) return null;
+        const [item] = pool.splice(idx, 1);
+        return item;
+    };
+
+    for (const ref of editorSnapshot) {
+        if (ref?.type === 'path' || ref?.type === 'polyline') {
+            const cid = Number(ref?.contourId);
+            let found = Number.isFinite(cid)
+                ? takeFromPool(e => (e?.type === 'path' || e?.type === 'polyline') && Number(e?.contourId) === cid)
+                : null;
+            if (!found) {
+                found = takeFromPool(e => e?.type === 'path' || e?.type === 'polyline');
+            }
+            if (found) ordered.push(found);
+            continue;
+        }
+
+        if (ref?.type === 'circle' || ref?.type === 'rect' || ref?.type === 'ellipse') {
+            const sid = String(ref?.segId ?? '');
+            let found = sid
+                ? takeFromPool(e => (e?.type === 'circle' || e?.type === 'rect' || e?.type === 'ellipse') && String(e?.segId ?? '') === sid)
+                : null;
+            if (!found) {
+                found = takeFromPool(e => e?.type === ref?.type);
+            }
+            if (found) ordered.push(found);
+        }
+    }
+
+    return [...ordered, ...pool];
+}
+
+/**
  * Resolve a token/expression to numeric value using current variables.
  * @param {string|number} token
  * @param {Record<string,number>} vars
@@ -231,7 +282,7 @@ function _resolveTokenNumber(token, vars) {
     const direct = Number(t);
     if (!Number.isNaN(direct) && Number.isFinite(direct)) return direct;
     try {
-        const expr = t.replace(/\{([a-zA-Z][a-zA-Z0-9]*)\}/g, (_, name) => {
+        const expr = t.replace(VARIABLE_TOKEN_RE_GLOBAL, (_, name) => {
             const v = vars?.[name];
             return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : '0';
         });
@@ -352,6 +403,124 @@ function _syncElementTransformsToState(state, transformsMeta) {
     if (updates.length > 0) state.updateSegments(updates);
 }
 
+/**
+ * Build evaluated contour-only path string from a PathEditor elements snapshot.
+ * Shape rows are intentionally ignored (they are restored as shapes, not path).
+ *
+ * @param {Array} elements
+ * @param {Record<string,number>} vars
+ * @returns {string}
+ */
+function _buildEvaluatedContoursPathFromElements(elements, vars) {
+    if (!Array.isArray(elements) || elements.length === 0) return "";
+
+    const evalToken = (token) => {
+        const t = String(token ?? "").trim();
+        if (!t) return "";
+        const direct = Number(t);
+        if (!Number.isNaN(direct) && Number.isFinite(direct)) return String(direct);
+        try {
+            const expr = t.replace(VARIABLE_TOKEN_RE_GLOBAL, (_, name) => {
+                const v = vars?.[name];
+                return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : "0";
+            });
+            const n = Number(evaluateMathExpression(expr));
+            return Number.isNaN(n) ? t : String(n);
+        } catch (_) {
+            return t;
+        }
+    };
+
+    const evalLine = (lineText) => {
+        const text = String(lineText ?? "").trim();
+        if (!text) return "";
+        const cmd = text[0];
+        if (!/[MmLlHhVvCcSsQqTtAaZz]/.test(cmd)) return text;
+        if (cmd.toUpperCase() === "Z") return cmd;
+        const params = text.slice(1).trim();
+        if (!params) return cmd;
+        const tokens = params.split(/[\s,]+/).filter(Boolean).map(evalToken);
+        return `${cmd} ${tokens.join(" ")}`;
+    };
+
+    const contourParts = [];
+    for (const elem of elements) {
+        if (!(elem?.type === "path" || elem?.type === "polyline")) continue;
+        const lines = Array.isArray(elem.lines) ? elem.lines : [];
+        if (lines.length > 0) {
+            const part = lines
+                .map((line) => evalLine(line?.text ?? ""))
+                .filter(Boolean)
+                .join(" ");
+            if (part) contourParts.push(part);
+            continue;
+        }
+        const flatPath = String(elem.path ?? "").trim();
+        if (!flatPath) continue;
+        const cmds = _splitCmds(flatPath);
+        const part = cmds.map(evalLine).filter(Boolean).join(" ");
+        if (part) contourParts.push(part);
+    }
+
+    return contourParts.join(" ");
+}
+
+/**
+ * Restore standalone shape rows from PathEditor elements snapshot into state.
+ * Keeps logic deterministic and minimal: no contour reordering heuristics.
+ *
+ * @param {EditorStateManager} state
+ * @param {Array} elements
+ */
+function _restoreStateStructureFromElements(state, elements) {
+    if (!state || !Array.isArray(elements) || elements.length === 0) return;
+
+    const shapeElems = elements.filter(e => e?.type === "circle" || e?.type === "rect" || e?.type === "ellipse");
+    if (shapeElems.length === 0) return;
+
+    const existingIds = new Set(state.segments.map(s => String(s.id)));
+    const normalizeTransforms = (arr) => (Array.isArray(arr) ? arr : []).map(t => ({
+        type: String(t?.type ?? "").toUpperCase(),
+        raw: String(t?.raw ?? ""),
+        params: Array.isArray(t?.params) ? [...t.params] : [],
+    }));
+
+    const segNumFromId = (id) => {
+        const m = String(id ?? "").match(/^seg-(\d+)$/);
+        return m ? Number(m[1]) : NaN;
+    };
+
+    const maxContourId = Math.max(0, ...state.segments.map(s => Number(s.contourId ?? 0)).filter(Number.isFinite));
+    state._nextContourId = Math.max(state._nextContourId, maxContourId + 1);
+
+    for (const elem of shapeElems) {
+        const requestedId = typeof elem?.segId === "string" ? elem.segId : null;
+        const canReuseId = !!requestedId && !existingIds.has(requestedId);
+        const id = canReuseId ? requestedId : `seg-${state._nextSegmentId++}`;
+        const segNum = segNumFromId(id);
+        if (Number.isFinite(segNum)) {
+            state._nextSegmentId = Math.max(state._nextSegmentId, segNum + 1);
+        }
+
+        const seg = {
+            id,
+            selected: false,
+            contourId: state._nextContourId++,
+            type: elem.type,
+            data: { ...(elem.data ?? {}) },
+            transforms: normalizeTransforms(elem.transforms),
+        };
+        state.segments.push(seg);
+        existingIds.add(id);
+    }
+
+    state._history = [{
+        segments: state.segments.map(s => ({ ...s })),
+        description: "Import",
+    }];
+    state._historyIndex = 0;
+}
+
 
 /**
  * ProfileEditor — top-level orchestrator for the profile cross-section editor.
@@ -426,6 +595,12 @@ export default class ProfileEditor {
         this._origPathEditorOnLineClick = null;
         /** Saved PathEditor.onElementOrderChange before edit mode — restored on exit. @type {Function|null} */
         this._origPathEditorOnElementOrderChange = null;
+        /** Saved PathEditor.onShapeElementClick before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnShapeElementClick = null;
+        /** Saved PathEditor.onPathElemClick before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnPathElemClick = null;
+        /** Saved PathEditor.onDeactivate before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnDeactivate = null;
 
         /** The SVG <circle> dot drawn on the canvas overlay when an M row is selected in edit mode.
          *  Cleared when a segment is selected or edit mode exits. @type {SVGCircleElement|null} */
@@ -471,7 +646,7 @@ export default class ProfileEditor {
      * @param {() => void}          [context.onClose]    - Called on both Done and Cancel after cleanup
      * @param {import("../panel/PathEditor.js").default|null} [context.pathEditor] - Optional PathEditor for bidirectional text sync
      */
-    enter({ modal, canvasManager, profilePath = "", variableValues = {}, onSave, onClose, pathEditor = null }) {
+    enter({ modal, canvasManager, profilePath = "", profileElements = [], variableValues = {}, onSave, onClose, pathEditor = null }) {
         if (this._active) {
             log.warn("ProfileEditor.enter() called while already active");
             return;
@@ -481,13 +656,24 @@ export default class ProfileEditor {
         this._onSave = onSave;
         this._onClose = onClose ?? null;
         this._pathEditor = pathEditor;
-        this._formulaPath = pathEditor?.getContoursRawPath?.() || profilePath;
+        const sourceElements = Array.isArray(profileElements) && profileElements.length > 0
+            ? profileElements
+            : (pathEditor?.getElementsDebugSnapshot?.() ?? []);
+        const hasStructuredSource = Array.isArray(sourceElements) && sourceElements.length > 0;
+        const evaluatedContoursPath = _buildEvaluatedContoursPathFromElements(sourceElements, variableValues);
+        this._formulaPath = pathEditor?.getContoursRawPath?.()
+            || evaluatedContoursPath
+            || (hasStructuredSource ? "" : profilePath);
         const shapeFormulaSnapshot = pathEditor?.getShapeParamSnapshot?.() ?? [];
 
         log.info("Entering profile edit mode");
 
         // 1. Initialize state
-        this.state = new EditorStateManager({ profilePath, variableValues });
+        this.state = new EditorStateManager({
+            profilePath: hasStructuredSource ? evaluatedContoursPath : (evaluatedContoursPath || profilePath),
+            variableValues,
+        });
+        _restoreStateStructureFromElements(this.state, sourceElements);
         _restoreShapeFormulasIntoState(this.state, shapeFormulaSnapshot, variableValues);
         _syncElementTransformsToState(this.state, pathEditor?.getElementTransformsSnapshot?.() ?? []);
 
@@ -519,7 +705,12 @@ export default class ProfileEditor {
         // Use the same sync pipeline as normal edit updates so preview/edit stay unified.
         this.editorCanvas.renderAllSegments(this.state.segments);
         this._initialSyncDone = true;
-        this._syncToPathEditor();
+        if (hasStructuredSource) {
+            this._bindPathEditorSegmentIdsOnly();
+            this._pathEditor?.syncHiddenInputsFromElements?.();
+        } else {
+            this._syncToPathEditor();
+        }
 
         // 7. Re-draw M-dot at updated scale whenever the user zooms/pans.
         // The dot radius is zoom-dependent (3px screen = 3/zoom SVG units),
@@ -602,9 +793,9 @@ export default class ProfileEditor {
             this._pathEditor.onLineClick = this._origPathEditorOnLineClick ?? null;
             this._pathEditor.onElementOrderChange = this._origPathEditorOnElementOrderChange ?? null;
             this._pathEditor.onShapeElementChange = null;
-            this._pathEditor.onShapeElementClick = null;
-            this._pathEditor.onPathElemClick = null;
-            this._pathEditor.onDeactivate = null;
+            this._pathEditor.onShapeElementClick = this._origPathEditorOnShapeElementClick ?? null;
+            this._pathEditor.onPathElemClick = this._origPathEditorOnPathElemClick ?? null;
+            this._pathEditor.onDeactivate = this._origPathEditorOnDeactivate ?? null;
             this.state.activeContourId = null;
             this.state.insertAfterSegId = null;
             this._pathEditor.setShapeElements([]);
@@ -682,6 +873,9 @@ export default class ProfileEditor {
         this._origPathEditorOnChange = pathEditor.onChange;
         this._origPathEditorOnLineClick = pathEditor.onLineClick;
         this._origPathEditorOnElementOrderChange = pathEditor.onElementOrderChange;
+        this._origPathEditorOnShapeElementClick = pathEditor.onShapeElementClick;
+        this._origPathEditorOnPathElemClick = pathEditor.onPathElemClick;
+        this._origPathEditorOnDeactivate = pathEditor.onDeactivate;
 
         pathEditor.onElementOrderChange = (order) => {
             if (!Array.isArray(order) || !this.state) return;
@@ -951,7 +1145,9 @@ export default class ProfileEditor {
                 : this.state.variableValues;
             this.state.variableValues = currentVars ?? {};
             const mergedPath = _mergeFormulaPath(path, this._formulaPath, currentVars ?? {});
-            const elemsWithPaths = _buildElemsWithPaths(elements, mergedPath, lineSegIds);
+            const editorSnapshot = this._pathEditor?.getElementsDebugSnapshot?.() ?? [];
+            const orderedElements = _orderElementsLikePathEditor(elements, editorSnapshot);
+            const elemsWithPaths = _buildElemsWithPaths(orderedElements, mergedPath, lineSegIds);
             const needsRebuild = this._pathEditor.needsElementsRebuild?.(elemsWithPaths) ?? true;
             if (needsRebuild) {
                 this._syncingToPathEditor = true;
