@@ -1785,6 +1785,94 @@ export default class BitsManager {
             return [...new Set(out)];
         };
 
+        /**
+         * Normalize a selected-segment list to unique string IDs.
+         * @param {Array<string|number>} [ids=[]]
+         * @returns {string[]}
+         */
+        const normalizeSelectedSegIds = (ids = []) => {
+            if (!Array.isArray(ids)) return [];
+            return [...new Set(ids.map((id) => String(id ?? "").trim()).filter(Boolean))];
+        };
+
+        /**
+         * Apply preview selection by canonical segIds and redraw overlay highlights.
+         * @param {Array<string|number>} [ids=[]]
+         */
+        const applyPreviewSelectionBySegIds = (ids = []) => {
+            previewSelectedSegIds = normalizeSelectedSegIds(ids);
+            drawAnchorAndAxis(previewRenderState.shape);
+        };
+
+        /**
+         * Resolve PathEditor line refs to canonical segIds, apply selection and redraw highlights.
+         * @param {string|number|null} rowRef
+         * @param {Array<string|number>|null} [selectedRefs=null]
+         */
+        const applyPreviewSelectionFromRefs = (rowRef, selectedRefs = null) => {
+            const refs = Array.isArray(selectedRefs)
+                ? selectedRefs
+                : (rowRef != null ? [rowRef] : []);
+            previewSelectedSegIds = toSelectedSegIds(refs);
+            pathEditorInstance?.setSelectedLines?.(refs);
+            drawAnchorAndAxis(previewRenderState.shape);
+        };
+
+        /**
+         * Parse JSON safely and return array fallback on invalid payload.
+         * @param {string} raw
+         * @param {Array} [fallback=[]]
+         * @returns {Array}
+         */
+        const parseJsonArraySafe = (raw, fallback = []) => {
+            try {
+                const parsed = JSON.parse(String(raw ?? "[]"));
+                return Array.isArray(parsed) ? parsed : fallback;
+            } catch (_) {
+                return fallback;
+            }
+        };
+
+        /**
+         * Restore PathEditor structure and transforms from persisted snapshot.
+         * Uses `elements` as source-of-truth; falls back to legacy flat path only
+         * when elements are missing (backward compatibility).
+         *
+         * @param {import("./PathEditor.js").default|null} editor
+         * @param {object} options
+         * @param {Array} [options.elementsSnapshot=[]]
+         * @param {Array} [options.transformsSnapshot=[]]
+         * @param {string} [options.legacyPath=""]
+         * @param {boolean} [options.suppressOnChange=true]
+         * @returns {boolean} true when restored from elements snapshot
+         */
+        const restorePathEditorState = (editor, {
+            elementsSnapshot = [],
+            transformsSnapshot = [],
+            legacyPath = "",
+            suppressOnChange = true,
+        } = {}) => {
+            if (!editor) return false;
+            const savedOnChange = editor.onChange;
+            if (suppressOnChange) editor.onChange = () => { };
+
+            const elements = Array.isArray(elementsSnapshot) ? elementsSnapshot : [];
+            const hasElements = elements.length > 0;
+            if (hasElements) {
+                editor.setElements(elements);
+            } else if (legacyPath && String(legacyPath).trim()) {
+                editor.setPath(legacyPath);
+            }
+
+            const transforms = Array.isArray(transformsSnapshot) ? transformsSnapshot : [];
+            if (transforms.length > 0) {
+                editor.setElementTransformsSnapshot(normalizeProfileTransformsSnapshot(transforms));
+            }
+
+            if (suppressOnChange) editor.onChange = savedOnChange;
+            return hasElements;
+        };
+
         // Initialize preview canvas with larger size
         const initializePreviewCanvas = () => {
             previewCanvasManager = new CanvasManager({
@@ -1887,6 +1975,11 @@ export default class BitsManager {
             if (previewSelectedSegIds.length > 0 && pathEditorInstance?.getElementsDebugSnapshot) {
                 const selectedSet = new Set(previewSelectedSegIds.map(String));
                 const snapshot = pathEditorInstance.getElementsDebugSnapshot() || [];
+                const previewVars = this.collectVariableValues(form, groupName);
+                const transformFor = (elem) => {
+                    const tr = modListToSvgTransform(Array.isArray(elem?.transforms) ? elem.transforms : [], previewVars);
+                    return tr && tr !== "none" ? tr : "";
+                };
 
                 const contourRows = [];
                 for (const elem of snapshot) {
@@ -1895,7 +1988,11 @@ export default class BitsManager {
                     const evaluatedLines = lines.map((line) => pathEditorInstance.evaluateLine(String(line?.text ?? "")));
                     const segRows = parseEvaluatedPathRows(evaluatedLines.filter(Boolean).join(" "));
                     for (let i = 0; i < segRows.length; i++) {
-                        contourRows.push({ segId: lines[i]?.segId ?? null, geom: segRows[i] ?? null });
+                        contourRows.push({
+                            segId: lines[i]?.segId ?? null,
+                            geom: segRows[i] ?? null,
+                            transform: transformFor(elem),
+                        });
                     }
                 }
 
@@ -1911,6 +2008,7 @@ export default class BitsManager {
                         dot.setAttribute("fill-opacity", "0.85");
                         dot.setAttribute("stroke", "#1565C0");
                         dot.setAttribute("stroke-width", Math.max(0.05, 0.5 / zoom));
+                        if (row.transform) dot.setAttribute("transform", row.transform);
                         dot.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(dot);
                     } else if (seg.type === "arc") {
@@ -1924,6 +2022,7 @@ export default class BitsManager {
                         hl.setAttribute("stroke", "#2196F3");
                         hl.setAttribute("stroke-width", sw);
                         hl.setAttribute("stroke-linecap", "round");
+                        if (row.transform) hl.setAttribute("transform", row.transform);
                         hl.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(hl);
                     } else {
@@ -1936,6 +2035,7 @@ export default class BitsManager {
                         hl.setAttribute("stroke", "#2196F3");
                         hl.setAttribute("stroke-width", sw);
                         hl.setAttribute("stroke-linecap", "round");
+                        if (row.transform) hl.setAttribute("transform", row.transform);
                         hl.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(hl);
                     }
@@ -1948,6 +2048,7 @@ export default class BitsManager {
 
                 const sw = Math.max(0.05, 1.5 / zoom);
                 for (const elem of shapeElems) {
+                    const shapeTransform = transformFor(elem);
                     if (elem.type === "circle") {
                         const center = elem?.data?.center;
                         const radius = Number(elem?.data?.radius ?? NaN);
@@ -1959,6 +2060,7 @@ export default class BitsManager {
                         hl.setAttribute("fill", "none");
                         hl.setAttribute("stroke", "#2196F3");
                         hl.setAttribute("stroke-width", String(sw));
+                        if (shapeTransform) hl.setAttribute("transform", shapeTransform);
                         hl.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(hl);
                         continue;
@@ -1978,6 +2080,7 @@ export default class BitsManager {
                         hl.setAttribute("fill", "none");
                         hl.setAttribute("stroke", "#2196F3");
                         hl.setAttribute("stroke-width", String(sw));
+                        if (shapeTransform) hl.setAttribute("transform", shapeTransform);
                         hl.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(hl);
                         continue;
@@ -2006,6 +2109,7 @@ export default class BitsManager {
                         hl.setAttribute("fill", "none");
                         hl.setAttribute("stroke", "#2196F3");
                         hl.setAttribute("stroke-width", String(sw));
+                        if (shapeTransform) hl.setAttribute("transform", shapeTransform);
                         hl.classList.add("preview-seg-highlight");
                         overlayLayer.appendChild(hl);
                     }
@@ -2267,16 +2371,13 @@ export default class BitsManager {
                         if (!editSaved && pathEditorInstance) {
                             // Cancel: restore the path that was in the PathEditor before
                             // editing started (preserving any formula tokens).
-                            const savedOnChange = pathEditorInstance.onChange;
                             const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
-                            pathEditorInstance.onChange = () => { };
-                            if (Array.isArray(originalElementsSnapshot) && originalElementsSnapshot.length > 0) {
-                                pathEditorInstance.setElements(originalElementsSnapshot);
-                            } else {
-                                pathEditorInstance.setPath(originalRawPath);
-                            }
-                            pathEditorInstance.setElementTransformsSnapshot?.(transformsSnapshot);
-                            pathEditorInstance.onChange = savedOnChange;
+                            restorePathEditorState(pathEditorInstance, {
+                                elementsSnapshot: originalElementsSnapshot,
+                                transformsSnapshot,
+                                legacyPath: originalRawPath,
+                                suppressOnChange: true,
+                            });
                         }
                         previewRenderState.signature = null;
                         previewRenderState.shape = null;
@@ -2330,29 +2431,14 @@ export default class BitsManager {
             const initialTransformsRaw = profileTransformsInput?.value || "[]";
             const initialElementsRaw = profileElementsInput?.value || "[]";
             const initialPath = defaultValues.rawProfilePath || defaultValues.profilePath;
-            let elementsInitialized = false;
-            try {
-                const savedElements = JSON.parse(initialElementsRaw);
-                if (Array.isArray(savedElements) && savedElements.length > 0) {
-                    pathEditorInstance.setElements(savedElements);
-                    elementsInitialized = true;
-                }
-            } catch (_) {
-                // ignore invalid stored elements payload
-            }
-            if (!elementsInitialized && initialPath) {
-                pathEditorInstance.setPath(initialPath);
-            }
-            try {
-                const savedTransforms = JSON.parse(initialTransformsRaw);
-                if (Array.isArray(savedTransforms) && savedTransforms.length > 0) {
-                    pathEditorInstance.setElementTransformsSnapshot(
-                        normalizeProfileTransformsSnapshot(savedTransforms)
-                    );
-                }
-            } catch (_) {
-                // ignore invalid stored transforms payload
-            }
+            const savedElements = parseJsonArraySafe(initialElementsRaw, []);
+            const savedTransforms = parseJsonArraySafe(initialTransformsRaw, []);
+            restorePathEditorState(pathEditorInstance, {
+                elementsSnapshot: savedElements,
+                transformsSnapshot: savedTransforms,
+                legacyPath: initialPath,
+                suppressOnChange: true,
+            });
 
             // Keep hidden inputs consistent on modal open even when initialized
             // from setElements() (which does not emit onChange by design).
@@ -2364,27 +2450,22 @@ export default class BitsManager {
             // Preview mode: row click highlights row + canvas marker.
             // Shift+click adds to selection (multi-select), plain click replaces.
             pathEditorInstance.onLineClick = (rowRef, _e, selectedRefs = null) => {
-                const refs = Array.isArray(selectedRefs)
-                    ? selectedRefs
-                    : (rowRef != null ? [rowRef] : []);
-                previewSelectedSegIds = toSelectedSegIds(refs);
-                pathEditorInstance.setSelectedLines(refs);
-                drawAnchorAndAxis(previewRenderState.shape);
+                applyPreviewSelectionFromRefs(rowRef, selectedRefs);
             };
 
             pathEditorInstance.onShapeElementClick = (_segId, _e, selectedSegIds = null) => {
-                previewSelectedSegIds = Array.isArray(selectedSegIds)
-                    ? [...new Set(selectedSegIds.map((id) => String(id ?? "")).filter(Boolean))]
-                    : [];
-                drawAnchorAndAxis(previewRenderState.shape);
+                applyPreviewSelectionBySegIds(selectedSegIds ?? []);
             };
 
             pathEditorInstance.onPathElemClick = (segIds, _e, selectedSegIds = null) => {
                 const selected = Array.isArray(selectedSegIds)
                     ? selectedSegIds
                     : (Array.isArray(segIds) ? segIds : []);
-                previewSelectedSegIds = [...new Set(selected.map((id) => String(id ?? "")).filter(Boolean))];
-                drawAnchorAndAxis(previewRenderState.shape);
+                applyPreviewSelectionBySegIds(selected);
+            };
+
+            pathEditorInstance.onDeactivate = () => {
+                applyPreviewSelectionBySegIds([]);
             };
 
             // Update variable values when form inputs change

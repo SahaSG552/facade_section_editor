@@ -13,6 +13,13 @@
 
 import { evaluateMathExpression } from "../utils/utils.js";
 import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
+import {
+    isShapeYAttr,
+    pathUiToStoredToken,
+    shapeStoredToUiNumber,
+    shapeUiToStoredNumber,
+    shapeUiToStoredToken,
+} from "../utils/yPolicy.js";
 
 /**
  * Valid SVG path commands with their argument counts and labels
@@ -118,6 +125,12 @@ export default class PathEditor {
          * @type {'bit'|'canvas'}
          */
         this._shapeDataSpace = 'bit';
+        /**
+         * Coordinate space of path line params currently shown in row cells.
+         * Stored hidden path is always bit-space.
+         * @type {'bit'|'canvas'}
+         */
+        this._pathParamSpace = 'bit';
 
         // ── DOM refs ──────────────────────────────────────────────────────
         /** @type {HTMLElement|null} */
@@ -665,6 +678,7 @@ export default class PathEditor {
      */
     setVariableValues(values) {
         this.variableValues = values || {};
+        this._recomputeShapeDataFromTokens();
         for (const elem of this._elements) {
             if (elem.type === 'path' || elem.type === 'polyline') {
                 for (const line of elem.lines) {
@@ -674,6 +688,45 @@ export default class PathEditor {
         }
         this._fireOnChange();
         this._renderSuggestions();
+    }
+
+    /**
+     * Re-evaluate shape numeric data from currently stored raw tokens/formulas.
+     * Keeps formulas in `_expr` / `radiusExpr` while updating concrete geometry
+     * for the active variable set.
+     * @private
+     */
+    _recomputeShapeDataFromTokens() {
+        for (const elem of this._elements) {
+            if (!(elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse')) continue;
+            const def = PathEditor.SHAPE_DEFS[elem.type];
+            if (!def) continue;
+
+            const nextData = { ...(elem.data ?? {}) };
+            for (const attrKey of def.attrs) {
+                const token = this._shapeAttrValue(elem.type, nextData, attrKey);
+                if (token == null || String(token).trim() === '') continue;
+                const changes = this._shapeAttrToChanges(elem.type, nextData, attrKey, String(token));
+                Object.assign(nextData, changes);
+            }
+
+            if (elem.type === 'circle') {
+                const center = nextData.center ?? elem.data?.center ?? { x: 0, y: 0 };
+                const radius = Number(nextData.radius ?? elem.data?.radius ?? 0);
+                const prevPt3 = nextData.pt3 ?? elem.data?.pt3 ?? { x: center.x + radius, y: center.y };
+                const dx = Number(prevPt3?.x) - center.x;
+                const dy = Number(prevPt3?.y) - center.y;
+                const ang = Number.isFinite(dx) && Number.isFinite(dy) && Math.hypot(dx, dy) > 1e-9
+                    ? Math.atan2(dy, dx)
+                    : 0;
+                nextData.pt3 = {
+                    x: center.x + Math.cos(ang) * radius,
+                    y: center.y + Math.sin(ang) * radius,
+                };
+            }
+
+            elem.data = nextData;
+        }
     }
 
     /** @returns {Array<{varName:string, name:string, value:*}>} */
@@ -1467,21 +1520,23 @@ export default class PathEditor {
                 const { center, radius } = elem.data ?? {};
                 if (center != null && radius != null) {
                     const r6 = v => +Number(v).toFixed(6);
-                    const cx = center.x;
-                    const cy = center.y;
-                    const radNum = Number(radius);
-                    const cxRaw = elem.data?._expr?.cx ?? r6(cx);
-                    const cyRaw = elem.data?._expr?.cy ?? r6(cy);
+                    const cx = Number(center.x ?? 0);
+                    const cyCanvas = Number(center.y ?? 0);
+                    const radNum = Math.abs(Number(radius ?? 0));
+                    if (![cx, cyCanvas, radNum].every(Number.isFinite)) continue;
+
+                    const cxRaw = elem.data?._expr?.cx ?? r6(center.x);
+                    const cyRaw = elem.data?._expr?.cy ?? r6(center.y);
                     const radRaw = elem.data?.radiusExpr ?? elem.data?._expr?.r ?? r6(radNum);
-                    const radEval = Number(this.evaluateToken(String(radRaw)));
+
                     const mLeftX = r6(cx - radNum);
                     const mRightX = r6(cx + radNum);
-                    const cySvg = r6(-cy);
+                    const cySvg = r6(-cyCanvas);
 
                     const evaluatedCmd =
                         `M ${mLeftX} ${cySvg}` +
-                        ` A ${r6(radEval)} ${r6(radEval)} 0 1 0 ${mRightX} ${cySvg}` +
-                        ` A ${r6(radEval)} ${r6(radEval)} 0 1 0 ${mLeftX} ${cySvg}` +
+                        ` A ${r6(radNum)} ${r6(radNum)} 0 1 0 ${mRightX} ${cySvg}` +
+                        ` A ${r6(radNum)} ${r6(radNum)} 0 1 0 ${mLeftX} ${cySvg}` +
                         ` Z`;
                     const rawCmd =
                         `M (${cxRaw})-(${radRaw}) -(${cyRaw})` +
@@ -1494,18 +1549,31 @@ export default class PathEditor {
             } else if (elem.type === 'rect') {
                 const r6 = v => +Number(v).toFixed(6);
                 const data = elem.data ?? {};
-                const xVal = Number(data.x ?? 0);
-                const yVal = Number(data.y ?? 0);
-                const wVal = Number(data.w ?? 0);
-                const hVal = Number(data.h ?? 0);
-                const rxVal = Number(data.rx ?? 0);
+                const rawToken = (key, fallback) => {
+                    const expr = elem.data?._expr?.[key];
+                    return (expr != null && String(expr).trim() !== '') ? String(expr).trim() : String(fallback);
+                };
+                const toBitYToken = (token) => this._shapeDataSpace === 'canvas'
+                    ? shapeUiToStoredToken('y', token, this._shapeDataSpace)
+                    : String(token);
+
+                const xRaw = rawToken('x', r6(Number(data.x ?? 0)));
+                const yExpr = elem.data?._expr?.y;
+                const yRaw = (yExpr != null && String(yExpr).trim() !== '')
+                    ? String(yExpr).trim()
+                    : toBitYToken(r6(Number(data.y ?? 0)));
+                const wRaw = rawToken('w', r6(Number(data.w ?? 0)));
+                const hRaw = rawToken('h', r6(Number(data.h ?? 0)));
+                const rxRaw = rawToken('rx', r6(Number(data.rx ?? 0)));
+
+                const xEval = Number(this.evaluateToken(xRaw));
+                const yBit = Number(this.evaluateToken(yRaw));
+                const wEval = Math.abs(Number(this.evaluateToken(wRaw)));
+                const hEval = Math.abs(Number(this.evaluateToken(hRaw)));
+                const rxEvalRaw = Math.abs(Number(this.evaluateToken(rxRaw)));
 
                 // Hidden path is always stored in bit-space (Y-up).
-                const xEval = xVal;
-                const yBit = this._shapeDataSpace === 'canvas' ? -yVal : yVal;
-                const wEval = Math.abs(wVal);
-                const hEval = Math.abs(hVal);
-                const rxEval = Number.isFinite(rxVal) ? Math.abs(rxVal) : 0;
+                const rxEval = Number.isFinite(rxEvalRaw) ? rxEvalRaw : 0;
 
                 if (![xEval, yBit, wEval, hEval].every(Number.isFinite)) continue;
 
@@ -1513,21 +1581,9 @@ export default class PathEditor {
                 const y2Eval = yBit - hEval;
                 const radEval = Math.max(0, Math.min(Number.isFinite(rxEval) ? rxEval : 0, Math.abs(wEval) / 2, Math.abs(hEval) / 2));
 
-                const rawToken = (key, fallback) => {
-                    const expr = elem.data?._expr?.[key];
-                    return (expr != null && String(expr).trim() !== '') ? String(expr).trim() : String(fallback);
-                };
-                const toBitYToken = (token) => this._shapeDataSpace === 'canvas'
-                    ? this._negateShapeToken(token)
-                    : String(token);
-                const xRaw = rawToken('x', r6(xEval));
-                const yExpr = elem.data?._expr?.y;
-                const yRaw = (yExpr != null && String(yExpr).trim() !== '')
-                    ? String(yExpr).trim()
-                    : toBitYToken(r6(yVal));
-                const wRaw = rawToken('w', r6(wEval));
-                const hRaw = rawToken('h', r6(hEval));
-                const rxRaw = rawToken('rx', r6(radEval));
+                const rxRawOut = (elem.data?._expr?.rx != null && String(elem.data._expr.rx).trim() !== '')
+                    ? String(elem.data._expr.rx).trim()
+                    : r6(radEval);
 
                 if (radEval > 1e-9) {
                     const evaluatedCmd =
@@ -1542,15 +1598,15 @@ export default class PathEditor {
                         ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(xEval + radEval)} ${r6(yBit)}` +
                         ` Z`;
                     const rawCmd =
-                        `M (${xRaw})+(${rxRaw}) (${yRaw})` +
-                        ` L (${xRaw})+(${wRaw})-(${rxRaw}) (${yRaw})` +
-                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw})+(${wRaw}) (${yRaw})-(${rxRaw})` +
-                        ` L (${xRaw})+(${wRaw}) (${yRaw})-(${hRaw})+(${rxRaw})` +
-                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw})+(${wRaw})-(${rxRaw}) (${yRaw})-(${hRaw})` +
-                        ` L (${xRaw})+(${rxRaw}) (${yRaw})-(${hRaw})` +
-                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw}) (${yRaw})-(${hRaw})+(${rxRaw})` +
-                        ` L (${xRaw}) (${yRaw})-(${rxRaw})` +
-                        ` A ${rxRaw} ${rxRaw} 0 0 0 (${xRaw})+(${rxRaw}) (${yRaw})` +
+                        `M (${xRaw})+(${rxRawOut}) (${yRaw})` +
+                        ` L (${xRaw})+(${wRaw})-(${rxRawOut}) (${yRaw})` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw})+(${wRaw}) (${yRaw})-(${rxRawOut})` +
+                        ` L (${xRaw})+(${wRaw}) (${yRaw})-(${hRaw})+(${rxRawOut})` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw})+(${wRaw})-(${rxRawOut}) (${yRaw})-(${hRaw})` +
+                        ` L (${xRaw})+(${rxRawOut}) (${yRaw})-(${hRaw})` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw}) (${yRaw})-(${hRaw})+(${rxRawOut})` +
+                        ` L (${xRaw}) (${yRaw})-(${rxRawOut})` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw})+(${rxRawOut}) (${yRaw})` +
                         ` Z`;
                     parts.push(evaluatedCmd);
                     rawParts.push(rawCmd);
@@ -1573,13 +1629,18 @@ export default class PathEditor {
             } else if (elem.type === 'ellipse') {
                 const r6 = v => +Number(v).toFixed(6);
                 const data = elem.data ?? {};
-                const cxEval = Number(data.cx ?? 0);
-                const cyEvalCanvas = Number(data.cy ?? 0);
-                const rxEval = Math.abs(Number(data.rx ?? 0));
-                const ryEval = Math.abs(Number(data.ry ?? 0));
-                const cyBit = this._shapeDataSpace === 'canvas' ? -cyEvalCanvas : cyEvalCanvas;
+                const cxRaw = elem.data?._expr?.cx ?? r6(Number(data.cx ?? 0));
+                const cyRawCanvas = elem.data?._expr?.cy ?? r6(Number(data.cy ?? 0));
+                const rxRaw = elem.data?._expr?.rx ?? r6(Number(data.rx ?? 0));
+                const ryRaw = elem.data?._expr?.ry ?? r6(Number(data.ry ?? 0));
 
-                if (![cxEval, cyEval, rxEval, ryEval].every(Number.isFinite)) continue;
+                const cxEval = Number(this.evaluateToken(String(cxRaw)));
+                const cyEvalCanvas = Number(this.evaluateToken(String(cyRawCanvas)));
+                const rxEval = Math.abs(Number(this.evaluateToken(String(rxRaw))));
+                const ryEval = Math.abs(Number(this.evaluateToken(String(ryRaw))));
+                const cyBit = shapeUiToStoredNumber('cy', cyEvalCanvas, this._shapeDataSpace);
+
+                if (![cxEval, cyEvalCanvas, rxEval, ryEval].every(Number.isFinite)) continue;
 
                 const evaluatedCmd =
                     `M ${r6(cxEval - rxEval)} ${r6(cyBit)}` +
@@ -1669,7 +1730,8 @@ export default class PathEditor {
 
     /**
      * Apply top-level element transforms snapshot to current rows.
-     * Matching is positional within path rows and shape rows.
+     * Path rows are matched by `contourId` first (fallback: positional for legacy snapshots).
+     * Shape rows are matched by `segId` first (fallback: positional for legacy snapshots).
      * @param {Array<{kind:'path'|'shape', contourId?:number, segId?:string, transforms:Array<object>}>} snapshot
      */
     setElementTransformsSnapshot(snapshot) {
@@ -1713,9 +1775,10 @@ export default class PathEditor {
         const shapeElems = this._elements.filter(e => e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse');
 
         for (let i = 0; i < pathElems.length; i++) {
+            const byContour = pathSnap.find(s => Number(s?.contourId) === Number(pathElems[i]?.contourId));
             pathElems[i].transforms = this._mergeTransformsWithFormulaPriority(
                 pathElems[i].transforms,
-                norm(pathSnap[i]?.transforms)
+                norm(byContour?.transforms ?? pathSnap[i]?.transforms)
             );
         }
         for (let i = 0; i < shapeElems.length; i++) {
@@ -2475,7 +2538,9 @@ export default class PathEditor {
         if (!parsed) return '';
         const { cmd, params } = parsed;
         if (cmd.toUpperCase() === 'Z') return cmd;
-        return cmd + ' ' + params.map(p => this.evaluateToken(p)).join(' ');
+        return cmd + ' ' + params
+            .map((p, i) => pathUiToStoredToken(cmd, i, this.evaluateToken(p), this._pathParamSpace))
+            .join(' ');
     }
 
     /**
@@ -2649,23 +2714,29 @@ export default class PathEditor {
     _shapeAttrValueForSpace(type, data, attrKey, shapeSpace = this._shapeDataSpace) {
         const exprVal = data?._expr?.[attrKey];
         if (exprVal != null && exprVal !== '') return String(exprVal);
-        const ySign = shapeSpace === 'canvas' ? -1 : 1;
         if (type === 'circle') {
             if (attrKey === 'cx') return String(parseFloat((data.center?.x ?? 0).toFixed(4)));
-            if (attrKey === 'cy') return String(parseFloat(((data.center?.y ?? 0) * ySign).toFixed(4)));
+            if (attrKey === 'cy') {
+                const ui = shapeStoredToUiNumber('cy', data.center?.y ?? 0, shapeSpace);
+                return String(parseFloat(Number(ui).toFixed(4)));
+            }
             if (attrKey === 'r')  return data.radiusExpr ?? String(parseFloat((data.radius ?? 0).toFixed(4)));
         }
         if (type === 'rect') {
             // data uses w/h directly (not width/height)
             const key = attrKey === 'w' ? 'w' : attrKey === 'h' ? 'h' : attrKey;
             const raw = data[key];
-            const v = (attrKey === 'y') ? Number(raw ?? 0) * ySign : raw;
+            const v = isShapeYAttr(attrKey)
+                ? shapeStoredToUiNumber(attrKey, Number(raw ?? 0), shapeSpace)
+                : raw;
             return v !== undefined ? String(parseFloat(Number(v).toFixed(4))) : '';
         }
         if (type === 'ellipse') {
             const map = { cx: 'cx', cy: 'cy', rx: 'rx', ry: 'ry' };
             const raw = data[map[attrKey]];
-            const v = (attrKey === 'cy') ? Number(raw ?? 0) * ySign : raw;
+            const v = isShapeYAttr(attrKey)
+                ? shapeStoredToUiNumber(attrKey, Number(raw ?? 0), shapeSpace)
+                : raw;
             return v !== undefined ? String(parseFloat(Number(v).toFixed(4))) : '';
         }
         return '';
@@ -2698,7 +2769,6 @@ export default class PathEditor {
     _shapeAttrToChangesForSpace(type, data, attrKey, val, shapeSpace = this._shapeDataSpace) {
         const toNum  = s => parseFloat(this.evaluateToken(s));
         const isFormula = s => this._isFormulaParamToken(s);
-        const ySign = shapeSpace === 'canvas' ? -1 : 1;
         const withExprMap = (key, rawVal) => {
             const map = { ...(data?._expr ?? {}) };
             if (isFormula(rawVal)) map[key] = rawVal.trim();
@@ -2712,7 +2782,7 @@ export default class PathEditor {
                 _expr: withExprMap('cx', val),
             };
             if (attrKey === 'cy') return {
-                center: { ...data.center, y: toNum(val) * ySign },
+                center: { ...data.center, y: shapeUiToStoredNumber('cy', toNum(val), shapeSpace) },
                 _expr: withExprMap('cy', val),
             };
             if (attrKey === 'r') {
@@ -2724,11 +2794,15 @@ export default class PathEditor {
         }
         if (type === 'rect') {
             // data uses w/h directly
-            const nextVal = attrKey === 'y' ? toNum(val) * ySign : toNum(val);
+            const nextVal = isShapeYAttr(attrKey)
+                ? shapeUiToStoredNumber(attrKey, toNum(val), shapeSpace)
+                : toNum(val);
             return { [attrKey]: nextVal, _expr: withExprMap(attrKey, val) };
         }
         if (type === 'ellipse') {
-            const nextVal = attrKey === 'cy' ? toNum(val) * ySign : toNum(val);
+            const nextVal = isShapeYAttr(attrKey)
+                ? shapeUiToStoredNumber(attrKey, toNum(val), shapeSpace)
+                : toNum(val);
             return { [attrKey]: nextVal, _expr: withExprMap(attrKey, val) };
         }
         return {};
@@ -2741,27 +2815,7 @@ export default class PathEditor {
      * @private
      */
     _isShapeYAttr(attrKey) {
-        return attrKey === 'cy' || attrKey === 'y';
-    }
-
-    /**
-     * Negate a numeric/formula token for UI display/edit round-trip.
-     * Applying twice returns the original token (for common token forms).
-     * @param {string} token
-     * @returns {string}
-     * @private
-     */
-    _negateShapeToken(token) {
-        const t = String(token ?? '').trim();
-        if (!t) return '';
-        const numeric = Number(t);
-        if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
-            return String(parseFloat(String(-numeric)));
-        }
-        const wrappedNeg = t.match(/^-\((.*)\)$/);
-        if (wrappedNeg) return wrappedNeg[1].trim();
-        if (t.startsWith('-')) return t.slice(1).trim();
-        return `-(${t})`;
+        return isShapeYAttr(attrKey);
     }
 
     /**

@@ -12,6 +12,8 @@ import RectTool from "./tools/RectTool.js";
 import EllipseTool from "./tools/EllipseTool.js";
 import { evaluateMathExpression } from "../utils/utils.js";
 import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
+import { isFormulaToken, evaluateTokenWithVars } from "../utils/formulaPolicy.js";
+import { shapeUiToStoredNumber } from "../utils/yPolicy.js";
 
 const log = LoggerFactory.createLogger("ProfileEditor");
 
@@ -277,20 +279,7 @@ function _orderElementsLikePathEditor(elements, editorSnapshot) {
  * @returns {number}
  */
 function _resolveTokenNumber(token, vars) {
-    const t = String(token ?? '').trim();
-    if (!t) return NaN;
-    const direct = Number(t);
-    if (!Number.isNaN(direct) && Number.isFinite(direct)) return direct;
-    try {
-        const expr = t.replace(VARIABLE_TOKEN_RE_GLOBAL, (_, name) => {
-            const v = vars?.[name];
-            return v !== undefined && !Number.isNaN(Number(v)) ? String(v) : '0';
-        });
-        const n = Number(evaluateMathExpression(expr));
-        return Number.isNaN(n) ? NaN : n;
-    } catch (_) {
-        return NaN;
-    }
+    return evaluateTokenWithVars(token, vars, Number.NaN);
 }
 
 /**
@@ -304,15 +293,7 @@ function _resolveTokenNumber(token, vars) {
 function _restoreShapeFormulasIntoState(state, snapshot, vars) {
     if (!state || !Array.isArray(snapshot) || snapshot.length === 0) return;
 
-    const isFormula = (v) => {
-        const t = String(v ?? '').trim();
-        if (!t) return false;
-        const direct = Number(t);
-        if (!Number.isNaN(direct) && Number.isFinite(direct)) return false;
-        return /\{[^}]+\}/.test(t)
-            || /[*/()]/.test(t)
-            || (/[+\-]/.test(t) && !/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t));
-    };
+    const isFormula = (v) => isFormulaToken(v);
     const isEq = (a, b) => !Number.isNaN(a) && !Number.isNaN(b) && Math.abs(a - b) <= 1e-4;
     const shapeSegs = state.segments.filter(s => s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse');
     if (shapeSegs.length === 0) return;
@@ -384,7 +365,8 @@ function _syncElementTransformsToState(state, transformsMeta) {
 
     for (let i = 0; i < statePaths.length; i++) {
         const elem = statePaths[i];
-        const tr = normalize(metaPaths[i]?.transforms);
+        const byContour = metaPaths.find(m => Number(m?.contourId) === Number(elem?.contourId));
+        const tr = normalize(byContour?.transforms ?? metaPaths[i]?.transforms);
         for (const seg of state.segments) {
             if ((seg.contourId ?? 0) !== (elem.contourId ?? 0)) continue;
             if (!same(seg.transforms, tr)) updates.push({ id: seg.id, changes: { transforms: tr } });
@@ -471,12 +453,24 @@ function _buildEvaluatedContoursPathFromElements(elements, vars) {
  *
  * @param {EditorStateManager} state
  * @param {Array} elements
+ * @param {{ resetHistoryBaseline?: boolean }} [options]
  */
-function _restoreStateStructureFromElements(state, elements) {
+function _restoreStateStructureFromElements(state, elements, { resetHistoryBaseline = true, vars = {} } = {}) {
     if (!state || !Array.isArray(elements) || elements.length === 0) return;
 
     const shapeElems = elements.filter(e => e?.type === "circle" || e?.type === "rect" || e?.type === "ellipse");
-    if (shapeElems.length === 0) return;
+    // Keep only contour segments in state; shape rows are restored from snapshot below.
+    state.segments = state.segments.filter(s => s.type === 'line' || s.type === 'arc');
+    if (shapeElems.length === 0) {
+        if (resetHistoryBaseline) {
+            state._history = [{
+                segments: state.segments.map(s => ({ ...s })),
+                description: "Import",
+            }];
+            state._historyIndex = 0;
+        }
+        return;
+    }
 
     const existingIds = new Set(state.segments.map(s => String(s.id)));
     const normalizeTransforms = (arr) => (Array.isArray(arr) ? arr : []).map(t => ({
@@ -484,6 +478,113 @@ function _restoreStateStructureFromElements(state, elements) {
         raw: String(t?.raw ?? ""),
         params: Array.isArray(t?.params) ? [...t.params] : [],
     }));
+
+    const isFormulaToken = (value) => {
+        const t = String(value ?? "").trim();
+        if (!t) return false;
+        const direct = Number(t);
+        if (!Number.isNaN(direct) && Number.isFinite(direct)) return false;
+        return /\{[^}]+\}/.test(t)
+            || /[*/()]/.test(t)
+            || (/[+\-]/.test(t) && !/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t));
+    };
+
+    const evalMaybeFormula = (token, fallback = 0) => {
+        const raw = String(token ?? "").trim();
+        if (!raw) return Number(fallback) || 0;
+        if (!isFormulaToken(raw)) {
+            const n = Number(raw);
+            return Number.isFinite(n) ? n : (Number(fallback) || 0);
+        }
+        return _resolveTokenNumber(raw, vars);
+    };
+
+    const evalShapeData = (type, data) => {
+        const src = { ...(data ?? {}) };
+        const next = { ...src };
+        const expr = src?._expr ?? {};
+
+        if (type === 'circle') {
+            const cxTok = expr.cx ?? src?.center?.x;
+            const cyTok = expr.cy ?? src?.center?.y;
+            const rTok = src?.radiusExpr ?? expr.r ?? src?.radius;
+
+            const cx = evalMaybeFormula(cxTok, src?.center?.x ?? 0);
+            const cy = evalMaybeFormula(cyTok, src?.center?.y ?? 0);
+            const r = Math.abs(evalMaybeFormula(rTok, src?.radius ?? 0));
+
+            next.center = {
+                x: Number.isFinite(cx) ? cx : Number(src?.center?.x ?? 0),
+                y: Number.isFinite(cy)
+                    ? (isFormulaToken(cyTok)
+                        ? shapeUiToStoredNumber('cy', cy, 'canvas')
+                        : cy)
+                    : Number(src?.center?.y ?? 0),
+            };
+            next.radius = Number.isFinite(r) ? r : Math.abs(Number(src?.radius ?? 0));
+
+            const prevPt3 = src?.pt3;
+            const dx = Number(prevPt3?.x) - next.center.x;
+            const dy = Number(prevPt3?.y) - next.center.y;
+            const ang = Number.isFinite(dx) && Number.isFinite(dy) && Math.hypot(dx, dy) > 1e-9
+                ? Math.atan2(dy, dx)
+                : 0;
+            next.pt3 = {
+                x: next.center.x + Math.cos(ang) * next.radius,
+                y: next.center.y + Math.sin(ang) * next.radius,
+            };
+            return next;
+        }
+
+        if (type === 'rect') {
+            const xTok = expr.x ?? src.x;
+            const yTok = expr.y ?? src.y;
+            const wTok = expr.w ?? src.w;
+            const hTok = expr.h ?? src.h;
+            const rxTok = expr.rx ?? src.rx;
+
+            const x = evalMaybeFormula(xTok, src.x ?? 0);
+            const y = evalMaybeFormula(yTok, src.y ?? 0);
+            const w = evalMaybeFormula(wTok, src.w ?? 0);
+            const h = evalMaybeFormula(hTok, src.h ?? 0);
+            const rx = Math.abs(evalMaybeFormula(rxTok, src.rx ?? 0));
+
+            next.x = Number.isFinite(x) ? x : Number(src.x ?? 0);
+            next.y = Number.isFinite(y)
+                ? (isFormulaToken(yTok)
+                    ? shapeUiToStoredNumber('y', y, 'canvas')
+                    : y)
+                : Number(src.y ?? 0);
+            next.w = Number.isFinite(w) ? w : Number(src.w ?? 0);
+            next.h = Number.isFinite(h) ? h : Number(src.h ?? 0);
+            next.rx = Number.isFinite(rx) ? rx : Math.abs(Number(src.rx ?? 0));
+            return next;
+        }
+
+        if (type === 'ellipse') {
+            const cxTok = expr.cx ?? src.cx;
+            const cyTok = expr.cy ?? src.cy;
+            const rxTok = expr.rx ?? src.rx;
+            const ryTok = expr.ry ?? src.ry;
+
+            const cx = evalMaybeFormula(cxTok, src.cx ?? 0);
+            const cy = evalMaybeFormula(cyTok, src.cy ?? 0);
+            const rx = Math.abs(evalMaybeFormula(rxTok, src.rx ?? 0));
+            const ry = Math.abs(evalMaybeFormula(ryTok, src.ry ?? 0));
+
+            next.cx = Number.isFinite(cx) ? cx : Number(src.cx ?? 0);
+            next.cy = Number.isFinite(cy)
+                ? (isFormulaToken(cyTok)
+                    ? shapeUiToStoredNumber('cy', cy, 'canvas')
+                    : cy)
+                : Number(src.cy ?? 0);
+            next.rx = Number.isFinite(rx) ? rx : Math.abs(Number(src.rx ?? 0));
+            next.ry = Number.isFinite(ry) ? ry : Math.abs(Number(src.ry ?? 0));
+            return next;
+        }
+
+        return next;
+    };
 
     const segNumFromId = (id) => {
         const m = String(id ?? "").match(/^seg-(\d+)$/);
@@ -507,18 +608,20 @@ function _restoreStateStructureFromElements(state, elements) {
             selected: false,
             contourId: state._nextContourId++,
             type: elem.type,
-            data: { ...(elem.data ?? {}) },
+            data: evalShapeData(elem.type, elem.data),
             transforms: normalizeTransforms(elem.transforms),
         };
         state.segments.push(seg);
         existingIds.add(id);
     }
 
-    state._history = [{
-        segments: state.segments.map(s => ({ ...s })),
-        description: "Import",
-    }];
-    state._historyIndex = 0;
+    if (resetHistoryBaseline) {
+        state._history = [{
+            segments: state.segments.map(s => ({ ...s })),
+            description: "Import",
+        }];
+        state._historyIndex = 0;
+    }
 }
 
 
@@ -673,7 +776,9 @@ export default class ProfileEditor {
             profilePath: hasStructuredSource ? evaluatedContoursPath : (evaluatedContoursPath || profilePath),
             variableValues,
         });
-        _restoreStateStructureFromElements(this.state, sourceElements);
+        _restoreStateStructureFromElements(this.state, sourceElements, {
+            vars: variableValues,
+        });
         _restoreShapeFormulasIntoState(this.state, shapeFormulaSnapshot, variableValues);
         _syncElementTransformsToState(this.state, pathEditor?.getElementTransformsSnapshot?.() ?? []);
 
@@ -917,10 +1022,26 @@ export default class ProfileEditor {
             if (this._syncingToPathEditor) return;
             // Keep the formula path in sync with what the user typed.
             this._formulaPath = this._pathEditor?.getContoursRawPath?.() ?? newPath;
+            this.state.variableValues = this._pathEditor?.variableValues ?? this.state.variableValues;
+            const snapshot = this._pathEditor?.getElementsDebugSnapshot?.() ?? [];
+            const contourPath = _buildEvaluatedContoursPathFromElements(
+                snapshot,
+                this._pathEditor?.variableValues ?? this.state.variableValues ?? {}
+            );
             // Mark that this change originated in the text editor so that
             // _syncToPathEditor does NOT overwrite PathEditor content.
             this._pathEditorIsSource = true;
-            this.state._importPath(newPath, { resetHistory: false });
+            if (contourPath && contourPath.trim()) {
+                this.state._importPath(contourPath, { resetHistory: false });
+            } else {
+                this.state.segments = [];
+                this.state._pushHistory("Import");
+            }
+            _restoreStateStructureFromElements(this.state, snapshot, {
+                resetHistoryBaseline: false,
+                vars: this._pathEditor?.variableValues ?? this.state.variableValues ?? {},
+            });
+            this.state._notifySegments();
 
             // Preserve row selection from PathEditor after text import.
             // PathEditor emits flat selected line indexes; convert them via fresh lineSegIds.

@@ -46,14 +46,13 @@
 
 ## 🎯 NEXT: АРХИТЕКТУРНЫЙ РЕФАКТОРИНГ PIPELINE PREVIEW/EDIT (28.02.2026)
 
-- [ ] Ввести единый source-of-truth: `profileElements` (порядок top-level элементов + строки path/polyline + segId привязки).
+- [x] Ввести единый source-of-truth: `profileElements` (порядок top-level элементов + строки path/polyline + segId привязки).
 - [ ] Убрать fallback-реконструкцию структуры из `profilePath` при наличии валидного `profileElements`.
 - [ ] Унифицировать цикл данных без расхождения порядка:
-  - [ ] `saved -> preview` загружается из `profileElements`,
-  - [ ] `preview -> edit` передаёт текущий snapshot `profileElements`,
-  - [ ] `edit -> preview` всегда синкает hidden inputs из `PathEditor` структуры,
-  - [ ] `modal close(save)` сохраняет актуальный `profileElements` без пересборки.
-- [ ] Зафиксировать один канал для preview-highlight маппинга строк: только contours-only path rows (без shape-сериализации).
+  - [x] `saved -> preview` загружается из `profileElements`,
+  - [x] `preview -> edit` передаёт текущий snapshot `profileElements`,
+  - [x] `edit -> preview` всегда синкает hidden inputs из `PathEditor` структуры,
+  - [x] `modal close(save)` сохраняет актуальный `profileElements` без пересборки.
 - [x] Зафиксировать один канал для preview-highlight маппинга строк: canonical `segId` selection для path/shape.
 - [ ] Минимизировать legacy API-пути (`setPath`, path-based структурный rebuild) в runtime-переходах, оставить только как fallback для старых данных.
 
@@ -75,11 +74,40 @@
   - Preview highlight строится по выбранным `segId` для всех типов элементов
     (path/polyline rows + shape rows), без двух параллельных моделей selection.
 
+- Восстановление состояния PathEditor унифицировано в один helper:
+  - `restorePathEditorState(...)` используется и при инициализации modal, и при rollback на Cancel,
+    с приоритетом `profileElements` и legacy fallback в `setPath` только при отсутствии структуры.
+
 - При canvas-originated sync порядок top-level элементов не берётся из произвольного
   `state.getElements()` как абсолют, а приводится к текущему порядку PathEditor snapshot.
 
+- Привязка модификаторов (`transforms`) должна быть только по стабильным ключам:
+  - path/polyline: по `contourId` (позиционный fallback допустим только для legacy snapshot),
+  - shape: по `segId` (позиционный fallback только для legacy).
+  - Любой positional-only маппинг transforms в runtime-пайплайне считается архитектурным дефектом.
+
+- При text-sync в edit mode в `EditorState` импортируется только contours-only path.
+  - Shape rows НЕ импортируются через path-сериализацию,
+  - shape-структура всегда восстанавливается из `profileElements` snapshot.
+  - Это предотвращает деградацию `circle/rect/ellipse -> polyline/path` при MOD/редактировании.
+
 - Сохранение формул остаётся универсальным инвариантом: для любого параметра любой сущности
   (path command / shape attr / modifier param) при численной эквивалентности сохраняется исходный raw token.
+
+- Введён общий utility политики формул: `src/utils/formulaPolicy.js`
+  - `isFormulaToken(...)`
+  - `evaluateTokenWithVars(...)`
+  - Используется для унификации проверки/вычисления formula token (без локальных regex-веток).
+
+- Следующий обязательный шаг унификации: единая policy нормализации Y-параметров
+  для всех shape attr и path command args, чтобы исключить точечные sign-flip кейсы
+  между preview/edit и между numeric/formula вводом.
+
+- Введён общий utility Y-policy: `src/utils/yPolicy.js`
+  - `isShapeYAttr(...)`
+  - `shapeStoredToUiNumber(...)`
+  - `shapeUiToStoredNumber(...)`
+  - Подключён в `PathEditor` и `ProfileEditor` для унифицированной обработки Y у shape-параметров.
 
 ## Описание задачи
 
