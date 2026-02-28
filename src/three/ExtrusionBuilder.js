@@ -1574,9 +1574,11 @@ export default class ExtrusionBuilder {
     ) {
         try {
             let modifiedPath = path;
+            const isRoundExtrusion = type === "round";
 
             // Apply path modification if specified
             if (
+                !isRoundExtrusion &&
                 pathModifier &&
                 (pathModifier.offset !== undefined || pathModifier.cornerStyle)
             ) {
@@ -2034,14 +2036,29 @@ export default class ExtrusionBuilder {
 
             // Swap left/right mapping for outer vs inner extrusion as requested.
             const outsideHalf = requestedOuterHalf === "left" ? "left" : "right";
+            const innerHalf = outsideHalf === "left" ? "right" : "left";
+
+            const splitOptions = {
+                useAnchorSplit: true,
+                anchorX: Number(options.profileAnchorX ?? 0),
+                anchorY: Number(options.profileAnchorY ?? 0),
+            };
 
             const halfProfilePoints = this.createOpenHalfProfilePoints(
                 profile,
                 null,
                 outsideHalf,
+                splitOptions,
             );
 
-            if (!halfProfilePoints || halfProfilePoints.length < 2) {
+            const innerProfilePoints = this.createOpenHalfProfilePoints(
+                profile,
+                null,
+                innerHalf,
+                splitOptions,
+            );
+
+            if (!halfProfilePoints || halfProfilePoints.length < 2 || !innerProfilePoints || innerProfilePoints.length < 2) {
                 this.log.warn(
                     "Round extrusion: not enough half-profile points",
                 );
@@ -2061,7 +2078,17 @@ export default class ExtrusionBuilder {
                     for (const p of halfProfilePoints) {
                         p.x *= scaleFactor;
                     }
-                    // this.log.debug(`Applied profile overlap to round extrusion: scale=${scaleFactor.toFixed(4)}`);
+                }
+
+                let maxAbsXInner = 0;
+                for (const p of innerProfilePoints) {
+                    if (Math.abs(p.x) > maxAbsXInner) maxAbsXInner = Math.abs(p.x);
+                }
+                if (maxAbsXInner > 1e-6) {
+                    const innerScaleFactor = (maxAbsXInner + this.profileOverlap) / maxAbsXInner;
+                    for (const p of innerProfilePoints) {
+                        p.x *= innerScaleFactor;
+                    }
                 }
             }
 
@@ -2073,6 +2100,9 @@ export default class ExtrusionBuilder {
             // Invert Y for top side extensions (both halfProfilePoints and lathePoints)
             if (isTopExtension || isBottomExtension) {
                 halfProfilePoints.forEach((p) => {
+                    p.y = -p.y;
+                });
+                innerProfilePoints.forEach((p) => {
                     p.y = -p.y;
                 });
             }
@@ -2287,7 +2317,6 @@ export default class ExtrusionBuilder {
             }
 
             // Inside half extrusion along merged path (single sweep)
-            const innerHalf = outsideHalf === "left" ? "right" : "left";
             const mergedCurvePath = new THREE.CurvePath();
             curveGroups.forEach((group) => {
                 group.curves.forEach((c) => mergedCurvePath.add(c));
@@ -2307,33 +2336,6 @@ export default class ExtrusionBuilder {
                 const contourClosed = firstPoint.distanceTo(lastPoint) < 0.01;
                 if (contourClosed) {
                     innerContour = innerContour.slice(0, -1);
-                }
-
-                const innerProfilePoints = this.createOpenHalfProfilePoints(
-                    profile,
-                    null,
-                    innerHalf,
-                );
-
-                // Apply overlap scaling to inner half points
-                if (this.profileOverlap > 0) {
-                    let maxAbsX = 0;
-                    for (const p of innerProfilePoints) {
-                        if (Math.abs(p.x) > maxAbsX) maxAbsX = Math.abs(p.x);
-                    }
-                    if (maxAbsX > 1e-6) {
-                        const scaleFactor = (maxAbsX + this.profileOverlap) / maxAbsX;
-                        for (const p of innerProfilePoints) {
-                            p.x *= scaleFactor;
-                        }
-                    }
-                }
-
-                // Invert Y for top side extensions
-                if (isTopExtension || isBottomExtension) {
-                    innerProfilePoints.forEach((p) => {
-                        p.y = -p.y;
-                    });
                 }
 
                 const extrudeInnerProfilePoints = innerProfilePoints
@@ -3167,6 +3169,7 @@ export default class ExtrusionBuilder {
      * @param {THREE.Shape} profile - Profile shape (for fallback)
      * @param {Array<THREE.Vector2>} existingPoints - Optional: use these points instead of generating new ones
      * @param {string} half - "left" or "right"
+    * @param {{useAnchorSplit?:boolean,anchorX?:number,anchorY?:number}} [splitOptions]
      * @returns {Array<THREE.Vector2>}
      */
     /**
@@ -3594,7 +3597,7 @@ export default class ExtrusionBuilder {
         return cleaned;
     }
 
-    createOpenHalfProfilePoints(profile, existingPoints = null, half = "left") {
+    createOpenHalfProfilePoints(profile, existingPoints = null, half = "left", splitOptions = {}) {
         try {
             // Calculate adaptive number of points based on profile shape complexity
             let pointsCount = 64; // Default fallback
@@ -3645,10 +3648,15 @@ export default class ExtrusionBuilder {
             // Get profile centroid
             const centroid = this._getProfileCentroid(fullProfile);
 
-            // Find where profile intersects with vertical line through centroid
+            const useAnchorSplit = splitOptions?.useAnchorSplit === true;
+            const anchorX = Number(splitOptions?.anchorX ?? 0);
+            const anchorY = Number(splitOptions?.anchorY ?? 0);
+            const splitX = useAnchorSplit ? anchorX : centroid.x;
+
+            // Find where profile intersects with vertical line through split axis
             const intersections = this._findProfileIntersections(
                 fullProfile,
-                centroid.x,
+                splitX,
             );
 
             let halfPointsRaw;
@@ -3714,8 +3722,8 @@ export default class ExtrusionBuilder {
                 );
                 halfPointsRaw = fullProfile.filter((p) =>
                     half === "left"
-                        ? p.x <= centroid.x + 0.01
-                        : p.x >= centroid.x - 0.01,
+                        ? p.x <= splitX + 0.01
+                        : p.x >= splitX - 0.01,
                 );
             }
 
@@ -3729,12 +3737,13 @@ export default class ExtrusionBuilder {
             // Find minimum Y (bottom of profile) for baseline
             const minY = Math.min(...fullProfile.map((p) => p.y));
 
-            // Normalize coordinates: translate to origin (center-bottom reference)
-            // X: centered at 0 (centroid.x)
-            // Y: bottom at 0 (minY)
+            // Normalize coordinates to requested split/origin policy.
+            // Default: center-bottom (legacy). Anchor mode: split from profile anchor.
+            const xOrigin = useAnchorSplit ? anchorX : centroid.x;
+            const yOrigin = useAnchorSplit ? anchorY : minY;
             const normalizedPoints = halfPointsRaw.map((p) => ({
-                x: p.x - centroid.x,
-                y: p.y - minY, // Bottom of profile at Y=0
+                x: p.x - xOrigin,
+                y: p.y - yOrigin,
             }));
 
             // Verify the half is correct after normalization
