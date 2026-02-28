@@ -1,5 +1,6 @@
 import BaseTool from "./BaseTool.js";
 import LoggerFactory from "../../core/LoggerFactory.js";
+import { isFormulaToken, evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 
 const log = LoggerFactory.createLogger("CursorTool");
 
@@ -92,6 +93,13 @@ export default class CursorTool extends BaseTool {
         this._arcPopup = null;
         /** @private @type {boolean} — true while radius popup input has keyboard focus */
         this._inputFocused = false;
+
+        /** @private @type {{kind:'side'|'rx',segId:string,role?:string,axisAttr:'w'|'h'|'rx',origin:object,geom?:object,cornerKey?:string}|null} */
+        this._rectDrag = null;
+        /** @private @type {HTMLElement|null} */
+        this._rectPopup = null;
+        /** @private @type {boolean} */
+        this._rectInputFocused = false;
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -105,10 +113,11 @@ export default class CursorTool extends BaseTool {
         this._clearHover();
         this._endDrag();
         this._endPt3Drag();
+        this._endRectDrag();
         super.deactivate();
     }
 
-    hasActiveCommand() { return this._pt3Drag !== null; }
+    hasActiveCommand() { return this._pt3Drag !== null || this._rectDrag !== null; }
 
     // ─── Pointer events ─────────────────────────────────────────────────────
 
@@ -116,6 +125,39 @@ export default class CursorTool extends BaseTool {
         if (e.button !== 0) return;
 
         const rawPos = this.ctx.canvas.screenToSVG(e);
+
+        // ── Rect side/rx editing: second click commits current placement ─────────
+        if (this._rectDrag) {
+            this._applyRectFromCursor(rawPos);
+            this._commitRectDrag();
+            return;
+        }
+
+        // ── Rect corner handle (rx): first click enters following mode ───────────
+        const prePointHit = this.ctx.canvas.hitTestPoint(rawPos);
+        if (prePointHit?.pointKey && String(prePointHit.pointKey).startsWith("rx-")) {
+            const seg = this.ctx.state.segments.find(s => s.id === prePointHit.segId);
+            if (seg?.type === "rect") {
+                if (!this.ctx.state.selectedIds.has(seg.id)) this.ctx.state.setSelection(seg.id);
+                this._beginRectRxDrag(seg.id, String(prePointHit.pointKey), e);
+                return;
+            }
+        }
+
+        // ── Rect side hit: first click enters width/height following mode ─────────
+        const sideHit = this.ctx.canvas.hitTestRectSide(rawPos);
+        if (sideHit) {
+            const seg = this.ctx.state.segments.find(s => s.id === sideHit.segId);
+            if (seg?.type === "rect") {
+                if (!this.ctx.state.selectedIds.has(seg.id)) this.ctx.state.setSelection(seg.id);
+                if (sideHit.axis === "rx") {
+                    this._beginRectRxDrag(seg.id, String(sideHit.cornerKey ?? "rx-start"), e);
+                } else {
+                    this._beginRectSideDrag(sideHit, e);
+                }
+                return;
+            }
+        }
 
         // ── Arc/circle pt3: if already following, second click → commit ─────────────
         if (this._pt3Drag) {
@@ -161,6 +203,22 @@ export default class CursorTool extends BaseTool {
     }
 
     onPointerMove(pos, e) {
+        // ── Rect side/rx following ─────────────────────────────────────────
+        if (this._rectDrag) {
+            const rawPos = this.ctx.canvas.screenToSVG(e);
+            this._applyRectFromCursor(rawPos);
+            if (this._rectPopup && e) this._positionRectPopup(e);
+            if (this._rectPopup && !this._rectInputFocused) {
+                const seg = this.ctx.state.segments.find(s => s.id === this._rectDrag?.segId);
+                const inp = this._rectPopup.querySelector("input");
+                if (seg && inp) {
+                    const key = this._rectDrag.axisAttr;
+                    inp.value = Number(seg.data?.[key] ?? 0).toFixed(4).replace(/\.0+$/, "").replace(/(\.\d*?)0+$/, "$1");
+                }
+            }
+            return;
+        }
+
         // ── Arc/circle pt3 drag ──────────────────────────────────────────
         if (this._pt3Drag) {
             const rawPos = this.ctx.canvas.screenToSVG(e);
@@ -246,6 +304,11 @@ export default class CursorTool extends BaseTool {
      * @override
      */
     onConfirm(_pos, _e) {
+        if (this._rectDrag) {
+            this.ctx.state.updateSegments([{ id: this._rectDrag.segId, changes: { data: this._rectDrag.origin } }]);
+            this._endRectDrag();
+            return true;
+        }
         if (this._pt3Drag) {
             this.ctx.state.updateSegments([{
                 id:      this._pt3Drag.segId,
@@ -258,6 +321,33 @@ export default class CursorTool extends BaseTool {
     }
 
     onKeyDown(e) {
+        if (e.key === "Escape" && this._rectDrag) {
+            this.ctx.state.updateSegments([{ id: this._rectDrag.segId, changes: { data: this._rectDrag.origin } }]);
+            this._endRectDrag();
+            return true;
+        }
+        if (this._rectDrag && !this._rectInputFocused) {
+            if (e.key === "Tab") {
+                e.preventDefault();
+                const inp = this._rectPopup?.querySelector("input");
+                if (inp) { inp.focus(); inp.select(); }
+                return true;
+            }
+            if (e.key === "Enter") {
+                this._commitRectDrag();
+                return true;
+            }
+            if (e.key.length === 1 && /[\d.\-+{}a-zA-Z_/*()]/.test(e.key)) {
+                const inp = this._rectPopup?.querySelector("input");
+                if (inp) {
+                    inp.value = e.key;
+                    inp.focus();
+                    inp.setSelectionRange(1, 1);
+                    e.preventDefault();
+                    return true;
+                }
+            }
+        }
         if (e.key === "Escape" && this._pt3Drag) {
             // Restore arc to state before the user clicked the handle (origin captured at pick time).
             this.ctx.state.updateSegments([{
@@ -456,6 +546,276 @@ export default class CursorTool extends BaseTool {
         this._pt3Drag = null;
         this._inputFocused = false;
         this._removeArcPopup();
+    }
+
+    /**
+     * Start rectangle side drag mode.
+    * @param {{segId:string, role:string, axis:'w'|'h'}} hit
+     * @param {MouseEvent} e
+     * @private
+     */
+    _beginRectSideDrag(hit, e) {
+        const seg = this.ctx.state.segments.find(s => s.id === hit.segId);
+        if (!seg || seg.type !== "rect") return;
+        const origin = JSON.parse(JSON.stringify(seg.data));
+        const geom = this._rectGeomFromData(origin);
+        this._rectDrag = {
+            kind: "side",
+            segId: hit.segId,
+            role: hit.role,
+            axisAttr: hit.axis,
+            origin,
+            geom,
+        };
+        this._showRectPopup(e, hit.axis === "w" ? "W =" : "H =", String(seg.data?._expr?.[hit.axis] ?? seg.data?.[hit.axis] ?? "0"));
+    }
+
+    /**
+     * Start rectangle corner rx drag mode.
+     * @param {string} segId
+     * @param {string} cornerKey
+     * @param {MouseEvent} e
+     * @private
+     */
+    _beginRectRxDrag(segId, cornerKey, e) {
+        const seg = this.ctx.state.segments.find(s => s.id === segId);
+        if (!seg || seg.type !== "rect") return;
+        const origin = JSON.parse(JSON.stringify(seg.data));
+        this._rectDrag = {
+            kind: "rx",
+            segId,
+            cornerKey,
+            axisAttr: "rx",
+            origin,
+            geom: this._rectGeomFromData(origin),
+        };
+        this._showRectPopup(e, "RX =", String(seg.data?._expr?.rx ?? seg.data?.rx ?? "0"));
+    }
+
+    /** @private */
+    _rectGeomFromData(data) {
+        const xStart = Number(data?.x ?? 0);
+        const yStart = Number(data?.y ?? 0);
+        const w = Number(data?.w ?? 0);
+        const h = Number(data?.h ?? 0);
+        const dirWBase = Number(data?.dirW) < 0 ? -1 : 1;
+        const hasDirH = Object.prototype.hasOwnProperty.call(data ?? {}, "dirH");
+        const dirHBase = hasDirH ? (Number(data?.dirH) < 0 ? -1 : 1) : -1;
+
+        // Effective extents must account for possible sign inversion of w/h.
+        const dx = dirWBase * w;
+        const dy = dirHBase * h;
+        const xOpp = xStart + dx;
+        const yOpp = yStart + dy;
+        const dirW = dx >= 0 ? 1 : -1;
+        const dirH = dy >= 0 ? 1 : -1;
+        return { xStart, yStart, xOpp, yOpp, dirW, dirH };
+    }
+
+    /** @private */
+    _applyRectFromCursor(rawPos) {
+        if (!this._rectDrag) return;
+        const seg = this.ctx.state.segments.find(s => s.id === this._rectDrag.segId);
+        if (!seg || seg.type !== "rect") return;
+        const localPos = this.ctx.canvas.toSegmentLocal(rawPos, seg.id);
+        if (!localPos) return;
+
+        if (this._rectDrag.kind === "side") {
+            const { role, geom } = this._rectDrag;
+            const next = { ...seg.data };
+            if (role === "x-opposite") {
+                next.x = geom.xStart;
+                next.w = (localPos.x - geom.xStart) / geom.dirW;
+            } else if (role === "x-start") {
+                next.x = localPos.x;
+                next.w = (geom.xOpp - localPos.x) / geom.dirW;
+            } else if (role === "y-opposite") {
+                next.y = geom.yStart;
+                next.h = (localPos.y - geom.yStart) / geom.dirH;
+            } else if (role === "y-start") {
+                next.y = localPos.y;
+                next.h = (geom.yOpp - localPos.y) / geom.dirH;
+            }
+            const expr = { ...(next._expr ?? {}) };
+            delete expr[this._rectDrag.axisAttr];
+            next._expr = Object.keys(expr).length > 0 ? expr : undefined;
+            this.ctx.state.updateSegments([{ id: seg.id, changes: { data: next } }]);
+            return;
+        }
+
+        if (this._rectDrag.kind === "rx") {
+            const rg = this._rectGeomFromData(seg.data);
+            const corners = {
+                "rx-start": { x: rg.xStart, y: rg.yStart },
+                "rx-x": { x: rg.xOpp, y: rg.yStart },
+                "rx-y": { x: rg.xStart, y: rg.yOpp },
+                "rx-opposite": { x: rg.xOpp, y: rg.yOpp },
+            };
+            const inward = {
+                "rx-start": { ix: rg.dirW, iy: rg.dirH },
+                "rx-x": { ix: -rg.dirW, iy: rg.dirH },
+                "rx-y": { ix: rg.dirW, iy: -rg.dirH },
+                "rx-opposite": { ix: -rg.dirW, iy: -rg.dirH },
+            };
+            const c = corners[this._rectDrag.cornerKey] ?? corners["rx-start"];
+            const i = inward[this._rectDrag.cornerKey] ?? inward["rx-start"];
+            const ux = (localPos.x - c.x) * i.ix;
+            const uy = (localPos.y - c.y) * i.iy;
+            // Bisector-based fillet solve (matches user pseudocode semantics).
+            // For a right-angle corner this becomes linear tracking from cursor:
+            // r = dot(PM, bisector) * sin(theta/2), theta=90° -> sin(theta/2)=sqrt(2)/2.
+            // Outside corner (u<=0 or v<=0) is treated as negative radius -> clamp to 0.
+            let rawRx = 0;
+            if (ux > 0 && uy > 0) {
+                const v1 = { x: i.ix, y: 0 };
+                const v2 = { x: 0, y: i.iy };
+                const bisLen = Math.hypot(v1.x + v2.x, v1.y + v2.y);
+                if (bisLen > 1e-9) {
+                    const bisector = { x: (v1.x + v2.x) / bisLen, y: (v1.y + v2.y) / bisLen };
+                    const pm = { x: localPos.x - c.x, y: localPos.y - c.y };
+                    const t = pm.x * bisector.x + pm.y * bisector.y;
+                    const cosTheta = v1.x * v2.x + v1.y * v2.y; // 0 for rectangle corners
+                    const sinHalfTheta = Math.sqrt(Math.max(0, (1 - cosTheta) / 2));
+                    rawRx = t * sinHalfTheta;
+                }
+                if (!Number.isFinite(rawRx) || rawRx < 0) rawRx = 0;
+            }
+            const maxRx = Math.min(Math.abs(Number(seg.data?.w ?? 0)), Math.abs(Number(seg.data?.h ?? 0))) / 2;
+            const nextRx = Math.max(0, Math.min(rawRx, maxRx));
+            const next = { ...seg.data, rx: nextRx };
+            const expr = { ...(next._expr ?? {}) };
+            delete expr.rx;
+            next._expr = Object.keys(expr).length > 0 ? expr : undefined;
+            this.ctx.state.updateSegments([{ id: seg.id, changes: { data: next } }]);
+        }
+    }
+
+    /** @private */
+    _commitRectDrag() {
+        if (!this._rectDrag) return;
+        const cur = this.ctx.state.segments.find(s => s.id === this._rectDrag.segId)?.data;
+        const changed = !_segDataEqual(this._rectDrag.origin, cur);
+        if (changed) this.ctx.state._pushHistory("Edit rectangle");
+        this._endRectDrag();
+    }
+
+    /** @private */
+    _showRectPopup(e, labelText, initialValue) {
+        this._removeRectPopup();
+        this._rectInputFocused = false;
+
+        const popup = document.createElement("div");
+        popup.className = "arc-radius-popup";
+
+        const label = document.createElement("span");
+        label.textContent = labelText;
+        popup.appendChild(label);
+
+        const inp = document.createElement("input");
+        inp.type = "text";
+        inp.inputMode = "decimal";
+        inp.className = "arc-radius-input";
+        inp.value = String(initialValue ?? "");
+        popup.appendChild(inp);
+
+        const hint = document.createElement("small");
+        hint.className = "arc-radius-hint";
+        popup.appendChild(hint);
+
+        document.body.appendChild(popup);
+        this._rectPopup = popup;
+        if (e) this._positionRectPopup(e);
+
+        inp.addEventListener("focus", () => { this._rectInputFocused = true; inp.select(); });
+        inp.addEventListener("blur", () => { this._rectInputFocused = false; });
+        inp.addEventListener("keydown", (ev) => {
+            ev.stopPropagation();
+            if (ev.key === "Tab") {
+                ev.preventDefault();
+                inp.blur();
+            } else if (ev.key === "Enter") {
+                this._commitRectInput();
+            } else if (ev.key === "Escape") {
+                if (this._rectDrag) {
+                    this.ctx.state.updateSegments([{ id: this._rectDrag.segId, changes: { data: this._rectDrag.origin } }]);
+                }
+                this._endRectDrag();
+            }
+        });
+    }
+
+    /** @private */
+    _commitRectInput() {
+        const inp = this._rectPopup?.querySelector("input");
+        const hint = this._rectPopup?.querySelector(".arc-radius-hint");
+        const raw = String(inp?.value ?? "").trim();
+        if (!this._rectDrag || !raw) return;
+
+        const showError = (msg) => {
+            if (inp) { inp.classList.add("arc-radius-error"); setTimeout(() => inp.classList.remove("arc-radius-error"), 2000); }
+            if (hint) hint.textContent = msg;
+        };
+
+        const seg = this.ctx.state.segments.find(s => s.id === this._rectDrag?.segId);
+        if (!seg || seg.type !== "rect") return;
+
+        const num = evaluateTokenWithVars(raw, this.ctx.state.variableValues ?? {}, Number.NaN);
+        if (!Number.isFinite(num)) {
+            showError("Invalid expression");
+            return;
+        }
+
+        const next = { ...seg.data };
+        const expr = { ...(next._expr ?? {}) };
+        const axis = this._rectDrag.axisAttr;
+
+        if (axis === "rx") {
+            const maxRx = Math.min(Math.abs(Number(seg.data?.w ?? 0)), Math.abs(Number(seg.data?.h ?? 0))) / 2;
+            next.rx = Math.max(0, Math.min(Math.abs(num), maxRx));
+        } else if (axis === "w") {
+            const val = num;
+            const g = this._rectDrag.geom;
+            if (this._rectDrag.role === "x-start") {
+                next.x = g.xOpp - g.dirW * val;
+            }
+            next.w = val;
+        } else if (axis === "h") {
+            const val = num;
+            const g = this._rectDrag.geom;
+            if (this._rectDrag.role === "y-start") {
+                next.y = g.yOpp - g.dirH * val;
+            }
+            next.h = val;
+        }
+
+        if (isFormulaToken(raw)) expr[axis] = raw;
+        else delete expr[axis];
+        next._expr = Object.keys(expr).length > 0 ? expr : undefined;
+
+        this.ctx.state.updateSegments([{ id: seg.id, changes: { data: next } }]);
+        this._commitRectDrag();
+    }
+
+    /** @private */
+    _positionRectPopup(e) {
+        if (!this._rectPopup) return;
+        this._rectPopup.style.left = (e.clientX + 14) + "px";
+        this._rectPopup.style.top = (e.clientY + 14) + "px";
+    }
+
+    /** @private */
+    _removeRectPopup() {
+        if (this._rectPopup) {
+            this._rectPopup.remove();
+            this._rectPopup = null;
+        }
+    }
+
+    /** @private */
+    _endRectDrag() {
+        this._rectDrag = null;
+        this._rectInputFocused = false;
+        this._removeRectPopup();
     }
     // ─── Box selection ──────────────────────────────────────────────────────
 

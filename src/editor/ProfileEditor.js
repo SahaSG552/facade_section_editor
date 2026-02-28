@@ -557,6 +557,10 @@ function _restoreStateStructureFromElements(state, elements, { resetHistoryBasel
                 : Number(src.y ?? 0);
             next.w = Number.isFinite(w) ? w : Number(src.w ?? 0);
             next.h = Number.isFinite(h) ? h : Number(src.h ?? 0);
+            next.dirW = Number(src?.dirW) < 0 ? -1 : 1;
+            next.dirH = Object.prototype.hasOwnProperty.call(src ?? {}, 'dirH')
+                ? (Number(src?.dirH) < 0 ? -1 : 1)
+                : -1;
             next.rx = Number.isFinite(rx) ? rx : Math.abs(Number(src.rx ?? 0));
             return next;
         }
@@ -1352,7 +1356,7 @@ export default class ProfileEditor {
                 segData = { type: 'circle', data: { center: { x: 0, y: 0 }, radius: 10 } };
                 break;
             case 'rect':
-                segData = { type: 'rect', data: { x: -15, y: -10, w: 30, h: 20, rx: 0 } };
+                segData = { type: 'rect', data: { x: -15, y: -10, w: 30, h: 20, dirW: 1, dirH: -1, rx: 0 } };
                 break;
             case 'ellipse':
                 segData = { type: 'ellipse', data: { cx: 0, cy: 0, rx: 20, ry: 10 } };

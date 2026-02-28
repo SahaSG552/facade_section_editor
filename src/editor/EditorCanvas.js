@@ -199,6 +199,129 @@ function _toSegmentLocal(point, seg, vars = {}) {
 }
 
 /**
+ * Compute rectangle interaction geometry in segment-local space.
+ * @param {object} data
+ * @returns {{xStart:number,yStart:number,xOpp:number,yOpp:number,minX:number,maxX:number,minY:number,maxY:number,dirW:number,dirH:number}}
+ */
+function _rectGeomLocal(data) {
+    const xStart = Number(data?.x ?? 0);
+    const yStart = Number(data?.y ?? 0);
+    const w = Number(data?.w ?? 0);
+    const h = Number(data?.h ?? 0);
+    const dirWBase = Number(data?.dirW) < 0 ? -1 : 1;
+    const hasDirH = Object.prototype.hasOwnProperty.call(data ?? {}, "dirH");
+    const dirHBase = hasDirH ? (Number(data?.dirH) < 0 ? -1 : 1) : -1;
+
+    // Effective extents must include possible sign inversion introduced by
+    // direct width/height edits in PathEditor (w/h can be negative).
+    const dx = dirWBase * w;
+    const dy = dirHBase * h;
+    const xOpp = xStart + dx;
+    const yOpp = yStart + dy;
+    const dirW = dx >= 0 ? 1 : -1;
+    const dirH = dy >= 0 ? 1 : -1;
+    return {
+        xStart,
+        yStart,
+        xOpp,
+        yOpp,
+        minX: Math.min(xStart, xOpp),
+        maxX: Math.max(xStart, xOpp),
+        minY: Math.min(yStart, yOpp),
+        maxY: Math.max(yStart, yOpp),
+        dirW,
+        dirH,
+    };
+}
+
+/** @param {object} data @returns {number} */
+function _rectRxLocal(data) {
+    const wAbs = Math.abs(Number(data?.w ?? 0));
+    const hAbs = Math.abs(Number(data?.h ?? 0));
+    const rxRaw = Math.abs(Number(data?.rx ?? 0));
+    return Math.max(0, Math.min(rxRaw, wAbs / 2, hAbs / 2));
+}
+
+/**
+ * Build rounded-rectangle boundary primitives in segment-local space.
+ * @param {object} data
+ */
+function _rectBoundaryPrimitives(data) {
+    const g = _rectGeomLocal(data);
+    const rx = _rectRxLocal(data);
+
+    const xA = g.xStart;
+    const yA = g.yStart;
+    const xB = g.xOpp;
+    const yB = g.yOpp;
+    const dx = g.dirW;
+    const dy = g.dirH;
+
+    const lines = [];
+    if (rx > 1e-9) {
+        lines.push(
+            { side: "top", axis: "h", role: "y-start", a: { x: xA + dx * rx, y: yA }, b: { x: xB - dx * rx, y: yA } },
+            { side: "bottom", axis: "h", role: "y-opposite", a: { x: xA + dx * rx, y: yB }, b: { x: xB - dx * rx, y: yB } },
+            { side: "left", axis: "w", role: "x-start", a: { x: xA, y: yA + dy * rx }, b: { x: xA, y: yB - dy * rx } },
+            { side: "right", axis: "w", role: "x-opposite", a: { x: xB, y: yA + dy * rx }, b: { x: xB, y: yB - dy * rx } },
+        );
+    } else {
+        lines.push(
+            { side: "top", axis: "h", role: "y-start", a: { x: xA, y: yA }, b: { x: xB, y: yA } },
+            { side: "bottom", axis: "h", role: "y-opposite", a: { x: xA, y: yB }, b: { x: xB, y: yB } },
+            { side: "left", axis: "w", role: "x-start", a: { x: xA, y: yA }, b: { x: xA, y: yB } },
+            { side: "right", axis: "w", role: "x-opposite", a: { x: xB, y: yA }, b: { x: xB, y: yB } },
+        );
+    }
+
+    const arcs = rx > 1e-9
+        ? [
+            { cornerKey: "rx-start", center: { x: xA + dx * rx, y: yA + dy * rx }, sx: -dx, sy: -dy },
+            { cornerKey: "rx-x", center: { x: xB - dx * rx, y: yA + dy * rx }, sx: dx, sy: -dy },
+            { cornerKey: "rx-y", center: { x: xA + dx * rx, y: yB - dy * rx }, sx: -dx, sy: dy },
+            { cornerKey: "rx-opposite", center: { x: xB - dx * rx, y: yB - dy * rx }, sx: dx, sy: dy },
+        ]
+        : [];
+
+    return { lines, arcs, rx };
+}
+
+/**
+ * Distance from local point to rounded-rectangle boundary and primitive details.
+ * @param {{x:number,y:number}} lp
+ * @param {object} data
+ */
+function _pointToRectBoundaryDistWithDetail(lp, data) {
+    const { lines, arcs, rx } = _rectBoundaryPrimitives(data);
+    let bestDist = Infinity;
+    let best = null;
+
+    for (const l of lines) {
+        const d = _pointToSegmentDist(lp, l.a, l.b);
+        if (d < bestDist) {
+            bestDist = d;
+            best = { kind: "line", ...l };
+        }
+    }
+
+    if (rx > 1e-9) {
+        for (const a of arcs) {
+            const vx = lp.x - a.center.x;
+            const vy = lp.y - a.center.y;
+            // Restrict to the corner quarter-space.
+            if (vx * a.sx < 0 || vy * a.sy < 0) continue;
+            const d = Math.abs(Math.hypot(vx, vy) - rx);
+            if (d < bestDist) {
+                bestDist = d;
+                best = { kind: "arc", ...a };
+            }
+        }
+    }
+
+    return { dist: bestDist, detail: best };
+}
+
+/**
  * EditorCanvas — wraps a CanvasManager instance and adds editor-specific functionality.
  *
  * Responsibilities:
@@ -524,14 +647,23 @@ export default class EditorCanvas {
 
         if (seg.type === "rect") {
             const { x, y, w, h, rx = 0 } = seg.data;
+            const dirW = Number(seg.data?.dirW) < 0 ? -1 : 1;
+            const hasDirH = Object.prototype.hasOwnProperty.call(seg.data ?? {}, "dirH");
+            const dirH = hasDirH ? (Number(seg.data?.dirH) < 0 ? -1 : 1) : -1;
+            const x1 = x + dirW * w;
+            const y1 = y + dirH * h;
+            const x0 = Math.min(x, x1);
+            const y0 = Math.min(y, y1);
+            const wAbs = Math.abs(w);
+            const hAbs = Math.abs(h);
             const g = document.createElementNS(SVG_NS, "g");
             g.setAttribute("data-seg-id", seg.id);
 
             const rect = document.createElementNS(SVG_NS, "rect");
-            rect.setAttribute("x", x);
-            rect.setAttribute("y", y);
-            rect.setAttribute("width", w);
-            rect.setAttribute("height", h);
+            rect.setAttribute("x", x0);
+            rect.setAttribute("y", y0);
+            rect.setAttribute("width", wAbs);
+            rect.setAttribute("height", hAbs);
             rect.setAttribute("rx", rx);
             rect.setAttribute("fill", "none");
             rect.classList.add("editor-segment");
@@ -541,9 +673,10 @@ export default class EditorCanvas {
 
             if (seg.selected) {
                 // Corner handles (non-interactive, visual only)
-                for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
-                    _appendArcHandle(g, cx, cy, "corner");
-                }
+                _appendArcHandle(g, x, y, "rx-start");
+                _appendArcHandle(g, x1, y, "rx-x");
+                _appendArcHandle(g, x, y1, "rx-y");
+                _appendArcHandle(g, x1, y1, "rx-opposite");
             }
             if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
             return g;
@@ -610,17 +743,7 @@ export default class EditorCanvas {
                 const { center, radius } = seg.data;
                 dist = Math.abs(Math.hypot(localPoint.x - center.x, localPoint.y - center.y) - radius);
             } else if (seg.type === "rect") {
-                // Distance to nearest edge of the rectangle.
-                const { x, y, w, h } = seg.data;
-                const nearX = Math.max(x, Math.min(localPoint.x, x + w));
-                const nearY = Math.max(y, Math.min(localPoint.y, y + h));
-                const inside = localPoint.x >= x && localPoint.x <= x + w && localPoint.y >= y && localPoint.y <= y + h;
-                if (inside) {
-                    // Minimum distance to any of the 4 edges
-                    dist = Math.min(localPoint.x - x, x + w - localPoint.x, localPoint.y - y, y + h - localPoint.y);
-                } else {
-                    dist = Math.hypot(localPoint.x - nearX, localPoint.y - nearY);
-                }
+                dist = _pointToRectBoundaryDistWithDetail(localPoint, seg.data).dist;
             } else if (seg.type === "ellipse") {
                 // Approximate distance from point to ellipse outline.
                 const { cx, cy, rx, ry } = seg.data;
@@ -690,8 +813,74 @@ export default class EditorCanvas {
                     bestRef = { segId: seg.id, pointKey: "pt3" };
                 }
             }
+
+            // Rect corner handles (rx) — only while selected.
+            if (seg.type === "rect" && seg.selected) {
+                const rg = _rectGeomLocal(seg.data);
+                const corners = [
+                    { key: "rx-start", pt: { x: rg.xStart, y: rg.yStart } },
+                    { key: "rx-x", pt: { x: rg.xOpp, y: rg.yStart } },
+                    { key: "rx-y", pt: { x: rg.xStart, y: rg.yOpp } },
+                    { key: "rx-opposite", pt: { x: rg.xOpp, y: rg.yOpp } },
+                ];
+                for (const { key, pt } of corners) {
+                    const d = Math.hypot(localPoint.x - pt.x, localPoint.y - pt.y);
+                    if (d <= tol && d < bestDist) {
+                        bestDist = d;
+                        bestRef = { segId: seg.id, pointKey: key };
+                    }
+                }
+            }
         }
         return bestRef;
+    }
+
+    /**
+     * Convert global SVG point to a segment-local coordinate system.
+     * @param {{x:number,y:number}} point
+     * @param {string} segId
+     * @returns {{x:number,y:number}|null}
+     */
+    toSegmentLocal(point, segId) {
+        const seg = this.state.segments.find(s => s.id === segId);
+        if (!seg) return null;
+        return _toSegmentLocal(point, seg, this.state?.variableValues ?? {});
+    }
+
+    /**
+     * Hit-test rectangle sides for resize interactions.
+     * @param {{x:number,y:number}} point
+     * @param {number} [tolerancePx=8]
+     * @returns {{segId:string,side?:'left'|'right'|'top'|'bottom',role?:'x-start'|'x-opposite'|'y-start'|'y-opposite',axis:'w'|'h'|'rx',cornerKey?:string}|null}
+     */
+    hitTestRectSide(point, tolerancePx = 8) {
+        const tol = tolerancePx / this.cm.zoomLevel;
+        let best = null;
+        let bestDist = Infinity;
+
+        for (const seg of this.state.segments) {
+            if (seg.type !== "rect") continue;
+            const lp = _toSegmentLocal(point, seg, this.state?.variableValues ?? {});
+            const { dist, detail } = _pointToRectBoundaryDistWithDetail(lp, seg.data);
+            if (!detail || dist > tol || dist >= bestDist) continue;
+            bestDist = dist;
+            if (detail.kind === "arc") {
+                best = {
+                    segId: seg.id,
+                    axis: "rx",
+                    cornerKey: detail.cornerKey,
+                };
+            } else {
+                best = {
+                    segId: seg.id,
+                    side: detail.side,
+                    axis: detail.axis,
+                    role: detail.role,
+                };
+            }
+        }
+
+        return best;
     }
 
     // ─── Arc control-handle update ───────────────────────────────────────────
@@ -835,7 +1024,7 @@ export default class EditorCanvas {
             `[data-seg-id="${ref.segId}"] [data-point-key="${ref.pointKey}"]`
         );
         if (circle) {
-            if (ref.pointKey === "pt3") {
+            if (ref.pointKey === "pt3" || String(ref.pointKey).startsWith("rx-")) {
                 circle.classList.toggle("editor-arc-handle-hover", active);
             } else {
                 circle.classList.toggle("editor-endpoint-hover", active);

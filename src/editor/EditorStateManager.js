@@ -866,17 +866,22 @@ export default class EditorStateManager {
                 } else if (seg.type === 'rect') {
                     // Serialize as a closed path (Y negated editor→profile space).
                     const { x, y, w, h, rx: rx0 = 0 } = seg.data;
-                    const rx = Math.max(0, Math.min(rx0, w / 2, h / 2));
+                    const dirW = Number(seg.data?.dirW) < 0 ? -1 : 1;
+                    const hasDirH = Object.prototype.hasOwnProperty.call(seg.data ?? {}, 'dirH');
+                    const dirH = hasDirH ? (Number(seg.data?.dirH) < 0 ? -1 : 1) : -1;
+                    const x2 = x + dirW * w;
+                    const y2 = y + dirH * h;
+                    const rx = Math.max(0, Math.min(rx0, Math.abs(w) / 2, Math.abs(h) / 2));
                     if (rx > EPS) {
                         // Rounded corners: use arc commands at each corner.
                         parts.push(
                             `M ${r(x + rx)} ${r(-y)}`,
-                            `L ${r(x + w - rx)} ${r(-y)}`,
-                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x + w)} ${r(-(y + rx))}`,
-                            `L ${r(x + w)} ${r(-(y + h - rx))}`,
-                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x + w - rx)} ${r(-(y + h))}`,
-                            `L ${r(x + rx)} ${r(-(y + h))}`,
-                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x)} ${r(-(y + h - rx))}`,
+                            `L ${r(x2 - rx)} ${r(-y)}`,
+                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x2)} ${r(-(y + rx))}`,
+                            `L ${r(x2)} ${r(-(y2 + rx))}`,
+                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x2 - rx)} ${r(-y2)}`,
+                            `L ${r(x + rx)} ${r(-y2)}`,
+                            `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x)} ${r(-(y2 + rx))}`,
                             `L ${r(x)} ${r(-(y + rx))}`,
                             `A ${r(rx)} ${r(rx)} 0 0 1 ${r(x + rx)} ${r(-y)}`,
                             `Z`,
@@ -886,9 +891,9 @@ export default class EditorStateManager {
                         // Sharp corners: four L commands.
                         parts.push(
                             `M ${r(x)} ${r(-y)}`,
-                            `L ${r(x + w)} ${r(-y)}`,
-                            `L ${r(x + w)} ${r(-(y + h))}`,
-                            `L ${r(x)} ${r(-(y + h))}`,
+                            `L ${r(x2)} ${r(-y)}`,
+                            `L ${r(x2)} ${r(-y2)}`,
+                            `L ${r(x)} ${r(-y2)}`,
                             `Z`,
                         );
                         for (let i = 0; i < 5; i++) lineSegIds.push(i === 0 ? seg.id : null);

@@ -411,21 +411,26 @@ export default class RectTool extends BaseTool {
     _commitRect2ptShape(p1, p2) {
         if (!this.ctx?.state || !p1 || !p2) return;
 
-        const x = Math.min(p1.x, p2.x);
-        const y = Math.min(p1.y, p2.y);
-        const w = Math.abs(p2.x - p1.x);
-        const h = Math.abs(p2.y - p1.y);
-        if (w < 1e-6 || h < 1e-6) {
+        // Preserve first click as anchor; keep signed width/height direction.
+        const x = p1.x;
+        const y = p1.y;
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dirW = dx >= 0 ? 1 : -1;
+        const dirH = dy >= 0 ? 1 : -1;
+        const w = Math.abs(dx);
+        const h = Math.abs(dy);
+        if (Math.abs(w) < 1e-6 || Math.abs(h) < 1e-6) {
             log.warn("RectTool: degenerate rectangle — skipping");
             return;
         }
 
         this.ctx.state.addSegment({
             type: "rect",
-            data: { x, y, w, h, rx: 0 },
+            data: { x, y, w, h, dirW, dirH, rx: 0 },
             transforms: [],
         });
-        log.debug("RectTool: committed rect2pt shape", { x, y, w, h });
+        log.debug("RectTool: committed rect2pt shape", { x, y, w, h, dirW, dirH });
     }
 
     /**
@@ -451,9 +456,11 @@ export default class RectTool extends BaseTool {
         const angleRad = angleDeg * Math.PI / 180;
         const p1Local = _rotatePoint(p1, -angleRad);
 
+        const dirW = 1;
+        const dirH = hSigned >= 0 ? 1 : -1;
         const h = Math.abs(hSigned);
         const x = p1Local.x;
-        const y = hSigned >= 0 ? p1Local.y : (p1Local.y - h);
+        const y = p1Local.y;
 
         const angleToken = String(parseFloat(angleDeg.toFixed(6)));
         const transforms = Math.abs(angleDeg) > 1e-9
@@ -462,10 +469,10 @@ export default class RectTool extends BaseTool {
 
         this.ctx.state.addSegment({
             type: "rect",
-            data: { x, y, w, h, rx: 0 },
+            data: { x, y, w, h, dirW, dirH, rx: 0 },
             transforms,
         });
-        log.debug("RectTool: committed rect3pt shape", { x, y, w, h, angleDeg });
+        log.debug("RectTool: committed rect3pt shape", { x, y, w, h, dirW, dirH, angleDeg });
     }
 
     // ─── Floating dimension / radius popup ────────────────────────────────────

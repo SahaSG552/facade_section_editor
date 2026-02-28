@@ -1549,6 +1549,9 @@ export default class PathEditor {
             } else if (elem.type === 'rect') {
                 const r6 = v => +Number(v).toFixed(6);
                 const data = elem.data ?? {};
+                const dirW = Number(data?.dirW) < 0 ? -1 : 1;
+                const hasDirH = Object.prototype.hasOwnProperty.call(data ?? {}, 'dirH');
+                const dirH = hasDirH ? (Number(data?.dirH) < 0 ? -1 : 1) : -1;
                 const rawToken = (key, fallback) => {
                     const expr = elem.data?._expr?.[key];
                     return (expr != null && String(expr).trim() !== '') ? String(expr).trim() : String(fallback);
@@ -1568,8 +1571,8 @@ export default class PathEditor {
 
                 const xEval = Number(this.evaluateToken(xRaw));
                 const yBit = Number(this.evaluateToken(yRaw));
-                const wEval = Math.abs(Number(this.evaluateToken(wRaw)));
-                const hEval = Math.abs(Number(this.evaluateToken(hRaw)));
+                const wEval = Number(this.evaluateToken(wRaw));
+                const hEval = Number(this.evaluateToken(hRaw));
                 const rxEvalRaw = Math.abs(Number(this.evaluateToken(rxRaw)));
 
                 // Hidden path is always stored in bit-space (Y-up).
@@ -1577,36 +1580,62 @@ export default class PathEditor {
 
                 if (![xEval, yBit, wEval, hEval].every(Number.isFinite)) continue;
 
-                const x2Eval = xEval + wEval;
-                const y2Eval = yBit - hEval;
+                const x2Eval = xEval + dirW * wEval;
+                const y2Eval = yBit - dirH * hEval;
+                const dxEval = x2Eval - xEval;
+                const dyEval = y2Eval - yBit;
                 const radEval = Math.max(0, Math.min(Number.isFinite(rxEval) ? rxEval : 0, Math.abs(wEval) / 2, Math.abs(hEval) / 2));
+                const sx = dxEval >= 0 ? 1 : -1;
+                const sy = dyEval >= 0 ? 1 : -1;
+
+                const xRawTo = dirW > 0
+                    ? `(${xRaw})+(${wRaw})`
+                    : `(${xRaw})-(${wRaw})`;
+                const yRawTo = dirH > 0
+                    ? `(${yRaw})-(${hRaw})`
+                    : `(${yRaw})+(${hRaw})`;
 
                 const rxRawOut = (elem.data?._expr?.rx != null && String(elem.data._expr.rx).trim() !== '')
                     ? String(elem.data._expr.rx).trim()
                     : r6(radEval);
 
                 if (radEval > 1e-9) {
+                    const sweep = (dxEval * dyEval) >= 0 ? 1 : 0;
                     const evaluatedCmd =
-                        `M ${r6(xEval + radEval)} ${r6(yBit)}` +
-                        ` L ${r6(x2Eval - radEval)} ${r6(yBit)}` +
-                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(x2Eval)} ${r6(yBit - radEval)}` +
-                        ` L ${r6(x2Eval)} ${r6(y2Eval + radEval)}` +
-                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(x2Eval - radEval)} ${r6(y2Eval)}` +
-                        ` L ${r6(xEval + radEval)} ${r6(y2Eval)}` +
-                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(xEval)} ${r6(y2Eval + radEval)}` +
-                        ` L ${r6(xEval)} ${r6(yBit - radEval)}` +
-                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 0 ${r6(xEval + radEval)} ${r6(yBit)}` +
+                        `M ${r6(xEval + sx * radEval)} ${r6(yBit)}` +
+                        ` L ${r6(x2Eval - sx * radEval)} ${r6(yBit)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 ${sweep} ${r6(x2Eval)} ${r6(yBit + sy * radEval)}` +
+                        ` L ${r6(x2Eval)} ${r6(y2Eval - sy * radEval)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 ${sweep} ${r6(x2Eval - sx * radEval)} ${r6(y2Eval)}` +
+                        ` L ${r6(xEval + sx * radEval)} ${r6(y2Eval)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 ${sweep} ${r6(xEval)} ${r6(y2Eval - sy * radEval)}` +
+                        ` L ${r6(xEval)} ${r6(yBit + sy * radEval)}` +
+                        ` A ${r6(radEval)} ${r6(radEval)} 0 0 ${sweep} ${r6(xEval + sx * radEval)} ${r6(yBit)}` +
                         ` Z`;
+
+                    const xRawFromIn = sx > 0
+                        ? `(${xRaw})+(${rxRawOut})`
+                        : `(${xRaw})-(${rxRawOut})`;
+                    const xRawToIn = sx > 0
+                        ? `(${xRawTo})-(${rxRawOut})`
+                        : `(${xRawTo})+(${rxRawOut})`;
+                    const yRawFromIn = sy > 0
+                        ? `(${yRaw})+(${rxRawOut})`
+                        : `(${yRaw})-(${rxRawOut})`;
+                    const yRawToIn = sy > 0
+                        ? `(${yRawTo})-(${rxRawOut})`
+                        : `(${yRawTo})+(${rxRawOut})`;
+
                     const rawCmd =
-                        `M (${xRaw})+(${rxRawOut}) (${yRaw})` +
-                        ` L (${xRaw})+(${wRaw})-(${rxRawOut}) (${yRaw})` +
-                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw})+(${wRaw}) (${yRaw})-(${rxRawOut})` +
-                        ` L (${xRaw})+(${wRaw}) (${yRaw})-(${hRaw})+(${rxRawOut})` +
-                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw})+(${wRaw})-(${rxRawOut}) (${yRaw})-(${hRaw})` +
-                        ` L (${xRaw})+(${rxRawOut}) (${yRaw})-(${hRaw})` +
-                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw}) (${yRaw})-(${hRaw})+(${rxRawOut})` +
-                        ` L (${xRaw}) (${yRaw})-(${rxRawOut})` +
-                        ` A ${rxRawOut} ${rxRawOut} 0 0 0 (${xRaw})+(${rxRawOut}) (${yRaw})` +
+                        `M ${xRawFromIn} (${yRaw})` +
+                        ` L ${xRawToIn} (${yRaw})` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 ${sweep} (${xRawTo}) ${yRawFromIn}` +
+                        ` L (${xRawTo}) ${yRawToIn}` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 ${sweep} ${xRawToIn} (${yRawTo})` +
+                        ` L ${xRawFromIn} (${yRawTo})` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 ${sweep} (${xRaw}) ${yRawToIn}` +
+                        ` L (${xRaw}) ${yRawFromIn}` +
+                        ` A ${rxRawOut} ${rxRawOut} 0 0 ${sweep} ${xRawFromIn} (${yRaw})` +
                         ` Z`;
                     parts.push(evaluatedCmd);
                     rawParts.push(rawCmd);
@@ -1619,9 +1648,9 @@ export default class PathEditor {
                         ` Z`;
                     const rawCmd =
                         `M ${xRaw} ${yRaw}` +
-                        ` L (${xRaw})+(${wRaw}) ${yRaw}` +
-                        ` L (${xRaw})+(${wRaw}) (${yRaw})-(${hRaw})` +
-                        ` L ${xRaw} (${yRaw})-(${hRaw})` +
+                        ` L ${xRawTo} ${yRaw}` +
+                        ` L ${xRawTo} ${yRawTo}` +
+                        ` L ${xRaw} ${yRawTo}` +
                         ` Z`;
                     parts.push(evaluatedCmd);
                     rawParts.push(rawCmd);
