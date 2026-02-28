@@ -2094,10 +2094,18 @@ export default class BitsManager {
                         const rx = Math.max(0, Number(elem?.data?.rx ?? 0));
                         if (![x, y, w, h].every(Number.isFinite)) continue;
 
-                        const x0 = w >= 0 ? x : x + w;
-                        const y0 = h >= 0 ? y : y + h;
-                        const ww = Math.abs(w);
-                        const hh = Math.abs(h);
+                        const dirWRaw = Number(elem?.data?.dirW);
+                        const dirHRaw = Number(elem?.data?.dirH);
+                        const hasDirW = Number.isFinite(dirWRaw) && Math.abs(dirWRaw) > 0;
+                        const hasDirH = Number.isFinite(dirHRaw) && Math.abs(dirHRaw) > 0;
+
+                        const xOpp = hasDirW ? x + dirWRaw * w : x + w;
+                        const yOpp = hasDirH ? y + dirHRaw * h : y + h;
+
+                        const x0 = Math.min(x, xOpp);
+                        const y0 = Math.min(y, yOpp);
+                        const ww = Math.abs(xOpp - x);
+                        const hh = Math.abs(yOpp - y);
                         const rr = Math.min(rx, ww / 2, hh / 2);
 
                         const hl = document.createElementNS(svgNS, "rect");

@@ -1523,6 +1523,25 @@ html {
   vector-effect: non-scaling-stroke;
 }
 
+.editor-rect-side-guide {
+  stroke: transparent;
+  stroke-width: 6;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.editor-rect-side-selected {
+  stroke: hsl(var(--primary));
+  stroke-width: 2.2;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.editor-segment.editor-rect-side-only {
+  stroke: hsl(var(--foreground) / 0.85);
+  stroke-width: 0.5;
+}
+
 /* Default cursor on segments (overriding any move cursor) */
 .editor-segment {
   cursor: pointer;

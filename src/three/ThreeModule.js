@@ -1202,6 +1202,16 @@ export default class ThreeModule extends BaseModule {
             usingFallbackBBox: !this.isBBoxValid(partFrontBBox),
         });
 
+        const pickPositiveNumber = (...values) => {
+            for (const value of values) {
+                const num = Number(value);
+                if (Number.isFinite(num) && num > 0) {
+                    return num;
+                }
+            }
+            return null;
+        };
+
         for (const [bitIndex, bit] of uniqueBits.entries()) {
             // Skip if partial update and this bit is not in the changed list
             if (bitsToProcess && !bitsToProcess.includes(bit.bitData?.id)) {
@@ -1535,13 +1545,32 @@ export default class ThreeModule extends BaseModule {
                     let extensionMeshes = [];
                     if (
                         passExtensionInfo &&
-                        passExtensionInfo.width &&
-                        passExtensionInfo.height
+                        pickPositiveNumber(
+                            passExtensionInfo?.height,
+                            bit?.extension?.height,
+                            bit?.bitData?.extension?.height,
+                        )
                     ) {
+                        const extensionWidth =
+                            pickPositiveNumber(
+                                passExtensionInfo?.width,
+                                bit?.extension?.width,
+                                bit?.bitData?.extension?.width,
+                                bit?.bitData?.shankDiameter,
+                                bit?.bitData?.diameter,
+                                10,
+                            ) || 10;
+                        const extensionHeight =
+                            pickPositiveNumber(
+                                passExtensionInfo?.height,
+                                bit?.extension?.height,
+                                bit?.bitData?.extension?.height,
+                            ) || 0;
+
                         const extensionProfile =
                             this.extrusionBuilder.createExtensionProfile(
-                                passExtensionInfo.width,
-                                passExtensionInfo.height,
+                                extensionWidth,
+                                extensionHeight,
                             );
 
                         // Use depth variable from outer scope (already defined for this pass)
@@ -1697,7 +1726,37 @@ export default class ThreeModule extends BaseModule {
                                 );
 
                             if (bitProfile) {
+                                const profilePoints = bitProfile.getPoints(
+                                    this.extrusionBuilder.calculateAdaptiveCurveSegments(
+                                        bitProfile,
+                                    ),
+                                );
+                                let profileMinX = Infinity;
+                                let profileMaxX = -Infinity;
+                                for (const p of profilePoints) {
+                                    const px = Number(p?.x);
+                                    if (!Number.isFinite(px)) continue;
+                                    if (px < profileMinX) profileMinX = px;
+                                    if (px > profileMaxX) profileMaxX = px;
+                                }
+                                const hasProfileBounds =
+                                    Number.isFinite(profileMinX) &&
+                                    Number.isFinite(profileMaxX) &&
+                                    profileMaxX > profileMinX;
+                                const profileLeftHalfWidth = hasProfileBounds
+                                    ? Math.max(0, -profileMinX)
+                                    : diameter / 2;
+                                const profileRightHalfWidth = hasProfileBounds
+                                    ? Math.max(0, profileMaxX)
+                                    : diameter / 2;
+
                                 // Transformation options for coordinate conversion
+                                const exportModule =
+                                    this.container?.has?.("export")
+                                        ? this.container.get("export")
+                                        : window?.dependencyContainer?.get?.("export") ||
+                                          window?.app?.container?.get?.("export");
+
                                 const transformOptions = {
                                     partFrontX,
                                     partFrontY,
@@ -1706,6 +1765,7 @@ export default class ThreeModule extends BaseModule {
                                     depth: bit.y,
                                     panelThickness,
                                     panelAnchor,
+                                    exportModule,
                                 };
 
                                 // Extrude main bit using SVG path with modifier
@@ -1720,7 +1780,7 @@ export default class ThreeModule extends BaseModule {
                                         this.panelSide,
                                         transformOptions,
                                         {
-                                            offset: diameter / 2,
+                                            offset: -profileLeftHalfWidth, // Offset inward by profile left half-width to align with left edge contour
                                             cornerStyle: "miter",
                                         },
                                     );
@@ -1794,7 +1854,7 @@ export default class ThreeModule extends BaseModule {
                                                 this.panelSide,
                                                 transformOptions,
                                                 {
-                                                    offset: -diameter / 2,
+                                                    offset: profileRightHalfWidth,
                                                     cornerStyle: "miter",
                                                 },
                                             );
@@ -1903,7 +1963,8 @@ export default class ThreeModule extends BaseModule {
                                             isFullRemoval
                                                 ? null
                                                 : phantomPathData, // No hole for full removal
-                                            diameter,
+                                            profileLeftHalfWidth,
+                                            profileRightHalfWidth,
                                             totalHeight, // Use total height (bit + extension)
                                             transformOptions,
                                         );
@@ -1949,8 +2010,24 @@ export default class ThreeModule extends BaseModule {
                                         (bit.group && bit.group.__extension);
 
                                     if (extensionInfo && extensionInfo.height > 0) {
-                                        const extensionWidth = extensionInfo.width || bitWidth || 10;
-                                        const extensionHeight = extensionInfo.height;
+                                        const extensionWidth =
+                                            pickPositiveNumber(
+                                                extensionInfo?.width,
+                                                bit?.extension?.width,
+                                                bit?.bitData?.extension?.width,
+                                                bit?.bitData?.shankDiameter,
+                                                bitWidth,
+                                                bit?.bitData?.diameter,
+                                                10,
+                                            ) || 10;
+                                        const extensionHeight =
+                                            pickPositiveNumber(
+                                                extensionInfo?.height,
+                                                bit?.extension?.height,
+                                                bit?.bitData?.extension?.height,
+                                            ) || 0;
+                                        const signedExtensionHeight =
+                                            -extensionHeight;
 
                                         this.log.info(`PO bit ${bitIndex}: Creating main bit extension`, {
                                             bitDepth,
@@ -1959,14 +2036,14 @@ export default class ThreeModule extends BaseModule {
                                         });
 
                                         const mainExtensionResult = this.extrusionBuilder.extrudeAlongPath(
-                                            this.extrusionBuilder.createExtensionProfile(extensionWidth, extensionHeight),
+                                            this.extrusionBuilder.createExtensionProfile(extensionWidth, signedExtensionHeight),
                                             mainPathData, // Same path as main bit
                                             "#FF0000", // Red color for main bit extension
                                             bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                                             "round",
                                             this.panelSide,
                                             { ...transformOptions, pathVisual: false, isExtension: true },
-                                            { offset: diameter/2, cornerStyle: "miter" }, // No offset for extensions
+                                            { offset: -profileLeftHalfWidth, cornerStyle: "miter" }, // No offset for extensions
                                         );
 
                                         let mainExtensionMeshes = [];
@@ -2007,8 +2084,24 @@ export default class ThreeModule extends BaseModule {
                                         (bit.group && bit.group.__extension);
 
                                     if (extensionInfo && extensionInfo.height > 0) {
-                                        const extensionWidth = extensionInfo.width || bitWidth || 10;
-                                        const extensionHeight = extensionInfo.height;
+                                        const extensionWidth =
+                                            pickPositiveNumber(
+                                                extensionInfo?.width,
+                                                bit?.extension?.width,
+                                                bit?.bitData?.extension?.width,
+                                                bit?.bitData?.shankDiameter,
+                                                bitWidth,
+                                                bit?.bitData?.diameter,
+                                                10,
+                                            ) || 10;
+                                        const extensionHeight =
+                                            pickPositiveNumber(
+                                                extensionInfo?.height,
+                                                bit?.extension?.height,
+                                                bit?.bitData?.extension?.height,
+                                            ) || 0;
+                                        const signedExtensionHeight =
+                                            extensionHeight;
 
                                         this.log.info(`PO bit ${bitIndex}: Creating phantom bit extension`, {
                                             pocketOffset,
@@ -2018,14 +2111,14 @@ export default class ThreeModule extends BaseModule {
                                         });
 
                                         const phantomExtensionResult = this.extrusionBuilder.extrudeAlongPath(
-                                            this.extrusionBuilder.createExtensionProfile(extensionWidth, extensionHeight),
+                                            this.extrusionBuilder.createExtensionProfile(extensionWidth, signedExtensionHeight),
                                             phantomPathData, // Same path as phantom bit
                                             "#FFA500", // Orange color for phantom bit extension
                                             bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
                                             "miter",
                                             this.panelSide,
                                             { ...transformOptions, pathVisual: false, isExtension: true },
-                                            { offset: -diameter/2, cornerStyle: "miter" }, // No offset for extensions
+                                            { offset: profileRightHalfWidth, cornerStyle: "miter" }, // No offset for extensions
                                         );
 
                                         let phantomExtensionMeshes = [];
@@ -2180,13 +2273,33 @@ export default class ThreeModule extends BaseModule {
             let extensionMeshes = [];
             if (
                 passExtensionInfo &&
-                passExtensionInfo.width &&
-                passExtensionInfo.height
+                pickPositiveNumber(
+                    passExtensionInfo?.height,
+                    bit?.extension?.height,
+                    bit?.bitData?.extension?.height,
+                )
             ) {
+                const extensionWidth =
+                    pickPositiveNumber(
+                        passExtensionInfo?.width,
+                        bit?.extension?.width,
+                        bit?.bitData?.extension?.width,
+                        bit?.bitData?.shankDiameter,
+                        bit?.bitData?.diameter,
+                        10,
+                    ) || 10;
+                const extensionHeight =
+                    pickPositiveNumber(
+                        passExtensionInfo?.height,
+                        bit?.extension?.height,
+                        bit?.bitData?.extension?.height,
+                    ) || 0;
+                const signedExtensionHeight = -extensionHeight;
+
                 const extensionProfile =
                     this.extrusionBuilder.createExtensionProfile(
-                        passExtensionInfo.width,
-                        passExtensionInfo.height,
+                        extensionWidth,
+                        signedExtensionHeight,
                     );
 
                 const extensionResult = this.extrusionBuilder.extrudeAlongPath(
@@ -2286,7 +2399,8 @@ export default class ThreeModule extends BaseModule {
      * @param {number} bitIndex - Bit index
      * @param {string} mainPathData - Main contour SVG path
      * @param {string} phantomPathData - Phantom contour SVG path
-     * @param {number} diameter - Bit diameter
+    * @param {number} profileLeftHalfWidth - Left half profile width for offset operations
+    * @param {number} profileRightHalfWidth - Right half profile width for offset operations
      * @param {number} bitLength - Bit length/height
      * @param {object} transformOptions - Coordinate transformation options
      * @returns {Array<THREE.Mesh>} Array of filler meshes
@@ -2296,20 +2410,29 @@ export default class ThreeModule extends BaseModule {
         bitIndex,
         mainPathData,
         phantomPathData,
-        diameter,
+        profileLeftHalfWidth,
+        profileRightHalfWidth,
         bitLength,
         transformOptions,
     ) {
         try {
             // Offset distances: inward for main, outward for phantom
-            const offsetDist = diameter / 2;
+            const mainOffsetDist = Math.max(
+                0,
+                Number(profileLeftHalfWidth) || 0,
+            );
+            const phantomOffsetDist = Math.max(
+                0,
+                Number(profileRightHalfWidth) || 0,
+            );
             const exportModule =
+                transformOptions?.exportModule ||
                 window?.dependencyContainer?.get?.("export") ||
                 window?.app?.container?.get?.("export");
 
             const outerSVG = calculateOffsetFromPathData(
                 mainPathData,
-                -offsetDist,
+                -mainOffsetDist,
                 {
                     join: "miter",
                     cap: "butt",
@@ -2327,7 +2450,10 @@ export default class ThreeModule extends BaseModule {
             }
 
             const innerSVG = phantomPathData
-                ? calculateOffsetFromPathData(phantomPathData, offsetDist, {
+                ? calculateOffsetFromPathData(
+                    phantomPathData,
+                    phantomOffsetDist,
+                    {
                       join: "miter",
                       cap: "butt",
                       limit: 10,
@@ -2335,8 +2461,9 @@ export default class ThreeModule extends BaseModule {
                       exportModule,
                       forceReverseOutput:
                           window?.forceReverseOffset !== false,
-                        trimSelfIntersections: true,
-                  })
+                    trimSelfIntersections: true,
+                },
+                )
                 : null;
 
             if (phantomPathData && !innerSVG) {

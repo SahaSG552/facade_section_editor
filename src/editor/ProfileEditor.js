@@ -843,8 +843,8 @@ export default class ProfileEditor {
                 // operation (e.g. moving objects), cancel the operation but stay on the
                 // current tool rather than switching to cursor.
                 if (toolId === "cursor" && this._currentTool?.hasActiveCommand()) {
-                    this._currentTool.onKeyDown({ key: "Escape", preventDefault() { }, stopPropagation() { } });
-                    return;
+                    const consumed = this._currentTool.onKeyDown({ key: "Escape", preventDefault() { }, stopPropagation() { } });
+                    if (consumed) return;
                 }
                 // Always keep selection when switching tools — clearing only happens
                 // on an empty-space click (CursorTool) or Escape in cursor mode.

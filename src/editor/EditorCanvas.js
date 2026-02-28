@@ -577,6 +577,23 @@ export default class EditorCanvas {
             if (seg.selected) rect.classList.add("editor-segment-selected");
             g.appendChild(rect);
 
+            const sides = [
+                { role: "x-start", x1: xStart, y1: yStart, x2: xStart, y2: yOpp },
+                { role: "x-opposite", x1: xOpp, y1: yStart, x2: xOpp, y2: yOpp },
+                { role: "y-start", x1: xStart, y1: yStart, x2: xOpp, y2: yStart },
+                { role: "y-opposite", x1: xStart, y1: yOpp, x2: xOpp, y2: yOpp },
+            ];
+            for (const s of sides) {
+                const sideLine = document.createElementNS(SVG_NS, "line");
+                sideLine.setAttribute("x1", s.x1);
+                sideLine.setAttribute("y1", s.y1);
+                sideLine.setAttribute("x2", s.x2);
+                sideLine.setAttribute("y2", s.y2);
+                sideLine.setAttribute("data-rect-side-role", s.role);
+                sideLine.classList.add("editor-rect-side-guide");
+                g.appendChild(sideLine);
+            }
+
             if (seg.selected) {
                 // Corner handles (non-interactive, visual only)
                 _appendArcHandle(g, xStart, yStart, "rx-start");
@@ -937,5 +954,32 @@ export default class EditorCanvas {
                 circle.classList.toggle("editor-endpoint-hover", active);
             }
         }
+    }
+
+    /**
+     * Apply or remove persistent highlight on a rectangle side overlay.
+     * @param {string} segId
+     * @param {'x-start'|'x-opposite'|'y-start'|'y-opposite'} role
+     * @param {boolean} [active=true]
+     */
+    setRectSideHighlight(segId, role, active = true) {
+        if (!segId || !role) return;
+        const layer = this.cm.getLayer("bits");
+        if (!layer) return;
+        const sideEl = layer.querySelector(`[data-seg-id="${segId}"] [data-rect-side-role="${role}"]`);
+        if (sideEl) sideEl.classList.toggle("editor-rect-side-selected", active);
+    }
+
+    /**
+     * When active, suppress full-rect selected stroke and show only side selections.
+     * @param {string} segId
+     * @param {boolean} [active=true]
+     */
+    setRectSideOnlySelection(segId, active = true) {
+        if (!segId) return;
+        const layer = this.cm.getLayer("bits");
+        if (!layer) return;
+        const rectEl = layer.querySelector(`[data-seg-id="${segId}"] rect.editor-segment`);
+        if (rectEl) rectEl.classList.toggle("editor-rect-side-only", active);
     }
 }

@@ -1574,18 +1574,17 @@ export default class ExtrusionBuilder {
     ) {
         try {
             let modifiedPath = path;
-            const isRoundExtrusion = type === "round";
 
             // Apply path modification if specified
             if (
-                !isRoundExtrusion &&
                 pathModifier &&
                 (pathModifier.offset !== undefined || pathModifier.cornerStyle)
             ) {
                 modifiedPath = this._modifyPathWithOffset(
                     path,
-                    pathModifier.offset || 0,
+                    Number(pathModifier.offset ?? 0),
                     pathModifier.cornerStyle || "miter",
+                    options,
                 );
 
                 if (!modifiedPath) {
@@ -1699,7 +1698,7 @@ export default class ExtrusionBuilder {
      * @param {string} cornerStyle - Corner style: 'round' or 'bevel' (default: 'round')
      * @returns {THREE.CurvePath|string|null} Modified path or null if conversion fails
      */
-    _modifyPathWithOffset(path, offset, cornerStyle = "round") {
+    _modifyPathWithOffset(path, offset, cornerStyle = "round", options = {}) {
         try {
             this.log.info("_modifyPathWithOffset called:", {
                 pathType:
@@ -1721,6 +1720,7 @@ export default class ExtrusionBuilder {
                     path,
                     offset,
                     cornerStyle,
+                    options,
                 );
             }
 
@@ -1743,32 +1743,64 @@ export default class ExtrusionBuilder {
      * Modify SVG path string using custom offset
      * @private
      */
-    _modifySVGPathWithOffset(svgPathString, offset, cornerStyle) {
+    _modifySVGPathWithOffset(svgPathString, offset, cornerStyle, options = {}) {
         try {
             const exportModule =
+                options?.exportModule ||
                 window?.dependencyContainer?.get?.("export") ||
                 window?.app?.container?.get?.("export");
 
-            const customPath = calculateOffsetFromPathData(
-                svgPathString,
-                offset,
-                {
-                    join: cornerStyle === "round" ? "round" : cornerStyle,
-                    cap: "butt",
-                    limit: 10,
-                    useArcApproximation: true,
-                    exportModule,
-                    forceReverseOutput: window?.forceReverseOffset !== false,
-                    trimSelfIntersections: true,
-                },
-            );
+            const basePath = String(svgPathString ?? "").trim();
+            const offsetOptions = {
+                join: cornerStyle === "round" ? "round" : cornerStyle,
+                cap: "butt",
+                limit: 10,
+                useArcApproximation: true,
+                exportModule,
+                forceReverseOutput: window?.forceReverseOffset !== false,
+                trimSelfIntersections: true,
+            };
 
-            if (!customPath) {
-                this.log.warn("Custom offset failed, returning original SVG");
-                return svgPathString;
+            const runOffset = (dist) =>
+                calculateOffsetFromPathData(basePath, dist, offsetOptions);
+
+            const isUsable = (candidate, { requireChanged = true } = {}) => {
+                if (typeof candidate !== "string") return false;
+                const c = candidate.trim();
+                if (!c) return false;
+                if (requireChanged && c === basePath) return false;
+                try {
+                    return this.parsePathToCurves(c).length > 0;
+                } catch (_) {
+                    return false;
+                }
+            };
+
+            const direct = runOffset(offset);
+            if (isUsable(direct, { requireChanged: true })) return direct;
+
+            if (!exportModule?.dxfExporter?.parseSVGPathSegments) {
+                this.log.warn("Path modifier: exportModule/dxf parser unavailable");
             }
 
-            return customPath;
+            if (Math.abs(Number(offset) || 0) > 1e-9) {
+                const reversedSign = runOffset(-offset);
+                if (isUsable(reversedSign, { requireChanged: true })) {
+                    this.log.warn(
+                        "Custom offset sign fallback applied",
+                        { requestedOffset: offset, appliedOffset: -offset },
+                    );
+                    return reversedSign;
+                }
+            }
+
+            if (isUsable(direct, { requireChanged: false })) {
+                this.log.warn("Custom offset produced no geometric change");
+                return direct;
+            }
+
+            this.log.warn("Custom offset failed, returning original SVG");
+            return svgPathString;
         } catch (error) {
             this.log.error("Error modifying SVG path:", error);
             return svgPathString;

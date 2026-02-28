@@ -1,7 +1,8 @@
 import BaseTool from "./BaseTool.js";
 import LoggerFactory from "../../core/LoggerFactory.js";
 import { isFormulaToken, evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
-import { getRectGeomLocal, getRectCornerPointMap, getRectCornerInwardMap } from "../geometry/rectGeometry.js";
+import { getRectGeomLocal, getRectCornerPointMap } from "../geometry/rectGeometry.js";
+import { circumcenter, arc2ptData, arcFlagsViaPoint } from "./ArcTool.js";
 
 const log = LoggerFactory.createLogger("CursorTool");
 
@@ -113,6 +114,11 @@ export default class CursorTool extends BaseTool {
         this._rectPopup = null;
         /** @private @type {boolean} */
         this._rectInputFocused = false;
+
+        /** @private @type {Array<{segId:string,pointKey:'start'|'end'}>} */
+        this._movingPoints = [];
+        /** @private @type {Map<string,object>} */
+        this._movingPointsOrigins = new Map();
     }
 
     // ─── Lifecycle ──────────────────────────────────────────────────────────
@@ -127,21 +133,26 @@ export default class CursorTool extends BaseTool {
         this._endDrag();
         this._endPt3Drag();
         this._endRectDrag();
+        this._endPointMove();
         super.deactivate();
     }
 
-    hasActiveCommand() { return this._pt3Drag !== null || this._rectDrag !== null; }
+    hasActiveCommand() { return this._pt3Drag !== null || this._rectDrag !== null || this._movingPoints.length > 0; }
 
     // ─── Pointer events ─────────────────────────────────────────────────────
 
     onPointerDown(pos, e) {
+        if (this._movingPoints.length > 0) {
+            this._commitPointMove();
+            return;
+        }
         if (e.button !== 0) return;
 
         const rawPos = this.ctx.canvas.screenToSVG(e);
 
         // ── Rect side/rx editing: second click commits current placement ─────────
         if (this._rectDrag) {
-            this._applyRectFromCursor(rawPos);
+            this._applyRectFromCursor(pos);
             this._commitRectDrag();
             return;
         }
@@ -208,6 +219,12 @@ export default class CursorTool extends BaseTool {
             }
         }
 
+        // ── Endpoint move: first click picks welded vertex, second click commits ──
+        if (ptHit && ptHit.pointKey !== "pt3" && !String(ptHit.pointKey).startsWith("rx-")) {
+            this._beginPointMove(ptHit, pos);
+            return;
+        }
+
         this._downClient = { x: e.clientX, y: e.clientY };
         // Use raw (un-snapped) SVG position so the box-selection start is not
         // pulled to a nearby endpoint by the snap manager.
@@ -216,10 +233,14 @@ export default class CursorTool extends BaseTool {
     }
 
     onPointerMove(pos, e) {
+        if (this._movingPoints.length > 0) {
+            this._applyPointMove(pos);
+            return;
+        }
+
         // ── Rect side/rx following ─────────────────────────────────────────
         if (this._rectDrag) {
-            const rawPos = this.ctx.canvas.screenToSVG(e);
-            this._applyRectFromCursor(rawPos);
+            this._applyRectFromCursor(pos);
             if (this._rectPopup && e) this._positionRectPopup(e);
             if (this._rectPopup && !this._rectInputFocused) {
                 const seg = this.ctx.state.segments.find(s => s.id === this._rectDrag?.segId);
@@ -274,7 +295,7 @@ export default class CursorTool extends BaseTool {
     onPointerUp(pos, e) {
         // In pt3-following mode the commit happens on the NEXT pointerDown (click-pick-click).
         // Ignore the mouseup that ends the initial picking click.
-        if (this._pt3Drag) return;
+        if (this._pt3Drag || this._movingPoints.length > 0) return;
 
         if (!this._downSvgPos) return;
         const downSvg = this._downSvgPos;
@@ -317,6 +338,16 @@ export default class CursorTool extends BaseTool {
      * @override
      */
     onConfirm(_pos, _e) {
+        if (this._movingPoints.length > 0) {
+            const updates = [];
+            for (const ref of this._movingPoints) {
+                const origin = this._movingPointsOrigins.get(ref.segId);
+                if (origin) updates.push({ id: ref.segId, changes: { data: origin } });
+            }
+            if (updates.length > 0) this.ctx.state.updateSegments(updates);
+            this._endPointMove();
+            return true;
+        }
         if (this._rectDrag) {
             this.ctx.state.updateSegments([{ id: this._rectDrag.segId, changes: { data: this._rectDrag.origin } }]);
             this._endRectDrag();
@@ -334,6 +365,20 @@ export default class CursorTool extends BaseTool {
     }
 
     onKeyDown(e) {
+        if (e.key === "Escape" && this._movingPoints.length > 0) {
+            const updates = [];
+            for (const ref of this._movingPoints) {
+                const origin = this._movingPointsOrigins.get(ref.segId);
+                if (origin) updates.push({ id: ref.segId, changes: { data: origin } });
+            }
+            if (updates.length > 0) this.ctx.state.updateSegments(updates);
+            this._endPointMove();
+            return true;
+        }
+        if (e.key === "Enter" && this._movingPoints.length > 0) {
+            this._commitPointMove();
+            return true;
+        }
         if (e.key === "Escape" && this._rectDrag) {
             this.ctx.state.updateSegments([{ id: this._rectDrag.segId, changes: { data: this._rectDrag.origin } }]);
             this._endRectDrag();
@@ -402,6 +447,136 @@ export default class CursorTool extends BaseTool {
             }
         }
         return false;
+    }
+
+    _beginPointMove(pointHit, pos) {
+        const seg = this.ctx.state.segments.find(s => s.id === pointHit.segId);
+        if (!seg) return;
+
+        const vertexPt = seg.data[pointHit.pointKey];
+        const allRefs = this.ctx.state.getSegmentsAtVertex(vertexPt);
+        if (!allRefs.length) return;
+
+        this._movingPoints = allRefs;
+        this._movingPointsOrigins.clear();
+        for (const ref of allRefs) {
+            const s = this.ctx.state.segments.find(x => x.id === ref.segId);
+            if (s) this._movingPointsOrigins.set(ref.segId, JSON.parse(JSON.stringify(s.data)));
+        }
+
+        this.ctx.state.setSelection(pointHit.segId);
+        this._applyPointMove(pos);
+        log.debug("CursorTool: moving welded vertex", allRefs.length, "refs");
+    }
+
+    _applyPointMove(pos) {
+        if (!this._movingPoints.length) return;
+
+        const updates = [];
+        for (const ref of this._movingPoints) {
+            const origin = this._movingPointsOrigins.get(ref.segId);
+            if (!origin) continue;
+
+            const newPt = { x: pos.x, y: pos.y };
+            const newData = { ...origin, [ref.pointKey]: newPt };
+
+            const isArc = typeof origin.radius === "number" && origin.center;
+            if (isArc) {
+                const s = newData.start;
+                const en = newData.end;
+
+                let pt3 = origin.pt3 ?? null;
+                if (!pt3) {
+                    const mx = (origin.start.x + origin.end.x) / 2;
+                    const my = (origin.start.y + origin.end.y) / 2;
+                    const dmx = mx - origin.center.x;
+                    const dmy = my - origin.center.y;
+                    const dmLen = Math.hypot(dmx, dmy);
+                    if (dmLen > 1e-9) {
+                        const sign = origin.largeArc ? -1 : 1;
+                        pt3 = {
+                            x: origin.center.x + sign * origin.radius * dmx / dmLen,
+                            y: origin.center.y + sign * origin.radius * dmy / dmLen,
+                        };
+                    }
+                }
+
+                if (pt3) {
+                    if (origin.arcMode === "arc2pt") {
+                        const result = arc2ptData(s, en, origin.radius, pt3);
+                        if (result) {
+                            const dcLen = Math.hypot(pt3.x - result.center.x, pt3.y - result.center.y);
+                            const newPt3 = dcLen > 1e-9
+                                ? {
+                                    x: result.center.x + origin.radius * (pt3.x - result.center.x) / dcLen,
+                                    y: result.center.y + origin.radius * (pt3.y - result.center.y) / dcLen,
+                                }
+                                : { x: result.center.x + origin.radius, y: result.center.y };
+                            updates.push({
+                                id: ref.segId,
+                                changes: {
+                                    data: {
+                                        ...newData,
+                                        center: result.center,
+                                        largeArc: result.largeArc,
+                                        sweep: result.sweep,
+                                        pt3: newPt3,
+                                    },
+                                },
+                            });
+                            continue;
+                        }
+                    }
+
+                    const c = circumcenter(s, en, pt3);
+                    if (c) {
+                        const flags = arcFlagsViaPoint(s, en, pt3, c.cx, c.cy);
+                        updates.push({
+                            id: ref.segId,
+                            changes: {
+                                data: {
+                                    ...newData,
+                                    center: { x: c.cx, y: c.cy },
+                                    radius: c.r,
+                                    ...flags,
+                                    pt3,
+                                    arcMode: "arc3pt",
+                                    radiusExpr: undefined,
+                                },
+                            },
+                        });
+                        continue;
+                    }
+                }
+            }
+
+            updates.push({ id: ref.segId, changes: { data: newData } });
+        }
+
+        if (updates.length > 0) this.ctx.state.updateSegments(updates);
+    }
+
+    _commitPointMove() {
+        const anyChanged = this._movingPoints.some(ref => {
+            const origin = this._movingPointsOrigins.get(ref.segId);
+            const cur = this.ctx.state.segments.find(s => s.id === ref.segId)?.data;
+            return !_segDataEqual(origin, cur);
+        });
+        if (anyChanged) this.ctx.state._pushHistory("Move point");
+        else {
+            const updates = [];
+            for (const ref of this._movingPoints) {
+                const origin = this._movingPointsOrigins.get(ref.segId);
+                if (origin) updates.push({ id: ref.segId, changes: { data: origin } });
+            }
+            if (updates.length > 0) this.ctx.state.updateSegments(updates);
+        }
+        this._endPointMove();
+    }
+
+    _endPointMove() {
+        this._movingPoints = [];
+        this._movingPointsOrigins = new Map();
     }
     // ─── Arc pt3 handle drag ────────────────────────────────────────────────
 
@@ -616,18 +791,21 @@ export default class CursorTool extends BaseTool {
         if (this._rectDrag.kind === "side") {
             const { role, geom } = this._rectDrag;
             const next = { ...seg.data };
-            if (role === "x-opposite") {
-                next.x = geom.xStart;
-                next.w = (localPos.x - geom.xStart) / geom.dirW;
-            } else if (role === "x-start") {
-                next.x = localPos.x;
-                next.w = (geom.xOpp - localPos.x) / geom.dirW;
-            } else if (role === "y-opposite") {
-                next.y = geom.yStart;
-                next.h = (localPos.y - geom.yStart) / geom.dirH;
-            } else if (role === "y-start") {
-                next.y = localPos.y;
-                next.h = (geom.yOpp - localPos.y) / geom.dirH;
+            if (role === "x-opposite" || role === "x-start") {
+                const xStart = role === "x-start" ? localPos.x : geom.xStart;
+                const xOpp = role === "x-opposite" ? localPos.x : geom.xOpp;
+                const dx = xOpp - xStart;
+                next.x = xStart;
+                next.w = Math.abs(dx);
+                next.dirW = Math.abs(dx) > EPS ? (dx >= 0 ? 1 : -1) : geom.dirW;
+            }
+            if (role === "y-opposite" || role === "y-start") {
+                const yStart = role === "y-start" ? localPos.y : geom.yStart;
+                const yOpp = role === "y-opposite" ? localPos.y : geom.yOpp;
+                const dy = yOpp - yStart;
+                next.y = yStart;
+                next.h = Math.abs(dy);
+                next.dirH = Math.abs(dy) > EPS ? (dy >= 0 ? 1 : -1) : geom.dirH;
             }
             const expr = { ...(next._expr ?? {}) };
             delete expr[this._rectDrag.axisAttr];
@@ -639,19 +817,23 @@ export default class CursorTool extends BaseTool {
         if (this._rectDrag.kind === "rx") {
             const rg = getRectGeomLocal(seg.data);
             const corners = getRectCornerPointMap(rg);
-            const inward = getRectCornerInwardMap(rg);
             const c = corners[this._rectDrag.cornerKey] ?? corners["rx-start"];
-            const i = inward[this._rectDrag.cornerKey] ?? inward["rx-start"];
-            const ux = (localPos.x - c.x) * i.ix;
-            const uy = (localPos.y - c.y) * i.iy;
+            const center = {
+                x: (rg.minX + rg.maxX) / 2,
+                y: (rg.minY + rg.maxY) / 2,
+            };
+            const ix = Math.abs(center.x - c.x) > EPS ? Math.sign(center.x - c.x) : 1;
+            const iy = Math.abs(center.y - c.y) > EPS ? Math.sign(center.y - c.y) : 1;
+            const ux = (localPos.x - c.x) * ix;
+            const uy = (localPos.y - c.y) * iy;
             // Bisector-based fillet solve (matches user pseudocode semantics).
             // For a right-angle corner this becomes linear tracking from cursor:
             // r = dot(PM, bisector) * sin(theta/2), theta=90° -> sin(theta/2)=sqrt(2)/2.
             // Outside corner (u<=0 or v<=0) is treated as negative radius -> clamp to 0.
             let rawRx = 0;
             if (ux > 0 && uy > 0) {
-                const v1 = { x: i.ix, y: 0 };
-                const v2 = { x: 0, y: i.iy };
+                const v1 = { x: ix, y: 0 };
+                const v2 = { x: 0, y: iy };
                 const bisLen = Math.hypot(v1.x + v2.x, v1.y + v2.y);
                 if (bisLen > 1e-9) {
                     const bisector = { x: (v1.x + v2.x) / bisLen, y: (v1.y + v2.y) / bisLen };
@@ -756,19 +938,21 @@ export default class CursorTool extends BaseTool {
             const maxRx = Math.min(Math.abs(Number(seg.data?.w ?? 0)), Math.abs(Number(seg.data?.h ?? 0))) / 2;
             next.rx = Math.max(0, Math.min(Math.abs(num), maxRx));
         } else if (axis === "w") {
-            const val = num;
+            const val = Math.abs(num);
             const g = this._rectDrag.geom;
             if (this._rectDrag.role === "x-start") {
                 next.x = g.xOpp - g.dirW * val;
             }
             next.w = val;
+            next.dirW = g.dirW;
         } else if (axis === "h") {
-            const val = num;
+            const val = Math.abs(num);
             const g = this._rectDrag.geom;
             if (this._rectDrag.role === "y-start") {
                 next.y = g.yOpp - g.dirH * val;
             }
             next.h = val;
+            next.dirH = g.dirH;
         }
 
         if (isFormulaToken(raw)) expr[axis] = raw;
