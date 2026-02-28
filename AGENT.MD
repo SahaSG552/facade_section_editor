@@ -9,6 +9,26 @@
 - [ ] Вынести в универсальную обёртку для текущих и будущих параметров.
 - [ ] Применить не только к `Path`, но и к shape-параметрам и параметрам модификаторов.
 
+## ✅ РЕФАКТОРИНГ RECT GEOMETRY (28.02.2026)
+
+- Вынесена единая геометрия прямоугольника в `src/editor/geometry/rectGeometry.js`:
+  - `getRectGeomLocal(...)`
+  - `getRectClampedRx(...)`
+  - `getRectCornerPointMap(...)`
+  - `getRectCornerInwardMap(...)`
+  - `getRectBoundaryPrimitives(...)`
+- На общий helper переведены:
+  - `EditorCanvas` (рендер selected-corner handles + rect boundary hit-test),
+  - `CursorTool` (side/rx drag геометрия).
+- Удалены дубли расчётов `dirW/dirH` и corner/inward maps между модулями.
+
+### Зафиксированный инвариант
+- Для всех rect интеракций используется **effective direction**:
+  - сначала учитывается `dirW/dirH`,
+  - затем знак `w/h`,
+  - итоговая ориентация берётся из `dx = dirW*w`, `dy = dirH*h`.
+- Это предотвращает рассинхрон между preview/hit-test/edit на инверснутых прямоугольниках.
+
 ## ✅ ИТОГИ РЕФАКТОРИНГА ПЕРЕД RX (28.02.2026)
 
 ### Что выяснили по багфиксам

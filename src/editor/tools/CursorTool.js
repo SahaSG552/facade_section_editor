@@ -1,6 +1,7 @@
 import BaseTool from "./BaseTool.js";
 import LoggerFactory from "../../core/LoggerFactory.js";
 import { isFormulaToken, evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
+import { getRectGeomLocal, getRectCornerPointMap, getRectCornerInwardMap } from "../geometry/rectGeometry.js";
 
 const log = LoggerFactory.createLogger("CursorTool");
 
@@ -8,6 +9,18 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 
 /** Epsilon for floating-point coordinate comparisons. */
 const EPS = 1e-6;
+
+/**
+ * Rectangle drag state for side/radius edits.
+ * @typedef {object} RectDragState
+ * @property {'side'|'rx'} kind
+ * @property {string} segId
+ * @property {string=} role
+ * @property {'w'|'h'|'rx'} axisAttr
+ * @property {object} origin
+ * @property {object=} geom
+ * @property {string=} cornerKey
+ */
 
 /**
  * Compare two segment data objects geometrically.
@@ -94,7 +107,7 @@ export default class CursorTool extends BaseTool {
         /** @private @type {boolean} — true while radius popup input has keyboard focus */
         this._inputFocused = false;
 
-        /** @private @type {{kind:'side'|'rx',segId:string,role?:string,axisAttr:'w'|'h'|'rx',origin:object,geom?:object,cornerKey?:string}|null} */
+        /** @private @type {RectDragState|null} */
         this._rectDrag = null;
         /** @private @type {HTMLElement|null} */
         this._rectPopup = null;
@@ -550,7 +563,7 @@ export default class CursorTool extends BaseTool {
 
     /**
      * Start rectangle side drag mode.
-    * @param {{segId:string, role:string, axis:'w'|'h'}} hit
+        * @param {{segId:string, role:string, axis:'w'|'h'}} hit
      * @param {MouseEvent} e
      * @private
      */
@@ -558,7 +571,7 @@ export default class CursorTool extends BaseTool {
         const seg = this.ctx.state.segments.find(s => s.id === hit.segId);
         if (!seg || seg.type !== "rect") return;
         const origin = JSON.parse(JSON.stringify(seg.data));
-        const geom = this._rectGeomFromData(origin);
+        const geom = getRectGeomLocal(origin);
         this._rectDrag = {
             kind: "side",
             segId: hit.segId,
@@ -587,29 +600,9 @@ export default class CursorTool extends BaseTool {
             cornerKey,
             axisAttr: "rx",
             origin,
-            geom: this._rectGeomFromData(origin),
+            geom: getRectGeomLocal(origin),
         };
         this._showRectPopup(e, "RX =", String(seg.data?._expr?.rx ?? seg.data?.rx ?? "0"));
-    }
-
-    /** @private */
-    _rectGeomFromData(data) {
-        const xStart = Number(data?.x ?? 0);
-        const yStart = Number(data?.y ?? 0);
-        const w = Number(data?.w ?? 0);
-        const h = Number(data?.h ?? 0);
-        const dirWBase = Number(data?.dirW) < 0 ? -1 : 1;
-        const hasDirH = Object.prototype.hasOwnProperty.call(data ?? {}, "dirH");
-        const dirHBase = hasDirH ? (Number(data?.dirH) < 0 ? -1 : 1) : -1;
-
-        // Effective extents must account for possible sign inversion of w/h.
-        const dx = dirWBase * w;
-        const dy = dirHBase * h;
-        const xOpp = xStart + dx;
-        const yOpp = yStart + dy;
-        const dirW = dx >= 0 ? 1 : -1;
-        const dirH = dy >= 0 ? 1 : -1;
-        return { xStart, yStart, xOpp, yOpp, dirW, dirH };
     }
 
     /** @private */
@@ -644,19 +637,9 @@ export default class CursorTool extends BaseTool {
         }
 
         if (this._rectDrag.kind === "rx") {
-            const rg = this._rectGeomFromData(seg.data);
-            const corners = {
-                "rx-start": { x: rg.xStart, y: rg.yStart },
-                "rx-x": { x: rg.xOpp, y: rg.yStart },
-                "rx-y": { x: rg.xStart, y: rg.yOpp },
-                "rx-opposite": { x: rg.xOpp, y: rg.yOpp },
-            };
-            const inward = {
-                "rx-start": { ix: rg.dirW, iy: rg.dirH },
-                "rx-x": { ix: -rg.dirW, iy: rg.dirH },
-                "rx-y": { ix: rg.dirW, iy: -rg.dirH },
-                "rx-opposite": { ix: -rg.dirW, iy: -rg.dirH },
-            };
+            const rg = getRectGeomLocal(seg.data);
+            const corners = getRectCornerPointMap(rg);
+            const inward = getRectCornerInwardMap(rg);
             const c = corners[this._rectDrag.cornerKey] ?? corners["rx-start"];
             const i = inward[this._rectDrag.cornerKey] ?? inward["rx-start"];
             const ux = (localPos.x - c.x) * i.ix;

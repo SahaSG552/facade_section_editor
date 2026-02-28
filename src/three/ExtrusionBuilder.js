@@ -1818,49 +1818,42 @@ export default class ExtrusionBuilder {
 
             // Calculate adaptive curve segments based on profile complexity
             const curveSegments = this.calculateAdaptiveCurveSegments(profile);
-            const profileGeometry = new THREE.ShapeGeometry(
-                profile,
-                curveSegments,
+            const profilePointsRaw = this._normalizeClosedProfilePointsWinding(
+                profile.getPoints(curveSegments),
             );
 
-            // Apply overlap scaling to profile geometry to prevent gaps
-            if (this.profileOverlap > 0) {
-                const pos = profileGeometry.attributes.position;
-                let minX = Infinity, maxX = -Infinity;
-                
-                // 1. Calculate bounds
-                for (let i = 0; i < pos.count; i++) {
-                    const x = pos.getX(i);
-                    if (x < minX) minX = x;
-                    if (x > maxX) maxX = x;
+            // Apply overlap scaling to profile points to prevent gaps
+            if (this.profileOverlap > 0 && profilePointsRaw.length > 0) {
+                let minX = Infinity;
+                let maxX = -Infinity;
+                for (const p of profilePointsRaw) {
+                    if (p.x < minX) minX = p.x;
+                    if (p.x > maxX) maxX = p.x;
                 }
-                
+
                 const width = maxX - minX;
                 if (width > 1e-6) {
                     const centerX = (minX + maxX) / 2;
                     const halfWidth = width / 2;
-                    const scaleFactor = (halfWidth + this.profileOverlap) / halfWidth;
-                    
-                    // 2. Apply scale from center
-                    for (let i = 0; i < pos.count; i++) {
-                        const x = pos.getX(i);
-                        const scaledX = centerX + (x - centerX) * scaleFactor;
-                        pos.setX(i, scaledX);
+                    const scaleFactor =
+                        (halfWidth + this.profileOverlap) / halfWidth;
+
+                    for (const p of profilePointsRaw) {
+                        p.x = centerX + (p.x - centerX) * scaleFactor;
                     }
-                    pos.needsUpdate = true;
-                    this.log.debug(`Applied profile overlap scale: ${scaleFactor.toFixed(4)} (width: ${width.toFixed(2)} -> ${(width + this.profileOverlap*2).toFixed(2)})`);
+                    this.log.debug(
+                        `Applied profile overlap scale: ${scaleFactor.toFixed(4)} (width: ${width.toFixed(2)} -> ${(width + this.profileOverlap * 2).toFixed(2)})`,
+                    );
                 }
             }
 
-            // Extract points from geometry
-            const posAttr = profileGeometry.attributes.position;
             const profilePoints = [];
             const geometryPoints = []; // Raw points for geometry generation (scaled)
             const isExtension = !!options.isExtension;
             const isTopExtension = isExtension && side === "top";
-            for (let i = 0; i < posAttr.count; i++) {
-                const x = posAttr.getX(i);
-                const rawY = posAttr.getY(i);
+            for (let i = 0; i < profilePointsRaw.length; i++) {
+                const x = Number(profilePointsRaw[i].x ?? 0);
+                const rawY = Number(profilePointsRaw[i].y ?? 0);
                 
                 // Store raw scaled points for geometry generation
                 geometryPoints.push(new THREE.Vector2(x, rawY));
@@ -2034,21 +2027,13 @@ export default class ExtrusionBuilder {
                 return [];
             }
 
-            // Determine winding for outside half selection
-            let contourIsClockwise = false;
-            if (path.curves.length > 1) {
-                let signedArea = 0;
-                for (const curve of path.curves) {
-                    const p0 = curve.getPoint(0);
-                    const p1 = curve.getPoint(1);
-                    signedArea += (p1.x - p0.x) * (p1.y + p0.y);
-                }
-                contourIsClockwise = signedArea > 0;
-            }
+            // Force canonical half selection independent from SVG winding direction.
+            // This prevents inverted extrusions when imported profile/path orientation is wrong.
+            const requestedOuterHalf =
+                options.outsideHalf === "right" ? "right" : "left";
 
-            // Choose outside half (flipped for external half on straight segments)
-            const outsideHalf =
-                options.outsideHalf || (contourIsClockwise ? "right" : "left");
+            // Swap left/right mapping for outer vs inner extrusion as requested.
+            const outsideHalf = requestedOuterHalf === "left" ? "left" : "right";
 
             const halfProfilePoints = this.createOpenHalfProfilePoints(
                 profile,
@@ -2096,6 +2081,10 @@ export default class ExtrusionBuilder {
             const lathePoints = halfProfilePoints.map(
                 (p) => new THREE.Vector2(Math.abs(p.x), p.y),
             );
+
+            // Reverse winding only for sweep-extruded half-profiles.
+            // Lathe uses original order (lathePoints) and remains unchanged.
+            const extrudeHalfProfilePoints = halfProfilePoints.slice().reverse();
 
             // Group curves using shared logic
             const curveGroups = this.groupCurves(path.curves);
@@ -2170,7 +2159,7 @@ export default class ExtrusionBuilder {
                     flags.invertExtrusionCaps,
                     side,
                     {
-                        profilePointsOverride: halfProfilePoints,
+                        profilePointsOverride: extrudeHalfProfilePoints,
                         profileClosed: false,
                         useParallelTransport: false,
                     },
@@ -2208,6 +2197,7 @@ export default class ExtrusionBuilder {
                 mesh.userData.halfProfile = outsideHalf;
                 mesh.userData.contourPointCount = contourPoints.length;
                 mesh.userData.profilePointCount = halfProfilePoints.length;
+                mesh.userData.contourReversed = true;
 
                 allMeshes.push(mesh);
             }
@@ -2273,7 +2263,7 @@ export default class ExtrusionBuilder {
                             i,
                             true,
                             null,
-                            contourIsClockwise,
+                            false,
                             side,
                             !!options.isExtension,
                             extensionHeight,
@@ -2346,6 +2336,10 @@ export default class ExtrusionBuilder {
                     });
                 }
 
+                const extrudeInnerProfilePoints = innerProfilePoints
+                    .slice()
+                    .reverse();
+
                 if (innerProfilePoints && innerProfilePoints.length > 1) {
                     const curveSegments =
                         this.calculateAdaptiveCurveSegments(profile);
@@ -2359,7 +2353,7 @@ export default class ExtrusionBuilder {
                         flags.invertExtrusionCaps,
                         side,
                         {
-                            profilePointsOverride: innerProfilePoints,
+                            profilePointsOverride: extrudeInnerProfilePoints,
                             profileClosed: false,
                             useParallelTransport: false,
                         },
@@ -2554,11 +2548,20 @@ export default class ExtrusionBuilder {
                 contour = contour.map((p) => new THREE.Vector3(p.x, p.y, -p.z));
             }
 
+            // Force opposite sweep direction for all extrusions.
+            if (Array.isArray(contour) && contour.length > 1) {
+                contour = contour.slice().reverse();
+            }
+
             let profile;
             if (profilePointsOverride && profilePointsOverride.length > 0) {
-                const pos = new Float32Array(profilePointsOverride.length * 3);
-                for (let i = 0; i < profilePointsOverride.length; i++) {
-                    const p = profilePointsOverride[i];
+                const sourcePoints = profileClosed
+                    ? this._normalizeClosedProfilePointsWinding(profilePointsOverride)
+                    : profilePointsOverride;
+
+                const pos = new Float32Array(sourcePoints.length * 3);
+                for (let i = 0; i < sourcePoints.length; i++) {
+                    const p = sourcePoints[i];
                     pos[i * 3] = p.x;
                     pos[i * 3 + 1] = p.y;
                     pos[i * 3 + 2] = 0;
@@ -3196,17 +3199,21 @@ export default class ExtrusionBuilder {
 
             const prevContourCount = prevMesh.userData.contourPointCount || 0;
             const nextContourCount = nextMesh.userData.contourPointCount || 0;
+            const prevContourReversed = prevMesh.userData.contourReversed === true;
+            const nextContourReversed = nextMesh.userData.contourReversed === true;
 
             if (prevContourCount < 1 || nextContourCount < 1) {
                 this.log.warn("Cannot merge: contourPointCount not set");
                 return 0;
             }
 
-            // Last profile slice of prevMesh: vertices from (prevContourCount - 1) * profileCount
-            const prevSliceStart = (prevContourCount - 1) * profileCount;
-            
-            // First profile slice of nextMesh: vertices from 0 to profileCount
-            const nextSliceStart = 0;
+            // With reversed contour order, geometric "end"/"start" slices are swapped.
+            const prevSliceStart = prevContourReversed
+                ? 0
+                : (prevContourCount - 1) * profileCount;
+            const nextSliceStart = nextContourReversed
+                ? (nextContourCount - 1) * profileCount
+                : 0;
 
             // Update matrices to get world positions
             prevMesh.updateMatrixWorld(true);
@@ -3538,6 +3545,55 @@ export default class ExtrusionBuilder {
         return { leftPart, rightPart };
     }
 
+    /**
+     * Compute signed polygon area in XY plane.
+     * Positive area = CCW winding, negative = CW winding.
+     * @param {Array<{x:number,y:number}>} points
+     * @returns {number}
+     * @private
+     */
+    _computeSignedArea2D(points) {
+        if (!Array.isArray(points) || points.length < 3) return 0;
+        let area2 = 0;
+        for (let i = 0; i < points.length; i++) {
+            const a = points[i];
+            const b = points[(i + 1) % points.length];
+            area2 += a.x * b.y - b.x * a.y;
+        }
+        return area2 * 0.5;
+    }
+
+    /**
+        * Normalize closed profile loop winding to canonical CW direction.
+     * Removes duplicated closing point if present.
+     * @param {Array<{x:number,y:number}>} points
+     * @returns {Array<{x:number,y:number}>}
+     * @private
+     */
+    _normalizeClosedProfilePointsWinding(points) {
+        if (!Array.isArray(points) || points.length < 3) {
+            return Array.isArray(points) ? points.slice() : [];
+        }
+
+        const cleaned = points.map((p) => ({ x: Number(p.x), y: Number(p.y) }));
+        if (cleaned.length > 1) {
+            const first = cleaned[0];
+            const last = cleaned[cleaned.length - 1];
+            if (Math.hypot(first.x - last.x, first.y - last.y) < 1e-6) {
+                cleaned.pop();
+            }
+        }
+
+        if (cleaned.length < 3) return cleaned;
+
+        const signedArea = this._computeSignedArea2D(cleaned);
+        if (signedArea > 0) {
+            cleaned.reverse();
+        }
+
+        return cleaned;
+    }
+
     createOpenHalfProfilePoints(profile, existingPoints = null, half = "left") {
         try {
             // Calculate adaptive number of points based on profile shape complexity
@@ -3575,6 +3631,9 @@ export default class ExtrusionBuilder {
             } else {
                 fullProfile = profile.getPoints(pointsCount);
             }
+
+            // Canonicalize profile winding so half extraction is orientation-agnostic.
+            fullProfile = this._normalizeClosedProfilePointsWinding(fullProfile);
 
             if (fullProfile.length < 3) {
                 this.log.warn(
