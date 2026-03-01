@@ -4,6 +4,12 @@ import { evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { evalAngle } from "../transforms/TransformCommands.js";
 import { circumcenter, arc2ptData, arcFlagsViaPoint } from "./ArcTool.js";
 import { computeBoxSelection, buildSelectionBoxGhost } from "./shared/selectionUtils.js";
+import {
+    collectSegmentSnapshots,
+    commitCopiedSnapshots,
+    commitStagedTransformTarget,
+    transitionCopyMode,
+} from "./shared/copyPreviewUtils.js";
 
 const log = LoggerFactory.createLogger("RotateTool");
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -86,6 +92,9 @@ export default class RotateTool extends BaseTool {
         this._rotatingEndpointRefs = [];
         this._rotatingEndpointOrigins = new Map();
 
+        this._copyMode = false;
+        this._copyPreviewSnapshots = [];
+
         this._pointPopup = null;
         this._pointInputFocused = false;
     }
@@ -134,9 +143,18 @@ export default class RotateTool extends BaseTool {
             return;
         }
         if (this._mode === "pick-to") {
-            this._applyPreviewTo(pos);
-            this._commitRotate();
-            this._rollbackToSelection();
+            this._copyMode = !!e.ctrlKey;
+            commitStagedTransformTarget({
+                copyMode: this._copyMode,
+                targetPoint: pos,
+                applyPreview: (point) => this._applyPreviewTo(point),
+                commit: (args) => this._commitRotate(args),
+                refreshPreview: () => {
+                    if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+                    this._updateRotateGhost();
+                },
+                finishCommand: () => this._rollbackToSelection(),
+            });
             return;
         }
 
@@ -172,6 +190,14 @@ export default class RotateTool extends BaseTool {
         }
         if (this._mode === "pick-to") {
             this._cursorPos = pos;
+            this._copyMode = transitionCopyMode({
+                current: this._copyMode,
+                next: !!e.ctrlKey,
+                onEnterCopy: () => this._restoreOrigins(),
+                onExitCopy: () => {
+                    this._copyPreviewSnapshots = [];
+                },
+            });
             this._applyPreviewTo(pos);
             this._updateRotateGhost();
             this._updatePointPopupValues(pos);
@@ -277,6 +303,17 @@ export default class RotateTool extends BaseTool {
             }
         }
 
+        if (this._mode === "pick-to" && e.key === "Control") {
+            this._copyMode = transitionCopyMode({
+                current: this._copyMode,
+                next: true,
+                onEnterCopy: () => this._restoreOrigins(),
+            });
+            if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+            this._updateRotateGhost();
+            return true;
+        }
+
         if ((this._mode === "pick-center" || this._mode === "pick-ref" || this._mode === "pick-to") && !this._pointInputFocused) {
             if (e.key === "Tab") {
                 e.preventDefault();
@@ -299,6 +336,22 @@ export default class RotateTool extends BaseTool {
             }
         }
 
+        return false;
+    }
+
+    onKeyUp(e) {
+        if (this._mode === "pick-to" && e.key === "Control") {
+            this._copyMode = transitionCopyMode({
+                current: this._copyMode,
+                next: false,
+                onExitCopy: () => {
+                    this._copyPreviewSnapshots = [];
+                },
+            });
+            if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+            this._updateRotateGhost();
+            return true;
+        }
         return false;
     }
 
@@ -325,6 +378,8 @@ export default class RotateTool extends BaseTool {
 
         this._refPoint = { x: point.x, y: point.y };
         this._captureOrigins();
+        this._copyMode = false;
+        this._copyPreviewSnapshots = [];
         this._mode = "pick-to";
         this._cursorPos = point;
         this._showPointPopup(e, "ref2", point);
@@ -346,6 +401,11 @@ export default class RotateTool extends BaseTool {
         }
 
         const selectedSet = new Set(this._rotatingSegIds);
+        const selectedContourIds = new Set(
+            this._rotatingSegIds
+                .map(id => segmentById.get(id)?.contourId)
+                .filter(v => v !== undefined && v !== null),
+        );
         const refsSeen = new Set();
         for (const id of this._rotatingSegIds) {
             const origin = this._origins.get(id)?.data;
@@ -354,14 +414,15 @@ export default class RotateTool extends BaseTool {
                 const refs = this.ctx.state.getSegmentsAtVertex(pt);
                 for (const ref of refs) {
                     if (selectedSet.has(ref.segId)) continue;
+                    const refSeg = segmentById.get(ref.segId);
+                    if (!refSeg) continue;
+                    if (!selectedContourIds.has(refSeg.contourId)) continue;
                     const key = `${ref.segId}:${ref.pointKey}`;
                     if (refsSeen.has(key)) continue;
                     refsSeen.add(key);
                     this._rotatingEndpointRefs.push(ref);
                     if (!this._rotatingEndpointOrigins.has(ref.segId)) {
-                        const seg = segmentById.get(ref.segId);
-                        if (!seg) continue;
-                        this._rotatingEndpointOrigins.set(ref.segId, _segmentSnapshot(seg));
+                        this._rotatingEndpointOrigins.set(ref.segId, _segmentSnapshot(refSeg));
                     }
                 }
             }
@@ -494,12 +555,58 @@ export default class RotateTool extends BaseTool {
             updates.push({ id: segId, changes: { data: nextData, transforms: entry.next.transforms } });
         }
 
-        if (updates.length > 0) this.ctx.state.updateSegments(updates);
+        if (updates.length > 0) {
+            if (this._copyMode) {
+                this.ctx.state.updateSegments(updates);
+                this._copyPreviewSnapshots = this._collectCopyPreviewSnapshots();
+                this._restoreOrigins();
+                return;
+            }
+            this.ctx.state.updateSegments(updates);
+            this._copyPreviewSnapshots = [];
+        }
     }
 
-    _commitRotate() {
-        if (this._origins.size === 0) return;
-        this.ctx.state._pushHistory("Rotate");
+    _collectCopyPreviewSnapshots() {
+        return collectSegmentSnapshots(this.ctx.state, this._rotatingSegIds);
+    }
+
+    _commitRotate({ keepSourceSelection = false } = {}) {
+        if (this._origins.size === 0) return false;
+
+        const state = this.ctx.state;
+        let hasChanged = [...this._origins.entries()].some(([id, origin]) => {
+            const seg = state.segments.find(s => s.id === id);
+            if (!seg) return false;
+            return JSON.stringify(origin.data) !== JSON.stringify(seg.data)
+                || JSON.stringify(origin.transforms ?? []) !== JSON.stringify(seg.transforms ?? []);
+        });
+        if (this._copyMode && this._copyPreviewSnapshots.length > 0) hasChanged = true;
+
+        if (!hasChanged) {
+            this._restoreOrigins();
+            return false;
+        }
+
+        if (this._copyMode) {
+            let snapshots = this._copyPreviewSnapshots;
+            if ((!snapshots || snapshots.length === 0) && this._cursorPos) {
+                this._applyPreviewTo(this._cursorPos);
+                snapshots = this._copyPreviewSnapshots;
+            }
+
+            this._restoreOrigins();
+            return commitCopiedSnapshots({
+                state,
+                snapshots,
+                historyLabel: "Rotate Copy",
+                keepSourceSelection,
+                sourceIds: this._rotatingSegIds,
+            });
+        }
+
+        state._pushHistory("Rotate");
+        return true;
     }
 
     _restoreOrigins() {
@@ -529,6 +636,8 @@ export default class RotateTool extends BaseTool {
         this._origins.clear();
         this._rotatingEndpointRefs = [];
         this._rotatingEndpointOrigins = new Map();
+        this._copyMode = false;
+        this._copyPreviewSnapshots = [];
         this._pointInputFocused = false;
     }
 
@@ -746,6 +855,26 @@ export default class RotateTool extends BaseTool {
         if (this._refPoint) drawRay(this._refPoint);
         if (this._cursorPos) drawRay(this._cursorPos);
 
+        if (this._copyMode && this._cursorPos) {
+            const plus = document.createElementNS(SVG_NS, "text");
+            plus.setAttribute("x", this._cursorPos.x + 0.12);
+            plus.setAttribute("y", this._cursorPos.y - 0.12);
+            plus.setAttribute("font-size", "0.28");
+            plus.textContent = "+";
+            plus.classList.add("editor-selection-box");
+            g.appendChild(plus);
+
+            for (const snap of this._copyPreviewSnapshots) {
+                const el = this.ctx.canvas._buildSegmentElement?.({
+                    ...snap,
+                    selected: false,
+                });
+                if (!el) continue;
+                el.classList.add("editor-copy-preview");
+                g.appendChild(el);
+            }
+        }
+
         this.ctx.canvas.setGhost(g);
     }
 
@@ -848,9 +977,17 @@ export default class RotateTool extends BaseTool {
                 return;
             }
             this._cursorPos = toPoint;
-            this._applyPreviewTo(toPoint);
-            this._commitRotate();
-            this._rollbackToSelection();
+            commitStagedTransformTarget({
+                copyMode: this._copyMode,
+                targetPoint: toPoint,
+                applyPreview: (point) => this._applyPreviewTo(point),
+                commit: (args) => this._commitRotate(args),
+                refreshPreview: () => {
+                    if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+                    this._updateRotateGhost();
+                },
+                finishCommand: () => this._rollbackToSelection(),
+            });
             return;
         }
 

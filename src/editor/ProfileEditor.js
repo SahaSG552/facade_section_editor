@@ -730,6 +730,8 @@ export default class ProfileEditor {
 
         /** @type {((e: KeyboardEvent) => void)|null} */
         this._keyHandler = null;
+        /** @type {((e: KeyboardEvent) => void)|null} */
+        this._keyUpHandler = null;
 
         /**
          * The last path text seen from PathEditor (may contain {varname} formula tokens).
@@ -738,6 +740,11 @@ export default class ProfileEditor {
          * @type {string}
          */
         this._formulaPath = "";
+
+        /** @type {Array} Structured snapshot captured on enter for cancel-restore. */
+        this._entryElementsSnapshot = [];
+        /** @type {Record<string, number>} Variable snapshot captured on enter for cancel-restore. */
+        this._entryVariableValues = {};
     }
 
     // ─── Public API ──────────────────────────────────────────────────────────
@@ -767,6 +774,8 @@ export default class ProfileEditor {
         const sourceElements = Array.isArray(profileElements) && profileElements.length > 0
             ? profileElements
             : (pathEditor?.getElementsDebugSnapshot?.() ?? []);
+        this._entryElementsSnapshot = JSON.parse(JSON.stringify(sourceElements ?? []));
+        this._entryVariableValues = { ...(variableValues ?? {}) };
         const hasStructuredSource = Array.isArray(sourceElements) && sourceElements.length > 0;
         const evaluatedContoursPath = _buildEvaluatedContoursPathFromElements(sourceElements, variableValues);
         this._formulaPath = pathEditor?.getContoursRawPath?.()
@@ -911,6 +920,14 @@ export default class ProfileEditor {
             this._pathEditor.setShapeElements([]);
             this._pathEditor.clearLineSelection();
             this._pathEditor.clearShapeSelection?.();
+
+            if (!save && Array.isArray(this._entryElementsSnapshot)) {
+                const restoreElements = JSON.parse(JSON.stringify(this._entryElementsSnapshot));
+                this._pathEditor.setElements(restoreElements);
+                this._pathEditor.setVariableValues?.({ ...(this._entryVariableValues ?? {}) });
+                this._pathEditor.syncHiddenInputsFromElements?.();
+            }
+
             this._pathEditor = null;
         }
         this._lineSegIds = [];
@@ -936,11 +953,17 @@ export default class ProfileEditor {
 
         this.state = null;
         this._initialSyncDone = false;
+        this._entryElementsSnapshot = [];
+        this._entryVariableValues = {};
 
         // Restore keyboard
         if (this._keyHandler) {
             window.removeEventListener("keydown", this._keyHandler);
             this._keyHandler = null;
+        }
+        if (this._keyUpHandler) {
+            window.removeEventListener("keyup", this._keyUpHandler);
+            this._keyUpHandler = null;
         }
 
         // Restore DOM to preview layout
@@ -1460,7 +1483,8 @@ export default class ProfileEditor {
             case "move": return new MoveTool();
             case "rotate": return new RotateTool();
             case "line": return new LineTool();
-            case "mirror": return new MirrorTool();
+            case "mirror": return new MirrorTool("mirror");
+            case "symmetry": return new MirrorTool("symmetry");
             case "arc3pt":
             case "arc": return new ArcTool();
             case "circle2pt": return new CircleTool("circle2pt");
@@ -1605,7 +1629,13 @@ export default class ProfileEditor {
             // Delegate remaining keys to the active tool
             if (this._currentTool?.onKeyDown(e)) e.preventDefault();
         };
+        this._keyUpHandler = (e) => {
+            if (!this._active) return;
+            if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+            if (this._currentTool?.onKeyUp(e)) e.preventDefault();
+        };
         window.addEventListener("keydown", this._keyHandler);
+        window.addEventListener("keyup", this._keyUpHandler);
     }
 
     // ─── Layout switching ────────────────────────────────────────────────────

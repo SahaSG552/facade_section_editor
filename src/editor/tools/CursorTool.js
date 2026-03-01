@@ -3,6 +3,7 @@ import LoggerFactory from "../../core/LoggerFactory.js";
 import { isFormulaToken, evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { getRectGeomLocal, getRectCornerPointMap } from "../geometry/rectGeometry.js";
 import { circumcenter, arc2ptData, arcFlagsViaPoint } from "./ArcTool.js";
+import { computeBoxSelection, buildSelectionBoxGhost } from "./shared/selectionUtils.js";
 
 const log = LoggerFactory.createLogger("CursorTool");
 
@@ -457,16 +458,24 @@ export default class CursorTool extends BaseTool {
         const allRefs = this.ctx.state.getSegmentsAtVertex(vertexPt);
         if (!allRefs.length) return;
 
-        this._movingPoints = allRefs;
+        const targetContourId = seg.contourId;
+        const filteredRefs = allRefs.filter(ref => {
+            const refSeg = this.ctx.state.segments.find(s => s.id === ref.segId);
+            if (!refSeg) return false;
+            return refSeg.contourId === targetContourId;
+        });
+        if (!filteredRefs.length) return;
+
+        this._movingPoints = filteredRefs;
         this._movingPointsOrigins.clear();
-        for (const ref of allRefs) {
+        for (const ref of filteredRefs) {
             const s = this.ctx.state.segments.find(x => x.id === ref.segId);
             if (s) this._movingPointsOrigins.set(ref.segId, JSON.parse(JSON.stringify(s.data)));
         }
 
         this.ctx.state.setSelection(pointHit.segId);
         this._applyPointMove(pos);
-        log.debug("CursorTool: moving welded vertex", allRefs.length, "refs");
+        log.debug("CursorTool: moving welded vertex", filteredRefs.length, "refs");
     }
 
     _applyPointMove(pos) {
@@ -988,54 +997,20 @@ export default class CursorTool extends BaseTool {
 
     /** @private */
     _applyBoxSelection(start, end, addToExisting) {
-        const ltr  = end.x >= start.x;
-        const minX = Math.min(start.x, end.x);
-        const maxX = Math.max(start.x, end.x);
-        const minY = Math.min(start.y, end.y);
-        const maxY = Math.max(start.y, end.y);
-
-        const ids = [];
-        for (const seg of this.ctx.state.segments) {
-            if (seg.type === 'circle') {
-                const { center: c, radius } = seg.data;
-                const hit = ltr
-                    ? (c.x - radius >= minX && c.x + radius <= maxX && c.y - radius >= minY && c.y + radius <= maxY)
-                    : (c.x + radius >= minX && c.x - radius <= maxX && c.y + radius >= minY && c.y - radius <= maxY);
-                if (hit) ids.push(seg.id);
-                continue;
-            }
-            if (seg.type !== "line" && seg.type !== "arc") continue;
-            const { start: s, end: en } = seg.data;
-            const hit = ltr
-                ? _ptInRect(s, minX, maxX, minY, maxY) && _ptInRect(en, minX, maxX, minY, maxY)
-                : _segTouchesRect(s, en, minX, maxX, minY, maxY);
-            if (hit) ids.push(seg.id);
-        }
-
-        const selected = addToExisting ? [...this.ctx.state.selectedIds, ...ids] : ids;
+        const result = computeBoxSelection(this.ctx.state.segments, start, end, {
+            selectParts: false,
+            variableValues: this.ctx.state.variableValues ?? {},
+        });
+        const selected = addToExisting
+            ? [...this.ctx.state.selectedIds, ...result.ids]
+            : result.ids;
         this.ctx.state.setSelection(selected);
         this.ctx.canvas.clearGhost();
     }
 
     /** @private */
     _updateBoxGhost(start, end) {
-        const ltr = end.x >= start.x;
-        const x = Math.min(start.x, end.x);
-        const y = Math.min(start.y, end.y);
-        const w = Math.abs(end.x - start.x);
-        const h = Math.abs(end.y - start.y);
-
-        const rect = document.createElementNS(SVG_NS, "rect");
-        rect.setAttribute("x", x);
-        rect.setAttribute("y", y);
-        rect.setAttribute("width",  w);
-        rect.setAttribute("height", h);
-        rect.classList.add("editor-selection-box");
-        if (!ltr) rect.classList.add("editor-selection-box--crossing");
-
-        const g = document.createElementNS(SVG_NS, "g");
-        g.appendChild(rect);
-        this.ctx.canvas.setGhost(g);
+        this.ctx.canvas.setGhost(buildSelectionBoxGhost(start, end, SVG_NS));
     }
 
     /** @private */

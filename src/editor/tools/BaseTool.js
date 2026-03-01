@@ -112,6 +112,15 @@ export default class BaseTool {
     onKeyDown(_e) { return false; }
 
     /**
+     * Key released while this tool is active.
+     * Return `true` to indicate the event was consumed.
+     * @param {KeyboardEvent} _e
+     * @returns {boolean}
+     */
+    // eslint-disable-next-line no-unused-vars
+    onKeyUp(_e) { return false; }
+
+    /**
      * Called when the user double-clicks (e.g., to finish a polyline).
      * @param {{ x: number, y: number }} pos
      * @param {MouseEvent} _e

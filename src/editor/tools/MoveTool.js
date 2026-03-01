@@ -4,6 +4,12 @@ import { evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { circumcenter, arc2ptData, arcFlagsViaPoint } from "./ArcTool.js";
 import { getRectGeomLocal } from "../geometry/rectGeometry.js";
 import { computeBoxSelection, buildSelectionBoxGhost } from "./shared/selectionUtils.js";
+import {
+    collectSegmentSnapshots,
+    commitCopiedSnapshots,
+    commitStagedTransformTarget,
+    transitionCopyMode,
+} from "./shared/copyPreviewUtils.js";
 
 const log = LoggerFactory.createLogger("MoveTool");
 
@@ -47,7 +53,6 @@ function _dropChangedExprKeys(origin, next, keys) {
     return _normalizeExprMap(exprMap);
 }
 
-
 /**
  * MoveTool — staged move workflow:
  * 1) Select elements (click toggle / box select).
@@ -90,6 +95,11 @@ export default class MoveTool extends BaseTool {
         this._fromPoint = null;
         /** @private @type {{x:number,y:number}|null} */
         this._cursorPos = null;
+
+        /** @private @type {boolean} */
+        this._copyMode = false;
+        /** @private @type {Array<object>} */
+        this._copyPreviewSnapshots = [];
 
         /** @private @type {HTMLElement|null} */
         this._pointPopup = null;
@@ -138,9 +148,18 @@ export default class MoveTool extends BaseTool {
         }
 
         if (this._mode === "pick-to") {
-            this._applyPreviewTo(pos);
-            this._commitMove();
-            this._rollbackToSelection();
+            this._copyMode = !!e.ctrlKey;
+            commitStagedTransformTarget({
+                copyMode: this._copyMode,
+                targetPoint: pos,
+                applyPreview: (point) => this._applyPreviewTo(point),
+                commit: (args) => this._commitMove(args),
+                refreshPreview: () => {
+                    if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+                    this._updateMoveGhost();
+                },
+                finishCommand: () => this._rollbackToSelection(),
+            });
             return;
         }
 
@@ -167,6 +186,14 @@ export default class MoveTool extends BaseTool {
 
         if (this._mode === "pick-to") {
             this._cursorPos = pos;
+            this._copyMode = transitionCopyMode({
+                current: this._copyMode,
+                next: !!e.ctrlKey,
+                onEnterCopy: () => this._restoreOrigins(),
+                onExitCopy: () => {
+                    this._copyPreviewSnapshots = [];
+                },
+            });
             this._applyPreviewTo(pos);
             this._updateMoveGhost();
             this._updatePointPopupValues(pos);
@@ -286,6 +313,17 @@ export default class MoveTool extends BaseTool {
             }
         }
 
+        if (this._mode === "pick-to" && e.key === "Control") {
+            this._copyMode = transitionCopyMode({
+                current: this._copyMode,
+                next: true,
+                onEnterCopy: () => this._restoreOrigins(),
+            });
+            if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+            this._updateMoveGhost();
+            return true;
+        }
+
         if ((this._mode === "pick-from" || this._mode === "pick-to") && !this._pointInputFocused) {
             if (e.key === "Tab") {
                 e.preventDefault();
@@ -311,8 +349,26 @@ export default class MoveTool extends BaseTool {
         return false;
     }
 
+    onKeyUp(e) {
+        if (this._mode === "pick-to" && e.key === "Control") {
+            this._copyMode = transitionCopyMode({
+                current: this._copyMode,
+                next: false,
+                onExitCopy: () => {
+                    this._copyPreviewSnapshots = [];
+                },
+            });
+            if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+            this._updateMoveGhost();
+            return true;
+        }
+        return false;
+    }
+
     _beginPickFrom(pos, e) {
         this._captureMoveOrigins();
+        this._copyMode = false;
+        this._copyPreviewSnapshots = [];
         this._mode = "pick-from";
         this._cursorPos = pos ?? null;
         this._showPointPopup(e, "from", pos ?? null);
@@ -352,6 +408,11 @@ export default class MoveTool extends BaseTool {
         }
 
         const selectedSet = new Set(this._movingSegIds);
+        const selectedContourIds = new Set(
+            this._movingSegIds
+                .map(id => this._findSeg(id)?.contourId)
+                .filter(v => v !== undefined && v !== null),
+        );
         const refsSeen = new Set();
         for (const id of this._movingSegIds) {
             const origin = this._movingOrigins.get(id);
@@ -361,13 +422,15 @@ export default class MoveTool extends BaseTool {
                 const refs = this.ctx.state.getSegmentsAtVertex(pt);
                 for (const ref of refs) {
                     if (selectedSet.has(ref.segId)) continue;
+                    const refSeg = this._findSeg(ref.segId);
+                    if (!refSeg) continue;
+                    if (!selectedContourIds.has(refSeg.contourId)) continue;
                     const key = `${ref.segId}:${ref.pointKey}`;
                     if (refsSeen.has(key)) continue;
                     refsSeen.add(key);
                     this._movingEndpointRefs.push(ref);
                     if (!this._movingEndpointOrigins.has(ref.segId)) {
-                        const seg = this._findSeg(ref.segId);
-                        if (seg) this._movingEndpointOrigins.set(ref.segId, JSON.parse(JSON.stringify(seg.data)));
+                        this._movingEndpointOrigins.set(ref.segId, JSON.parse(JSON.stringify(refSeg.data)));
                     }
                 }
             }
@@ -608,13 +671,26 @@ export default class MoveTool extends BaseTool {
         }
 
         if (updates.length > 0) {
+            if (this._copyMode) {
+                this.ctx.state.updateSegments(updates);
+                this._copyPreviewSnapshots = this._collectCopyPreviewSnapshots();
+                this._restoreOrigins();
+                if (this._selectedRectSides.size > 0) this._syncRectSideHighlights();
+                return;
+            }
             this.ctx.state.updateSegments(updates);
+            this._copyPreviewSnapshots = [];
             if (this._selectedRectSides.size > 0) this._syncRectSideHighlights();
         }
     }
 
-    _commitMove() {
-        const anyChanged = [...this._movingOrigins.entries()].some(([id, origin]) => {
+    _collectCopyPreviewSnapshots() {
+        const selectedMovedIds = [...new Set([...this._movingSegIds, ...this._movingRectSides.keys()])];
+        return collectSegmentSnapshots(this.ctx.state, selectedMovedIds);
+    }
+
+    _commitMove({ keepSourceSelection = false } = {}) {
+        let anyChanged = [...this._movingOrigins.entries()].some(([id, origin]) => {
             const seg = this._findSeg(id);
             return !_segDataEqual(origin, seg?.data);
         }) || this._movingEndpointRefs.some(ref => {
@@ -622,13 +698,34 @@ export default class MoveTool extends BaseTool {
             const seg = this._findSeg(ref.segId);
             return !_segDataEqual(origin, seg?.data);
         });
+        if (this._copyMode && this._copyPreviewSnapshots.length > 0) anyChanged = true;
+
+        if (this._copyMode && anyChanged) {
+            const state = this.ctx.state;
+            let snapshots = this._copyPreviewSnapshots;
+            if ((!snapshots || snapshots.length === 0) && this._cursorPos) {
+                this._applyPreviewTo(this._cursorPos);
+                snapshots = this._copyPreviewSnapshots;
+            }
+
+            this._restoreOrigins();
+            const sourceIds = [...new Set([...this._movingSegIds, ...this._movingRectSides.keys()])];
+            return commitCopiedSnapshots({
+                state,
+                snapshots,
+                historyLabel: "Move Copy",
+                keepSourceSelection,
+                sourceIds,
+            });
+        }
 
         if (anyChanged) {
             this.ctx.state._pushHistory("Move");
-            return;
+            return true;
         }
 
         this._restoreOrigins();
+        return false;
     }
 
     _restoreOrigins() {
@@ -652,6 +749,8 @@ export default class MoveTool extends BaseTool {
     _resetMoveSession() {
         this._fromPoint = null;
         this._cursorPos = null;
+        this._copyMode = false;
+        this._copyPreviewSnapshots = [];
         this._movingSegIds = [];
         this._movingOrigins = new Map();
         this._movingEndpointRefs = [];
@@ -777,6 +876,26 @@ export default class MoveTool extends BaseTool {
             g.appendChild(c);
         }
 
+        if (this._copyMode) {
+            const plus = document.createElementNS(SVG_NS, "text");
+            plus.setAttribute("x", this._cursorPos.x + 0.12);
+            plus.setAttribute("y", this._cursorPos.y - 0.12);
+            plus.setAttribute("font-size", "0.28");
+            plus.textContent = "+";
+            plus.classList.add("editor-selection-box");
+            g.appendChild(plus);
+
+            for (const snap of this._copyPreviewSnapshots) {
+                const el = this.ctx.canvas._buildSegmentElement?.({
+                    ...snap,
+                    selected: false,
+                });
+                if (!el) continue;
+                el.classList.add("editor-copy-preview");
+                g.appendChild(el);
+            }
+        }
+
         this.ctx.canvas.setGhost(g);
     }
 
@@ -894,9 +1013,17 @@ export default class MoveTool extends BaseTool {
         }
 
         if (this._mode === "pick-to") {
-            this._applyPreviewTo(pt);
-            this._commitMove();
-            this._rollbackToSelection();
+            commitStagedTransformTarget({
+                copyMode: this._copyMode,
+                targetPoint: pt,
+                applyPreview: (point) => this._applyPreviewTo(point),
+                commit: (args) => this._commitMove(args),
+                refreshPreview: () => {
+                    if (this._cursorPos) this._applyPreviewTo(this._cursorPos);
+                    this._updateMoveGhost();
+                },
+                finishCommand: () => this._rollbackToSelection(),
+            });
         }
     }
 

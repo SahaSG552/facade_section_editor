@@ -59,6 +59,105 @@
   - [ ] Проверить rotate для rect/circle/ellipse с последующим move/edit.
   - [ ] Проверить совместимость formula tokens при rotate+save.
 
+## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ: MIRROR / SYMMETRY TOOL (01.03.2026)
+
+### Rhino reference (зафиксировано)
+- `Mirror` (Rhino):
+  - flow: select objects → pick axis start → pick axis end → live preview;
+  - ключевая опция: `Copy` (создать копию vs трансформировать исходный объект).
+- `Symmetry` (Rhino):
+  - flow аналогичен Mirror (2 точки оси), но зеркальная половина связана с исходной геометрией;
+  - continuity options (None/Position/Smooth) для curve/surface в Rhino.
+
+### Принятая продуктовая интерпретация для текущего 2D-редактора
+- `Mirror`: создаёт зеркальные **НОВЫЕ** элементы (исходные остаются).
+- `Symmetry`: создаёт вторую половину объекта как отдельный симметричный результат
+  (позже — подготовка к зависимой/параметрической связи, если потребуется).
+- Выделение и selection-UX — как в `Move/Rotate`:
+  - click/shift toggle,
+  - box selection (LTR/crossing),
+  - shift part-selection (включая `rect` sides).
+
+### План внедрения
+- [x] Фаза 1: UI/dispatch
+  - [x] Перенести кнопку `Mirror` справа от `Rotate`.
+  - [x] Сделать dual-mode кнопку: LMB=`mirror`, RMB=`symmetry`.
+  - [x] Зарегистрировать `symmetry` в `ProfileEditor._createTool(...)`.
+- [ ] Фаза 2: Shared selection reuse
+  - [x] Подключить к `MirrorTool` общий selection слой из `shared/selectionUtils.js`.
+  - [x] Синхронизировать rect-side highlights и part-selection поведение.
+- [ ] Фаза 3: Mirror execution (new elements)
+  - [x] Stage 1: selection.
+  - [x] Stage 2: axis start.
+  - [x] Stage 3: axis end + live preview.
+  - [x] Commit: добавить зеркальные сегменты как новые; исходные не менять.
+- [ ] Фаза 4: Symmetry execution
+  - [x] Reuse mirror-axis interaction (same staged flow).
+  - [x] Commit: создать вторую половину объекта по правилам symmetry-mode (MVP = geometric mirror copy).
+  - [ ] Зафиксировать MVP continuity policy для 2D (минимум: geometric mirror, без G2-сглаживания).
+- [ ] Фаза 5: Validation
+  - [ ] Проверить line/arc/path/polyline/rect/ellipse/circle.
+  - [ ] Проверить `RT`-модификаторы и selection рамкой у transformed-элементов.
+  - [ ] Проверить undo/redo как одну атомарную операцию на commit.
+
+## ✅ MIRROR TOOL MVP: STAGED FLOW + SHARED SELECTION (01.03.2026)
+
+- `src/editor/tools/MirrorTool.js` переведён из TODO-скелета в рабочий инструмент.
+- Реализован staged UX:
+  - selection stage (click / shift / box / part-selection),
+  - axis-start stage,
+  - axis-end stage с live ghost preview.
+- Реализован commit для `mirror` и `symmetry`:
+  - создаются новые зеркальные сегменты,
+  - исходные сегменты не модифицируются,
+  - операция фиксируется в history (`Mirror` / `Symmetry`).
+- Поддержка shared selection:
+  - используется `shared/selectionUtils.js`,
+  - поведение выделения приведено к `Move/Rotate`.
+- Проверка:
+  - diagnostics по `MirrorTool.js`/`ProfileEditor.js`/`EditorToolbar.js` — без ошибок,
+  - `npm run build` — успешно.
+
+## ✅ COPY TOGGLE UNIFICATION + MULTI-COPY + ISOLATION FIXES (01.03.2026)
+
+- `Move/Rotate/Mirror` приведены к единой copy-toggle модели:
+  - без `Ctrl` — preview/commit трансформируют исходные выбранные элементы,
+  - с `Ctrl` — preview показывает фантомы, commit создаёт копии и не завершает команду (мультикопии),
+  - завершение мультикопирования — по `ПКМ`.
+- Для `Mirror` ghost переведён на тот же рендер-пайплайн, что у исходной геометрии
+  (`EditorCanvas._buildSegmentElement`), чтобы фантом был 1:1 с оригиналом.
+- Выделен общий shared-модуль copy-пайплайна:
+  - `src/editor/tools/shared/copyPreviewUtils.js`
+  - `collectSegmentSnapshots(...)`
+  - `materializeCopiedSegments(...)`
+  - `commitCopiedSnapshots(...)`
+  - `commitStagedTransformTarget(...)`
+  - `transitionCopyMode(...)`
+- На shared-copy helpers переведены:
+  - `src/editor/tools/MoveTool.js`
+  - `src/editor/tools/RotateTool.js`
+  - `src/editor/tools/MirrorTool.js`
+- Исправлен критичный weld-bug независимых path-объектов:
+  - endpoint propagation при move/rotate/point-move в cursor теперь ограничен
+    только сегментами того же `contourId`,
+  - совпадающие по координатам точки разных контуров больше не тянут друг друга.
+- Исправлен `Cancel` в edit-mode:
+  - `ProfileEditor` сохраняет snapshot на входе в edit и на `exit(false)`
+    полностью восстанавливает структуру PathEditor текущей сессии.
+- Проверка после интеграции:
+  - diagnostics по `MoveTool/RotateTool/MirrorTool/CursorTool/ProfileEditor/copyPreviewUtils` — без ошибок,
+  - `npm run build` — успешно.
+
+## ▶ NEXT: SYMMETRY TOOL (PHASE 2) (01.03.2026)
+
+- Цель следующего шага:
+  - довести `symmetry` от геометрического MVP до согласованного продуктового режима
+    с фиксированной policy continuity и более явным UX-коммитом.
+- План:
+  - [ ] зафиксировать policy continuity для 2D (MVP: geometric mirror, no smoothing),
+  - [ ] верифицировать selection/commit semantics symmetry против move/rotate/mirror copy-flow,
+  - [ ] добавить целевые сценарии регрессии: multi-copy, cancel rollback, contour isolation.
+
 ## ✅ РЕФАКТОРИНГ ROTATE TOOL: ОЧИСТКА, ОПТИМИЗАЦИЯ, УНИФИКАЦИЯ (01.03.2026)
 
 - Выполнен технический проход по `src/editor/tools/RotateTool.js` без изменения согласованного UX.
