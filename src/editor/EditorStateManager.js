@@ -254,6 +254,197 @@ export default class EditorStateManager {
     }
 
     /**
+     * Convert selected standalone shape segments (circle/rect) into path segments.
+     *
+     * Conversion is atomic: all replacements are applied in one update and produce
+     * one history entry. Selection is remapped from replaced shape IDs to all newly
+     * created line/arc segment IDs.
+     *
+     * Ellipse conversion is intentionally skipped for now because editor arc
+     * primitives are circular-only in the interactive pipeline.
+     *
+     * @param {string[]|Set<string>|null} [ids=null] - Optional explicit segment IDs.
+     *   When omitted, current selection is used.
+     * @returns {{ convertedCount:number, skippedCount:number, createdSegIds:string[] }}
+     */
+    convertSelectionToPath(ids = null) {
+        const targetIds = ids == null
+            ? new Set(this.selectedIds)
+            : new Set(Array.isArray(ids) ? ids : Array.from(ids));
+        if (targetIds.size === 0) {
+            return { convertedCount: 0, skippedCount: 0, createdSegIds: [] };
+        }
+
+        const replacements = new Map();
+        let skippedCount = 0;
+        for (const seg of this.segments) {
+            if (!targetIds.has(seg.id)) continue;
+            if (seg.type !== 'circle' && seg.type !== 'rect' && seg.type !== 'ellipse') continue;
+            const converted = this._materializeShapeAsPathSegments(seg);
+            if (converted.length === 0) {
+                skippedCount++;
+                continue;
+            }
+            replacements.set(seg.id, converted);
+        }
+
+        if (replacements.size === 0) {
+            return { convertedCount: 0, skippedCount, createdSegIds: [] };
+        }
+
+        const nextSegments = [];
+        for (const seg of this.segments) {
+            const converted = replacements.get(seg.id);
+            if (converted) nextSegments.push(...converted);
+            else nextSegments.push(seg);
+        }
+
+        this.segments = nextSegments;
+
+        const nextSelected = new Set(this.selectedIds);
+        const createdSegIds = [];
+        for (const [oldId, converted] of replacements.entries()) {
+            nextSelected.delete(oldId);
+            for (const created of converted) {
+                createdSegIds.push(created.id);
+                nextSelected.add(created.id);
+            }
+        }
+        this.selectedIds = nextSelected;
+        this.segments = this.segments.map(s => ({ ...s, selected: this.selectedIds.has(s.id) }));
+
+        if (this.insertAfterSegId && replacements.has(this.insertAfterSegId)) {
+            const tail = replacements.get(this.insertAfterSegId);
+            this.insertAfterSegId = tail?.[tail.length - 1]?.id ?? null;
+        }
+
+        this._pushHistory("To Path");
+        this._notifySegments();
+        if (this.onSelectionChange) this.onSelectionChange();
+
+        return {
+            convertedCount: replacements.size,
+            skippedCount,
+            createdSegIds,
+        };
+    }
+
+    /**
+     * Convert one shape segment to one or more line/arc path segments.
+     *
+     * @param {PathSegment} shapeSeg
+     * @returns {PathSegment[]}
+     * @private
+     */
+    _materializeShapeAsPathSegments(shapeSeg) {
+        const transforms = Array.isArray(shapeSeg.transforms) ? [...shapeSeg.transforms] : [];
+
+        const makeLine = (start, end, cmdHint = 'L') => ({
+            id: `seg-${this._nextSegmentId++}`,
+            selected: false,
+            contourId: shapeSeg.contourId,
+            type: 'line',
+            cmdHint,
+            transforms,
+            data: {
+                start: { x: Number(start.x), y: Number(start.y) },
+                end: { x: Number(end.x), y: Number(end.y) },
+            },
+        });
+        const makeArc = (start, end, center, radius, largeArc, sweep) => ({
+            id: `seg-${this._nextSegmentId++}`,
+            selected: false,
+            contourId: shapeSeg.contourId,
+            type: 'arc',
+            transforms,
+            data: {
+                start: { x: Number(start.x), y: Number(start.y) },
+                end: { x: Number(end.x), y: Number(end.y) },
+                center: { x: Number(center.x), y: Number(center.y) },
+                radius: Number(radius),
+                largeArc: Number(largeArc),
+                sweep: Number(sweep),
+                arcMode: 'arc2pt',
+            },
+        });
+
+        if (shapeSeg.type === 'circle') {
+            const center = shapeSeg.data?.center;
+            const radius = Number(shapeSeg.data?.radius ?? 0);
+            if (!center || !Number.isFinite(radius) || radius <= 0) return [];
+            const left = { x: center.x - radius, y: center.y };
+            const right = { x: center.x + radius, y: center.y };
+            return [
+                makeArc(left, right, center, radius, 0, 1),
+                makeArc(right, left, center, radius, 0, 1),
+            ];
+        }
+
+        if (shapeSeg.type === 'rect') {
+            const { x, y, w, h, rx: rx0 = 0 } = shapeSeg.data ?? {};
+            if (![x, y, w, h].every(Number.isFinite)) return [];
+            const dirW = Number(shapeSeg.data?.dirW) < 0 ? -1 : 1;
+            const hasDirH = Object.prototype.hasOwnProperty.call(shapeSeg.data ?? {}, 'dirH');
+            const dirH = hasDirH ? (Number(shapeSeg.data?.dirH) < 0 ? -1 : 1) : -1;
+            const x1 = Number(x);
+            const y1 = Number(y);
+            const x2 = x1 + dirW * Number(w);
+            const y2 = y1 + dirH * Number(h);
+            const rx = Math.max(0, Math.min(Number(rx0), Math.abs(Number(w)) / 2, Math.abs(Number(h)) / 2));
+
+            if (rx <= 1e-9) {
+                const p1 = { x: x1, y: y1 };
+                const p2 = { x: x2, y: y1 };
+                const p3 = { x: x2, y: y2 };
+                const p4 = { x: x1, y: y2 };
+                return [
+                    makeLine(p1, p2),
+                    makeLine(p2, p3),
+                    makeLine(p3, p4),
+                    makeLine(p4, p1, 'Z'),
+                ];
+            }
+
+            const sW = x2 >= x1 ? 1 : -1;
+            const sH = y2 >= y1 ? 1 : -1;
+
+            const topStart = { x: x1 + sW * rx, y: y1 };
+            const topEnd = { x: x2 - sW * rx, y: y1 };
+            const rightTop = { x: x2, y: y1 + sH * rx };
+            const rightBottom = { x: x2, y: y2 - sH * rx };
+            const bottomRight = { x: x2 - sW * rx, y: y2 };
+            const bottomLeft = { x: x1 + sW * rx, y: y2 };
+            const leftBottom = { x: x1, y: y2 - sH * rx };
+            const leftTop = { x: x1, y: y1 + sH * rx };
+
+            const cTR = { x: x2 - sW * rx, y: y1 + sH * rx };
+            const cBR = { x: x2 - sW * rx, y: y2 - sH * rx };
+            const cBL = { x: x1 + sW * rx, y: y2 - sH * rx };
+            const cTL = { x: x1 + sW * rx, y: y1 + sH * rx };
+
+            // Arc segments are exported with flipped sweep (1 - sweep).
+            // Choose stored sweep from rect direction so exported quarter-arcs
+            // stay on the rectangle boundary for all dirW/dirH combinations.
+            // desiredExportSweep = (sW*sH < 0) ? 1 : 0
+            const storedSweep = (sW * sH < 0) ? 0 : 1;
+
+            return [
+                makeLine(topStart, topEnd),
+                makeArc(topEnd, rightTop, cTR, rx, 0, storedSweep),
+                makeLine(rightTop, rightBottom),
+                makeArc(rightBottom, bottomRight, cBR, rx, 0, storedSweep),
+                makeLine(bottomRight, bottomLeft),
+                makeArc(bottomLeft, leftBottom, cBL, rx, 0, storedSweep),
+                makeLine(leftBottom, leftTop),
+                makeArc(leftTop, topStart, cTL, rx, 0, storedSweep),
+            ];
+        }
+
+        // Ellipse conversion intentionally deferred.
+        return [];
+    }
+
+    /**
      * Re-sort `this.segments` per-contour so every connected chain within a
      * contour is in sequential start→end order.  Called after deletion.
      *

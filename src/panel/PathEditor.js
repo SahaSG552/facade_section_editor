@@ -58,6 +58,7 @@ const SVG_COMMANDS = new Set([...Object.keys(SVG_COMMAND_DEFS), ...Object.keys(S
  * onLineClick(segId, e)          — fired when a sub-line row is clicked
  * onShapeElementChange(segId, changes|null) — fired on shape attr edit / delete
  * onShapeElementClick(segId, e)  — fired when a shape row is clicked
+ * onToPathRequest(segIds, e)      — fired on top-level RMB action (To Path)
  *
  * Backward-compat stubs (no-op): setPath, setShapeElements,
  *   setSelectedLines, clearLineSelection, clearShapeSelection, setMirrorStartIndex
@@ -94,6 +95,7 @@ export default class PathEditor {
      * @param {Function}           [options.onLineClick]         — (segId, MouseEvent)
      * @param {Function}           [options.onShapeElementChange]— (segId, changes|null)
      * @param {Function}           [options.onShapeElementClick] — (segId, MouseEvent)
+    * @param {Function}           [options.onToPathRequest]     — (segIds:string[], MouseEvent)
     * @param {Function}           [options.onElementOrderChange] — (order) top-level reorder callback
      */
     constructor(options = {}) {
@@ -113,6 +115,8 @@ export default class PathEditor {
         this.onShapeElementClick   = options.onShapeElementClick   || null;
         /** @type {((segIds:string[], e:MouseEvent)=>void)|null} */
         this.onPathElemClick       = options.onPathElemClick       || null;
+        /** @type {((segIds:string[], e:MouseEvent)=>void)|null} */
+        this.onToPathRequest       = options.onToPathRequest       || null;
         /** @type {((order:Array<object>)=>void)|null} */
         this.onElementOrderChange  = options.onElementOrderChange  || null;
         /** @type {((e:MouseEvent)=>void)|null} Called when user clicks on the empty elements container background */
@@ -832,6 +836,19 @@ export default class PathEditor {
             }
         });
 
+        row.addEventListener('contextmenu', (e) => {
+            if (!this.onToPathRequest) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (!row.classList.contains('path-line-selected')) {
+                this.clearAllSelection();
+                row.classList.add('path-line-selected');
+            }
+            this._setActiveElem(`shape:${elem.segId}`);
+            const selectedSegIds = this._collectSelectedTopLevelSegIds();
+            this.onToPathRequest(selectedSegIds, e);
+        });
+
         // Drag to reorder top-level elements
         this._attachElemDrag(row, elem);
 
@@ -1107,6 +1124,21 @@ export default class PathEditor {
                 const selectedSegIds = this._collectSelectedTopLevelSegIds();
                 this.onPathElemClick(elem.segIds, e, selectedSegIds);
             }
+        });
+
+        header.addEventListener('contextmenu', (e) => {
+            if (!this.onToPathRequest) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const rowRef = this._getTopLevelRef(elem);
+            if (!header.classList.contains('path-line-selected')) {
+                this.clearAllSelection();
+                header.classList.add('path-line-selected');
+                this._lastSelectedElemRef = rowRef;
+            }
+            this._setActiveElem(`path:${elem.contourId}`);
+            const selectedSegIds = this._collectSelectedTopLevelSegIds();
+            this.onToPathRequest(selectedSegIds, e);
         });
 
         // Drag to reorder top-level elements (by header)

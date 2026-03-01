@@ -364,9 +364,18 @@ function _syncElementTransformsToState(state, transformsMeta) {
     const metaPaths = transformsMeta.filter(m => m?.kind === 'path');
     const statePaths = state.getElements().filter(e => e.type === 'path' || e.type === 'polyline');
 
+    const setKey = (arr) => [...new Set(arr.map(v => Number(v)).filter(Number.isFinite))]
+        .sort((a, b) => a - b)
+        .join('|');
+    const stateCidKey = setKey(statePaths.map(e => e?.contourId));
+    const metaCidKey = setKey(metaPaths.map(m => m?.contourId));
+    const preferPositional = stateCidKey !== metaCidKey;
+
     for (let i = 0; i < statePaths.length; i++) {
         const elem = statePaths[i];
-        const byContour = metaPaths.find(m => Number(m?.contourId) === Number(elem?.contourId));
+        const byContour = preferPositional
+            ? null
+            : metaPaths.find(m => Number(m?.contourId) === Number(elem?.contourId));
         const tr = normalize(byContour?.transforms ?? metaPaths[i]?.transforms);
         for (const seg of state.segments) {
             if ((seg.contourId ?? 0) !== (elem.contourId ?? 0)) continue;
@@ -384,6 +393,48 @@ function _syncElementTransformsToState(state, transformsMeta) {
     }
 
     if (updates.length > 0) state.updateSegments(updates);
+}
+
+/**
+ * Re-map imported contour IDs to the contour IDs from source structured elements.
+ *
+ * `_importPath()` regenerates contour IDs from M-order. Saved transforms are keyed
+ * by persisted contour IDs from PathEditor structure, so regenerated IDs can map
+ * transforms to wrong contours on edit enter.
+ *
+ * @param {EditorStateManager} state
+ * @param {Array} sourceElements
+ */
+function _realignContourIdsToSourceOrder(state, sourceElements) {
+    if (!state || !Array.isArray(sourceElements) || sourceElements.length === 0) return;
+
+    const srcPathElems = sourceElements.filter(e => e?.type === 'path' || e?.type === 'polyline');
+    const curPathElems = state.getElements().filter(e => e?.type === 'path' || e?.type === 'polyline');
+    if (srcPathElems.length === 0 || curPathElems.length === 0) return;
+
+    const oldToNew = new Map();
+    const n = Math.min(srcPathElems.length, curPathElems.length);
+    for (let i = 0; i < n; i++) {
+        const oldCid = Number(curPathElems[i]?.contourId);
+        const newCid = Number(srcPathElems[i]?.contourId);
+        if (!Number.isFinite(oldCid) || !Number.isFinite(newCid)) continue;
+        oldToNew.set(oldCid, newCid);
+    }
+    if (oldToNew.size === 0) return;
+
+    state.segments = state.segments.map(seg => {
+        const cid = Number(seg?.contourId ?? 0);
+        if (!oldToNew.has(cid)) return seg;
+        const mapped = oldToNew.get(cid);
+        if (!Number.isFinite(mapped) || mapped === cid) return seg;
+        return { ...seg, contourId: mapped };
+    });
+
+    const maxCid = Math.max(
+        0,
+        ...state.segments.map(s => Number(s?.contourId ?? 0)).filter(Number.isFinite)
+    );
+    state._nextContourId = Math.max(Number(state._nextContourId ?? 1), maxCid + 1);
 }
 
 /**
@@ -707,6 +758,8 @@ export default class ProfileEditor {
         this._origPathEditorOnShapeElementClick = null;
         /** Saved PathEditor.onPathElemClick before edit mode — restored on exit. @type {Function|null} */
         this._origPathEditorOnPathElemClick = null;
+        /** Saved PathEditor.onToPathRequest before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnToPathRequest = null;
         /** Saved PathEditor.onDeactivate before edit mode — restored on exit. @type {Function|null} */
         this._origPathEditorOnDeactivate = null;
 
@@ -790,6 +843,9 @@ export default class ProfileEditor {
             profilePath: hasStructuredSource ? evaluatedContoursPath : (evaluatedContoursPath || profilePath),
             variableValues,
         });
+        if (hasStructuredSource) {
+            _realignContourIdsToSourceOrder(this.state, sourceElements);
+        }
         _restoreStateStructureFromElements(this.state, sourceElements, {
             vars: variableValues,
         });
@@ -914,6 +970,7 @@ export default class ProfileEditor {
             this._pathEditor.onShapeElementChange = null;
             this._pathEditor.onShapeElementClick = this._origPathEditorOnShapeElementClick ?? null;
             this._pathEditor.onPathElemClick = this._origPathEditorOnPathElemClick ?? null;
+            this._pathEditor.onToPathRequest = this._origPathEditorOnToPathRequest ?? null;
             this._pathEditor.onDeactivate = this._origPathEditorOnDeactivate ?? null;
             this.state.activeContourId = null;
             this.state.insertAfterSegId = null;
@@ -994,6 +1051,7 @@ export default class ProfileEditor {
      * - `onShapeElementChange` — shape attribute edit → update matching segment
      * - `onShapeElementClick`  — shape row click → select shape segment
      * - `onPathElemClick`    — path header click → select all path segments
+    * - `onToPathRequest`    — convert selected shape rows to path segments
      * - `onDeactivate`       — background click → clear canvas selection
      *
      * @param {import("../panel/PathEditor.js").default} pathEditor
@@ -1008,6 +1066,7 @@ export default class ProfileEditor {
         this._origPathEditorOnElementOrderChange = pathEditor.onElementOrderChange;
         this._origPathEditorOnShapeElementClick = pathEditor.onShapeElementClick;
         this._origPathEditorOnPathElemClick = pathEditor.onPathElemClick;
+        this._origPathEditorOnToPathRequest = pathEditor.onToPathRequest;
         this._origPathEditorOnDeactivate = pathEditor.onDeactivate;
 
         pathEditor.onElementOrderChange = (order) => {
@@ -1245,6 +1304,24 @@ export default class ProfileEditor {
                 this.state.setSelection(segIds);
             }
             this._pathEditorIsSource = false;
+        };
+
+        pathEditor.onToPathRequest = (segIds = [], _e = null) => {
+            const raw = Array.isArray(segIds) ? segIds : [];
+            const shapeSegIds = [...new Set(raw.filter(id => {
+                const seg = this.state.segments.find(s => s.id === id);
+                return !!seg && (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse');
+            }))];
+            if (shapeSegIds.length === 0) return;
+            const result = this.state.convertSelectionToPath(shapeSegIds);
+
+            if (result.createdSegIds.length > 0) {
+                const first = this.state.segments.find(s => s.id === result.createdSegIds[0]);
+                if (first) {
+                    this.state.activeContourId = first.contourId ?? null;
+                    this.state.insertAfterSegId = result.createdSegIds[result.createdSegIds.length - 1] ?? null;
+                }
+            }
         };
 
         // PathEditor background click → clear canvas selection + active contour.

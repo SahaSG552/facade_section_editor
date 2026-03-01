@@ -158,6 +158,100 @@
   - [ ] верифицировать selection/commit semantics symmetry против move/rotate/mirror copy-flow,
   - [ ] добавить целевые сценарии регрессии: multi-copy, cancel rollback, contour isolation.
 
+## 🚩 НОВЫЙ ПЛАН: TO PATH → STRUCTURED SYMMETRY OBJECT (01.03.2026)
+
+### Продуктовые требования (зафиксировано)
+- `Symmetry` работает только с **цельными элементами**, не с частями.
+- Flow `Symmetry`:
+  1) выделение 1 цельного элемента + подтверждение `ПКМ`,
+  2) выбор 1-й точки оси + live ghost,
+  3) выбор 2-й точки оси → создание зеркальной копии и сохранение оси,
+  4) формирование зависимой пары `Parent + Symmetry`:
+     - Symmetry отображается как отдельный top-level объект,
+     - команды Symmetry не редактируются,
+     - изменение parent обновляет Symmetry,
+     - move/rotate/copy работают группой,
+     - удаление parent удаляет Symmetry.
+- `To Path`:
+  - доступен для выделенных non-path элементов и для объектов с Symmetry,
+  - для Symmetry-пары выполняет merge Symmetry внутрь parent path,
+    снимая зависимость и делая команды редактируемыми.
+- PathEditor:
+  - top-level row `Symmetry` (не `Path`), тёмно-синяя кнопка,
+  - внутри команды как у path, но read-only / non-selectable,
+  - `ПКМ` по parent/symmetry → context menu с `To Path`.
+
+### Архитектурные решения (перед кодом)
+- [ ] Ввести явную связь зависимых элементов в model/state:
+  - `groupId` / `linkType='symmetry'` / `parentContourId` / `axis:{p1,p2}`,
+  - метаданные симметрии хранятся отдельно от обычных transforms.
+- [ ] Зафиксировать single source-of-truth:
+  - parent хранит редактируемые команды,
+  - symmetry contour пересчитывается детерминированно из parent + axis.
+- [ ] Selection policy:
+  - выбор parent/symmetry автоматически расширяется до пары,
+  - part-selection для symmetry отключён.
+
+### ЭТАП A — Инструмент To Path (первый внедряемый шаг)
+- [x] Добавить `To Path` command в editor-операции.
+- [x] Реализовать конвертацию shape → path commands (`M/L/A/Z`), preserving transforms.
+- [ ] Реализовать `Symmetry-aware To Path`:
+  - если выделена parent/symmetry пара, выполнить merge symmetry commands в parent path,
+  - снять symmetry-связь и вернуть обычный редактируемый path.
+- [x] Добавить вызов `To Path` из PathEditor context menu (ПКМ на top-level row).
+- [ ] История: одна атомарная операция (`To Path`).
+
+### ✅ UPDATE (01.03.2026): TO PATH BASELINE ГОТОВ
+
+- В `EditorStateManager` добавлена атомарная операция `convertSelectionToPath(...)`.
+  - Одна history-запись: `To Path`.
+  - Перенос selection на созданные line/arc сегменты.
+  - Сохранение `contourId` и `transforms`.
+- В `ProfileEditor` подключён callback `PathEditor.onToPathRequest`.
+- В `PathEditor` добавлен RMB action на top-level rows (`shape/path`) с вызовом `onToPathRequest(...)`.
+- Текущий scope конвертации:
+  - `circle` → 2 дуги,
+  - `rect` (включая rounded `rx`) → line/arc контур,
+  - `ellipse` пока **не** конвертируется (deferred до расширения arc-пайплайна под эллиптические дуги).
+
+### ЭТАП B — Структура Symmetry объекта в PathEditor
+- [ ] Расширить element schema PathEditor для `type:'symmetry'`.
+- [ ] Рендер top-level `Symmetry` row:
+  - отдельный стиль (тёмно-синий header),
+  - sub-lines визуально read-only (серые),
+  - клики по параметрам/командам не открывают inline edit.
+- [ ] Отключить line/part selection внутри symmetry sub-lines.
+- [ ] Drag/reorder policy: parent и symmetry перемещаются как связанный блок.
+
+### ЭТАП C — Поведение Symmetry Tool
+- [ ] Ограничить selection stage до одного цельного элемента.
+- [ ] Отключить copy-toggle (`Ctrl`) для symmetry mode.
+- [ ] На commit создавать не просто копию, а связанную структуру parent+symmetry с осью.
+- [ ] Сразу после commit выделять пару как grouped selection.
+
+### ЭТАП D — Синхронизация и групповые операции
+- [ ] При редактировании parent (canvas + PathEditor text edits) пересчитывать symmetry.
+- [ ] Move/Rotate/Copy применять к parent+symmetry как к одной группе.
+- [ ] Delete parent → каскадное удаление symmetry.
+- [ ] Undo/Redo: поддержать атомарность всех операций по группе.
+
+### ЭТАП E — Validation / Regression
+- [ ] Сценарии:
+  - symmetry create/edit/move/rotate/copy/delete,
+  - To Path для shape,
+  - To Path для symmetry pair (merge + unlink),
+  - rollback/cancel в edit-сессии,
+  - отсутствие cross-contour weld side effects.
+- [ ] Проверка синхронизации PathEditor ↔ EditorState ↔ Canvas на всех шагах.
+
+### Порядок внедрения (зафиксировано)
+1. `To Path` infra + command + history.
+2. PathEditor `ПКМ` context menu + `To Path` action.
+3. Element schema + UI рендер `Symmetry` (read-only).
+4. Symmetry link model + grouped selection/delete.
+5. Symmetry tool behavior (single element, axis, linked commit).
+6. Grouped move/rotate/copy + final regression pass.
+
 ## ✅ РЕФАКТОРИНГ ROTATE TOOL: ОЧИСТКА, ОПТИМИЗАЦИЯ, УНИФИКАЦИЯ (01.03.2026)
 
 - Выполнен технический проход по `src/editor/tools/RotateTool.js` без изменения согласованного UX.
