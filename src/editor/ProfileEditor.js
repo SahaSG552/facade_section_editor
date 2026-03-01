@@ -4,6 +4,7 @@ import EditorCanvas from "./EditorCanvas.js";
 import EditorToolbar from "./EditorToolbar.js";
 import CursorTool from "./tools/CursorTool.js";
 import MoveTool from "./tools/MoveTool.js";
+import RotateTool from "./tools/RotateTool.js";
 import LineTool from "./tools/LineTool.js";
 import MirrorTool from "./tools/MirrorTool.js";
 import ArcTool from "./tools/ArcTool.js";
@@ -1457,6 +1458,7 @@ export default class ProfileEditor {
         switch (toolId) {
             case "cursor": return new CursorTool();
             case "move": return new MoveTool();
+            case "rotate": return new RotateTool();
             case "line": return new LineTool();
             case "mirror": return new MirrorTool();
             case "arc3pt":

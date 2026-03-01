@@ -22,6 +22,90 @@
 - [ ] Перенести point/handle перемещение из `MoveTool` в `CursorTool`.
 - [ ] Для перемещения vertex сохранять welded-связность path/polyline (без разрыва контура).
 
+## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ: ROTATE TOOL + LOCAL RT (01.03.2026)
+
+### Цель
+- Добавить отдельный инструмент `Rotate` рядом с `Move` с staged UX в стиле Rhino:
+  1) selection,
+  2) center of rotation,
+  3) first reference point,
+  4) second reference point (live preview + commit).
+- Перевести применение `RT` к local frame элемента так, чтобы итоговое поведение move/edit оставалось глобально ожидаемым.
+
+### Инварианты
+- [ ] Для `rect/ellipse/circle` сохранять параметрическую форму (без деградации в path).
+- [ ] `Move` и редактирование геометрии остаются в глобальной системе координат UX.
+- [ ] `RT` отражается в `transforms` консистентно с canvas render/hit-test.
+- [ ] Cancel/rollback на любой стадии rotate не оставляет промежуточных изменений.
+
+### План внедрения
+- [x] Фаза 1: UI wiring
+  - [x] Добавить кнопку `rotate` в `EditorToolbar` рядом с `move`.
+  - [x] Зарегистрировать `RotateTool` в `ProfileEditor._createTool(...)`.
+- [ ] Фаза 2: RotateTool staged MVP
+  - [x] Stage selection + confirm.
+  - [x] Stage center/ref1/ref2 с ghost preview.
+  - [x] Commit в history (`Rotate`), rollback по `Esc/RMB`.
+  - [x] Добавить box-selection в rotate selection stage.
+  - [x] Добавить Shift part-selection (включая rect sides), как в `MoveTool`.
+  - [x] Добавить welded-обновление точек невыделенных соседей при rotate.
+  - [x] Заменить ввод `ref2` в popup на ввод угла поворота (deg) на стадии `pick-to`.
+- [ ] Фаза 3: RT local-system migration
+  - [ ] Зафиксировать правило pivot/local-frame для shape/path сегментов.
+  - [ ] Уточнить сериализацию `MOD RT` при compose нескольких RT.
+  - [ ] Привести `EditorCanvas` hit-test/local conversion к единому источнику истины.
+- [ ] Фаза 4: Validation
+  - [ ] Проверить rotate для line/arc/path/polyline.
+  - [ ] Проверить rotate для rect/circle/ellipse с последующим move/edit.
+  - [ ] Проверить совместимость formula tokens при rotate+save.
+
+## ✅ РЕФАКТОРИНГ ROTATE TOOL: ОЧИСТКА, ОПТИМИЗАЦИЯ, УНИФИКАЦИЯ (01.03.2026)
+
+- Выполнен технический проход по `src/editor/tools/RotateTool.js` без изменения согласованного UX.
+- Очистка:
+  - удалена неиспользуемая константа `FORMULA_EQ_EPS`.
+- Унификация:
+  - введены общие helper-функции `_clone(...)`, `_cloneTransforms(...)`, `_segmentSnapshot(...)`,
+  - унифицирован доступ к активному popup-input через `_getPopupInput(...)`.
+- Оптимизация:
+  - ускорен `_captureOrigins(...)` за счёт `Map` (`id -> segment`) вместо повторных линейных `find(...)`.
+- Поддерживаемость:
+  - добавлены JSDoc для публичных lifecycle/pointer/keyboard обработчиков.
+- Проверка после рефакторинга:
+  - diagnostics по `RotateTool.js` — без ошибок,
+  - `npm run build` — успешно.
+
+## ✅ SHARED SELECTION LOGIC: MOVE/ROTATE UNIFICATION (01.03.2026)
+
+- Выделена общая логика box/part selection в новый модуль:
+  - `src/editor/tools/shared/selectionUtils.js`
+  - `computeBoxSelection(...)`
+  - `buildSelectionBoxGhost(...)`
+- На shared-реализацию переведены оба инструмента:
+  - `src/editor/tools/MoveTool.js`
+  - `src/editor/tools/RotateTool.js`
+- Удалено дублирование кода в инструментах:
+  - hit-test геометрия рамки,
+  - выбор whole-element vs part selection,
+  - построение ghost-рамки selection.
+- Подготовлен reuse-контур для следующего инструмента `MirrorTool` (подключение единого selection слоя без копипаста).
+- Проверка после унификации:
+  - diagnostics по `MoveTool.js` / `RotateTool.js` / `shared/selectionUtils.js` — без ошибок,
+  - `npm run build` — успешно.
+
+## ✅ РЕФАКТОРИНГ MOVE TOOL: ОПТИМИЗАЦИЯ И УНИФИКАЦИЯ (01.03.2026)
+
+- Выполнен технический проход по `src/editor/tools/MoveTool.js` без изменения UX staged-workflow.
+- Убрано дублирование логики очистки `_expr`:
+  - добавлены единые helper-функции `_dropChangedExprKeys(...)` и `_normalizeExprMap(...)`,
+  - на них переведены ветки изменения `x/y`, `cx/cy`, `rect x/y/w/h`.
+- Удалён неиспользуемый параметр `ltr` из `_segmentBoxHit(...)` и обновлены call-site’ы.
+- Добавлены недостающие JSDoc для ключевых методов инструмента:
+  - lifecycle (`activate`, `deactivate`),
+  - pointer/keyboard handlers (`onPointerDown`, `onPointerMove`, `onPointerUp`, `onConfirm`, `onKeyDown`),
+  - preview pipeline (`_applyPreviewTo`).
+- Проверка после рефакторинга: compile diagnostics по `MoveTool.js` — без ошибок.
+
 ## ✅ РЕФАКТОРИНГ RECT GEOMETRY (28.02.2026)
 
 - Вынесена единая геометрия прямоугольника в `src/editor/geometry/rectGeometry.js`:

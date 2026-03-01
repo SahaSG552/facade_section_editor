@@ -27,6 +27,7 @@ const TOOL_DEFINITIONS = [
     // Draw tools
     { id: "cursor", label: "Select", icon: "↖", group: "draw", key: "s" },
     { id: "move", label: "Move", icon: "✥", group: "draw", key: "m" },
+    { id: "rotate", label: "Rotate", icon: "⟳", group: "draw", key: "q" },
     { id: "line", label: "Line", icon: "╱", group: "draw", key: "l" },
     { id: "arc", label: "Arc (3pt + R)", icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt" },
     { id: "circle", label: "Circle (LMB: 2pt · RMB: 3pt)", icon: "○", group: "draw", key: "c", lmbTool: "circle2pt", rmbTool: "circle3pt" },

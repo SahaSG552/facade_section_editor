@@ -3,6 +3,7 @@ import LoggerFactory from "../../core/LoggerFactory.js";
 import { evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { circumcenter, arc2ptData, arcFlagsViaPoint } from "./ArcTool.js";
 import { getRectGeomLocal } from "../geometry/rectGeometry.js";
+import { computeBoxSelection, buildSelectionBoxGhost } from "./shared/selectionUtils.js";
 
 const log = LoggerFactory.createLogger("MoveTool");
 
@@ -28,31 +29,24 @@ function _segDataEqual(a, b) {
     return true;
 }
 
-function _ptInRect(p, x1, x2, y1, y2) {
-    return p.x >= x1 && p.x <= x2 && p.y >= y1 && p.y <= y2;
+function _normalizeExprMap(exprMap) {
+    return exprMap && Object.keys(exprMap).length > 0 ? exprMap : undefined;
 }
 
-function _ccw(A, B, C) {
-    return (C.y - A.y) * (B.x - A.x) > (B.y - A.y) * (C.x - A.x);
+function _dropChangedExprKeys(origin, next, keys) {
+    const exprMap = { ...(origin?._expr ?? {}) };
+    for (const key of keys) {
+        if (!(key in origin) || !(key in next)) continue;
+        const oldVal = Number(origin[key]);
+        const nextVal = Number(next[key]);
+        if (!Number.isFinite(oldVal) || !Number.isFinite(nextVal)) continue;
+        if (Math.abs(nextVal - oldVal) > FORMULA_EQ_EPS) {
+            delete exprMap[key];
+        }
+    }
+    return _normalizeExprMap(exprMap);
 }
 
-function _segsIntersect(A, B, C, D) {
-    return _ccw(A, C, D) !== _ccw(B, C, D) && _ccw(A, B, C) !== _ccw(A, B, D);
-}
-
-function _segTouchesRect(s, e, x1, x2, y1, y2) {
-    if (_ptInRect(s, x1, x2, y1, y2) || _ptInRect(e, x1, x2, y1, y2)) return true;
-    const tl = { x: x1, y: y1 };
-    const tr = { x: x2, y: y1 };
-    const br = { x: x2, y: y2 };
-    const bl = { x: x1, y: y2 };
-    return (
-        _segsIntersect(s, e, tl, tr) ||
-        _segsIntersect(s, e, tr, br) ||
-        _segsIntersect(s, e, br, bl) ||
-        _segsIntersect(s, e, bl, tl)
-    );
-}
 
 /**
  * MoveTool — staged move workflow:
@@ -103,12 +97,19 @@ export default class MoveTool extends BaseTool {
         this._pointInputFocused = false;
     }
 
+    /**
+     * Activate tool and reset staged state.
+     * @param {{ state: import("../EditorStateManager.js").default, canvas: import("../EditorCanvas.js").default }} ctx
+     */
     activate(ctx) {
         super.activate(ctx);
         this._mode = "selecting";
         log.debug("MoveTool active");
     }
 
+    /**
+     * Deactivate tool and clear all temporary overlays/session data.
+     */
     deactivate() {
         this._clearHover();
         this._endDrag();
@@ -122,6 +123,11 @@ export default class MoveTool extends BaseTool {
         return true;
     }
 
+    /**
+     * Handle left-button press according to staged workflow.
+     * @param {{x:number,y:number}} pos
+     * @param {MouseEvent} e
+     */
     onPointerDown(pos, e) {
         if (e.button !== 0) return;
         const rawPos = this.ctx.canvas.screenToSVG(e);
@@ -143,6 +149,11 @@ export default class MoveTool extends BaseTool {
         this._dragging = false;
     }
 
+    /**
+     * Handle pointer move for selection rectangle or move preview.
+     * @param {{x:number,y:number}} pos
+     * @param {MouseEvent} e
+     */
     onPointerMove(pos, e) {
         const rawPos = this.ctx.canvas.screenToSVG(e);
 
@@ -176,6 +187,11 @@ export default class MoveTool extends BaseTool {
         this._updateHover(rawPos);
     }
 
+    /**
+     * Handle pointer release and apply click/box selection in selecting stage.
+     * @param {{x:number,y:number}} _pos
+     * @param {MouseEvent} e
+     */
     onPointerUp(_pos, e) {
         if (this._mode !== "selecting" || !this._downSvgPos) return;
 
@@ -212,6 +228,12 @@ export default class MoveTool extends BaseTool {
         }
     }
 
+    /**
+     * Handle RMB confirm/cancel semantics per stage.
+     * @param {{x:number,y:number}} pos
+     * @param {MouseEvent} e
+     * @returns {boolean}
+     */
     onConfirm(pos, e) {
         if (this._mode === "selecting") {
             if (this.ctx.state.selectedIds.size === 0) {
@@ -236,6 +258,11 @@ export default class MoveTool extends BaseTool {
         return false;
     }
 
+    /**
+     * Handle keyboard shortcuts for cancel/delete and point-input focus.
+     * @param {KeyboardEvent} e
+     * @returns {boolean}
+     */
     onKeyDown(e) {
         if (e.key === "Escape") {
             if (this._mode === "pick-to") {
@@ -413,12 +440,7 @@ export default class MoveTool extends BaseTool {
             dirH: nextDirH,
         };
 
-        const exprMap = { ...(origin._expr ?? {}) };
-        if (Math.abs(next.x - origin.x) > FORMULA_EQ_EPS) delete exprMap.x;
-        if (Math.abs(next.y - origin.y) > FORMULA_EQ_EPS) delete exprMap.y;
-        if (Math.abs(next.w - origin.w) > FORMULA_EQ_EPS) delete exprMap.w;
-        if (Math.abs(next.h - origin.h) > FORMULA_EQ_EPS) delete exprMap.h;
-        next._expr = Object.keys(exprMap).length > 0 ? exprMap : undefined;
+        next._expr = _dropChangedExprKeys(origin, next, ["x", "y", "w", "h"]);
         return next;
     }
 
@@ -482,45 +504,43 @@ export default class MoveTool extends BaseTool {
         if (!origin) return origin;
 
         if (origin.center !== undefined && origin.start === undefined) {
-            const exprMap = { ...(origin._expr ?? {}) };
             const nextCx = origin.center.x + dx;
             const nextCy = origin.center.y + dy;
-            if (Math.abs(nextCx - origin.center.x) > FORMULA_EQ_EPS) delete exprMap.cx;
-            if (Math.abs(nextCy - origin.center.y) > FORMULA_EQ_EPS) delete exprMap.cy;
-            return {
+            const nextData = {
                 ...origin,
                 center: { x: nextCx, y: nextCy },
                 ...(origin.pt3 && { pt3: { x: origin.pt3.x + dx, y: origin.pt3.y + dy } }),
-                ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : { _expr: undefined }),
             };
+            nextData._expr = _dropChangedExprKeys(
+                { ...origin, cx: origin.center.x, cy: origin.center.y },
+                { ...nextData, cx: nextCx, cy: nextCy },
+                ["cx", "cy"],
+            );
+            return nextData;
         }
 
         if (origin.cx !== undefined) {
-            const exprMap = { ...(origin._expr ?? {}) };
             const nextCx = origin.cx + dx;
             const nextCy = origin.cy + dy;
-            if (Math.abs(nextCx - origin.cx) > FORMULA_EQ_EPS) delete exprMap.cx;
-            if (Math.abs(nextCy - origin.cy) > FORMULA_EQ_EPS) delete exprMap.cy;
-            return {
+            const nextData = {
                 ...origin,
                 cx: nextCx,
                 cy: nextCy,
-                ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : { _expr: undefined }),
             };
+            nextData._expr = _dropChangedExprKeys(origin, nextData, ["cx", "cy"]);
+            return nextData;
         }
 
         if (origin.x !== undefined && origin.start === undefined) {
-            const exprMap = { ...(origin._expr ?? {}) };
             const nextX = origin.x + dx;
             const nextY = origin.y + dy;
-            if (Math.abs(nextX - origin.x) > FORMULA_EQ_EPS) delete exprMap.x;
-            if (Math.abs(nextY - origin.y) > FORMULA_EQ_EPS) delete exprMap.y;
-            return {
+            const nextData = {
                 ...origin,
                 x: nextX,
                 y: nextY,
-                ...(Object.keys(exprMap).length > 0 ? { _expr: exprMap } : { _expr: undefined }),
             };
+            nextData._expr = _dropChangedExprKeys(origin, nextData, ["x", "y"]);
+            return nextData;
         }
 
         const next = {
@@ -533,10 +553,22 @@ export default class MoveTool extends BaseTool {
         return next;
     }
 
+    _segmentLocalDelta(segId, fromPoint, toPoint) {
+        if (!fromPoint || !toPoint) return { dx: 0, dy: 0 };
+        const fromLocal = this.ctx.canvas.toSegmentLocal(fromPoint, segId) ?? fromPoint;
+        const toLocal = this.ctx.canvas.toSegmentLocal(toPoint, segId) ?? toPoint;
+        return {
+            dx: toLocal.x - fromLocal.x,
+            dy: toLocal.y - fromLocal.y,
+        };
+    }
+
+    /**
+     * Apply live preview translation/side-resize from source point to target point.
+     * @param {{x:number,y:number}} toPoint
+     */
     _applyPreviewTo(toPoint) {
         if (!this._fromPoint || !toPoint) return;
-        const dx = toPoint.x - this._fromPoint.x;
-        const dy = toPoint.y - this._fromPoint.y;
         const updates = [];
 
         for (const [id, sideSpecs] of this._movingRectSides) {
@@ -549,6 +581,7 @@ export default class MoveTool extends BaseTool {
         for (const id of this._movingSegIds) {
             const origin = this._movingOrigins.get(id);
             if (!origin) continue;
+            const { dx, dy } = this._segmentLocalDelta(id, this._fromPoint, toPoint);
             updates.push({ id, changes: { data: this._translateSegmentData(origin, dx, dy) } });
         }
 
@@ -561,6 +594,7 @@ export default class MoveTool extends BaseTool {
             }
             const entry = endpointBySeg.get(ref.segId);
             const p0 = origin[ref.pointKey];
+            const { dx, dy } = this._segmentLocalDelta(ref.segId, this._fromPoint, toPoint);
             entry.next[ref.pointKey] = { x: p0.x + dx, y: p0.y + dy };
         }
 
@@ -699,145 +733,25 @@ export default class MoveTool extends BaseTool {
         this._pruneRectSideSelection();
     }
 
-    _segmentBoxHit(seg, ltr, minX, maxX, minY, maxY) {
-        if (seg.type === "circle") {
-            const { center: c, radius } = seg.data;
-            const full = c.x - radius >= minX && c.x + radius <= maxX && c.y - radius >= minY && c.y + radius <= maxY;
-            const partial = c.x + radius >= minX && c.x - radius <= maxX && c.y + radius >= minY && c.y - radius <= maxY;
-            return { full, partial };
-        }
-
-        if (seg.type === "rect") {
-            const g = getRectGeomLocal(seg.data);
-            const left = g.minX;
-            const right = g.maxX;
-            const top = g.minY;
-            const bottom = g.maxY;
-            const full = left >= minX && right <= maxX && top >= minY && bottom <= maxY;
-            const partial = !(right < minX || left > maxX || bottom < minY || top > maxY);
-            return { full, partial };
-        }
-
-        if (seg.type === "ellipse") {
-            const cx = Number(seg.data.cx ?? 0);
-            const cy = Number(seg.data.cy ?? 0);
-            const rx = Math.abs(Number(seg.data.rx ?? 0));
-            const ry = Math.abs(Number(seg.data.ry ?? 0));
-            const full = cx - rx >= minX && cx + rx <= maxX && cy - ry >= minY && cy + ry <= maxY;
-            const partial = cx + rx >= minX && cx - rx <= maxX && cy + ry >= minY && cy - ry <= maxY;
-            return { full, partial };
-        }
-
-        if (seg.type === "line" || seg.type === "arc") {
-            const { start: s, end: en } = seg.data;
-            const full = _ptInRect(s, minX, maxX, minY, maxY) && _ptInRect(en, minX, maxX, minY, maxY);
-            const partial = _segTouchesRect(s, en, minX, maxX, minY, maxY);
-            return { full, partial };
-        }
-
-        return { full: false, partial: false };
-    }
-
-    _collectElementSegments(seedSeg) {
-        if (!seedSeg) return [];
-        if (seedSeg.type === "line" || seedSeg.type === "arc") {
-            const contourId = seedSeg.contourId ?? 0;
-            return this.ctx.state.segments.filter(
-                s => (s.type === "line" || s.type === "arc" || s.type === "circle" || s.type === "rect" || s.type === "ellipse")
-                    && (s.contourId ?? 0) === contourId,
-            );
-        }
-        return [seedSeg];
-    }
-
     _applyBoxSelection(start, end, { selectParts = false } = {}) {
-        const ltr = end.x >= start.x;
-        const minX = Math.min(start.x, end.x);
-        const maxX = Math.max(start.x, end.x);
-        const minY = Math.min(start.y, end.y);
-        const maxY = Math.max(start.y, end.y);
-
-        const sideLineHit = (x1, y1, x2, y2) => {
-            const s = { x: x1, y: y1 };
-            const e = { x: x2, y: y2 };
-            const full = _ptInRect(s, minX, maxX, minY, maxY) && _ptInRect(e, minX, maxX, minY, maxY);
-            const partial = _segTouchesRect(s, e, minX, maxX, minY, maxY);
-            return ltr ? full : partial;
-        };
-
+        this._clearRectSideSelection();
+        const result = computeBoxSelection(this.ctx.state.segments, start, end, {
+            selectParts,
+            variableValues: this.ctx.state.variableValues ?? {},
+        });
         if (selectParts) {
-            this._clearRectSideSelection();
-
-            const partIds = [];
-            for (const seg of this.ctx.state.segments) {
-                if (seg.type === "rect") {
-                    const g = getRectGeomLocal(seg.data);
-                    const xStart = g.xStart;
-                    const yStart = g.yStart;
-                    const xOpp = g.xOpp;
-                    const yOpp = g.yOpp;
-                    const sides = [];
-                    if (sideLineHit(xStart, yStart, xStart, yOpp)) sides.push({ role: "x-start", axis: "w" });
-                    if (sideLineHit(xOpp, yStart, xOpp, yOpp)) sides.push({ role: "x-opposite", axis: "w" });
-                    if (sideLineHit(xStart, yStart, xOpp, yStart)) sides.push({ role: "y-start", axis: "h" });
-                    if (sideLineHit(xStart, yOpp, xOpp, yOpp)) sides.push({ role: "y-opposite", axis: "h" });
-                    if (sides.length > 0) {
-                        this._selectedRectSides.set(seg.id, sides);
-                        partIds.push(seg.id);
-                        continue;
-                    }
-                }
-                const hit = this._segmentBoxHit(seg, ltr, minX, maxX, minY, maxY);
-                if (ltr ? hit.full : hit.partial) partIds.push(seg.id);
-            }
-            this.ctx.state.setSelection(partIds);
+            this._selectedRectSides = result.rectSides;
+            this.ctx.state.setSelection(result.ids);
             this._pruneRectSideSelection();
         } else {
-            this._clearRectSideSelection();
-            const elementIds = new Set();
-            const visitedElements = new Set();
-            for (const seg of this.ctx.state.segments) {
-                const elemKey = (seg.type === "line" || seg.type === "arc")
-                    ? `c:${seg.contourId ?? 0}`
-                    : `s:${seg.id}`;
-                if (visitedElements.has(elemKey)) continue;
-                visitedElements.add(elemKey);
-
-                const elementSegs = this._collectElementSegments(seg);
-                if (elementSegs.length === 0) continue;
-
-                const evals = elementSegs.map(s => this._segmentBoxHit(s, ltr, minX, maxX, minY, maxY));
-                const pick = ltr
-                    ? evals.every(v => v.full)
-                    : evals.some(v => v.partial);
-                if (!pick) continue;
-
-                for (const s of elementSegs) elementIds.add(s.id);
-            }
-            this.ctx.state.setSelection([...elementIds]);
+            this.ctx.state.setSelection(result.ids);
         }
         this._syncRectSideHighlights();
         this.ctx.canvas.clearGhost();
     }
 
     _updateBoxGhost(start, end) {
-        const ltr = end.x >= start.x;
-        const x = Math.min(start.x, end.x);
-        const y = Math.min(start.y, end.y);
-        const w = Math.abs(end.x - start.x);
-        const h = Math.abs(end.y - start.y);
-
-        const rect = document.createElementNS(SVG_NS, "rect");
-        rect.setAttribute("x", x);
-        rect.setAttribute("y", y);
-        rect.setAttribute("width", w);
-        rect.setAttribute("height", h);
-        rect.classList.add("editor-selection-box");
-        if (!ltr) rect.classList.add("editor-selection-box--crossing");
-
-        const g = document.createElementNS(SVG_NS, "g");
-        g.appendChild(rect);
-        this.ctx.canvas.setGhost(g);
+        this.ctx.canvas.setGhost(buildSelectionBoxGhost(start, end, SVG_NS));
     }
 
     _updateMoveGhost() {
@@ -895,7 +809,7 @@ export default class MoveTool extends BaseTool {
         inpPoint.dataset.role = "point";
         inpPoint.style.width = "132px";
         inpPoint.placeholder = "x y";
-        inpPoint.value = point ? `${this._fmtPoint(point.x)} ${this._fmtPoint(point.y)}` : "";
+        inpPoint.value = point ? `${this._fmtPoint(point.x)} ${this._fmtPoint(-point.y)}` : "";
         popup.appendChild(inpPoint);
 
         const hint = document.createElement("small");
@@ -965,7 +879,8 @@ export default class MoveTool extends BaseTool {
         const rawY = tokens.length >= 2 ? tokens[1] : tokens[0];
 
         const x = evaluateTokenWithVars(rawX, this.ctx.state.variableValues ?? {}, Number.NaN);
-        const y = evaluateTokenWithVars(rawY, this.ctx.state.variableValues ?? {}, Number.NaN);
+        const yEval = evaluateTokenWithVars(rawY, this.ctx.state.variableValues ?? {}, Number.NaN);
+        const y = Number.isFinite(yEval) ? -yEval : yEval;
         if (!Number.isFinite(x) || !Number.isFinite(y)) {
             showError("Invalid coordinate expression");
             return;
@@ -988,7 +903,7 @@ export default class MoveTool extends BaseTool {
     _updatePointPopupValues(point) {
         if (!this._pointPopup || this._pointInputFocused || !point) return;
         const inpPoint = this._pointPopup.querySelector('input[data-role="point"]');
-        if (inpPoint) inpPoint.value = `${this._fmtPoint(point.x)} ${this._fmtPoint(point.y)}`;
+        if (inpPoint) inpPoint.value = `${this._fmtPoint(point.x)} ${this._fmtPoint(-point.y)}`;
     }
 
     _positionPointPopup(e) {
