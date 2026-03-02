@@ -3,7 +3,7 @@ import LoggerFactory from "../../core/LoggerFactory.js";
 import { isFormulaToken, evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { getRectGeomLocal, getRectCornerPointMap } from "../geometry/rectGeometry.js";
 import { circumcenter, arc2ptData, arcFlagsViaPoint } from "./ArcTool.js";
-import { computeBoxSelection, buildSelectionBoxGhost } from "./shared/selectionUtils.js";
+import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 
 const log = LoggerFactory.createLogger("CursorTool");
 
@@ -306,27 +306,32 @@ export default class CursorTool extends BaseTool {
         if (wasDrag) {
             // Use raw SVG coords (not snapped) to avoid snap freezing the box corners.
             const rawEnd = this.ctx.canvas.screenToSVG(e);
-            this._applyBoxSelection(downSvg, rawEnd, e.shiftKey);
+            const selectParts = !!e.shiftKey && !!(e.ctrlKey || e.metaKey);
+            const ignoreGroups = !!e.shiftKey && !(e.ctrlKey || e.metaKey);
+            this._applyBoxSelection(downSvg, rawEnd, { addToExisting: !!e.shiftKey, selectParts, ignoreGroups });
         } else {
             // Use raw (unsnapped) position for hit-testing so that grid snap does
             // not prevent clicking on arcs and segments between grid nodes.
             const rawPos = this.ctx.canvas.screenToSVG(e);
             const hitId = this.ctx.canvas.hitTest(rawPos);
             if (hitId) {
-                // Treat the whole connected chain as a single selectable unit.
-                const chainIds = this.ctx.state.getChain(hitId).map(s => s.id);
+                const selectParts = !!e.shiftKey && !!(e.ctrlKey || e.metaKey);
+                const selectionIds = selectParts
+                    ? [hitId]
+                    : resolveClickSelectionIds(
+                        hitId,
+                        this.ctx.state.segments,
+                        this.ctx.state.elementGroups ?? [],
+                        { ignoreGroups: !!e.shiftKey && !(e.ctrlKey || e.metaKey) },
+                    );
                 if (e.shiftKey) {
-                    // Toggle chain: if every member is already selected → deselect all;
-                    // otherwise add the whole chain to the current selection.
-                    const allSel = chainIds.every(id => this.ctx.state.selectedIds.has(id));
-                    if (allSel) {
-                        const keep = [...this.ctx.state.selectedIds].filter(id => !chainIds.includes(id));
-                        this.ctx.state.setSelection(keep);
-                    } else {
-                        this.ctx.state.setSelection([...this.ctx.state.selectedIds, ...chainIds]);
-                    }
+                    const next = new Set(this.ctx.state.selectedIds);
+                    const allSelected = selectionIds.every(id => next.has(id));
+                    if (allSelected) selectionIds.forEach(id => next.delete(id));
+                    else selectionIds.forEach(id => next.add(id));
+                    this.ctx.state.setSelection([...next]);
                 } else {
-                    this.ctx.state.setSelection(chainIds);
+                    this.ctx.state.setSelection(selectionIds);
                 }
             } else if (!e.shiftKey) {
                 this.ctx.state.clearSelection();
@@ -996,10 +1001,16 @@ export default class CursorTool extends BaseTool {
     // ─── Box selection ──────────────────────────────────────────────────────
 
     /** @private */
-    _applyBoxSelection(start, end, addToExisting) {
+    _applyBoxSelection(start, end, { addToExisting = false, selectParts = false, ignoreGroups = false } = {}) {
         const result = computeBoxSelection(this.ctx.state.segments, start, end, {
-            selectParts: false,
+            selectParts,
             variableValues: this.ctx.state.variableValues ?? {},
+            ...(selectParts || ignoreGroups
+                ? {}
+                : {
+                    groupSelectionMode: true,
+                    elementGroups: this.ctx.state.elementGroups ?? [],
+                }),
         });
         const selected = addToExisting
             ? [...this.ctx.state.selectedIds, ...result.ids]

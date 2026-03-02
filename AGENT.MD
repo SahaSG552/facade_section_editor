@@ -100,6 +100,74 @@
   - [ ] Проверить `RT`-модификаторы и selection рамкой у transformed-элементов.
   - [ ] Проверить undo/redo как одну атомарную операцию на commit.
 
+## ✅ CANVAS GROUP/UNGROUP + SELECTION UNIFICATION (02.03.2026)
+
+### Унификация модификаторов выделения (все инструменты)
+
+Реализована единая логика клика и рамки для `CursorTool`, `MoveTool`, `RotateTool`, `MirrorTool`:
+- **Без модификатора** → выделяет верхний уровень группы (всё поддерево).
+- **Shift** → игнорирует группы, выделяет конкретный элемент/контур.
+- **Ctrl+Shift** → части элементов (сегменты/стороны rect).
+
+Ключевые изменения:
+- В `src/editor/tools/shared/selectionUtils.js` добавлена функция `resolveClickSelectionIds(...)`.
+- Все 4 инструмента импортируют `resolveClickSelectionIds` вместо собственных копий логики.
+
+### Баг-фиксы Ungroup
+
+**Проблема 1 (PathEditor):** `ungroupSelection` обрабатывал все вложенные группы, выбранные через расширение, а не только корневые → структура становилась плоской.
+- **Фикс:** Работает только с *корневыми* выбранными группами (те, у которых нет другой выбранной группы-предка).
+
+**Проблема 2 (Canvas→PathEditor sync):** `setSelectedElements` подсвечивал все вложенные Group-строки, и `ungroupSelection` обрабатывал их все.
+- **Фикс:** `setSelectedElements` теперь подсвечивает только *корневую* полностью-выбранную группу в иерархии.
+
+**Проблема 3 (Canvas Ungroup — итоговая):** При унгруппировке через canvas вся структура становилась плоской из-за двух связанных причин:
+- `ungroupSelection` запрашивал `_resolveParentGroupById` *после* того, как первый цикл удалял группы из `_elements` → цепочка предков обрывалась.
+- `_expandSelectionToGroups` помечал вложенные строки как selected, а второй цикл `ungroupSelection` их тоже обрабатывал.
+- **Фикс:** Снимок `originalParentByGroupId` делается ДО мутаций через `_buildGroupParentMap()`. Логика первого и второго циклов разделена на `if/else`.
+
+**Проблема 4 (Группировка "не тех" элементов):** При Ctrl+клике на строку-потомок выбранной группы `_expandSelectionToGroups` сразу переподсвечивала её.
+- **Фикс:** При Ctrl+деселекции строки в `_applyTopLevelSelection` также сбрасываются все строки групп-предков.
+
+### Рефакторинг и унификация (02.03.2026)
+
+**`src/panel/PathEditor.js`:**
+- Добавлен приватный метод `_buildGroupParentMap()` — строит `Map<groupId → parentGroupId>` за один проход по `_elements`. Используется как снимок перед мутациями и как общий источник вместо дублирующихся inline-построений.
+- `setSelectedElements`: заменён inline-цикл построения `groupParentById` на `_buildGroupParentMap()`; цикл `groupFullySelected` упрощён.
+- `_expandSelectionToGroups`: удалена неиспользуемая Map `parentByGroup`; цикл сбора `selectedGroupIds` упрощён до единственного условия.
+- `ungroupSelection`: удалена неиспользуемая переменная `group`; inline-построение Map заменено на `_buildGroupParentMap()`.
+- `groupSelection`: заменён `selectedRefs.has('group:...')` (шаблонная строка при каждой итерации) на `selectedGroupIdSet.has(gid)` (Set<number>); двойной `.map()` на массив `moved` объединён в один проход.
+- `_resolveParentGroupById`: добавлен JSDoc.
+- `_applyTopLevelSelection`: расширен JSDoc с описанием всех трёх modifier-режимов и логики деселекции предков.
+
+**`src/editor/tools/shared/selectionUtils.js`:**
+- `resolveClickSelectionIds`: `elementGroups` теперь обходится один раз (строятся `parentByGroup` и `childrenMap` совместно), вместо двух проходов — устранён повторный вызов `buildGroupChildrenMap(elementGroups)`.
+- Добавлен полный JSDoc для `resolveClickSelectionIds` и `expandSegIdsToGroupClosure`.
+
+**Проверка:**
+- `npm run build` — успешно (без ошибок и предупреждений компилятора).
+
+### Баг-фикс: структура становится плоской после сохранения и возврата в edit-режим
+
+**Проблема:** После сохранения фрезы и возврата в edit-режим структура вложенности в PathEditor была корректной до первого изменения на canvas (рисование нового элемента или редактирование существующего). После первого изменения структура становилась плоской.
+
+**Корневая причина — `_sanitizeElementsSnapshot` в `src/editor/ProfileEditor.js`:**
+1. В первом обходе `cloned` все `groupId` заранее добавлялись в `usedGroupIds`.
+2. При вызове `allocGroupId(candidate)` кандидат **всегда** оказывался в `usedGroupIds` → всегда присваивался новый ID (например, G1→G3, G2→G4).
+3. Поле `parentGroupId` при этом копировалось через `_optFiniteId(elem?.parentGroupId)` — т.е. оставалось со **старым** значением (G2.parentGroupId оставался равным 1, хотя теперь нет ни одной группы с ID=1).
+4. `_restoreStateStructureFromElements` записывал в `state.elementGroups` эти сломанные `parentGroupId`.
+5. При `enter()` с `hasStructuredSource=true` PathEditor **не** перестраивался — он сохранял корректные элементы.
+6. При первом canvas-изменении `_syncToPathEditor` вызывался впервые и строил PathEditor из `state.getElements()`, которые содержали сломанную иерархию → структура была плоской.
+
+**Фикс (`src/editor/ProfileEditor.js`, функция `_sanitizeElementsSnapshot`):**
+- Добавлен **пред-проход** по всем group-элементам: вызывается `allocGroupId(oldId)` и результат сохраняется в `groupIdRemap: Map<oldId, newId>`.
+- В основном `.map()` для group-элементов `groupId` берётся из `groupIdRemap.get(...)`.
+- Добавлена функция `remapGroupId(oldId)`, которая возвращает новый ID через `groupIdRemap.get(c) ?? null`.
+- Для ВСЕХ типов элементов (`group`, `circle/rect/ellipse`, `path/polyline/symmetry`) `parentGroupId` теперь задаётся через `remapGroupId(elem?.parentGroupId)` — гарантируя консистентность ссылок во всём снимке.
+
+**Проверка:**
+- `npm run build` — успешно.
+
 ## ✅ MIRROR TOOL MVP: STAGED FLOW + SHARED SELECTION (01.03.2026)
 
 - `src/editor/tools/MirrorTool.js` переведён из TODO-скелета в рабочий инструмент.

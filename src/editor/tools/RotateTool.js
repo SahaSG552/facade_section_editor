@@ -3,7 +3,7 @@ import LoggerFactory from "../../core/LoggerFactory.js";
 import { evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { evalAngle } from "../transforms/TransformCommands.js";
 import { circumcenter, arc2ptData, arcFlagsViaPoint } from "./ArcTool.js";
-import { computeBoxSelection, buildSelectionBoxGhost } from "./shared/selectionUtils.js";
+import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 import {
     collectSegmentSnapshots,
     commitCopiedSnapshots,
@@ -232,11 +232,14 @@ export default class RotateTool extends BaseTool {
         this._endDrag();
 
         if (wasDrag) {
-            this._applyBoxSelection(downSvg, rawEnd, { selectParts: !!e.shiftKey });
+            const selectParts = !!e.shiftKey && !!(e.ctrlKey || e.metaKey);
+            const ignoreGroups = !!e.shiftKey && !(e.ctrlKey || e.metaKey);
+            this.ctx.state._selectionInsideGroupMode = false;
+            this._applyBoxSelection(downSvg, rawEnd, { selectParts, ignoreGroups });
             return;
         }
 
-        if (e.shiftKey) {
+        if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
             const sideHit = this.ctx.canvas.hitTestRectSide(rawEnd);
             if (sideHit?.axis && sideHit.axis !== "rx") {
                 this._toggleRectSideSelection(sideHit);
@@ -246,14 +249,25 @@ export default class RotateTool extends BaseTool {
 
         const hitId = this.ctx.canvas.hitTest(rawEnd);
         if (hitId) {
+            const selectParts = !!e.shiftKey && !!(e.ctrlKey || e.metaKey);
+            const ignoreGroups = !!e.shiftKey && !(e.ctrlKey || e.metaKey);
+            this.ctx.state._selectionInsideGroupMode = false;
+            const selectionIds = selectParts
+                ? [hitId]
+                : resolveClickSelectionIds(
+                    hitId,
+                    this.ctx.state.segments,
+                    this.ctx.state.elementGroups ?? [],
+                    { ignoreGroups },
+                );
             if (e.shiftKey) {
-                this._toggleSelectionIds([hitId]);
+                this._toggleSelectionIds(selectionIds);
             } else {
                 this._clearRectSideSelection();
-                const chainIds = this.ctx.state.getChain(hitId).map(s => s.id);
-                this._toggleSelectionIds(chainIds);
+                this.ctx.state.setSelection(selectionIds);
             }
-        } else if (!e.shiftKey) {
+        } else if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+            this.ctx.state._selectionInsideGroupMode = false;
             this._clearRectSideSelection();
             this.ctx.state.clearSelection();
         }
@@ -770,11 +784,17 @@ export default class RotateTool extends BaseTool {
         this._pruneRectSideSelection();
     }
 
-    _applyBoxSelection(start, end, { selectParts = false } = {}) {
+    _applyBoxSelection(start, end, { selectParts = false, ignoreGroups = false } = {}) {
         this._clearRectSideSelection();
         const result = computeBoxSelection(this.ctx.state.segments, start, end, {
             selectParts,
             variableValues: this.ctx.state.variableValues ?? {},
+            ...(selectParts || ignoreGroups
+                ? {}
+                : {
+                    groupSelectionMode: true,
+                    elementGroups: this.ctx.state.elementGroups ?? [],
+                }),
         });
         if (selectParts) {
             this._selectedRectSides = result.rectSides;

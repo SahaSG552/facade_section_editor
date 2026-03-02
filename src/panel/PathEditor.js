@@ -82,6 +82,10 @@ export default class PathEditor {
         ellipse: { icon: '⬬', label: 'Ellipse', attrs: ['cx', 'cy', 'rx', 'ry']    },
     };
 
+    static isShapeType(type) {
+        return type === 'circle' || type === 'rect' || type === 'ellipse';
+    }
+
     /**
      * @param {Object}  options
      * @param {HTMLElement}         options.container
@@ -115,6 +119,8 @@ export default class PathEditor {
         this.onShapeElementClick   = options.onShapeElementClick   || null;
         /** @type {((segIds:string[], e:MouseEvent)=>void)|null} */
         this.onPathElemClick       = options.onPathElemClick       || null;
+        /** @type {((segIds:string[], e:MouseEvent)=>void)|null} */
+        this.onGroupElemClick      = options.onGroupElemClick      || null;
         /** @type {((segIds:string[], e:MouseEvent)=>void)|null} */
         this.onToPathRequest       = options.onToPathRequest       || null;
         /** @type {((order:Array<object>)=>void)|null} */
@@ -170,6 +176,8 @@ export default class PathEditor {
         this._lastSelectedElemRef = null;
         /** @type {{parentElem:object, fromIndex:number}|null} active drag-sort state */
         this._dragState = null;
+        /** @type {number} monotonic group id allocator for UI structure nodes */
+        this._nextGroupId = 1;
 
         // ── Inline edit state ─────────────────────────────────────────────
         this.activeEditLineData  = null;
@@ -213,6 +221,57 @@ export default class PathEditor {
                 if (this.onDeactivate) this.onDeactivate(e);
             }
         });
+        this.elementsContainer.addEventListener('dragover', (e) => {
+            if (!this._dragState?.isElem) return;
+            if (e.target?.closest?.('.pe-elem')) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            this.elementsContainer.classList.add('pe-elem-drag-over');
+        });
+        this.elementsContainer.addEventListener('dragleave', () => {
+            this.elementsContainer.classList.remove('pe-elem-drag-over');
+        });
+        this.elementsContainer.addEventListener('drop', (e) => {
+            this.elementsContainer.classList.remove('pe-elem-drag-over');
+            if (!this._dragState?.isElem) return;
+            if (e.target?.closest?.('.pe-elem')) return;
+            e.preventDefault();
+            const baseIndices = Array.isArray(this._dragState?.fromIndices)
+                ? [...new Set(this._dragState.fromIndices)].sort((a, b) => a - b)
+                : [this._dragState.fromIndex];
+            const valid = this._expandMoveIndicesWithGroupDescendants(baseIndices)
+                .filter(i => i >= 0 && i < this._elements.length);
+            if (valid.length === 0) return;
+
+            const rootGroupIds = new Set(
+                (Array.isArray(this._dragState?.dragRefs) ? this._dragState.dragRefs : [])
+                    .map((ref) => {
+                        if (!String(ref).startsWith('group:')) return null;
+                        const gid = Number(String(ref).slice(6));
+                        return Number.isFinite(gid) ? gid : null;
+                    })
+                    .filter(Number.isFinite)
+            );
+
+            const moved = valid.map(i => this._elements[i]).map((elem) => {
+                const isShape = PathEditor.isShapeType(elem?.type);
+                const isNestedUnderMovedRoot = this._isDescendantOfGroupRoots(elem, rootGroupIds);
+                if (isNestedUnderMovedRoot) return { ...elem };
+                return {
+                    ...elem,
+                    parentGroupId: null,
+                    parentGroupGuid: null,
+                    ...(isShape ? { parentContourId: null } : {}),
+                };
+            });
+            for (let i = valid.length - 1; i >= 0; i--) {
+                this._elements.splice(valid[i], 1);
+            }
+            this._elements.push(...moved);
+            this._pruneEmptyGroups();
+            this._renderElements();
+            this._emitTopLevelOrder();
+        });
         this._renderSuggestions();
     }
 
@@ -230,6 +289,251 @@ export default class PathEditor {
             e.clipboardData.getData('text/plain').split(/[\n\r]+/).filter(l => l.trim())
                 .forEach(line => this._tryAddLine(line.trim()));
         });
+    }
+
+    /**
+     * Emit current top-level order payload for external state synchronization.
+     * @private
+     */
+    _emitTopLevelOrder() {
+        const order = this._elements.map(elem =>
+            (elem.type === 'path' || elem.type === 'polyline')
+                ? {
+                    kind: 'contour',
+                    contourId: elem.contourId,
+                    parentGroupId: this._optId(elem?.parentGroupId),
+                }
+                : (elem.type === 'group')
+                    ? {
+                        kind: 'group',
+                        groupId: Number(elem.groupId),
+                        guid: String(elem?.guid ?? ''),
+                        name: String(elem.name ?? ''),
+                        parentGroupId: this._optId(elem?.parentGroupId),
+                    }
+                    : {
+                    kind: 'shape',
+                    segId: elem.segId,
+                    parentContourId: this._optId(elem?.parentContourId),
+                    parentGroupId: this._optId(elem?.parentGroupId),
+                }
+        );
+        if (this.onElementOrderChange) this.onElementOrderChange(order);
+        else this._fireOnChange();
+    }
+
+    /**
+     * Allocate smallest available positive group ID.
+     * @returns {number}
+     * @private
+     */
+    _allocateGroupId() {
+        const used = new Set(
+            this._elements
+                .filter(e => e?.type === 'group')
+                .map(e => Number(e?.groupId))
+                .filter(Number.isFinite)
+        );
+        let id = 1;
+        while (used.has(id)) id++;
+        this._nextGroupId = Math.max(this._nextGroupId, id + 1);
+        return id;
+    }
+
+    /** @returns {string} @private */
+    _newGuid() {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            return crypto.randomUUID();
+        }
+        return `guid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    /**
+     * Parse optional numeric id. Returns null for null/undefined/empty/non-finite.
+     * @param {*} value
+     * @returns {number|null}
+     * @private
+     */
+    _optId(value) {
+        if (value === null || value === undefined || value === '') return null;
+        const n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    /**
+     * Return clickable/selectable row element for a top-level element.
+     * @param {object} elem
+     * @returns {HTMLElement|null}
+     * @private
+     */
+    _getTopLevelRowElement(elem) {
+        if (!elem?._elem) return null;
+        if (elem.type === 'path' || elem.type === 'polyline' || elem.type === 'group') {
+            return elem._elem?.querySelector?.('.pe-path-header') ?? null;
+        }
+        return elem._elem ?? null;
+    }
+
+    /**
+     * Remove groups that have no direct children (iteratively).
+     * @returns {boolean} true when structure changed
+     * @private
+     */
+    _pruneEmptyGroups() {
+        if (!Array.isArray(this._elements) || this._elements.length === 0) return false;
+
+        let changed = false;
+        while (true) {
+            const existingGroupIds = new Set(
+                this._elements
+                    .filter(e => e?.type === 'group')
+                    .map(e => this._optId(e?.groupId))
+                    .filter(id => Number.isFinite(id) && id > 0)
+            );
+            if (existingGroupIds.size === 0) break;
+
+            const nonEmptyGroupIds = new Set();
+            for (const elem of this._elements) {
+                const parentId = this._optId(elem?.parentGroupId);
+                if (!Number.isFinite(parentId) || !existingGroupIds.has(parentId)) continue;
+                nonEmptyGroupIds.add(parentId);
+            }
+
+            const next = this._elements.filter((elem) => {
+                if (elem?.type !== 'group') return true;
+                const gid = this._optId(elem?.groupId);
+                return Number.isFinite(gid) && gid > 0 && nonEmptyGroupIds.has(gid);
+            });
+
+            if (next.length === this._elements.length) break;
+            this._elements = next;
+            changed = true;
+        }
+
+        if (changed && this._activeElemId?.startsWith('group:')) {
+            const gid = Number(this._activeElemId.slice(6));
+            const exists = this._elements.some(e => e?.type === 'group' && Number(e?.groupId) === gid);
+            if (!exists) this._activeElemId = null;
+        }
+
+        return changed;
+    }
+
+    /**
+     * Resolve valid parent group for element using id+guid check.
+     * @param {object} elem
+     * @returns {object|null}
+     * @private
+     */
+    _resolveParentGroup(elem) {
+        const gid = this._optId(elem?.parentGroupId);
+        if (!Number.isFinite(gid)) return null;
+        const parent = this._elements.find(e => e?.type === 'group' && Number(e.groupId) === gid) ?? null;
+        if (!parent) return null;
+        const childGuid = String(elem?.parentGroupGuid ?? '').trim();
+        const parentGuid = String(parent?.guid ?? '').trim();
+        if (childGuid && parentGuid && childGuid !== parentGuid) return null;
+        return parent;
+    }
+
+    /**
+     * Resolve parent group by id only (ignores guid mismatch).
+     * Used for hierarchy/selection operations where stale guid must not break nesting.
+     * @param {object} elem
+     * @returns {object|null}
+     * @private
+     */
+    /**
+     * Resolve the direct parent group element of `elem`, or null if ungrouped.
+     * @param {object} elem
+     * @returns {object|null}
+     * @private
+     */
+    _resolveParentGroupById(elem) {
+        const gid = this._optId(elem?.parentGroupId);
+        if (!Number.isFinite(gid)) return null;
+        return this._elements.find(e => e?.type === 'group' && Number(e.groupId) === gid) ?? null;
+    }
+
+    /**
+     * Build a Map of groupId → parentGroupId for every group currently in `_elements`.
+     * Top-level groups map to `null`. Useful as a lightweight snapshot before structural
+     * mutations (e.g. ungroup) that would otherwise break live `_resolveParentGroupById` chains.
+     * @returns {Map<number, number|null>}
+     * @private
+     */
+    _buildGroupParentMap() {
+        const map = new Map();
+        for (const elem of this._elements) {
+            if (elem?.type !== 'group') continue;
+            const gid = this._optId(elem?.groupId);
+            if (!Number.isFinite(gid)) continue;
+            map.set(gid, this._optId(elem?.parentGroupId));
+        }
+        return map;
+    }
+
+    /**
+     * @param {object} elem
+     * @param {Set<number>} rootGroupIds
+     * @returns {boolean}
+     * @private
+     */
+    _isDescendantOfGroupRoots(elem, rootGroupIds) {
+        if (!elem || !rootGroupIds?.size) return false;
+        let cur = this._optId(elem?.parentGroupId);
+        const seen = new Set();
+        while (Number.isFinite(cur) && !seen.has(cur)) {
+            if (rootGroupIds.has(cur)) return true;
+            seen.add(cur);
+            const parent = this._elements.find(e => e?.type === 'group' && Number(e.groupId) === cur) ?? null;
+            cur = this._optId(parent?.parentGroupId);
+        }
+        return false;
+    }
+
+    /**
+     * Expand dragged index set: selected group rows always carry their full descendant subtree.
+     * @param {number[]} baseIndices
+     * @returns {number[]}
+     * @private
+     */
+    _expandMoveIndicesWithGroupDescendants(baseIndices) {
+        const validBase = [...new Set(baseIndices)]
+            .filter(i => Number.isInteger(i) && i >= 0 && i < this._elements.length)
+            .sort((a, b) => a - b);
+        if (validBase.length === 0) return [];
+
+        const moved = new Set(validBase);
+        const rootGroupIds = new Set(
+            validBase
+                .map(i => this._elements[i])
+                .filter(e => e?.type === 'group')
+                .map(e => Number(e.groupId))
+                .filter(Number.isFinite)
+        );
+        if (rootGroupIds.size === 0) return validBase;
+
+        const queue = [...rootGroupIds];
+        const seenGroups = new Set(queue);
+        while (queue.length > 0) {
+            const gid = queue.shift();
+            for (let idx = 0; idx < this._elements.length; idx++) {
+                const item = this._elements[idx];
+                const parent = this._resolveParentGroupById(item);
+                if (Number(parent?.groupId) !== gid) continue;
+                moved.add(idx);
+                if (item?.type === 'group') {
+                    const childGid = Number(item.groupId);
+                    if (Number.isFinite(childGid) && !seenGroups.has(childGid)) {
+                        seenGroups.add(childGid);
+                        queue.push(childGid);
+                    }
+                }
+            }
+        }
+
+        return [...moved].sort((a, b) => a - b);
     }
 
     // ─── Elements API ─────────────────────────────────────────────────────────
@@ -261,7 +565,23 @@ export default class PathEditor {
         // Keep incoming order as the single source of truth.
         // IDs (especially contourId) are not stable across all mode transitions,
         // so re-sorting by previous IDs can swap rows incorrectly.
-        elements = [...elements];
+        elements = [...elements].map((elem) => {
+            if (elem?.type === 'symmetry') {
+                return {
+                    ...elem,
+                    type: 'path',
+                    isSymmetry: true,
+                };
+            }
+            if (elem?.type === 'group') {
+                return {
+                    ...elem,
+                    type: 'group',
+                    name: String(elem?.name ?? ''),
+                };
+            }
+            return { ...elem, isSymmetry: !!elem?.isSymmetry };
+        });
 
         // Snapshot expanded state and existing line texts (to survive re-render).
         // Also record the positional order of path elements (by index among path/polyline
@@ -271,7 +591,7 @@ export default class PathEditor {
         const prevExpanded  = new Set(this._expandedContours);
         const prevExpandedBySig = new Map();
         const prevPathOrder = []; // [{contourId, expanded, lines}] ordered by position
-        const prevLineTexts = new Map(); // contourId -> [{text, segId, formulaText}]
+        const prevLineTexts = new Map(); // contourId -> [{text, segId, formulaText, lineGuid}]
         const prevTransformsByPathCid = new Map();
         const prevTransformsByShapeSid = new Map();
         const prevShapeOrder = [];       // [{type, segId, attrs}]
@@ -282,6 +602,7 @@ export default class PathEditor {
                     text: l.text,
                     segId: l.segId,
                     formulaText: l._formulaText ?? (this._hasFormulaToken(l.text) ? l.text : null),
+                    lineGuid: String(l?.lineGuid ?? this._newGuid()),
                 }));
                 prevPathOrder.push({ contourId: elem.contourId, expanded: prevExpanded.has(elem.contourId), lines: lineSnap });
                 prevPathOrder[prevPathOrder.length - 1].transforms = Array.isArray(elem.transforms) ? [...elem.transforms] : [];
@@ -289,6 +610,9 @@ export default class PathEditor {
                 prevTransformsByPathCid.set(elem.contourId, Array.isArray(elem.transforms) ? [...elem.transforms] : []);
                 const sig = this._contourSignatureFromLines(lineSnap);
                 if (sig) prevExpandedBySig.set(sig, prevExpanded.has(elem.contourId));
+            } else if (elem.type === 'group') {
+                const gid = Number(elem.groupId);
+                if (Number.isFinite(gid)) this._nextGroupId = Math.max(this._nextGroupId, gid + 1);
             } else if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
                 const attrs = PathEditor.SHAPE_DEFS[elem.type]?.attrs ?? [];
                 const snap = {
@@ -296,6 +620,7 @@ export default class PathEditor {
                     segId: elem.segId,
                     attrs: Object.fromEntries(attrs.map(a => [a, this._shapeAttrValueForSpace(elem.type, elem.data ?? {}, a, prevShapeSpace)])),
                     transforms: Array.isArray(elem.transforms) ? [...elem.transforms] : [],
+                    parentContourId: this._optId(elem?.parentContourId),
                 };
                 prevShapeOrder.push(snap);
                 if (elem.segId) prevShapeBySegId.set(elem.segId, snap);
@@ -309,6 +634,22 @@ export default class PathEditor {
         this._activeSubLine = null;
         this._lastSelectedLine = null;
         this._elements = elements.map(elem => {
+            if (elem.type === 'group') {
+                const groupId = Number(elem?.groupId);
+                const safeGroupId = Number.isFinite(groupId) ? groupId : this._nextGroupId++;
+                this._nextGroupId = Math.max(this._nextGroupId, safeGroupId + 1);
+                return {
+                    type: 'group',
+                    groupId: safeGroupId,
+                    guid: String(elem?.guid ?? this._newGuid()),
+                    name: String(elem?.name ?? `Group ${safeGroupId}`),
+                    expanded: elem?.expanded !== false,
+                    parentGroupId: this._optId(elem?.parentGroupId),
+                    transforms: Array.isArray(elem.transforms) ? [...elem.transforms] : [],
+                    _elem: null,
+                };
+            }
+
             if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
                 const nextData = { ...(elem.data ?? {}) };
                 const prevShape = prevShapeBySegId.get(elem.segId) ?? prevShapeOrder[shapeElemIndex++] ?? null;
@@ -317,6 +658,7 @@ export default class PathEditor {
                 const transforms = incomingTransforms
                     ? this._mergeTransformsWithFormulaPriority(prevTransforms, incomingTransforms)
                     : prevTransforms;
+                const parentContourId = this._optId(elem?.parentContourId);
                 const attrs = PathEditor.SHAPE_DEFS[elem.type]?.attrs ?? [];
                 if (prevShape?.type === elem.type) {
                     for (const attr of attrs) {
@@ -328,7 +670,16 @@ export default class PathEditor {
                         }
                     }
                 }
-                return { type: elem.type, segId: elem.segId, data: nextData, transforms, _elem: null };
+                return {
+                    type: elem.type,
+                    segId: elem.segId,
+                    data: nextData,
+                    transforms,
+                    parentContourId,
+                    parentGroupId: this._optId(elem?.parentGroupId),
+                    _isEmbeddedVisual: false,
+                    _elem: null,
+                };
             }
             // path / polyline
             const cid = elem.contourId;
@@ -344,11 +695,21 @@ export default class PathEditor {
                     lines = lines.map((line, i) => {
                         const prevText = prevTexts[i]?.text ?? null;
                         const prevFormula = prevTexts[i]?.formulaText ?? null;
+                        const prevGuid = String(prevTexts[i]?.lineGuid ?? this._newGuid());
                         const chosenText = this._chooseLineTextWithFormulaPriority(prevText, prevFormula, line.text);
                         if (chosenText !== line.text) {
-                            return { ...line, text: chosenText, _formulaText: prevFormula ?? (this._hasFormulaToken(chosenText) ? chosenText : null) };
+                            return {
+                                ...line,
+                                text: chosenText,
+                                _formulaText: prevFormula ?? (this._hasFormulaToken(chosenText) ? chosenText : null),
+                                lineGuid: prevGuid,
+                            };
                         }
-                        return { ...line, _formulaText: prevFormula ?? (this._hasFormulaToken(chosenText) ? chosenText : null) };
+                        return {
+                            ...line,
+                            _formulaText: prevFormula ?? (this._hasFormulaToken(chosenText) ? chosenText : null),
+                            lineGuid: prevGuid,
+                        };
                     });
                 }
             } else {
@@ -363,6 +724,7 @@ export default class PathEditor {
                         text:  l.text,
                         segId: lsids ? (lsids[i] ?? null) : (elem.segIds[i] ?? l.segId ?? null),
                         _formulaText: l.formulaText ?? (this._hasFormulaToken(l.text) ? l.text : null),
+                        lineGuid: String(l?.lineGuid ?? this._newGuid()),
                         _elem: null,
                     }));
                 } else if (Array.isArray(elem.lines) && elem.lines.length > 0) {
@@ -372,6 +734,7 @@ export default class PathEditor {
                         text: String(l?.text ?? '').trim(),
                         segId: l?.segId ?? (elem.lineSegIds?.[i] ?? null),
                         _formulaText: this._hasFormulaToken(String(l?.text ?? '')) ? String(l?.text ?? '').trim() : null,
+                        lineGuid: String(l?.lineGuid ?? this._newGuid()),
                         _elem: null,
                     }));
                 } else {
@@ -391,7 +754,19 @@ export default class PathEditor {
             const transforms = incomingTransforms
                 ? this._mergeTransformsWithFormulaPriority(prevTransforms, incomingTransforms)
                 : prevTransforms;
-            return { type: elem.type, contourId: cid, segIds: elem.segIds ?? [], expanded, lines, transforms, _elem: null };
+            return {
+                type: elem.type,
+                contourId: cid,
+                segIds: elem.segIds ?? [],
+                expanded,
+                lines,
+                transforms,
+                isSymmetry: !!elem.isSymmetry,
+                parentContourId: this._optId(elem?.parentContourId),
+                parentGroupId: this._optId(elem?.parentGroupId),
+                axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
+                _elem: null,
+            };
         });
 
         // Rebuild _expandedContours from the resolved expanded flags.
@@ -408,6 +783,10 @@ export default class PathEditor {
             const segId = prevActiveElemId.slice(6);
             const exists = this._elements.some(e =>
                 (e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse') && e.segId === segId);
+            this._activeElemId = exists ? prevActiveElemId : null;
+        } else if (prevActiveElemId?.startsWith('group:')) {
+            const gid = Number(prevActiveElemId.slice(6));
+            const exists = this._elements.some(e => e.type === 'group' && Number(e.groupId) === gid);
             this._activeElemId = exists ? prevActiveElemId : null;
         } else if (prevActiveElemId?.startsWith('path:')) {
             const prevActiveCid = Number(prevActiveElemId.slice(5));
@@ -441,6 +820,7 @@ export default class PathEditor {
             text:  text.trim(),
             segId: lineSegIds[i] ?? null,
             _formulaText: null,
+            lineGuid: this._newGuid(),
             _elem: null,
         }));
     }
@@ -745,20 +1125,184 @@ export default class PathEditor {
     /** @private */
     _renderElements() {
         this.elementsContainer.innerHTML = '';
-        this._elements.forEach((elem, idx) => {
-            if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
-                elem._elem = this._buildShapeRow(elem, idx + 1);
+        let topIndex = 0;
+        const rowNoByContour = new Map();
+        const rowNoByGroup = new Map();
+        const embeddedCountByContour = new Map();
+        const childCountByGroup = new Map();
+
+        for (const elem of this._elements) {
+            if (!this._isElementVisibleUnderGroupCollapse(elem)) continue;
+
+            const parentGroup = this._resolveParentGroupById(elem);
+            const parentGroupId = Number(parentGroup?.groupId) || null;
+            const parentCid = this._optId(elem?.parentContourId);
+            const isEmbeddedShape = PathEditor.isShapeType(elem?.type)
+                && Number.isFinite(parentCid)
+                && rowNoByContour.has(parentCid);
+
+            let rowLabel = '';
+            if (isEmbeddedShape) {
+                const base = rowNoByContour.get(parentCid);
+                const nextSub = (embeddedCountByContour.get(parentCid) ?? 0) + 1;
+                embeddedCountByContour.set(parentCid, nextSub);
+                rowLabel = `${base}.${nextSub}`;
+                elem._isEmbeddedVisual = true;
             } else {
-                elem._elem = this._buildPathGroup(elem, idx + 1);
+                elem._isEmbeddedVisual = false;
+                if (Number.isFinite(parentGroupId) && rowNoByGroup.has(parentGroupId)) {
+                    const nextChild = (childCountByGroup.get(parentGroupId) ?? 0) + 1;
+                    childCountByGroup.set(parentGroupId, nextChild);
+                    rowLabel = `${rowNoByGroup.get(parentGroupId)}.${nextChild}`;
+                } else {
+                    topIndex += 1;
+                    rowLabel = String(topIndex);
+                }
             }
+
+            if (elem.type === 'group') rowNoByGroup.set(Number(elem.groupId), rowLabel);
+            if (elem.type === 'path' || elem.type === 'polyline') rowNoByContour.set(Number(elem.contourId), rowLabel);
+
+            if (elem.type === 'group') elem._elem = this._buildGroupRow(elem, rowLabel);
+            else if (PathEditor.isShapeType(elem.type)) elem._elem = this._buildShapeRow(elem, rowLabel);
+            else elem._elem = this._buildPathGroup(elem, rowLabel);
+
+            const depth = this._getGroupDepth(elem);
+            if (elem._elem) elem._elem.style.marginLeft = depth > 0 ? `${depth * 14}px` : '';
             this.elementsContainer.appendChild(elem._elem);
+        }
+    }
+
+    /** @private */
+    _isElementVisibleUnderGroupCollapse(elem) {
+        let parent = this._resolveParentGroupById(elem);
+        const seen = new Set();
+        while (parent && !seen.has(Number(parent.groupId))) {
+            seen.add(Number(parent.groupId));
+            if (parent.expanded === false) return false;
+            parent = this._resolveParentGroupById(parent);
+        }
+        return true;
+    }
+
+    /**
+     * Compute nesting depth by following parentGroupId chain.
+     * @param {object} elem
+     * @returns {number}
+     * @private
+     */
+    _getGroupDepth(elem) {
+        let depth = 0;
+        let parent = this._resolveParentGroupById(elem);
+        const seen = new Set();
+        while (parent && !seen.has(Number(parent.groupId))) {
+            seen.add(Number(parent.groupId));
+            depth += 1;
+            parent = this._resolveParentGroupById(parent);
+        }
+        return depth;
+    }
+
+    /**
+     * Build a group row element.
+     * @param {{type:'group', groupId:number, name:string}} elem
+     * @param {string|number} rowNum
+     * @returns {HTMLElement}
+     * @private
+     */
+    _buildGroupRow(elem, rowNum) {
+        const wrap = document.createElement('div');
+        wrap.className = 'pe-path-wrap';
+
+        const row = document.createElement('div');
+        row.className = 'path-line pe-elem pe-elem-group pe-path-header';
+        row.draggable = true;
+        row.dataset.groupId = String(elem.groupId);
+
+        const numEl = document.createElement('span');
+        numEl.className = 'path-line-number';
+        numEl.textContent = String(rowNum ?? '');
+        row.appendChild(numEl);
+
+        const expanded = elem.expanded !== false;
+        elem.expanded = expanded;
+        const expandBtn = document.createElement('button');
+        expandBtn.type = 'button';
+        expandBtn.className = 'path-cell path-cell-cmd pe-type-group';
+        expandBtn.textContent = `Group ${expanded ? '▼' : '►'}`;
+        expandBtn.title = 'Group';
+        row.appendChild(expandBtn);
+
+        this._appendElemModCells(elem, row);
+
+        const nameCell = document.createElement('button');
+        nameCell.type = 'button';
+        const nameVal = String(elem.name ?? '').trim();
+        nameCell.className = 'path-cell path-cell-param' + (nameVal ? '' : ' cell-empty');
+        nameCell.dataset.groupName = '1';
+        nameCell.textContent = nameVal || `Group ${elem.groupId}`;
+        nameCell.title = nameCell.textContent;
+        nameCell.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._activateGroupNameEdit(elem, nameCell);
         });
+        row.appendChild(nameCell);
+
+        const body = document.createElement('div');
+        body.className = 'pe-path-body';
+        body.style.display = expanded ? '' : 'none';
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'path-line-delete';
+        delBtn.title = 'Delete group';
+        delBtn.textContent = '×';
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const gid = Number(elem.groupId);
+            const parentGroup = this._resolveParentGroupById(elem);
+            const parentGid = Number(parentGroup?.groupId) || null;
+            const parentGuid = String(parentGroup?.guid ?? '') || null;
+            this._elements = this._elements
+                .filter(item => Number(item?.groupId) !== gid)
+                .map((item) => {
+                    if (Number(item?.parentGroupId) !== gid) return item;
+                    return { ...item, parentGroupId: parentGid, parentGroupGuid: parentGuid };
+                });
+            this._pruneEmptyGroups();
+            this._renderElements();
+            this._emitTopLevelOrder();
+        });
+        row.appendChild(delBtn);
+
+        row.addEventListener('click', (e) => {
+            if (e.target.closest('.path-cell') || e.target.closest('.path-line-delete')) return;
+            const rowRef = this._getTopLevelRef(elem);
+            this._applyTopLevelSelection(row, rowRef, e);
+            this._setActiveElem(`group:${elem.groupId}`);
+            if (this.onGroupElemClick) {
+                const selectedSegIds = this._collectSelectedTopLevelSegIds();
+                this.onGroupElemClick(selectedSegIds, e);
+            }
+        });
+
+        expandBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            elem.expanded = !elem.expanded;
+            expandBtn.textContent = `Group ${elem.expanded ? '▼' : '►'}`;
+            this._renderElements();
+        });
+
+        this._attachElemDrag(row, elem);
+        wrap.appendChild(row);
+        wrap.appendChild(body);
+        return wrap;
     }
 
     /**
      * Build a shape element row (circle / rect / ellipse).
      * @param {{type:string, segId:string, data:object, _elem:null}} elem
-     * @param {number} rowNum
+    * @param {string|number} rowNum
      * @returns {HTMLElement}
      * @private
      */
@@ -768,13 +1312,17 @@ export default class PathEditor {
 
         const row = document.createElement('div');
         row.className = `path-line pe-elem pe-elem-${elem.type}`;
+        if (elem?._isEmbeddedVisual) row.classList.add('pe-shape-embedded');
         row.draggable = true;
         row.dataset.segId = elem.segId;
+        if (elem?._isEmbeddedVisual && Number.isFinite(this._optId(elem?.parentContourId))) {
+            row.dataset.parentContourId = String(this._optId(elem.parentContourId));
+        }
 
         // Line number
         const numEl = document.createElement('span');
         numEl.className = 'path-line-number';
-        numEl.textContent = rowNum;
+        numEl.textContent = String(rowNum ?? '');
         row.appendChild(numEl);
 
         // Type command button
@@ -896,6 +1444,25 @@ export default class PathEditor {
     }
 
     /**
+     * Stable selectable id for a line: real segId when available,
+     * otherwise synthetic `m:<contourId>` for move rows.
+     * @param {{text:string, segId:string|null}} lineData
+     * @param {object} parentElem
+     * @returns {string|null}
+     * @private
+     */
+    _getSelectableLineId(lineData, parentElem) {
+        if (lineData?.segId != null && String(lineData.segId).trim() !== '') {
+            return String(lineData.segId);
+        }
+        const parsed = this.parseLine(String(lineData?.text ?? ''));
+        if (parsed?.cmdUpper === 'M' && Number.isFinite(Number(parentElem?.contourId))) {
+            return `m:${Number(parentElem.contourId)}`;
+        }
+        return null;
+    }
+
+    /**
      * Build a stable top-level row reference for shape/path element.
      * @param {object} elem
      * @returns {string|null}
@@ -905,6 +1472,7 @@ export default class PathEditor {
         if (!elem) return null;
         if (elem.type === 'path' || elem.type === 'polyline') return `path:${elem.contourId}`;
         if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') return `shape:${elem.segId}`;
+        if (elem.type === 'group') return `group:${elem.groupId}`;
         return null;
     }
 
@@ -918,9 +1486,7 @@ export default class PathEditor {
         for (const elem of this._elements) {
             const ref = this._getTopLevelRef(elem);
             if (!ref) continue;
-            const rowEl = (elem.type === 'path' || elem.type === 'polyline')
-                ? elem._elem?.querySelector?.('.pe-path-header') ?? null
-                : elem._elem ?? null;
+            const rowEl = this._getTopLevelRowElement(elem);
             rows.push({ ref, elem, rowEl });
         }
         return rows;
@@ -939,13 +1505,39 @@ export default class PathEditor {
                 if (Array.isArray(elem.segIds)) segIds.push(...elem.segIds);
             } else if (elem.segId) {
                 segIds.push(elem.segId);
+            } else if (elem.type === 'group') {
+                const gid = Number(elem.groupId);
+                const collect = (groupId) => {
+                    const groupItems = this._elements.filter((item) => Number(this._resolveParentGroupById(item)?.groupId) === groupId);
+                    for (const item of groupItems) {
+                        if (item.type === 'path' || item.type === 'polyline') {
+                            if (Array.isArray(item.segIds)) segIds.push(...item.segIds);
+                        } else if (item.segId) {
+                            segIds.push(item.segId);
+                        } else if (item.type === 'group') {
+                            collect(Number(item.groupId));
+                        }
+                    }
+                };
+                collect(gid);
             }
         }
         return [...new Set(segIds.filter(Boolean))];
     }
 
     /**
-     * Apply click selection semantics for top-level rows.
+     * Apply click-selection semantics for a top-level PathEditor row.
+     *
+     * Modifier behaviour:
+     *   - **Ctrl/Meta** — toggle the clicked row. When *deselecting*, also clears any
+     *     ancestor group rows so `_expandSelectionToGroups` cannot re-highlight the
+     *     intentionally-removed item on the next expand pass.
+     *   - **Shift** — range-select from the last anchor row.
+     *   - **No modifier** — exclusive single selection (toggle off if already selected).
+     *
+     * Always finishes by calling `_expandSelectionToGroups` to highlight subtree members
+     * of any newly-selected group rows.
+     *
      * @param {HTMLElement} rowEl
      * @param {string} clickedRef
      * @param {MouseEvent} e
@@ -954,8 +1546,27 @@ export default class PathEditor {
     _applyTopLevelSelection(rowEl, clickedRef, e) {
         const isAlreadySelected = rowEl.classList.contains('path-line-selected');
         if (e?.ctrlKey || e?.metaKey) {
-            if (isAlreadySelected) rowEl.classList.remove('path-line-selected');
-            else                   rowEl.classList.add('path-line-selected');
+            if (isAlreadySelected) {
+                rowEl.classList.remove('path-line-selected');
+                // If this row was a descendant of a selected group, also deselect
+                // that ancestor group — otherwise _expandSelectionToGroups would
+                // immediately re-highlight this row on the next expand pass.
+                const elem = this._elements.find(el => this._getTopLevelRef(el) === clickedRef);
+                if (elem) {
+                    let parent = this._resolveParentGroupById(elem);
+                    const seen = new Set();
+                    while (parent && !seen.has(Number(parent.groupId))) {
+                        const parentRow = this._getTopLevelRowElement(parent);
+                        if (parentRow?.classList.contains('path-line-selected')) {
+                            parentRow.classList.remove('path-line-selected');
+                        }
+                        seen.add(Number(parent.groupId));
+                        parent = this._resolveParentGroupById(parent);
+                    }
+                }
+            } else {
+                rowEl.classList.add('path-line-selected');
+            }
         } else if (e?.shiftKey && this._lastSelectedElemRef) {
             const rows = this._getAllTopLevelRows();
             const from = rows.findIndex(r => r.ref === this._lastSelectedElemRef);
@@ -966,30 +1577,87 @@ export default class PathEditor {
             }
         } else {
             if (isAlreadySelected) {
-                rowEl.classList.remove('path-line-selected');
+                this.clearAllSelection();
             } else {
                 this.clearAllSelection();
                 rowEl.classList.add('path-line-selected');
             }
         }
         this._lastSelectedElemRef = clickedRef;
+        this._expandSelectionToGroups();
     }
 
     /**
-     * Return selected sub-lines as segIds where available, otherwise flat line indexes.
-     * @returns {Array<string|number>}
+     * Expand current selected top-level rows to whole group subtree(s).
+     * @private
+     */
+    _expandSelectionToGroups() {
+        const selectedRows = this._getAllTopLevelRows()
+            .filter(r => r.rowEl?.classList.contains('path-line-selected'));
+        if (selectedRows.length === 0) return;
+
+        const manuallySelectedRefs = new Set(selectedRows.map(r => r.ref));
+
+        // Collect IDs of selected group rows — these are the roots to expand from.
+        const selectedGroupIds = new Set();
+        for (const { elem } of selectedRows) {
+            if (elem?.type !== 'group') continue;
+            const gid = Number(elem.groupId);
+            if (Number.isFinite(gid)) selectedGroupIds.add(gid);
+        }
+        if (selectedGroupIds.size === 0) return;
+
+        const isDescendantOfRoot = (elem, rootGid) => {
+            if (!elem) return false;
+            if (elem.type === 'group' && Number(elem.groupId) === rootGid) return true;
+            let parent = this._resolveParentGroupById(elem);
+            const seen = new Set();
+            while (parent && !seen.has(Number(parent.groupId))) {
+                const gid = Number(parent.groupId);
+                if (gid === rootGid) return true;
+                seen.add(gid);
+                parent = this._resolveParentGroupById(parent);
+            }
+            return false;
+        };
+
+        const rows = this._getAllTopLevelRows();
+        for (const row of rows) {
+            const shouldSelect = [...selectedGroupIds].some(root => isDescendantOfRoot(row.elem, root));
+            if (shouldSelect) {
+                row.rowEl?.classList.add('path-line-selected');
+                if (row.elem?.type === 'path' || row.elem?.type === 'polyline') {
+                    for (const line of (row.elem.lines ?? [])) {
+                        line?._elem?.classList.add('path-line-selected');
+                    }
+                }
+            } else if (!manuallySelectedRefs.has(row.ref)) {
+                row.rowEl?.classList.remove('path-line-selected');
+                if (row.elem?.type === 'path' || row.elem?.type === 'polyline') {
+                    for (const line of (row.elem.lines ?? [])) {
+                        line?._elem?.classList.remove('path-line-selected');
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Return selected sub-lines as stable refs (segment ids or synthetic m:<contourId>).
+     * @returns {Array<string>}
      * @private
      */
     _collectSelectedLineRefs() {
         const refs = [];
-        const allLines = this._elements.flatMap(e =>
-            (e.type === 'path' || e.type === 'polyline') ? e.lines : []);
-        allLines.forEach((line, index) => {
-            if (line._elem?.classList.contains('path-line-selected')) {
-                refs.push(line?.segId ?? index);
+        for (const elem of this._elements) {
+            if (elem.type !== 'path' && elem.type !== 'polyline') continue;
+            for (const line of (elem.lines ?? [])) {
+                if (!line?._elem?.classList.contains('path-line-selected')) continue;
+                const ref = this._getSelectableLineId(line, elem);
+                if (ref) refs.push(ref);
             }
-        });
-        return refs;
+        }
+        return [...new Set(refs)];
     }
 
     /**
@@ -1034,13 +1702,14 @@ export default class PathEditor {
     /**
      * Build a path / polyline group row (collapsible header + sub-lines).
      * @param {{type:string, contourId:number, segIds:string[], expanded:boolean, lines:Array, _elem:null}} elem
-     * @param {number} rowNum
+    * @param {string|number} rowNum
      * @returns {HTMLElement}
      * @private
      */
     _buildPathGroup(elem, rowNum) {
         const type  = elem.type;
-        const label = this._classifyContourLabel(elem.lines);
+        const isSymmetry = !!elem.isSymmetry;
+        const label = isSymmetry ? 'Symmetry' : this._classifyContourLabel(elem.lines);
 
         // Outer container (grouping wrapper, not pe-elem itself)
         const wrap = document.createElement('div');
@@ -1048,18 +1717,18 @@ export default class PathEditor {
 
         // ── Collapsible header row (looks like a command row) ────────────────────────────────
         const header = document.createElement('div');
-        header.className = `path-line pe-elem pe-elem-${type} pe-path-header`;
+        header.className = `path-line pe-elem pe-elem-${isSymmetry ? 'symmetry' : type} pe-path-header`;
         header.draggable = true;
         header.dataset.contourId = String(elem.contourId);
 
         const numEl = document.createElement('span');
         numEl.className = 'path-line-number';
-        numEl.textContent = rowNum;
+        numEl.textContent = String(rowNum ?? '');
         header.appendChild(numEl);
 
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button';
-        expandBtn.className = `path-cell path-cell-cmd pe-type-${type}`;
+        expandBtn.className = `path-cell path-cell-cmd pe-type-${isSymmetry ? 'symmetry' : type}`;
         expandBtn.textContent = label + (elem.expanded ? ' ▼' : ' ►');
         // Store label for live updates
         expandBtn.dataset.baseLabel = label;
@@ -1070,7 +1739,7 @@ export default class PathEditor {
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'path-line-delete';
-        delBtn.title = 'Delete path';
+        delBtn.title = isSymmetry ? 'Delete symmetry' : 'Delete path';
         delBtn.textContent = '×';
         delBtn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1101,7 +1770,7 @@ export default class PathEditor {
         expandBtn.addEventListener('click', (e) => {
             e.stopPropagation(); // don't bubble to header click handler
             elem.expanded = !elem.expanded;
-            const currentLabel = this._classifyContourLabel(elem.lines);
+            const currentLabel = isSymmetry ? 'Symmetry' : this._classifyContourLabel(elem.lines);
             expandBtn.textContent = currentLabel + (elem.expanded ? ' ▼' : ' ►');
             body.style.display = elem.expanded ? '' : 'none';
             if (elem.expanded) this._expandedContours.add(elem.contourId);
@@ -1157,8 +1826,24 @@ export default class PathEditor {
      */
     _attachElemDrag(handle, elemDesc) {
         handle.addEventListener('dragstart', (e) => {
-            const fromIndex = this._elements.indexOf(elemDesc);
-            this._dragState = { isElem: true, fromIndex };
+            const draggedRef = this._getTopLevelRef(elemDesc);
+            const selectedRefs = this._getAllTopLevelRows()
+                .filter(r => r.rowEl?.classList.contains('path-line-selected'))
+                .map(r => r.ref);
+            const dragRefs = (draggedRef && selectedRefs.includes(draggedRef) && selectedRefs.length > 1)
+                ? selectedRefs
+                : (draggedRef ? [draggedRef] : []);
+            const baseIndices = dragRefs
+                .map((ref) => this._elements.findIndex(el => this._getTopLevelRef(el) === ref))
+                .filter(i => i >= 0)
+                .sort((a, b) => a - b);
+            const fromIndices = this._expandMoveIndicesWithGroupDescendants(baseIndices);
+            this._dragState = {
+                isElem: true,
+                fromIndex: fromIndices[0] ?? this._elements.indexOf(elemDesc),
+                fromIndices,
+                dragRefs,
+            };
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', '');
             requestAnimationFrame(() => handle.classList.add('pe-elem-dragging'));
@@ -1168,37 +1853,93 @@ export default class PathEditor {
             handle.classList.remove('pe-elem-dragging');
             this.elementsContainer?.querySelectorAll('.pe-elem-drag-over')
                 .forEach(el => el.classList.remove('pe-elem-drag-over'));
+            this.elementsContainer?.querySelectorAll('.pe-elem-drag-over-top')
+                .forEach(el => el.classList.remove('pe-elem-drag-over-top'));
         });
         handle.addEventListener('dragover', (e) => {
             if (!this._dragState?.isElem) return;
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
-            handle.classList.add('pe-elem-drag-over');
+            const rect = handle.getBoundingClientRect();
+            const nearTop = (e.clientY - rect.top) <= 6;
+            this._dragState.dropMode = nearTop ? 'before' : 'on';
+            handle.classList.toggle('pe-elem-drag-over-top', nearTop);
+            handle.classList.toggle('pe-elem-drag-over', !nearTop);
         });
         handle.addEventListener('dragleave', () => {
             handle.classList.remove('pe-elem-drag-over');
+            handle.classList.remove('pe-elem-drag-over-top');
         });
         handle.addEventListener('drop', (e) => {
             e.preventDefault();
             handle.classList.remove('pe-elem-drag-over');
+            handle.classList.remove('pe-elem-drag-over-top');
             if (!this._dragState?.isElem) return;
-            const fromIndex = this._dragState.fromIndex;
-            const toIndex   = this._elements.indexOf(elemDesc);
-            if (fromIndex === toIndex || fromIndex === -1 || toIndex === -1) return;
-            const [moved] = this._elements.splice(fromIndex, 1);
-            this._elements.splice(toIndex, 0, moved);
-            this._renderElements();
-            const order = this._elements.map(elem =>
-                (elem.type === 'path' || elem.type === 'polyline')
-                    ? { kind: 'contour', contourId: elem.contourId }
-                    : { kind: 'shape', segId: elem.segId }
+            const indices = Array.isArray(this._dragState?.fromIndices)
+                ? [...new Set(this._dragState.fromIndices)].sort((a, b) => a - b)
+                : [this._dragState.fromIndex];
+            const valid = indices.filter(i => i >= 0 && i < this._elements.length);
+            const toIndex = this._elements.indexOf(elemDesc);
+            if (valid.length === 0 || toIndex === -1) return;
+            if (valid.includes(toIndex)) return;
+
+            const movedItems = valid.map(i => this._elements[i]);
+            const targetElem = elemDesc;
+            const targetIsGroup = targetElem?.type === 'group';
+            const dropMode = this._dragState?.dropMode === 'before' ? 'before' : 'on';
+            const canGroupToTarget = targetIsGroup && dropMode === 'on';
+            const rootGroupIds = new Set(
+                (Array.isArray(this._dragState?.dragRefs) ? this._dragState.dragRefs : [])
+                    .map((ref) => {
+                        if (!String(ref).startsWith('group:')) return null;
+                        const gid = Number(String(ref).slice(6));
+                        return Number.isFinite(gid) ? gid : null;
+                    })
+                    .filter(Number.isFinite)
             );
-            if (this.onElementOrderChange) {
-                this.onElementOrderChange(order);
-            } else {
-                // Preview mode: persist reordered structure into hidden/raw path.
-                this._fireOnChange();
+
+            const moved = movedItems.map((item) => {
+                const isShape = PathEditor.isShapeType(item?.type);
+                const isNestedUnderMovedRoot = this._isDescendantOfGroupRoots(item, rootGroupIds);
+                if (isNestedUnderMovedRoot) {
+                    return { ...item };
+                }
+                const targetParent = this._resolveParentGroupById(targetElem);
+                const targetParentGroupId = Number(targetParent?.groupId);
+                const targetParentGroupGuid = String(targetParent?.guid ?? '');
+                const nextParentGroupId = canGroupToTarget
+                    ? Number(targetElem.groupId)
+                    : (Number.isFinite(targetParentGroupId) ? targetParentGroupId : null);
+                const nextParentGroupGuid = canGroupToTarget
+                    ? String(targetElem?.guid ?? '')
+                    : (targetParentGroupGuid || null);
+                if (!isShape) {
+                    return {
+                        ...item,
+                        parentGroupId: nextParentGroupId,
+                        parentGroupGuid: nextParentGroupGuid,
+                    };
+                }
+                return {
+                    ...item,
+                    parentContourId: null,
+                    parentGroupId: nextParentGroupId,
+                    parentGroupGuid: nextParentGroupGuid,
+                };
+            });
+
+            for (let i = valid.length - 1; i >= 0; i--) {
+                this._elements.splice(valid[i], 1);
             }
+
+            const adjustedTarget = this._elements.indexOf(targetElem);
+            if (adjustedTarget < 0) return;
+            const insertAt = canGroupToTarget ? adjustedTarget + 1 : adjustedTarget;
+            this._elements.splice(insertAt, 0, ...moved);
+
+            this._pruneEmptyGroups();
+            this._renderElements();
+            this._emitTopLevelOrder();
         });
     }
 
@@ -1210,11 +1951,15 @@ export default class PathEditor {
      * @private
      */
     _buildSubLine(lineData, parentElem) {
+        const isReadOnly = !!parentElem?.isSymmetry;
         const lineEl = document.createElement('div');
         lineEl.className = 'path-line pe-sub-line';
-        lineEl.draggable = true;
+        if (isReadOnly) lineEl.classList.add('pe-sub-line-readonly');
+        lineEl.draggable = !isReadOnly;
         if (lineData.segId) lineEl.dataset.segId = lineData.segId;
-        this._buildLineCellsInElem(lineEl, lineData, parentElem);
+        this._buildLineCellsInElem(lineEl, lineData, parentElem, { readOnly: isReadOnly });
+
+        if (isReadOnly) return lineEl;
 
         // ── Drag-to-reorder ──────────────────────────────────────────────
         lineEl.addEventListener('dragstart', (e) => {
@@ -1287,12 +2032,9 @@ export default class PathEditor {
             // Set parent path as active element (shows command suggestions)
             this._setActiveElem(`path:${parentElem.contourId}`);
             if (this.onLineClick) {
-                // Prefer segId; fall back to flat numeric index for BitsManager legacy preview.
-                const allLines = this._elements.flatMap(el =>
-                    (el.type === 'path' || el.type === 'polyline') ? el.lines : []);
-                const flatIdx = allLines.indexOf(lineData);
+                const lineRef = this._getSelectableLineId(lineData, parentElem);
                 const selectedRefs = this._collectSelectedLineRefs();
-                this.onLineClick(lineData.segId ?? flatIdx, e, selectedRefs);
+                this.onLineClick(lineRef, e, selectedRefs);
             }
         });
         return lineEl;
@@ -1305,7 +2047,7 @@ export default class PathEditor {
      * @param {object} parentElem
      * @private
      */
-    _buildLineCellsInElem(lineEl, lineData, parentElem) {
+    _buildLineCellsInElem(lineEl, lineData, parentElem, { readOnly = false } = {}) {
         lineEl.innerHTML = '';
 
         // Line number (reflects live position in parent's lines array)
@@ -1331,7 +2073,11 @@ export default class PathEditor {
         cmdCell.className = 'path-cell path-cell-cmd';
         cmdCell.title = def.label || cmd;
         cmdCell.textContent = cmd;
-        cmdCell.addEventListener('click', () => this._activateCmdEdit(lineData, lineEl, parentElem));
+        if (!readOnly) {
+            cmdCell.addEventListener('click', () => this._activateCmdEdit(lineData, lineEl, parentElem));
+        } else {
+            cmdCell.disabled = true;
+        }
         lineEl.appendChild(cmdCell);
 
         // Param cells
@@ -1349,22 +2095,28 @@ export default class PathEditor {
             this._setParamCellTitle(cell, argLabel, paramVal);
             if (paramVal) { cell.textContent = paramVal; }
             else          { cell.textContent = argLabel; cell.classList.add('cell-empty'); }
-            cell.addEventListener('click', (e) =>
-                this._activateParamEditInElem(lineData, lineEl, parentElem, i, argLabel, e));
+            if (!readOnly) {
+                cell.addEventListener('click', (e) =>
+                    this._activateParamEditInElem(lineData, lineEl, parentElem, i, argLabel, e));
+            } else {
+                cell.disabled = true;
+            }
             lineEl.appendChild(cell);
         }
 
         // Delete button
-        const delBtn = document.createElement('button');
-        delBtn.type = 'button';
-        delBtn.className = 'path-line-delete';
-        delBtn.title = 'Delete line';
-        delBtn.textContent = '×';
-        delBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._removeSubLine(lineData, parentElem);
-        });
-        lineEl.appendChild(delBtn);
+        if (!readOnly) {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'path-line-delete';
+            delBtn.title = 'Delete line';
+            delBtn.textContent = '×';
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._removeSubLine(lineData, parentElem);
+            });
+            lineEl.appendChild(delBtn);
+        }
     }
 
     // ─── Edit operations ──────────────────────────────────────────────────────
@@ -1750,20 +2502,42 @@ export default class PathEditor {
                 raw: String(t?.raw ?? ''),
                 params: Array.isArray(t?.params) ? [...t.params] : [],
             })) : [];
-            if (elem.type === 'path' || elem.type === 'polyline') {
+            if (elem.type === 'group') {
                 return {
-                    type: elem.type,
-                    contourId: elem.contourId,
-                    segIds: Array.isArray(elem.segIds) ? [...elem.segIds] : [],
-                    lines: (elem.lines ?? []).map((line) => ({ text: line.text, segId: line.segId ?? null })),
+                    type: 'group',
+                    groupId: Number(elem.groupId),
+                    name: String(elem.name ?? ''),
+                    expanded: elem?.expanded !== false,
+                    parentGroupId: this._optId(elem?.parentGroupId),
                     transforms,
                 };
+            }
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                const out = {
+                    type: elem.isSymmetry ? 'symmetry' : elem.type,
+                    contourId: elem.contourId,
+                    segIds: Array.isArray(elem.segIds) ? [...elem.segIds] : [],
+                    lines: (elem.lines ?? []).map((line) => ({
+                        text: line.text,
+                        segId: line.segId ?? null,
+                        lineGuid: String(line?.lineGuid ?? this._newGuid()),
+                    })),
+                    transforms,
+                    parentGroupId: this._optId(elem?.parentGroupId),
+                };
+                if (elem.isSymmetry) {
+                    out.parentContourId = this._optId(elem?.parentContourId);
+                    out.axis = elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null;
+                }
+                return out;
             }
             return {
                 type: elem.type,
                 segId: elem.segId ?? null,
                 data: { ...(elem.data ?? {}) },
                 transforms,
+                parentContourId: this._optId(elem?.parentContourId),
+                parentGroupId: this._optId(elem?.parentGroupId),
             };
         });
     }
@@ -1784,6 +2558,15 @@ export default class PathEditor {
                 : [];
             if (elem.type === 'path' || elem.type === 'polyline') {
                 return { kind: 'path', contourId: Number(elem.contourId), transforms };
+            }
+            if (elem.type === 'group') {
+                return {
+                    kind: 'group',
+                    groupId: Number(elem.groupId),
+                    parentGroupId: this._optId(elem?.parentGroupId),
+                    name: String(elem.name ?? ''),
+                    transforms,
+                };
             }
             return { kind: 'shape', segId: String(elem.segId ?? ''), transforms };
         });
@@ -1832,8 +2615,10 @@ export default class PathEditor {
 
         const pathSnap = snapshot.filter(s => s?.kind === 'path');
         const shapeSnap = snapshot.filter(s => s?.kind === 'shape');
+        const groupSnap = snapshot.filter(s => s?.kind === 'group');
         const pathElems = this._elements.filter(e => e.type === 'path' || e.type === 'polyline');
         const shapeElems = this._elements.filter(e => e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse');
+        const groupElems = this._elements.filter(e => e.type === 'group');
 
         for (let i = 0; i < pathElems.length; i++) {
             const byContour = pathSnap.find(s => Number(s?.contourId) === Number(pathElems[i]?.contourId));
@@ -1847,6 +2632,13 @@ export default class PathEditor {
             shapeElems[i].transforms = this._mergeTransformsWithFormulaPriority(
                 shapeElems[i].transforms,
                 norm(byId?.transforms ?? shapeSnap[i]?.transforms)
+            );
+        }
+        for (let i = 0; i < groupElems.length; i++) {
+            const byId = groupSnap.find(s => Number(s?.groupId) === Number(groupElems[i].groupId));
+            groupElems[i].transforms = this._mergeTransformsWithFormulaPriority(
+                groupElems[i].transforms,
+                norm(byId?.transforms ?? groupSnap[i]?.transforms)
             );
         }
 
@@ -1906,7 +2698,7 @@ export default class PathEditor {
                 setTimeout(() => { this.input.style.borderColor = ''; }, 1000);
                 return false;
             }
-            const lineData = { text: text.trim(), segId: null, _elem: null };
+            const lineData = { text: text.trim(), segId: null, lineGuid: this._newGuid(), _elem: null };
             // Insert after the currently selected sub-line, or append at end
             const activeIdx = this._activeSubLine
                 ? activeElem.lines.indexOf(this._activeSubLine)
@@ -1938,7 +2730,7 @@ export default class PathEditor {
         const parsed = this.parseLine(text);
         if (parsed) {
             const cid      = Date.now();
-            const lineData = { text: text.trim(), segId: null, _elem: null };
+            const lineData = { text: text.trim(), segId: null, lineGuid: this._newGuid(), _elem: null };
             const newElem  = { type: 'polyline', contourId: cid, segIds: [], expanded: true, lines: [lineData], _elem: null };
             this._elements.push(newElem);
             this._expandedContours.add(cid);
@@ -1973,6 +2765,10 @@ export default class PathEditor {
         if (this._activeElemId.startsWith('shape:')) {
             const sid = this._activeElemId.slice(6);
             return this._elements.find(e => (e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse') && e.segId === sid) ?? null;
+        }
+        if (this._activeElemId.startsWith('group:')) {
+            const gid = Number(this._activeElemId.slice(6));
+            return this._elements.find(e => e.type === 'group' && Number(e.groupId) === gid) ?? null;
         }
         return null;
     }
@@ -2451,6 +3247,10 @@ export default class PathEditor {
             const sid = elemId.slice(6);
             this.elementsContainer?.querySelectorAll(`.pe-elem[data-seg-id="${sid}"]`)
                 .forEach(el => el.classList.add('pe-elem-active'));
+        } else if (elemId?.startsWith('group:')) {
+            const gid = elemId.slice(6);
+            this.elementsContainer?.querySelectorAll(`.pe-elem[data-group-id="${gid}"]`)
+                .forEach(el => el.classList.add('pe-elem-active'));
         } else {
             // Clearing active state
             this._activeSubLine = null;
@@ -2458,22 +3258,160 @@ export default class PathEditor {
         this._renderSuggestions();
     }
 
+    /**
+     * Inline-edit group name cell.
+     * @param {object} elem
+     * @param {HTMLElement} cell
+     * @private
+     */
+    _activateGroupNameEdit(elem, cell) {
+        if (!elem || !cell) return;
+        this._clearActiveEdit();
+        this.activeEditLineData = elem;
+        this.activeEditType = 'group-name';
+        this.activeEditArgIndex = 0;
+
+        const current = String(elem.name ?? `Group ${elem.groupId}`);
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'path-cell-inline-input';
+        input.value = current;
+        input.placeholder = `Group ${elem.groupId}`;
+        cell.classList.add('active-edit');
+        input.select();
+        cell.innerHTML = '';
+        cell.appendChild(input);
+        this.activeEditInput = input;
+
+        const resize = () => {
+            input.style.width = Math.max(25, Math.ceil(this.measureTextWidth(input.value || input.placeholder)) + 6) + 'px';
+        };
+        resize();
+        input.addEventListener('input', (e) => {
+            e.stopPropagation();
+            resize();
+        });
+
+        const commit = () => {
+            const raw = String(input.value ?? '').trim();
+            const baseName = raw || `Group ${elem.groupId}`;
+            const used = new Set(
+                this._elements
+                    .filter(e => e?.type === 'group' && Number(e.groupId) !== Number(elem.groupId))
+                    .map(e => String(e?.name ?? '').trim())
+                    .filter(Boolean)
+            );
+            let nextName = baseName;
+            if (used.has(nextName)) {
+                let idx = 2;
+                while (used.has(`${baseName} ${idx}`)) idx++;
+                nextName = `${baseName} ${idx}`;
+            }
+            elem.name = nextName;
+            this._renderElements();
+            this._emitTopLevelOrder();
+            this._clearActiveEdit();
+        };
+        const cancel = () => {
+            this._renderElements();
+            this._clearActiveEdit();
+        };
+
+        input.addEventListener('keydown', (e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                commit();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                cancel();
+            }
+        });
+        input.addEventListener('blur', commit, { once: true });
+        input.focus();
+    }
+
     // ─── Selection API ────────────────────────────────────────────────────────
 
     /**
      * Highlight rows whose segId is in the provided set.
      * @param {Set<string>} ids
+     * @param {{expandGroups?: boolean}} [options]
      */
-    setSelectedElements(ids) {
+    setSelectedElements(ids, { expandGroups = true } = {}) {
         this.clearAllSelection();
         if (!ids || !ids.size) {
             this._renderSuggestions();
             return;
         }
+
+        const childrenByGroup = new Map();
+        for (const elem of this._elements) {
+            const parentId = this._optId(elem?.parentGroupId);
+            if (!Number.isFinite(parentId)) continue;
+            if (!childrenByGroup.has(parentId)) childrenByGroup.set(parentId, []);
+            childrenByGroup.get(parentId).push(elem);
+        }
+
+        const collectGroupSegIds = (groupId) => {
+            const out = [];
+            const stack = [...(childrenByGroup.get(groupId) ?? [])];
+            const seenGroups = new Set();
+            while (stack.length > 0) {
+                const item = stack.pop();
+                if (!item) continue;
+                if (item.type === 'group') {
+                    const childGid = this._optId(item?.groupId);
+                    if (!Number.isFinite(childGid) || seenGroups.has(childGid)) continue;
+                    seenGroups.add(childGid);
+                    stack.push(...(childrenByGroup.get(childGid) ?? []));
+                    continue;
+                }
+                if (item.type === 'path' || item.type === 'polyline') {
+                    if (Array.isArray(item.segIds)) out.push(...item.segIds.filter(Boolean));
+                    continue;
+                }
+                if (item.segId) out.push(item.segId);
+            }
+            return [...new Set(out)];
+        };
+
+        // groupParentById: for the hasFullySelectedAncestorGroup walk.
+        // groupFullySelected: whether every seg in the group subtree is in `ids`.
+        const groupParentById = this._buildGroupParentMap();
+        const groupFullySelected = new Map();
+        for (const elem of this._elements) {
+            if (elem?.type !== 'group') continue;
+            const gid = this._optId(elem?.groupId);
+            if (!Number.isFinite(gid)) continue;
+            const groupSegIds = collectGroupSegIds(gid);
+            groupFullySelected.set(gid, groupSegIds.length > 0 && groupSegIds.every(sid => ids.has(sid)));
+        }
+
+        const hasFullySelectedAncestorGroup = (groupId) => {
+            let cur = groupParentById.get(groupId);
+            const seen = new Set();
+            while (Number.isFinite(cur) && !seen.has(cur)) {
+                if (groupFullySelected.get(cur) === true) return true;
+                seen.add(cur);
+                cur = groupParentById.get(cur);
+            }
+            return false;
+        };
+
+        let lastSelectedLine = null;
+        let lastSelectedParent = null;
         for (const elem of this._elements) {
             if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
                 if (ids.has(elem.segId)) elem._elem?.classList.add('path-line-selected');
-            } else {
+            } else if (elem.type === 'group') {
+                const gid = this._optId(elem?.groupId);
+                if (!Number.isFinite(gid)) continue;
+                if (groupFullySelected.get(gid) === true && !hasFullySelectedAncestorGroup(gid)) {
+                    const rowEl = this._getTopLevelRowElement(elem);
+                    rowEl?.classList.add('path-line-selected');
+                }
+            } else if (elem.type === 'path' || elem.type === 'polyline') {
                 // Highlight the path group header if any of its segments are selected,
                 // or if the M-row synthetic segId "m:<contourId>" is selected.
                 const headerEl = elem._elem?.querySelector?.('.pe-path-header');
@@ -2482,10 +3420,21 @@ export default class PathEditor {
                 if (anySelected && headerEl) headerEl.classList.add('path-line-selected');
                 // Highlight individual sub-lines
                 for (const lineData of elem.lines) {
-                    if (lineData.segId && ids.has(lineData.segId))
+                    const lineRef = this._getSelectableLineId(lineData, elem);
+                    if (lineRef && ids.has(lineRef)) {
                         lineData._elem?.classList.add('path-line-selected');
+                        lastSelectedLine = lineData;
+                        lastSelectedParent = elem;
+                    }
                 }
             }
+        }
+        if (expandGroups) this._expandSelectionToGroups();
+        if (lastSelectedLine && lastSelectedParent) {
+            this._activeSubLine = lastSelectedLine;
+            this._lastSelectedLine = lastSelectedLine;
+            this._lastSelectedLineRef = this._getLineRef(lastSelectedLine, lastSelectedParent);
+            this._setActiveElem(`path:${lastSelectedParent.contourId}`);
         }
         this._renderSuggestions();
     }
@@ -2495,6 +3444,194 @@ export default class PathEditor {
         this._activeSubLine = null;
         this.elementsContainer?.querySelectorAll('.path-line-selected')
             .forEach(el => el.classList.remove('path-line-selected'));
+    }
+
+    /** @returns {Array<{ref:string, elem:object, rowEl:HTMLElement|null}>} */
+    _getSelectedTopLevelRows() {
+        return this._getAllTopLevelRows().filter(r => r.rowEl?.classList.contains('path-line-selected'));
+    }
+
+    /** @returns {boolean} */
+    hasTopLevelSelection() {
+        return this._getSelectedTopLevelRows().length > 0;
+    }
+
+    /** @returns {boolean} */
+    canGroupSelection() {
+        return this._getSelectedTopLevelRows().length > 0;
+    }
+
+    /** @returns {boolean} */
+    canUngroupSelection() {
+        const selected = this._getSelectedTopLevelRows();
+        if (selected.length === 0) return false;
+        return selected.some(({ elem }) =>
+            elem?.type === 'group' || Number.isFinite(this._optId(elem?.parentGroupId))
+        );
+    }
+
+    /**
+     * Group currently selected top-level elements into a new Group node.
+     * @returns {boolean}
+     */
+    groupSelection() {
+        const selected = this._getSelectedTopLevelRows();
+        if (selected.length < 1) return false;
+
+        // Pre-build a Set<number> of selected group IDs for O(1) ancestor lookup.
+        const selectedGroupIdSet = new Set(
+            selected
+                .filter(r => r.elem?.type === 'group')
+                .map(r => Number(r.elem.groupId))
+                .filter(Number.isFinite)
+        );
+        /** @param {object} elem @returns {boolean} */
+        const hasSelectedAncestorGroup = (elem) => {
+            let parent = this._resolveParentGroupById(elem);
+            const seen = new Set();
+            while (parent && !seen.has(Number(parent.groupId))) {
+                const gid = Number(parent.groupId);
+                if (selectedGroupIdSet.has(gid)) return true;
+                seen.add(gid);
+                parent = this._resolveParentGroupById(parent);
+            }
+            return false;
+        };
+
+        const effectiveSelected = selected.filter(({ elem }) => !hasSelectedAncestorGroup(elem));
+        if (effectiveSelected.length < 1) return false;
+
+        const refs = effectiveSelected.map(r => r.ref);
+        const seedIndices = refs
+            .map(ref => this._elements.findIndex(el => this._getTopLevelRef(el) === ref))
+            .filter(i => i >= 0)
+            .sort((a, b) => a - b);
+        if (seedIndices.length === 0) return false;
+
+        const indices = this._expandMoveIndicesWithGroupDescendants(seedIndices)
+            .filter(i => i >= 0 && i < this._elements.length)
+            .sort((a, b) => a - b);
+        if (indices.length === 0) return false;
+
+        const selectedIndexSet = new Set(seedIndices);
+
+        const firstParent = this._resolveParentGroupById(this._elements[seedIndices[0]]);
+        const parentGroupId = Number(firstParent?.groupId) || null;
+        const parentGroupGuid = String(firstParent?.guid ?? '') || null;
+        const gid = this._allocateGroupId();
+        const groupGuid = this._newGuid();
+        const groupNode = {
+            type: 'group',
+            groupId: gid,
+            guid: groupGuid,
+            name: `Group ${gid}`,
+            expanded: true,
+            parentGroupId,
+            parentGroupGuid,
+            transforms: [],
+            _elem: null,
+        };
+
+        const moved = indices.map(i => {
+            const item = this._elements[i];
+            // Seed elements (directly selected) join the new group;
+            // descendant elements (pulled in via expandMoveIndices) keep existing parentGroupId.
+            return selectedIndexSet.has(i)
+                ? { ...item, parentGroupId: gid, parentGroupGuid: groupGuid }
+                : { ...item };
+        });
+        for (let i = indices.length - 1; i >= 0; i--) this._elements.splice(indices[i], 1);
+        const insertAt = Math.min(indices[0], this._elements.length);
+        this._elements.splice(insertAt, 0, groupNode, ...moved);
+        this._renderElements();
+        this.clearAllSelection();
+        const groupElem = this._elements.find(e => e.type === 'group' && Number(e.groupId) === gid) ?? null;
+        const groupRow = this._getTopLevelRowElement(groupElem);
+        groupRow?.classList.add('path-line-selected');
+        this._lastSelectedElemRef = `group:${gid}`;
+        this._setActiveElem(`group:${gid}`);
+        this._emitTopLevelOrder();
+        return true;
+    }
+
+    /**
+     * Ungroup selected groups or selected members from their groups.
+     * @returns {boolean}
+     */
+    ungroupSelection() {
+        const selectedRows = this._getSelectedTopLevelRows();
+        if (selectedRows.length === 0) return false;
+
+        let changed = false;
+        const selectedGroupIds = new Set(
+            selectedRows
+                .map(r => r.elem)
+                .filter(e => e?.type === 'group')
+                .map(e => Number(e.groupId))
+                .filter(Number.isFinite)
+        );
+
+        // Snapshot the parent map BEFORE structural mutations — the first loop removes
+        // group nodes from _elements, which would break live ancestry queries.
+        const originalParentByGroupId = this._buildGroupParentMap();
+
+        const hasAncestorInSet = (groupId, set) => {
+            let cur = originalParentByGroupId.get(groupId);
+            const seen = new Set();
+            while (Number.isFinite(cur) && !seen.has(cur)) {
+                if (set.has(cur)) return true;
+                seen.add(cur);
+                cur = originalParentByGroupId.get(cur);
+            }
+            return false;
+        };
+
+        const rootSelectedGroupIds = new Set(
+            [...selectedGroupIds].filter(gid =>
+                !hasAncestorInSet(gid, selectedGroupIds)
+            )
+        );
+
+        if (rootSelectedGroupIds.size > 0) {
+            // Remove the group wrapper; promote its direct children one level up.
+            // Nested sub-groups keep their own children intact — only their
+            // parentGroupId is re-pointed to the removed group's parent.
+            for (const gid of rootSelectedGroupIds) {
+                const nextParentGid = originalParentByGroupId.get(gid) ?? null;
+                const nextParentGroup = Number.isFinite(nextParentGid)
+                    ? this._elements.find(e => e.type === 'group' && Number(e.groupId) === nextParentGid)
+                    : null;
+                const nextParent = Number(nextParentGroup?.groupId) || null;
+                const nextParentGuid = String(nextParentGroup?.guid ?? '') || null;
+                const before = this._elements.length;
+                this._elements = this._elements
+                    .filter(e => !(e.type === 'group' && Number(e.groupId) === gid))
+                    .map((item) => {
+                        if (Number(item?.parentGroupId) !== gid) return item;
+                        changed = true;
+                        return { ...item, parentGroupId: nextParent, parentGroupGuid: nextParentGuid };
+                    });
+                changed = changed || this._elements.length !== before;
+            }
+        } else {
+            // No groups selected — extract individually-selected non-group elements
+            // from their parent groups.
+            for (const row of selectedRows) {
+                const elem = row.elem;
+                if (!elem || elem.type === 'group') continue;
+                if (!Number.isFinite(this._optId(elem?.parentGroupId))) continue;
+                const idx = this._elements.indexOf(elem);
+                if (idx < 0) continue;
+                this._elements[idx] = { ...elem, parentGroupId: null, parentGroupGuid: null };
+                changed = true;
+            }
+        }
+
+        if (!changed) return false;
+        this._pruneEmptyGroups();
+        this._renderElements();
+        this._emitTopLevelOrder();
+        return true;
     }
 
     // ─── Parsing infrastructure ─────────────────────────────────────────────
@@ -2716,6 +3853,7 @@ export default class PathEditor {
         const before = input.value.substring(0, start);
         const after = input.value.substring(end);
         input.value = before + `{${varName}}` + after;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
         input.focus();
         input.setSelectionRange(start + varName.length + 2, start + varName.length + 2);
     }
@@ -3093,9 +4231,12 @@ export default class PathEditor {
             const incoming = elements[i];
             const current = this._elements[i];
             if (!incoming || !current) return true;
-            if (incoming.type !== current.type) return true;
+            const incomingType = incoming.type === 'symmetry' ? 'path' : incoming.type;
+            const currentType = current.type === 'symmetry' ? 'path' : current.type;
+            if (incomingType !== currentType) return true;
+            if ((incoming.type === 'symmetry') !== !!current.isSymmetry) return true;
 
-            if (incoming.type === 'path' || incoming.type === 'polyline') {
+            if (incomingType === 'path' || incomingType === 'polyline') {
                 if (incoming.contourId !== current.contourId) return true;
                 const incomingLineCount = incoming.path != null
                     ? this._splitPathIntoCommands(incoming.path).length
@@ -3104,12 +4245,15 @@ export default class PathEditor {
                 continue;
             }
 
-            if (incoming.type === 'circle' || incoming.type === 'rect' || incoming.type === 'ellipse') {
+            if (incomingType === 'circle' || incomingType === 'rect' || incomingType === 'ellipse') {
                 if (incoming.segId !== current.segId) return true;
-                const attrs = PathEditor.SHAPE_DEFS[incoming.type]?.attrs ?? [];
+                const inParent = this._optId(incoming?.parentContourId);
+                const curParent = this._optId(current?.parentContourId);
+                if (inParent !== curParent) return true;
+                const attrs = PathEditor.SHAPE_DEFS[incomingType]?.attrs ?? [];
                 for (const attr of attrs) {
-                    const a = this._shapeAttrValue(incoming.type, current.data ?? {}, attr);
-                    const b = this._shapeAttrValue(incoming.type, incoming.data ?? {}, attr);
+                    const a = this._shapeAttrValue(incomingType, current.data ?? {}, attr);
+                    const b = this._shapeAttrValue(incomingType, incoming.data ?? {}, attr);
                     if (a !== b && !this._shapeTokenEquivalent(a, b)) return true;
                 }
                 continue;
@@ -3270,7 +4414,12 @@ export default class PathEditor {
                 line?._elem?.classList.add('path-line-selected');
                 if (line) lastSelected = line;
             } else if (idx != null) {
-                const line = allLines.find(l => l.segId === idx);
+                const line = allLines.find((l) => {
+                    if (l.segId === idx) return true;
+                    const parent = this._elements.find(e =>
+                        (e.type === 'path' || e.type === 'polyline') && e.lines.includes(l));
+                    return this._getSelectableLineId(l, parent) === idx;
+                });
                 line?._elem?.classList.add('path-line-selected');
                 if (line) lastSelected = line;
             }

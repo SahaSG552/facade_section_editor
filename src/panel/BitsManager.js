@@ -1834,6 +1834,112 @@ export default class BitsManager {
         };
 
         /**
+         * Sanitize persisted elements snapshot before loading into PathEditor.
+         * Ensures unique segId values and non-colliding contourId values.
+         *
+         * @param {Array} elements
+         * @returns {Array}
+         */
+        const sanitizeElementsSnapshot = (elements) => {
+            if (!Array.isArray(elements) || elements.length === 0) return [];
+
+            const cloned = JSON.parse(JSON.stringify(elements));
+            const usedSegIds = new Set();
+            const usedContourIds = new Set();
+
+            const segNums = [];
+            for (const elem of cloned) {
+                const topSegId = String(elem?.segId ?? "").trim();
+                if (topSegId) {
+                    const m = topSegId.match(/^seg-(\d+)$/i);
+                    if (m) segNums.push(Number(m[1]));
+                }
+                if (Array.isArray(elem?.segIds)) {
+                    for (const sid of elem.segIds) {
+                        const s = String(sid ?? "").trim();
+                        if (!s) continue;
+                        const m = s.match(/^line-(\d+)$/i);
+                        if (m) segNums.push(Number(m[1]));
+                    }
+                }
+                if (Array.isArray(elem?.lines)) {
+                    for (const line of elem.lines) {
+                        const s = String(line?.segId ?? "").trim();
+                        if (!s) continue;
+                        const m = s.match(/^line-(\d+)$/i);
+                        if (m) segNums.push(Number(m[1]));
+                    }
+                }
+                const cid = Number(elem?.contourId);
+                if (Number.isFinite(cid)) usedContourIds.add(cid);
+            }
+
+            let nextSegNum = Math.max(1, ...segNums.filter(Number.isFinite).map(n => Math.floor(n) + 1));
+            let nextContourId = Math.max(1, ...[...usedContourIds].filter(Number.isFinite).map(n => Math.floor(n) + 1));
+
+            const allocSegId = (candidate, prefix) => {
+                const c = String(candidate ?? "").trim();
+                if (c && !usedSegIds.has(c)) {
+                    usedSegIds.add(c);
+                    return c;
+                }
+                let id = `${prefix}-${nextSegNum++}`;
+                while (usedSegIds.has(id)) id = `${prefix}-${nextSegNum++}`;
+                usedSegIds.add(id);
+                return id;
+            };
+
+            const allocContourId = (candidate) => {
+                const c = Number(candidate);
+                if (Number.isFinite(c) && !usedContourIds.has(c)) {
+                    usedContourIds.add(c);
+                    return c;
+                }
+                let id = nextContourId++;
+                while (usedContourIds.has(id)) id = nextContourId++;
+                usedContourIds.add(id);
+                return id;
+            };
+
+            return cloned.map((elem) => {
+                if (!elem || typeof elem !== "object") return elem;
+
+                if (elem.type === "circle" || elem.type === "rect" || elem.type === "ellipse") {
+                    return {
+                        ...elem,
+                        segId: allocSegId(elem.segId, "seg"),
+                    };
+                }
+
+                if (elem.type === "path" || elem.type === "polyline" || elem.type === "symmetry") {
+                    const contourId = allocContourId(elem.contourId);
+                    const lines = Array.isArray(elem.lines)
+                        ? elem.lines.map((line) => ({
+                            ...(line ?? {}),
+                            segId: allocSegId(line?.segId, "line"),
+                        }))
+                        : [];
+
+                    let segIds = Array.isArray(elem.segIds)
+                        ? elem.segIds.map((sid) => allocSegId(sid, "line"))
+                        : [];
+                    if (lines.length > 0) {
+                        segIds = lines.map((line) => line.segId);
+                    }
+
+                    return {
+                        ...elem,
+                        contourId,
+                        lines,
+                        segIds: [...new Set(segIds)],
+                    };
+                }
+
+                return { ...elem };
+            });
+        };
+
+        /**
          * Restore PathEditor structure and transforms from persisted snapshot.
          * Uses `elements` as source-of-truth; falls back to legacy flat path only
          * when elements are missing (backward compatibility).
@@ -1856,7 +1962,7 @@ export default class BitsManager {
             const savedOnChange = editor.onChange;
             if (suppressOnChange) editor.onChange = () => { };
 
-            const elements = Array.isArray(elementsSnapshot) ? elementsSnapshot : [];
+            const elements = sanitizeElementsSnapshot(elementsSnapshot);
             const hasElements = elements.length > 0;
             if (hasElements) {
                 editor.setElements(elements);

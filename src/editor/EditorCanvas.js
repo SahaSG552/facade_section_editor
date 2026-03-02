@@ -417,6 +417,34 @@ export default class EditorCanvas {
             const el = this._buildSegmentElement(seg);
             if (el) layer.appendChild(el);
         }
+        this._renderSymmetryAxes(layer);
+    }
+
+    /**
+     * Render dashed axis markers for symmetry contours.
+     * @param {SVGGElement|SVGElement} layer
+     * @private
+     */
+    _renderSymmetryAxes(layer) {
+        if (!layer) return;
+        const seen = new Set();
+        for (const seg of this.state.segments) {
+            if (String(seg?.linkType ?? "") !== "symmetry") continue;
+            const cid = Number(seg?.contourId);
+            if (!Number.isFinite(cid) || seen.has(cid)) continue;
+            const axis = seg?.axis;
+            if (!axis?.p1 || !axis?.p2) continue;
+            seen.add(cid);
+
+            const axisEl = document.createElementNS(SVG_NS, "line");
+            axisEl.classList.add("editor-symmetry-axis");
+            axisEl.setAttribute("x1", String(axis.p1.x));
+            axisEl.setAttribute("y1", String(axis.p1.y));
+            axisEl.setAttribute("x2", String(axis.p2.x));
+            axisEl.setAttribute("y2", String(axis.p2.y));
+            axisEl.setAttribute("data-symmetry-contour-id", String(cid));
+            layer.appendChild(axisEl);
+        }
     }
 
     /**
@@ -655,6 +683,7 @@ export default class EditorCanvas {
         let bestDist = Infinity;
 
         for (const seg of segments) {
+            if (String(seg?.linkType ?? "") === "symmetry") continue;
             const localPoint = _toSegmentLocal(point, seg, this.state?.variableValues ?? {});
             let dist = Infinity;
 
@@ -701,6 +730,7 @@ export default class EditorCanvas {
         let bestDist = Infinity;
 
         for (const seg of this.state.segments) {
+            if (String(seg?.linkType ?? "") === "symmetry") continue;
             const localPoint = _toSegmentLocal(point, seg, this.state?.variableValues ?? {});
             if (seg.type === "line" || seg.type === "arc") {
                 const pts = [
@@ -783,6 +813,7 @@ export default class EditorCanvas {
         let bestDist = Infinity;
 
         for (const seg of this.state.segments) {
+            if (String(seg?.linkType ?? "") === "symmetry") continue;
             if (seg.type !== "rect") continue;
             const lp = _toSegmentLocal(point, seg, this.state?.variableValues ?? {});
             const { dist, detail } = _pointToRectBoundaryDistWithDetail(lp, seg.data);

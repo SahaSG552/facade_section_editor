@@ -3,7 +3,7 @@ import BaseTool from "./BaseTool.js";
 import { evalAngle } from "../transforms/TransformCommands.js";
 import { evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { getRectGeomLocal } from "../geometry/rectGeometry.js";
-import { computeBoxSelection, buildSelectionBoxGhost } from "./shared/selectionUtils.js";
+import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 import { collectSegmentSnapshots, commitCopiedSnapshots, materializeCopiedSegments } from "./shared/copyPreviewUtils.js";
 
 const log = LoggerFactory.createLogger("MirrorTool");
@@ -202,11 +202,16 @@ class MirrorTool extends BaseTool {
         this._endDrag();
 
         if (wasDrag) {
-            this._applyBoxSelection(downSvg, rawEnd, { selectParts: !!e.shiftKey });
+            const selectParts = this._modeType === "symmetry"
+                ? false
+                : (!!e.shiftKey && !!(e.ctrlKey || e.metaKey));
+            const ignoreGroups = !!e.shiftKey && !(e.ctrlKey || e.metaKey);
+            this.ctx.state._selectionInsideGroupMode = false;
+            this._applyBoxSelection(downSvg, rawEnd, { selectParts, ignoreGroups });
             return;
         }
 
-        if (e.shiftKey) {
+        if (e.shiftKey && (e.ctrlKey || e.metaKey) && this._modeType !== "symmetry") {
             const sideHit = this.ctx.canvas.hitTestRectSide(rawEnd);
             if (sideHit?.axis && sideHit.axis !== "rx") {
                 this._toggleRectSideSelection(sideHit);
@@ -216,14 +221,31 @@ class MirrorTool extends BaseTool {
 
         const hitId = this.ctx.canvas.hitTest(rawEnd);
         if (hitId) {
-            if (e.shiftKey) {
-                this._toggleSelectionIds([hitId]);
+            const selectParts = this._modeType === "symmetry"
+                ? false
+                : (!!e.shiftKey && !!(e.ctrlKey || e.metaKey));
+            const ignoreGroups = !!e.shiftKey && !(e.ctrlKey || e.metaKey);
+            const selectionIds = selectParts
+                ? [hitId]
+                : resolveClickSelectionIds(
+                    hitId,
+                    this.ctx.state.segments,
+                    this.ctx.state.elementGroups ?? [],
+                    { ignoreGroups },
+                );
+            if (this._modeType === "symmetry") {
+                this.ctx.state._selectionInsideGroupMode = false;
+                this._setSingleChainSelection(selectionIds[0] ?? hitId);
+            } else if (e.shiftKey) {
+                this.ctx.state._selectionInsideGroupMode = false;
+                this._toggleSelectionIds(selectionIds);
             } else {
+                this.ctx.state._selectionInsideGroupMode = false;
                 this._clearRectSideSelection();
-                const chainIds = this.ctx.state.getChain(hitId).map(s => s.id);
-                this._toggleSelectionIds(chainIds);
+                this.ctx.state.setSelection(selectionIds);
             }
-        } else if (!e.shiftKey) {
+        } else if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+            this.ctx.state._selectionInsideGroupMode = false;
             this._clearRectSideSelection();
             this.ctx.state.clearSelection();
         }
@@ -337,7 +359,24 @@ class MirrorTool extends BaseTool {
     }
 
     _captureSourceSelection() {
-        this._sourceSegIds = [...this.ctx.state.selectedIds];
+        const selected = [...this.ctx.state.selectedIds];
+        if (this._modeType === "symmetry" && selected.length > 0) {
+            const selectedContourIds = new Set(
+                selected
+                    .map((id) => this.ctx.state.segments.find((s) => s.id === id)?.contourId)
+                    .filter((cid) => Number.isFinite(Number(cid)))
+                    .map((cid) => Number(cid))
+            );
+            for (const seg of this.ctx.state.segments) {
+                const cid = Number(seg?.contourId);
+                if (!selectedContourIds.has(cid)) continue;
+                if (selected.includes(seg.id)) continue;
+                if (seg.type === "circle" || seg.type === "rect" || seg.type === "ellipse") {
+                    selected.push(seg.id);
+                }
+            }
+        }
+        this._sourceSegIds = selected;
         this._sourceSnapshots = collectSegmentSnapshots(this.ctx.state, this._sourceSegIds);
     }
 
@@ -407,9 +446,22 @@ class MirrorTool extends BaseTool {
         }
 
         if (keepOriginals) {
+            const sourceContourId = Number(sourceSegments[0]?.contourId);
+            const isSymmetryMode = this._modeType === "symmetry";
+            const snapshots = isSymmetryMode
+                ? newSegments.map((seg) => ({
+                    ...seg,
+                    linkType: "symmetry",
+                    parentContourId: Number.isFinite(sourceContourId) ? sourceContourId : null,
+                    axis: {
+                        p1: { x: this._axisStart.x, y: this._axisStart.y },
+                        p2: { x: this._axisEnd.x, y: this._axisEnd.y },
+                    },
+                }))
+                : newSegments;
             return commitCopiedSnapshots({
                 state,
-                snapshots: newSegments,
+                snapshots,
                 historyLabel: keepOriginals
                     ? (this._modeType === "symmetry" ? "Symmetry" : "Mirror Copy")
                     : "Mirror",
@@ -640,6 +692,10 @@ class MirrorTool extends BaseTool {
 
     _toggleSelectionIds(ids) {
         if (!Array.isArray(ids) || ids.length === 0) return;
+        if (this._modeType === "symmetry") {
+            this._setSingleChainSelection(ids[0]);
+            return;
+        }
         const next = new Set(this.ctx.state.selectedIds);
         const allSel = ids.every(id => next.has(id));
         if (allSel) {
@@ -651,12 +707,24 @@ class MirrorTool extends BaseTool {
         this._pruneRectSideSelection();
     }
 
-    _applyBoxSelection(start, end, { selectParts = false } = {}) {
+    _applyBoxSelection(start, end, { selectParts = false, ignoreGroups = false } = {}) {
         this._clearRectSideSelection();
         const result = computeBoxSelection(this.ctx.state.segments, start, end, {
             selectParts,
             variableValues: this.ctx.state.variableValues ?? {},
+            ...(selectParts || ignoreGroups
+                ? {}
+                : {
+                    groupSelectionMode: true,
+                    elementGroups: this.ctx.state.elementGroups ?? [],
+                }),
         });
+
+        if (this._modeType === "symmetry") {
+            this._setSingleChainSelection(result.ids[0] ?? null);
+            this.ctx.canvas.clearGhost();
+            return;
+        }
 
         if (selectParts) {
             this._selectedRectSides = result.rectSides;
@@ -668,6 +736,17 @@ class MirrorTool extends BaseTool {
 
         this._syncRectSideHighlights();
         this.ctx.canvas.clearGhost();
+    }
+
+    _setSingleChainSelection(id) {
+        if (!id) {
+            this.ctx.state.clearSelection();
+            this._clearRectSideSelection();
+            return;
+        }
+        this._clearRectSideSelection();
+        const chainIds = this.ctx.state.getChain(id).map(s => s.id);
+        this.ctx.state.setSelection(chainIds);
     }
 
     _updateBoxGhost(start, end) {

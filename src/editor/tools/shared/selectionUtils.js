@@ -145,7 +145,151 @@ function collectElementSegments(seedSeg, allSegments) {
     return [seedSeg];
 }
 
-export function computeBoxSelection(allSegments, start, end, { selectParts = false, variableValues = {} } = {}) {
+function getSegDirectGroupId(seg) {
+    const gRaw = seg?.groupId;
+    if (gRaw !== null && gRaw !== undefined && gRaw !== '') {
+        const gid = Number(gRaw);
+        if (Number.isFinite(gid) && gid > 0) return gid;
+    }
+    const pgRaw = seg?.parentGroupId;
+    if (pgRaw !== null && pgRaw !== undefined && pgRaw !== '') {
+        const pgid = Number(pgRaw);
+        if (Number.isFinite(pgid) && pgid > 0) return pgid;
+    }
+    return null;
+}
+
+function buildGroupChildrenMap(elementGroups = []) {
+    const map = new Map();
+    for (const g of (Array.isArray(elementGroups) ? elementGroups : [])) {
+        const gid = Number(g?.groupId);
+        if (!Number.isFinite(gid) || gid <= 0) continue;
+        const parent = Number(g?.parentGroupId);
+        const parentId = Number.isFinite(parent) && parent > 0 ? parent : null;
+        if (!map.has(parentId)) map.set(parentId, []);
+        map.get(parentId).push(gid);
+    }
+    return map;
+}
+
+function collectGroupSubtreeIds(rootGroupId, childrenMap) {
+    const out = new Set();
+    if (!Number.isFinite(Number(rootGroupId)) || Number(rootGroupId) <= 0) return out;
+    const queue = [Number(rootGroupId)];
+    while (queue.length > 0) {
+        const gid = queue.shift();
+        if (out.has(gid)) continue;
+        out.add(gid);
+        const children = childrenMap.get(gid) ?? [];
+        for (const child of children) queue.push(child);
+    }
+    return out;
+}
+
+function collectSegmentIdsForGroupSubtree(allSegments, subtreeIds) {
+    const ids = [];
+    for (const seg of allSegments) {
+        const gid = getSegDirectGroupId(seg);
+        if (Number.isFinite(gid) && subtreeIds.has(gid)) ids.push(seg.id);
+    }
+    return ids;
+}
+
+/**
+ * Expand a set of segment IDs to include all sibling segments that share the same
+ * top-level ancestor group. Segments not belonging to any group are kept as-is.
+ *
+ * Used for Shift-click "add to selection" when group-selection mode is active:
+ * clicking one segment inside a group selects the entire group subtree.
+ *
+ * @param {string[]} seedIds        - Initial segment IDs to expand.
+ * @param {object[]} allSegments    - Full segment array from editor state.
+ * @param {object[]} [elementGroups] - Group descriptor array from editor state.
+ * @returns {string[]} Expanded segment IDs (deduplicated).
+ */
+export function expandSegIdsToGroupClosure(seedIds, allSegments, elementGroups = []) {
+    const ids = Array.isArray(seedIds) ? seedIds : [];
+    if (ids.length === 0) return [];
+
+    const byId = new Map((Array.isArray(allSegments) ? allSegments : []).map(s => [s.id, s]));
+    const childrenMap = buildGroupChildrenMap(elementGroups);
+    const expanded = new Set();
+
+    for (const id of ids) {
+        const seg = byId.get(id);
+        if (!seg) continue;
+        const gid = getSegDirectGroupId(seg);
+        if (!Number.isFinite(gid)) {
+            expanded.add(id);
+            continue;
+        }
+        const subtree = collectGroupSubtreeIds(gid, childrenMap);
+        for (const sid of collectSegmentIdsForGroupSubtree(allSegments, subtree)) expanded.add(sid);
+    }
+
+    return [...expanded];
+}
+
+/**
+ * Given a directly-hit segment ID, expand the selection to include all segments
+ * that logically belong together:
+ * - **No groups / ignoreGroups=true**: returns all segments of the same element
+ *   (entire line/arc contour or single shape).
+ * - **Default (ignoreGroups=false)**: walks up to the topmost ancestor group that
+ *   contains the hit segment, then returns every segment in that group's subtree.
+ *
+ * @param {string} hitId            - ID of the segment that was hit.
+ * @param {object[]} allSegments    - Full segment array from editor state.
+ * @param {object[]} [elementGroups] - Group descriptor array from editor state.
+ * @param {{ignoreGroups?: boolean}} [opts]
+ * @returns {string[]} Resolved segment IDs to select.
+ */
+export function resolveClickSelectionIds(hitId, allSegments, elementGroups = [], { ignoreGroups = false } = {}) {
+    if (!hitId) return [];
+    const segments = Array.isArray(allSegments) ? allSegments : [];
+    const byId = new Map(segments.map(s => [s.id, s]));
+    const seg = byId.get(hitId);
+    if (!seg) return [];
+
+    const elementSegs = collectElementSegments(seg, segments);
+    const elementIds = [...new Set(elementSegs.map(s => s.id).filter(Boolean))];
+
+    if (ignoreGroups) return elementIds;
+
+    const directGroupId = getSegDirectGroupId(seg);
+    if (!Number.isFinite(directGroupId)) return elementIds;
+
+    // Build parentByGroup (gid → parentId) and childrenMap (parentId → [childIds])
+    // in a single pass — both are needed for top-group discovery and subtree collection.
+    const groups = Array.isArray(elementGroups) ? elementGroups : [];
+    const parentByGroup = new Map();
+    const childrenMap = new Map();
+    for (const g of groups) {
+        const gid = Number(g?.groupId);
+        if (!Number.isFinite(gid) || gid <= 0) continue;
+        const parent = Number(g?.parentGroupId);
+        const parentId = Number.isFinite(parent) && parent > 0 ? parent : null;
+        parentByGroup.set(gid, parentId);
+        if (!childrenMap.has(parentId)) childrenMap.set(parentId, []);
+        childrenMap.get(parentId).push(gid);
+    }
+
+    // Walk up parent chain to find the topmost ancestor group.
+    let topGroupId = directGroupId;
+    const seen = new Set();
+    while (Number.isFinite(topGroupId) && topGroupId > 0 && !seen.has(topGroupId)) {
+        seen.add(topGroupId);
+        const parent = parentByGroup.get(topGroupId);
+        if (!Number.isFinite(parent) || parent <= 0) break;
+        topGroupId = parent;
+    }
+
+    const subtree = collectGroupSubtreeIds(topGroupId, childrenMap);
+    const groupIds = collectSegmentIdsForGroupSubtree(segments, subtree);
+    return groupIds.length > 0 ? [...new Set(groupIds)] : elementIds;
+}
+
+export function computeBoxSelection(allSegments, start, end, { selectParts = false, variableValues = {}, groupSelectionMode = false, elementGroups = [] } = {}) {
     const ltr = end.x >= start.x;
     const minX = Math.min(start.x, end.x);
     const maxX = Math.max(start.x, end.x);
@@ -191,6 +335,55 @@ export function computeBoxSelection(allSegments, start, end, { selectParts = fal
         }
 
         return { ids, rectSides };
+    }
+
+    if (groupSelectionMode) {
+        const groupedIds = new Set();
+        const childrenMap = buildGroupChildrenMap(elementGroups);
+        const directGroupIds = [...new Set(
+            allSegments
+                .map(seg => getSegDirectGroupId(seg))
+                .filter(Number.isFinite)
+        )];
+
+        for (const rootGid of directGroupIds) {
+            const subtree = collectGroupSubtreeIds(rootGid, childrenMap);
+            const segs = allSegments.filter(seg => {
+                const gid = getSegDirectGroupId(seg);
+                return Number.isFinite(gid) && subtree.has(gid);
+            });
+            if (segs.length === 0) continue;
+            const evals = segs.map(s => segmentBoxHit(s, minX, maxX, minY, maxY, variableValues));
+            const pick = ltr
+                ? evals.every(v => v.full)
+                : evals.some(v => v.partial);
+            if (!pick) continue;
+            for (const sid of collectSegmentIdsForGroupSubtree(allSegments, subtree)) groupedIds.add(sid);
+        }
+
+        const ungroupedSegments = allSegments.filter(seg => !Number.isFinite(getSegDirectGroupId(seg)));
+        const elementIds = new Set();
+        const visitedElements = new Set();
+        for (const seg of ungroupedSegments) {
+            const elemKey = (seg.type === "line" || seg.type === "arc")
+                ? `c:${seg.contourId ?? 0}`
+                : `s:${seg.id}`;
+            if (visitedElements.has(elemKey)) continue;
+            visitedElements.add(elemKey);
+
+            const elementSegs = collectElementSegments(seg, ungroupedSegments);
+            if (elementSegs.length === 0) continue;
+
+            const evals = elementSegs.map(s => segmentBoxHit(s, minX, maxX, minY, maxY, variableValues));
+            const pick = ltr
+                ? evals.every(v => v.full)
+                : evals.some(v => v.partial);
+            if (!pick) continue;
+
+            for (const s of elementSegs) elementIds.add(s.id);
+        }
+
+        return { ids: [...new Set([...groupedIds, ...elementIds])], rectSides: new Map() };
     }
 
     const elementIds = new Set();

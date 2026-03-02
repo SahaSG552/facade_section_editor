@@ -1,7 +1,61 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { arcCenterFromEndpoints } from "./tools/ArcTool.js";
+import { evalAngle } from "./transforms/TransformCommands.js";
 
 const log = LoggerFactory.createLogger("EditorStateManager");
+
+function _cloneDeep(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function _isSymmetrySegment(seg) {
+    return String(seg?.linkType ?? "") === "symmetry";
+}
+
+function _sumRtAngle(transforms, vars = {}) {
+    const list = Array.isArray(transforms) ? transforms : [];
+    let angle = 0;
+    for (const t of list) {
+        if (String(t?.type ?? "").toUpperCase() !== "RT") continue;
+        const v = evalAngle(t?.params?.[0] ?? "", vars);
+        if (Number.isFinite(v)) angle += v;
+    }
+    return angle;
+}
+
+function _rotatePoint(p, angleDeg) {
+    const r = angleDeg * Math.PI / 180;
+    const c = Math.cos(r);
+    const s = Math.sin(r);
+    return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };
+}
+
+function _mirrorPoint(p, A, B) {
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq < 1e-12) return { x: p.x, y: p.y };
+    const t = ((p.x - A.x) * dx + (p.y - A.y) * dy) / lenSq;
+    const footX = A.x + t * dx;
+    const footY = A.y + t * dy;
+    return { x: 2 * footX - p.x, y: 2 * footY - p.y };
+}
+
+function _worldFromRaw(rawPoint, rtAngle) {
+    if (Math.abs(rtAngle) < 1e-9) return { x: rawPoint.x, y: rawPoint.y };
+    return _rotatePoint(rawPoint, rtAngle);
+}
+
+function _rawFromWorld(worldPoint, rtAngle) {
+    if (Math.abs(rtAngle) < 1e-9) return { x: worldPoint.x, y: worldPoint.y };
+    return _rotatePoint(worldPoint, -rtAngle);
+}
+
+function _optFiniteId(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+}
 
 /**
  * @typedef {"cursor"|"line"|"rect2pt"|"rect3pt"|"arc2pt"|"arc3pt"|"circle2pt"|"circle3pt"} DrawTool
@@ -65,6 +119,8 @@ export default class EditorStateManager {
          * @type {PathSegment[]}
          */
         this.segments = [];
+        /** @type {Array<{groupId:number,name:string,parentGroupId:number|null}>} */
+        this.elementGroups = [];
 
         /**
          * IDs of currently selected segments.
@@ -101,6 +157,7 @@ export default class EditorStateManager {
 
         /** @type {number} — monotonically increasing contour ID counter */
         this._nextContourId = 1;
+        this._syncingSymmetry = false;
 
         /**
          * When set, newly drawn line/arc segments that don’t snap geometrically
@@ -204,6 +261,7 @@ export default class EditorStateManager {
         }
         // Advance so the next drawn segment continues from this one.
         this.insertAfterSegId = segment.id;
+        this._syncSymmetryContours();
         this._pushHistory("Add segment");
         this._notifySegments();
         // Auto-select the new segment so the PathEditor highlights its row
@@ -221,6 +279,7 @@ export default class EditorStateManager {
         this.segments = this.segments.map(s =>
             s.id === id ? { ...s, ...changes } : s
         );
+        this._syncSymmetryContours();
         this._notifySegments();
     }
 
@@ -234,6 +293,7 @@ export default class EditorStateManager {
         this.segments = this.segments.map(s =>
             map.has(s.id) ? { ...s, ...map.get(s.id) } : s
         );
+        this._syncSymmetryContours();
         this._notifySegments();
     }
 
@@ -249,6 +309,7 @@ export default class EditorStateManager {
         this.segments = this.segments.filter(s => !idSet.has(s.id));
         idSet.forEach(id => this.selectedIds.delete(id));
         this._sortChains();
+        this._syncSymmetryContours();
         this._pushHistory("Delete segment(s)");
         this._notifySegments();
     }
@@ -318,6 +379,7 @@ export default class EditorStateManager {
             this.insertAfterSegId = tail?.[tail.length - 1]?.id ?? null;
         }
 
+        this._syncSymmetryContours();
         this._pushHistory("To Path");
         this._notifySegments();
         if (this.onSelectionChange) this.onSelectionChange();
@@ -553,50 +615,112 @@ export default class EditorStateManager {
      *
      * @returns {Array<
      *   {type:'circle'|'rect'|'ellipse', segId:string, data:object} |
-     *   {type:'path'|'polyline', contourId:number, segIds:string[]}
+    *   {type:'path'|'polyline'|'symmetry', contourId:number, segIds:string[]}
      * >}
      */
     getElements() {
         const elements = [];
-        const processedContours = new Set();
-        // Contours that have at least one line/arc segment.
         const lineArcContours = new Set(
-            this.segments.filter(s => s.type === 'line' || s.type === 'arc').map(s => s.contourId ?? 0)
+            this.segments
+                .filter(s => s.type === 'line' || s.type === 'arc')
+                .map(s => Number(s.contourId ?? 0))
+                .filter(Number.isFinite)
         );
+
+        const chainByContour = new Map();
         for (const seg of this.segments) {
+            if (seg.type !== 'line' && seg.type !== 'arc') continue;
+            const cid = Number(seg.contourId ?? 0);
+            if (!Number.isFinite(cid)) continue;
+            if (!chainByContour.has(cid)) chainByContour.set(cid, []);
+            chainByContour.get(cid).push(seg);
+        }
+
+        const embeddedShapesByContour = new Map();
+        const standaloneShapeElementsById = new Map();
+        const topLevelTokens = [];
+        const emittedContourTokens = new Set();
+
+        for (const seg of this.segments) {
+            if (seg.type === 'line' || seg.type === 'arc') {
+                const cid = Number(seg.contourId ?? 0);
+                if (!Number.isFinite(cid) || emittedContourTokens.has(cid)) continue;
+                emittedContourTokens.add(cid);
+                topLevelTokens.push({ kind: 'contour', contourId: cid });
+                continue;
+            }
+
             if (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse') {
-                const cid = seg.contourId ?? 0;
-                if (!lineArcContours.has(cid)) {
-                    // Standalone shape — own contour with no line/arc siblings.
-                    elements.push({
-                        type: seg.type,
-                        segId: seg.id,
-                        data: { ...seg.data },
-                        transforms: Array.isArray(seg.transforms) ? [...seg.transforms] : [],
-                    });
+                const explicitParent = Number(seg?.parentContourId);
+                const fallbackParent = Number(seg.contourId ?? 0);
+                const resolvedParentContourId = Number.isFinite(explicitParent)
+                    ? explicitParent
+                    : (lineArcContours.has(fallbackParent) ? fallbackParent : null);
+                const shapeElem = {
+                    type: seg.type,
+                    segId: seg.id,
+                    data: { ...seg.data },
+                    transforms: Array.isArray(seg.transforms) ? [...seg.transforms] : [],
+                    parentContourId: Number.isFinite(resolvedParentContourId)
+                        ? Number(resolvedParentContourId)
+                        : null,
+                    groupId: _optFiniteId(seg?.groupId),
+                    parentGroupId: _optFiniteId(seg?.parentGroupId),
+                };
+
+                if (Number.isFinite(shapeElem.parentContourId) && lineArcContours.has(shapeElem.parentContourId)) {
+                    if (!embeddedShapesByContour.has(shapeElem.parentContourId)) {
+                        embeddedShapesByContour.set(shapeElem.parentContourId, []);
+                    }
+                    embeddedShapesByContour.get(shapeElem.parentContourId).push(shapeElem);
+                } else {
+                    standaloneShapeElementsById.set(seg.id, shapeElem);
+                    topLevelTokens.push({ kind: 'shape', segId: seg.id });
                 }
-                // Embedded shapes (sharing contourId with a line/arc chain) are
-                // included in the chain’s segIds below.
-            } else if ((seg.type === 'line' || seg.type === 'arc') && !processedContours.has(seg.contourId ?? 0)) {
-                const cid = seg.contourId ?? 0;
-                processedContours.add(cid);
-                const chain = this.segments.filter(
-                    s => (s.type === 'line' || s.type === 'arc') && (s.contourId ?? 0) === cid
-                );
-                // Include any shapes embedded in this contour.
-                const embedded = this.segments.filter(
-                    s => (s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse') && (s.contourId ?? 0) === cid
-                );
-                // Always use 'polyline' type; PathEditor will classify the label
-                // dynamically as "Path" or "Polyline" based on command content.
-                elements.push({
-                    type: 'polyline',
-                    contourId: cid,
-                    segIds: [...chain.map(s => s.id), ...embedded.map(s => s.id)],
-                    transforms: Array.isArray(chain[0]?.transforms) ? [...chain[0].transforms] : [],
-                });
             }
         }
+
+        for (const token of topLevelTokens) {
+            if (token.kind === 'shape') {
+                const shapeElem = standaloneShapeElementsById.get(token.segId);
+                if (shapeElem) elements.push(shapeElem);
+                continue;
+            }
+
+            const cid = Number(token.contourId);
+            const chain = chainByContour.get(cid) ?? [];
+            if (chain.length === 0) continue;
+            const embedded = embeddedShapesByContour.get(cid) ?? [];
+            const isSymmetry = chain.some(s => String(s?.linkType ?? '') === 'symmetry');
+            elements.push({
+                type: isSymmetry ? 'symmetry' : 'polyline',
+                contourId: cid,
+                segIds: [...chain.map(s => s.id), ...embedded.map(s => s.segId)],
+                transforms: Array.isArray(chain[0]?.transforms) ? [...chain[0].transforms] : [],
+                groupId: _optFiniteId(chain[0]?.groupId),
+                parentGroupId: _optFiniteId(chain[0]?.parentGroupId),
+                ...(isSymmetry
+                    ? {
+                        parentContourId: _optFiniteId(chain[0]?.parentContourId),
+                        axis: chain[0]?.axis ? _cloneDeep(chain[0].axis) : null,
+                    }
+                    : {}),
+            });
+            elements.push(...embedded);
+        }
+
+        const groups = Array.isArray(this.elementGroups)
+            ? this.elementGroups.map((g) => ({
+                type: 'group',
+                groupId: Number(g?.groupId),
+                guid: String(g?.guid ?? ''),
+                name: String(g?.name ?? ''),
+                parentGroupId: _optFiniteId(g?.parentGroupId),
+                transforms: Array.isArray(g?.transforms) ? [...g.transforms] : [],
+            })).filter(g => Number.isFinite(g.groupId))
+            : [];
+        elements.push(...groups);
+
         return elements;
     }
 
@@ -616,6 +740,13 @@ export default class EditorStateManager {
         const eq = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
         const seed = this.segments.find(s => s.id === segId);
         if (!seed) return [];
+        if (_isSymmetrySegment(seed)) {
+            const parentCid = Number(seed?.parentContourId);
+            if (!Number.isFinite(parentCid)) return [];
+            const parentSeed = this.segments.find(s => !_isSymmetrySegment(s) && (s.contourId ?? 0) === parentCid);
+            if (!parentSeed) return [];
+            return this.getChain(parentSeed.id);
+        }
         // Standalone closed shapes — return immediately without chain-walking.
         if (seed.type === 'circle' || seed.type === 'rect' || seed.type === 'ellipse') return [seed];
 
@@ -680,6 +811,7 @@ export default class EditorStateManager {
      */
     _setSegments(segments) {
         this.segments = segments;
+        this._syncSymmetryContours();
         this._notifySegments();
     }
 
@@ -690,7 +822,8 @@ export default class EditorStateManager {
      * @param {string|string[]} ids
      */
     setSelection(ids) {
-        const newIds = new Set(Array.isArray(ids) ? ids : [ids]);
+        const nextIds = this._resolveSelectableIds(Array.isArray(ids) ? ids : [ids]);
+        const newIds = new Set(nextIds);
         this.selectedIds = newIds;
         this.segments = this.segments.map(s => ({ ...s, selected: newIds.has(s.id) }));
         if (this.onSelectionChange) this.onSelectionChange();
@@ -701,6 +834,19 @@ export default class EditorStateManager {
      * @param {string} id
      */
     toggleSelection(id) {
+        const seg = this.segments.find(s => s.id === id);
+        if (seg && _isSymmetrySegment(seg)) {
+            const mapped = this._resolveSelectableIds([id]);
+            if (mapped.length === 0) return;
+            const next = new Set(this.selectedIds);
+            const allSelected = mapped.every(mid => next.has(mid));
+            if (allSelected) mapped.forEach(mid => next.delete(mid));
+            else mapped.forEach(mid => next.add(mid));
+            this.selectedIds = next;
+            this.segments = this.segments.map(s => ({ ...s, selected: this.selectedIds.has(s.id) }));
+            if (this.onSelectionChange) this.onSelectionChange();
+            return;
+        }
         if (this.selectedIds.has(id)) {
             this.selectedIds.delete(id);
         } else {
@@ -711,6 +857,202 @@ export default class EditorStateManager {
             selected: this.selectedIds.has(s.id),
         }));
         if (this.onSelectionChange) this.onSelectionChange();
+    }
+
+    _resolveSelectableIds(ids) {
+        const input = Array.isArray(ids) ? ids : [];
+        const byId = new Map(this.segments.map(s => [s.id, s]));
+        const out = [];
+        for (const id of input) {
+            if (typeof id === 'string' && id.startsWith('m:')) {
+                out.push(id);
+                continue;
+            }
+            const seg = byId.get(id);
+            if (!seg) continue;
+            if (_isSymmetrySegment(seg)) {
+                const parentCid = Number(seg?.parentContourId);
+                if (!Number.isFinite(parentCid)) continue;
+                for (const parentSeg of this.segments) {
+                    if (_isSymmetrySegment(parentSeg)) continue;
+                    if ((parentSeg.contourId ?? 0) !== parentCid) continue;
+                    out.push(parentSeg.id);
+                }
+                continue;
+            }
+            out.push(seg.id);
+        }
+        return [...new Set(out)];
+    }
+
+    _mirrorSegmentForSymmetry(seg, axis) {
+        if (!seg || !axis?.p1 || !axis?.p2) return null;
+        const vars = this.variableValues ?? {};
+        const data = _cloneDeep(seg.data ?? {});
+        const transforms = _cloneDeep(Array.isArray(seg.transforms) ? seg.transforms : []);
+        const rt0 = _sumRtAngle(transforms, vars);
+
+        const mirrorRawPointKeepRt = (rawPoint) => {
+            const world = _worldFromRaw(rawPoint, rt0);
+            const mirroredWorld = _mirrorPoint(world, axis.p1, axis.p2);
+            return _rawFromWorld(mirroredWorld, rt0);
+        };
+
+        if (seg.type === "line") {
+            data.start = mirrorRawPointKeepRt(data.start);
+            data.end = mirrorRawPointKeepRt(data.end);
+            delete data._expr;
+            return { type: "line", data, transforms, cmdHint: seg.cmdHint };
+        }
+
+        if (seg.type === "arc") {
+            data.start = mirrorRawPointKeepRt(data.start);
+            data.end = mirrorRawPointKeepRt(data.end);
+            if (data.center) data.center = mirrorRawPointKeepRt(data.center);
+            if (data.pt3) data.pt3 = mirrorRawPointKeepRt(data.pt3);
+            data.sweep = Number(data.sweep ?? 0) ? 0 : 1;
+            delete data._expr;
+            return { type: "arc", data, transforms, cmdHint: seg.cmdHint };
+        }
+
+        if (seg.type === "circle") {
+            data.center = mirrorRawPointKeepRt(data.center);
+            if (data.pt3) data.pt3 = mirrorRawPointKeepRt(data.pt3);
+            delete data._expr;
+            return { type: "circle", data, transforms, cmdHint: seg.cmdHint };
+        }
+
+        if (seg.type === "rect") {
+            const x = Number(data.x ?? 0);
+            const y = Number(data.y ?? 0);
+            const w = Number(data.w ?? 0);
+            const h = Number(data.h ?? 0);
+            const p0 = mirrorRawPointKeepRt({ x, y });
+            const pW = mirrorRawPointKeepRt({ x: x + w, y });
+            const pH = mirrorRawPointKeepRt({ x, y: y + h });
+            data.x = p0.x;
+            data.y = p0.y;
+            data.w = Math.hypot(pW.x - p0.x, pW.y - p0.y) * (w < 0 ? -1 : 1);
+            data.h = Math.hypot(pH.x - p0.x, pH.y - p0.y) * (h < 0 ? -1 : 1);
+            delete data._expr;
+            return { type: "rect", data, transforms, cmdHint: seg.cmdHint };
+        }
+
+        if (seg.type === "ellipse") {
+            const p = mirrorRawPointKeepRt({ x: Number(data.cx ?? 0), y: Number(data.cy ?? 0) });
+            data.cx = p.x;
+            data.cy = p.y;
+            delete data._expr;
+            return { type: "ellipse", data, transforms, cmdHint: seg.cmdHint };
+        }
+
+        return null;
+    }
+
+    _syncSymmetryContours() {
+        if (this._syncingSymmetry) return;
+        this._syncingSymmetry = true;
+        try {
+            let work = [...this.segments];
+            let changed = false;
+
+            const groups = new Map();
+            for (const seg of work) {
+                if (!_isSymmetrySegment(seg)) continue;
+                const childCid = Number(seg?.contourId);
+                if (!Number.isFinite(childCid)) continue;
+                if (!groups.has(childCid)) {
+                    groups.set(childCid, {
+                        childCid,
+                        parentContourId: Number(seg?.parentContourId),
+                        axis: _cloneDeep(seg?.axis ?? null),
+                    });
+                }
+            }
+
+            for (const group of groups.values()) {
+                const parentCid = Number(group.parentContourId);
+                const axis = group.axis;
+                const childCid = Number(group.childCid);
+                if (!Number.isFinite(parentCid) || !axis?.p1 || !axis?.p2) continue;
+
+                const parentSegs = work.filter(s => !_isSymmetrySegment(s) && (s.contourId ?? 0) === parentCid);
+                const childSegs = work.filter(s => _isSymmetrySegment(s) && (s.contourId ?? 0) === childCid);
+                if (childSegs.length === 0) continue;
+
+                if (parentSegs.length === 0) {
+                    work = work.filter(s => !( _isSymmetrySegment(s) && (s.contourId ?? 0) === childCid));
+                    changed = true;
+                    continue;
+                }
+
+                const mirrored = parentSegs
+                    .map((seg) => this._mirrorSegmentForSymmetry(seg, axis))
+                    .filter(Boolean);
+
+                if (mirrored.length === 0) continue;
+
+                const canUpdateInPlace = mirrored.length === childSegs.length
+                    && mirrored.every((m, idx) => m.type === childSegs[idx]?.type);
+
+                if (canUpdateInPlace) {
+                    const byId = new Map(mirrored.map((m, i) => [childSegs[i].id, m]));
+                    let localChanged = false;
+                    work = work.map((seg) => {
+                        const m = byId.get(seg.id);
+                        if (!m) return seg;
+                        localChanged = true;
+                        return {
+                            ...seg,
+                            type: m.type,
+                            data: m.data,
+                            transforms: m.transforms,
+                            cmdHint: m.cmdHint,
+                            contourId: childCid,
+                            linkType: "symmetry",
+                            parentContourId: parentCid,
+                            axis: _cloneDeep(axis),
+                            selected: false,
+                        };
+                    });
+                    changed = changed || localChanged;
+                    continue;
+                }
+
+                const replacement = mirrored.map((m) => ({
+                    id: `seg-${this._nextSegmentId++}`,
+                    selected: false,
+                    contourId: childCid,
+                    type: m.type,
+                    data: m.data,
+                    transforms: m.transforms,
+                    cmdHint: m.cmdHint,
+                    linkType: "symmetry",
+                    parentContourId: parentCid,
+                    axis: _cloneDeep(axis),
+                }));
+
+                const firstChildIndex = work.findIndex(s => _isSymmetrySegment(s) && (s.contourId ?? 0) === childCid);
+                const withoutChild = work.filter(s => !(_isSymmetrySegment(s) && (s.contourId ?? 0) === childCid));
+                const insertAt = firstChildIndex >= 0 ? Math.min(firstChildIndex, withoutChild.length) : withoutChild.length;
+                work = [
+                    ...withoutChild.slice(0, insertAt),
+                    ...replacement,
+                    ...withoutChild.slice(insertAt),
+                ];
+                changed = true;
+            }
+
+            if (changed) {
+                this.segments = work;
+                const mapped = this._resolveSelectableIds([...this.selectedIds]);
+                const nextSelection = new Set(mapped);
+                this.selectedIds = nextSelection;
+                this.segments = this.segments.map(s => ({ ...s, selected: nextSelection.has(s.id) }));
+            }
+        } finally {
+            this._syncingSymmetry = false;
+        }
     }
 
     /** Clear all selections. */
@@ -735,6 +1077,7 @@ export default class EditorStateManager {
         this._history = this._history.slice(0, this._historyIndex + 1);
         this._history.push({
             segments: this.segments.map(s => ({ ...s })),
+            elementGroups: (this.elementGroups ?? []).map(g => ({ ...g })),
             description,
         });
         if (this._history.length > this._maxHistory) {
@@ -757,7 +1100,9 @@ export default class EditorStateManager {
     undo() {
         if (!this.canUndo()) return;
         this._historyIndex--;
-        this._setSegments(this._history[this._historyIndex].segments.map(s => ({ ...s })));
+        const h = this._history[this._historyIndex];
+        this.elementGroups = (h.elementGroups ?? []).map(g => ({ ...g }));
+        this._setSegments(h.segments.map(s => ({ ...s })));
         log.debug(`Undo → "${this._history[this._historyIndex].description}"`);
     }
 
@@ -768,7 +1113,9 @@ export default class EditorStateManager {
     redo() {
         if (!this.canRedo()) return;
         this._historyIndex++;
-        this._setSegments(this._history[this._historyIndex].segments.map(s => ({ ...s })));
+        const h = this._history[this._historyIndex];
+        this.elementGroups = (h.elementGroups ?? []).map(g => ({ ...g }));
+        this._setSegments(h.segments.map(s => ({ ...s })));
         log.debug(`Redo → "${this._history[this._historyIndex].description}"`);
     }
 
@@ -907,6 +1254,7 @@ export default class EditorStateManager {
             this._history = [];
             this._historyIndex = -1;
         }
+        this.elementGroups = [];
         // Negate Y: path is stored in bit-space (Y-up), editor works in SVG-space (Y-down).
         this.segments = segments.map(s => {
             const base = {

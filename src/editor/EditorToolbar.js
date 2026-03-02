@@ -34,6 +34,7 @@ const TOOL_DEFINITIONS = [
     { id: "circle", label: "Circle (LMB: 2pt · RMB: 3pt)", icon: "○", group: "draw", key: "c", lmbTool: "circle2pt", rmbTool: "circle3pt" },
     { id: "rect", label: "Rect (LMB: 2pt · RMB: 3pt)", icon: "▭", group: "draw", key: "r", lmbTool: "rect2pt", rmbTool: "rect3pt" },
     { id: "ellipse", label: "Ellipse (LMB: 2pt · RMB: 3pt)", icon: "⬭", group: "draw", key: "e", lmbTool: "ellipse2pt", rmbTool: "ellipse3pt" },
+    { id: "group", label: "Group (LMB) / Ungroup (RMB)", icon: "◫", group: "draw", key: "g", lmbTool: "group", rmbTool: "ungroup" },
     // Edit tools
     { id: "fillet", label: "Fillet", icon: "⌔", group: "edit", key: "f" },
     { id: "chamfer", label: "Chamfer", icon: "⌐", group: "edit" },
@@ -310,6 +311,14 @@ export default class EditorToolbar {
                 return;
             }
             if (e.key === "z" && (e.ctrlKey || e.metaKey)) { /* handled by ProfileEditor */ return; }
+
+            if (!e.ctrlKey && !e.metaKey && e.key === "u") {
+                const groupDef = TOOL_DEFINITIONS.find(t => t.lmbTool === "group" && t.rmbTool === "ungroup");
+                if (groupDef && this.onToolChange) {
+                    this.onToolChange("ungroup");
+                    return;
+                }
+            }
 
             const def = TOOL_DEFINITIONS.find(t => t.key === e.key && !e.ctrlKey && !e.metaKey);
             if (def && this.onToolChange) {

@@ -1388,6 +1388,14 @@ html {
   pointer-events: none;
 }
 
+.editor-symmetry-axis {
+  stroke: #2f5fb8;
+  stroke-width: 0.4;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
 /* ===== EDITOR CANVAS — ghost (in-progress drawing) ===== */
 .editor-ghost line,
 .editor-ghost circle,
@@ -2089,6 +2097,8 @@ html {
 .pe-elem-ellipse  { border-left-color: hsl(180 50% 45%); }   /* teal   */
 .pe-elem-path     { border-left-color: hsl(217 80% 55%); }   /* blue   */
 .pe-elem-polyline { border-left-color: hsl(140 55% 45%); }   /* green  */
+.pe-elem-symmetry { border-left-color: hsl(220 65% 38%); }   /* dark blue */
+.pe-elem-group    { border-left-color: hsl(280 62% 48%); }   /* violet */
 
 /* pe-path-wrap: plain block container for path group (header + body) */
 .pe-path-wrap {
@@ -2137,6 +2147,36 @@ html {
   border-color: rgba(33, 150, 243, 0.4) !important;
 }
 
+/* Symmetry: dark blue */
+.pe-type-symmetry {
+  background-color: rgba(30, 80, 170, 0.16) !important;
+  color: #2f5fb8 !important;
+  border-color: rgba(30, 80, 170, 0.28) !important;
+}
+.pe-type-symmetry:hover {
+  background-color: rgba(30, 80, 170, 0.26) !important;
+  border-color: rgba(30, 80, 170, 0.4) !important;
+}
+
+.pe-type-group {
+  background-color: rgba(140, 82, 255, 0.16) !important;
+  color: #7f56d9 !important;
+  border-color: rgba(140, 82, 255, 0.3) !important;
+}
+.pe-type-group:hover {
+  background-color: rgba(140, 82, 255, 0.26) !important;
+  border-color: rgba(140, 82, 255, 0.44) !important;
+}
+
+.pe-sub-line-readonly {
+  opacity: 0.78;
+}
+
+.pe-shape-embedded {
+  margin-left: 14px;
+  border-left-style: dashed;
+}
+
 /* Circle: purple */
 .pe-type-circle {
   background-color: rgba(156, 39, 176, 0.12) !important;
@@ -2175,6 +2215,10 @@ html {
   opacity: 0.4;
 }
 .pe-elem.pe-elem-drag-over {
+  outline: 1px solid hsl(var(--primary));
+  outline-offset: -1px;
+}
+.pe-elem.pe-elem-drag-over-top {
   border-top: 2px solid hsl(var(--primary));
   margin-top: -1px;
 }
@@ -2370,6 +2414,16 @@ html {
 .path-suggestion-btn.elem-btn-ellipse:hover {
   background: rgba(230, 126, 34, 0.18);
   border-color: rgba(230, 126, 34, 0.5);
+}
+
+.path-suggestion-btn.elem-btn-group {
+  color: #8e44ad;
+  border-color: rgba(142, 68, 173, 0.3);
+  background: rgba(142, 68, 173, 0.08);
+}
+.path-suggestion-btn.elem-btn-group:hover {
+  background: rgba(142, 68, 173, 0.2);
+  border-color: rgba(142, 68, 173, 0.5);
 }
 
 .path-cmd-label {
