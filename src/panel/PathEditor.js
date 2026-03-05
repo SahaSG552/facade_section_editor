@@ -101,6 +101,7 @@ export default class PathEditor {
      * @param {Function}           [options.onShapeElementClick] — (segId, MouseEvent)
     * @param {Function}           [options.onToPathRequest]     — (segIds:string[], MouseEvent)
     * @param {Function}           [options.onElementOrderChange] — (order) top-level reorder callback
+    * @param {Function}           [options.onConvertSymmetryGroup] — (groupId:number)
      */
     constructor(options = {}) {
         this.container             = options.container;
@@ -125,6 +126,8 @@ export default class PathEditor {
         this.onToPathRequest       = options.onToPathRequest       || null;
         /** @type {((order:Array<object>)=>void)|null} */
         this.onElementOrderChange  = options.onElementOrderChange  || null;
+        /** @type {((groupId:number)=>void)|null} */
+        this.onConvertSymmetryGroup = options.onConvertSymmetryGroup || null;
         /** @type {((e:MouseEvent)=>void)|null} Called when user clicks on the empty elements container background */
         this.onDeactivate          = options.onDeactivate          || null;
 
@@ -521,6 +524,30 @@ export default class PathEditor {
                 .map(e => Number(e.groupId))
                 .filter(Number.isFinite)
         );
+        // Keep source-group and its symmetry pair together when moving group rows.
+        if (rootGroupIds.size > 0) {
+            const guidById = new Map(
+                this._elements
+                    .filter(e => e?.type === 'group')
+                    .map(g => [Number(g?.groupId), String(g?.guid ?? '')])
+                    .filter(([gid]) => Number.isFinite(gid))
+            );
+            const linkedSymRoots = this._elements
+                .filter((e) => e?.type === 'group' && String(e?.linkType ?? '') === 'symmetry')
+                .filter((sym) => {
+                    const srcId = Number(sym?.sourceGroupId);
+                    if (Number.isFinite(srcId) && rootGroupIds.has(srcId)) return true;
+                    const srcGuid = String(sym?.sourceGroupGuid ?? '').trim();
+                    if (!srcGuid) return false;
+                    for (const rgid of rootGroupIds) {
+                        if (String(guidById.get(Number(rgid)) ?? '') === srcGuid) return true;
+                    }
+                    return false;
+                })
+                .map((g) => Number(g?.groupId))
+                .filter(Number.isFinite);
+            for (const gid of linkedSymRoots) rootGroupIds.add(gid);
+        }
         if (rootGroupIds.size === 0) return validBase;
 
         const queue = [...rootGroupIds];
@@ -1350,6 +1377,13 @@ export default class PathEditor {
             }
         });
 
+        row.addEventListener('contextmenu', (e) => {
+            if (!isSymmetryGroup) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this._convertSymmetryGroupToGroup(Number(elem.groupId));
+        });
+
         expandBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             elem.expanded = !elem.expanded;
@@ -1398,6 +1432,72 @@ export default class PathEditor {
         this._renderElements();
         if (this.onDeleteSymmetryGroup) {
             this.onDeleteSymmetryGroup(gid);
+        } else {
+            this._emitTopLevelOrder();
+        }
+    }
+
+    /**
+     * Convert a symmetry group into a regular editable group (break source link).
+     * @param {number} groupId
+     * @private
+     */
+    _convertSymmetryGroupToGroup(groupId) {
+        const gid = Number(groupId);
+        if (!Number.isFinite(gid)) return;
+
+        const target = this._elements.find(e => e?.type === 'group' && Number(e?.groupId) === gid) ?? null;
+        if (!target || String(target?.linkType ?? '') !== 'symmetry') return;
+
+        const groupIds = new Set([gid]);
+        let grown = true;
+        while (grown) {
+            grown = false;
+            for (const item of this._elements) {
+                if (item?.type !== 'group') continue;
+                const itemGid = Number(item?.groupId);
+                const parentGid = Number(item?.parentGroupId);
+                if (!Number.isFinite(itemGid) || !Number.isFinite(parentGid)) continue;
+                if (!groupIds.has(parentGid) || groupIds.has(itemGid)) continue;
+                groupIds.add(itemGid);
+                grown = true;
+            }
+        }
+
+        this._elements = this._elements.map((item) => {
+            if (item?.type === 'group' && groupIds.has(Number(item?.groupId))) {
+                return {
+                    ...item,
+                    linkType: null,
+                    sourceGroupId: null,
+                    sourceGroupGuid: null,
+                    axis: null,
+                };
+            }
+            if (!groupIds.has(Number(item?.parentGroupId))) return item;
+
+            if (item?.type === 'path' || item?.type === 'polyline') {
+                return {
+                    ...item,
+                    isSymmetry: false,
+                    parentContourId: null,
+                    linkType: null,
+                    axis: null,
+                };
+            }
+            if (item?.type === 'circle' || item?.type === 'rect' || item?.type === 'ellipse') {
+                return {
+                    ...item,
+                    linkType: null,
+                    axis: null,
+                };
+            }
+            return item;
+        });
+
+        this._renderElements();
+        if (this.onConvertSymmetryGroup) {
+            this.onConvertSymmetryGroup(gid);
         } else {
             this._emitTopLevelOrder();
         }

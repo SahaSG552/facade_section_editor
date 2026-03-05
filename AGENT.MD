@@ -14,6 +14,32 @@
 
 ## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ (27.02.2026)
 
+## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ: FLIP TOOL + SYMMETRY DIRECTION (05.03.2026)
+
+### Цель
+- Обеспечить противоположное направление отрисовки `Symmetry` относительно исходного path/contour,
+  чтобы результат можно было собирать в замкнутый последовательный контур.
+- Добавить новый staged-инструмент `Flip` (`F`) для реверса направления выбранных контуров.
+
+### UX требования (зафиксировано)
+- `Flip` доступен на панели инструментов как отдельная кнопка.
+- Flow: включаем `Flip` → если ничего не выбрано, выполняем выделение (клик/рамка) → `ПКМ` подтверждает selection.
+- После подтверждения отображаются маленькие стрелки направления (start/mid/end) на каждом выбранном сегменте.
+- Второй `ПКМ` выполняет реверс направления выбранных контуров и завершает команду.
+- `Esc` в preview-стадии отменяет команду без изменений.
+
+### План внедрения
+- [x] Добавить `Flip` в `EditorToolbar` и назначить hotkey `F`.
+- [x] Зарегистрировать `FlipTool` в `ProfileEditor._createTool(...)`.
+- [x] Реализовать `FlipTool` staged selection/confirm flow с ghost-стрелками направления.
+- [x] Реализовать commit реверса направления по контурам (reverse order + reverse segment direction).
+- [x] Обновить `Symmetry` генерацию: mirrored-контуры всегда в противоположном направлении к source.
+- [ ] Применить тот же Flip-пайплайн к элементам symmetry в отдельной итерации (после UX валидации).
+
+### Следующая задача (backlog)
+- [ ] Drag-and-drop одной/нескольких команд или целых path-элементов в структуру другого path:
+  вставка в конкретную позицию или в конец.
+
 - [ ] Универсальная обработка параметров: любой параметр любой команды/элемента/модификатора может содержать формулу.
 - [ ] При изменениях с канваса (move/edit):
   - [ ] показывать обновлённые численные значения динамически,
@@ -1472,5 +1498,55 @@ Group-driven режим:
 ### Эффект
 - Стабильная принадлежность shape к source/symmetry после повторного входа в edit.
 - Меньше фризов при перемещении/редактировании элементов в symmetry-сценариях.
+
+*Последнее обновление: 05.03.2026*
+
+---
+
+## Symmetry UX Parity + Pair Binding + Cache (05.03.2026)
+
+### UX parity (selection)
+- [x] `MirrorTool` в режиме `symmetry` переведён на тот же selection-flow, что и остальные инструменты:
+  - click / shift-toggle / box selection,
+  - `Ctrl+Shift` part-selection (включая rect-side выбор) теперь не отключается для symmetry.
+- [x] Удалён special-case single-chain selection для symmetry, который ломал рамочное выделение.
+
+### PathEditor pair binding (source group + symmetry)
+- [x] При drag source-группы в `PathEditor` её symmetry-группа перемещается вместе с ней.
+- [x] Реализовано через расширение `_expandMoveIndicesWithGroupDescendants(...)`:
+  - добавляется связанная symmetry-группа по `sourceGroupId`,
+  - fallback по `sourceGroupGuid` при remap id.
+
+### Performance
+- [x] Добавлен signature-cache в `EditorStateManager._syncSymmetryContours`:
+  - key: `symGroupId`,
+  - сигнатура: `sourceGroupId + axisSig + sourceSegSignature`.
+- [x] При cache-hit зеркальная перестройка пропускается (`cacheHit:true` в debug summary),
+      что уменьшает нагрузку на drag/continuous edits.
+
+### Статус
+- [x] Build проходит.
+
+*Последнее обновление: 05.03.2026*
+
+---
+
+## Symmetry Regression Fix + Next Roadmap (05.03.2026)
+
+### Фикс регрессии после aggressive cache
+- [x] Исправлен баг, при котором symmetry-элементы периодически исчезали/появлялись во время редактирования source-группы.
+- [x] Причина: при `cacheHit` в `_syncSymmetryContours` пересчёт пропускался, но существующие mirrored-сегменты не возвращались в рабочий массив.
+- [x] Исправление: при `cacheHit` добавлять `prevMirrors` в `work` (retain без rebuild).
+
+### План доработки Symmetry (следующие этапы)
+- [ ] Замыкание открытых Path между source Group и Symmetry:
+  - [ ] если Path не замкнут, соединять начальные/конечные точки source и symmetry для получения замкнутого контура,
+  - [ ] сегменты, выходящие за ось симметрии, отсекать (будущий инструмент `scissors`).
+- [ ] Булево объединение замкнутых контуров:
+  - [ ] все замкнутые элементы (включая замкнутые Path) объединять со своей symmetry через `boolean union` (будущий инструмент `boolean union`).
+- [ ] Конвертация `Symmetry -> Group` (с потерей связи с parent):
+  - [ ] действие по `ПКМ` на строке Symmetry в `PathEditor`,
+  - [ ] после конвертации Symmetry становится обычной `Group` с независимыми редактируемыми элементами,
+  - [ ] удаляются link-поля (`linkType/sourceGroupId/sourceGroupGuid/axis`) и отключается live-sync с parent Group.
 
 *Последнее обновление: 05.03.2026*

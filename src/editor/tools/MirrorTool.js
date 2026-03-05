@@ -21,6 +21,61 @@ function _clone(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
+function _reverseSegmentDirectionSnapshot(seg) {
+    const next = {
+        ...seg,
+        data: _clone(seg?.data ?? {}),
+        transforms: _clone(Array.isArray(seg?.transforms) ? seg.transforms : []),
+    };
+
+    if (seg?.type === "line") {
+        next.data.start = _clone(seg?.data?.end ?? seg?.data?.start ?? { x: 0, y: 0 });
+        next.data.end = _clone(seg?.data?.start ?? seg?.data?.end ?? { x: 0, y: 0 });
+        return next;
+    }
+
+    if (seg?.type === "arc") {
+        next.data.start = _clone(seg?.data?.end ?? seg?.data?.start ?? { x: 0, y: 0 });
+        next.data.end = _clone(seg?.data?.start ?? seg?.data?.end ?? { x: 0, y: 0 });
+        next.data.sweep = Number(seg?.data?.sweep ?? 0) ? 0 : 1;
+        return next;
+    }
+
+    return next;
+}
+
+function _reverseContourDirectionSnapshots(snapshots) {
+    const list = Array.isArray(snapshots) ? snapshots : [];
+    if (list.length === 0) return [];
+
+    const byContour = new Map();
+    for (const seg of list) {
+        if (seg?.type !== "line" && seg?.type !== "arc") continue;
+        const cid = Number(seg?.contourId);
+        if (!Number.isFinite(cid)) continue;
+        if (!byContour.has(cid)) byContour.set(cid, []);
+        byContour.get(cid).push(seg);
+    }
+
+    const handled = new Set();
+    const out = [];
+    for (const seg of list) {
+        if (seg?.type === "line" || seg?.type === "arc") {
+            const cid = Number(seg?.contourId);
+            if (!Number.isFinite(cid) || handled.has(cid)) continue;
+            handled.add(cid);
+            const contourSegs = byContour.get(cid) ?? [];
+            for (let i = contourSegs.length - 1; i >= 0; i--) {
+                out.push(_reverseSegmentDirectionSnapshot(contourSegs[i]));
+            }
+            continue;
+        }
+        out.push(_clone(seg));
+    }
+
+    return out;
+}
+
 
 class MirrorTool extends BaseTool {
     /**
@@ -150,16 +205,14 @@ class MirrorTool extends BaseTool {
         this._endDrag();
 
         if (wasDrag) {
-            const selectParts = this._modeType === "symmetry"
-                ? false
-                : (!!e.shiftKey && !!(e.ctrlKey || e.metaKey));
+            const selectParts = !!e.shiftKey && !!(e.ctrlKey || e.metaKey);
             const ignoreGroups = !!e.shiftKey && !(e.ctrlKey || e.metaKey);
             this.ctx.state._selectionInsideGroupMode = false;
             this._applyBoxSelection(downSvg, rawEnd, { selectParts, ignoreGroups });
             return;
         }
 
-        if (e.shiftKey && (e.ctrlKey || e.metaKey) && this._modeType !== "symmetry") {
+        if (e.shiftKey && (e.ctrlKey || e.metaKey)) {
             const sideHit = this.ctx.canvas.hitTestRectSide(rawEnd);
             if (sideHit?.axis && sideHit.axis !== "rx") {
                 this._toggleRectSideSelection(sideHit);
@@ -169,9 +222,7 @@ class MirrorTool extends BaseTool {
 
         const hitId = this.ctx.canvas.hitTest(rawEnd);
         if (hitId) {
-            const selectParts = this._modeType === "symmetry"
-                ? false
-                : (!!e.shiftKey && !!(e.ctrlKey || e.metaKey));
+            const selectParts = !!e.shiftKey && !!(e.ctrlKey || e.metaKey);
             const ignoreGroups = !!e.shiftKey && !(e.ctrlKey || e.metaKey);
             const selectionIds = selectParts
                 ? [hitId]
@@ -181,10 +232,7 @@ class MirrorTool extends BaseTool {
                     this.ctx.state.elementGroups ?? [],
                     { ignoreGroups },
                 );
-            if (this._modeType === "symmetry") {
-                this.ctx.state._selectionInsideGroupMode = false;
-                this._setSingleChainSelection(selectionIds[0] ?? hitId);
-            } else if (e.shiftKey) {
+            if (e.shiftKey) {
                 this.ctx.state._selectionInsideGroupMode = false;
                 this._toggleSelectionIds(selectionIds);
             } else {
@@ -307,7 +355,11 @@ class MirrorTool extends BaseTool {
     }
 
     _captureSourceSelection() {
-        const selected = [...this.ctx.state.selectedIds];
+        const selected = [...this.ctx.state.selectedIds]
+            .filter((id) => {
+                const seg = this.ctx.state.segments.find((s) => s.id === id);
+                return seg && String(seg?.linkType ?? "") !== "symmetry";
+            });
         if (this._modeType === "symmetry" && selected.length > 0) {
             // Expand to include shapes embedded in selected contours.
             const selectedContourIds = new Set(
@@ -320,6 +372,7 @@ class MirrorTool extends BaseTool {
                 const cid = Number(seg?.contourId);
                 if (!selectedContourIds.has(cid)) continue;
                 if (selected.includes(seg.id)) continue;
+                if (String(seg?.linkType ?? "") === "symmetry") continue;
                 if (seg.type === "circle" || seg.type === "rect" || seg.type === "ellipse") {
                     selected.push(seg.id);
                 }
@@ -455,6 +508,7 @@ class MirrorTool extends BaseTool {
                     groupId: symGroupId,
                     parentGroupId: symGroupId,
                 }));
+                snapshots = _reverseContourDirectionSnapshots(snapshots);
             } else {
                 snapshots = newSegments;
             }
@@ -632,7 +686,7 @@ class MirrorTool extends BaseTool {
 
     _toggleRectSideSelection(sideHit) {
         const seg = this._findSeg(sideHit.segId);
-        if (!seg || seg.type !== "rect") return;
+        if (!seg || seg.type !== "rect" || String(seg?.linkType ?? "") === "symmetry") return;
         const side = { role: String(sideHit.role), axis: sideHit.axis };
         const prev = this._selectedRectSides.get(seg.id) ?? [];
         const idx = prev.findIndex(s => s.role === side.role && s.axis === side.axis);
@@ -692,16 +746,19 @@ class MirrorTool extends BaseTool {
 
     _toggleSelectionIds(ids) {
         if (!Array.isArray(ids) || ids.length === 0) return;
-        if (this._modeType === "symmetry") {
-            this._setSingleChainSelection(ids[0]);
-            return;
-        }
+        const targetIds = this._modeType === "symmetry"
+            ? ids.filter((id) => {
+                const seg = this._findSeg(id);
+                return !!seg && String(seg?.linkType ?? "") !== "symmetry";
+            })
+            : ids;
+        if (targetIds.length === 0) return;
         const next = new Set(this.ctx.state.selectedIds);
-        const allSel = ids.every(id => next.has(id));
+        const allSel = targetIds.every(id => next.has(id));
         if (allSel) {
-            ids.forEach(id => next.delete(id));
+            targetIds.forEach(id => next.delete(id));
         } else {
-            ids.forEach(id => next.add(id));
+            targetIds.forEach(id => next.add(id));
         }
         this.ctx.state.setSelection([...next]);
         this._pruneRectSideSelection();
@@ -720,18 +777,29 @@ class MirrorTool extends BaseTool {
                 }),
         });
 
-        if (this._modeType === "symmetry") {
-            this._setSingleChainSelection(result.ids[0] ?? null);
-            this.ctx.canvas.clearGhost();
-            return;
-        }
+        const ids = this._modeType === "symmetry"
+            ? result.ids.filter((id) => {
+                const seg = this._findSeg(id);
+                return !!seg && String(seg?.linkType ?? "") !== "symmetry";
+            })
+            : result.ids;
 
         if (selectParts) {
-            this._selectedRectSides = result.rectSides;
-            this.ctx.state.setSelection(result.ids);
+            if (this._modeType === "symmetry") {
+                const filteredSides = new Map();
+                for (const [segId, sides] of result.rectSides.entries()) {
+                    const seg = this._findSeg(segId);
+                    if (!seg || String(seg?.linkType ?? "") === "symmetry") continue;
+                    filteredSides.set(segId, sides);
+                }
+                this._selectedRectSides = filteredSides;
+            } else {
+                this._selectedRectSides = result.rectSides;
+            }
+            this.ctx.state.setSelection(ids);
             this._pruneRectSideSelection();
         } else {
-            this.ctx.state.setSelection(result.ids);
+            this.ctx.state.setSelection(ids);
         }
 
         this._syncRectSideHighlights();

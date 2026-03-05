@@ -27,6 +27,61 @@ function _optFiniteId(value) {
     return Number.isFinite(n) ? n : null;
 }
 
+function _reverseSymmetryDirectionSegment(seg) {
+    const next = {
+        ...seg,
+        data: _cloneDeep(seg?.data ?? {}),
+        transforms: _cloneDeep(Array.isArray(seg?.transforms) ? seg.transforms : []),
+    };
+
+    if (seg?.type === "line") {
+        next.data.start = _cloneDeep(seg?.data?.end ?? seg?.data?.start ?? { x: 0, y: 0 });
+        next.data.end = _cloneDeep(seg?.data?.start ?? seg?.data?.end ?? { x: 0, y: 0 });
+        return next;
+    }
+
+    if (seg?.type === "arc") {
+        next.data.start = _cloneDeep(seg?.data?.end ?? seg?.data?.start ?? { x: 0, y: 0 });
+        next.data.end = _cloneDeep(seg?.data?.start ?? seg?.data?.end ?? { x: 0, y: 0 });
+        next.data.sweep = Number(seg?.data?.sweep ?? 0) ? 0 : 1;
+        return next;
+    }
+
+    return next;
+}
+
+function _reverseSymmetryDirectionForContours(segments) {
+    const list = Array.isArray(segments) ? segments : [];
+    if (list.length === 0) return [];
+
+    const byContour = new Map();
+    for (const seg of list) {
+        if (seg?.type !== 'line' && seg?.type !== 'arc') continue;
+        const cid = Number(seg?.contourId);
+        if (!Number.isFinite(cid)) continue;
+        if (!byContour.has(cid)) byContour.set(cid, []);
+        byContour.get(cid).push(seg);
+    }
+
+    const handled = new Set();
+    const out = [];
+    for (const seg of list) {
+        if (seg?.type === 'line' || seg?.type === 'arc') {
+            const cid = Number(seg?.contourId);
+            if (!Number.isFinite(cid) || handled.has(cid)) continue;
+            handled.add(cid);
+            const contourSegs = byContour.get(cid) ?? [];
+            for (let i = contourSegs.length - 1; i >= 0; i--) {
+                out.push(_reverseSymmetryDirectionSegment(contourSegs[i]));
+            }
+            continue;
+        }
+        out.push(seg);
+    }
+
+    return out;
+}
+
 
 /**
  * @typedef {"cursor"|"line"|"rect2pt"|"rect3pt"|"arc2pt"|"arc3pt"|"circle2pt"|"circle3pt"} DrawTool
@@ -129,6 +184,8 @@ export default class EditorStateManager {
         /** @type {number} — monotonically increasing contour ID counter */
         this._nextContourId = 1;
         this._syncingSymmetry = false;
+        /** @type {Map<number, {sourceGroupId:number, axisSig:string, sourceSig:string}>} */
+        this._symmetrySyncCache = new Map();
 
         /**
          * When set, newly drawn line/arc segments that don’t snap geometrically
@@ -1057,6 +1114,21 @@ export default class EditorStateManager {
 
             const allGroups = Array.isArray(this.elementGroups) ? this.elementGroups : [];
             const symGroups = allGroups.filter(g => String(g?.linkType ?? '') === 'symmetry');
+            const symGroupIds = new Set(symGroups.map(g => Number(g?.groupId)).filter(Number.isFinite));
+            for (const key of [...this._symmetrySyncCache.keys()]) {
+                if (!symGroupIds.has(Number(key))) this._symmetrySyncCache.delete(Number(key));
+            }
+
+            const segSignature = (seg) => [
+                String(seg?.id ?? ''),
+                String(seg?.type ?? ''),
+                Number(seg?.contourId ?? NaN),
+                Number(seg?.groupId ?? NaN),
+                Number(seg?.parentGroupId ?? NaN),
+                Number(seg?.parentContourId ?? NaN),
+                JSON.stringify(seg?.data ?? null),
+                JSON.stringify(seg?.transforms ?? null),
+            ].join(':');
 
             const collectDescendantGroupIds = (rootId) => {
                 const out = new Set();
@@ -1106,7 +1178,36 @@ export default class EditorStateManager {
                     const gid = Number(Number.isFinite(Number(s?.groupId)) ? s?.groupId : s?.parentGroupId);
                     return Number.isFinite(gid) && sourceGroupTree.has(gid);
                 });
+                const axisSig = JSON.stringify(axis ?? null);
+                const sourceSig = sourceSegs.map(segSignature).join('|');
+                const cache = this._symmetrySyncCache.get(Number(symGroupId)) ?? null;
+                const prevMirrors = srcSegments.filter((s) =>
+                    _isSymmetrySegment(s) && Number(s?.groupId) === Number(symGroupId)
+                );
+
+                if (
+                    sourceSegs.length > 0
+                    && cache
+                    && cache.sourceGroupId === Number(resolvedSourceGroupId)
+                    && cache.axisSig === axisSig
+                    && cache.sourceSig === sourceSig
+                    && prevMirrors.length > 0
+                ) {
+                    // Cache hit: keep existing mirrors as-is, do not rebuild.
+                    work.push(...prevMirrors);
+                    syncSummary.push({
+                        symGroupId,
+                        sourceGroupId: resolvedSourceGroupId,
+                        sourceCount: sourceSegs.length,
+                        mirroredCount: prevMirrors.length,
+                        skipped: false,
+                        cacheHit: true,
+                    });
+                    continue;
+                }
+
                 if (sourceSegs.length === 0) {
+                    this._symmetrySyncCache.delete(Number(symGroupId));
                     syncSummary.push({
                         symGroupId,
                         sourceGroupId: resolvedSourceGroupId,
@@ -1193,16 +1294,24 @@ export default class EditorStateManager {
                     });
                 }
 
-                if (nextMirrors.length > 0) {
-                    work.push(...nextMirrors);
+                const normalizedMirrors = _reverseSymmetryDirectionForContours(nextMirrors);
+
+                if (normalizedMirrors.length > 0) {
+                    work.push(...normalizedMirrors);
                     changed = true;
                 }
+                this._symmetrySyncCache.set(Number(symGroupId), {
+                    sourceGroupId: Number(resolvedSourceGroupId),
+                    axisSig,
+                    sourceSig,
+                });
                 syncSummary.push({
                     symGroupId,
                     sourceGroupId: resolvedSourceGroupId,
                     sourceCount: sourceSegs.length,
-                    mirroredCount: nextMirrors.length,
+                    mirroredCount: normalizedMirrors.length,
                     skipped: false,
+                    cacheHit: false,
                 });
             }
 

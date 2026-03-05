@@ -7,6 +7,7 @@ import MoveTool from "./tools/MoveTool.js";
 import RotateTool from "./tools/RotateTool.js";
 import LineTool from "./tools/LineTool.js";
 import MirrorTool from "./tools/MirrorTool.js";
+import FlipTool from "./tools/FlipTool.js";
 import ArcTool from "./tools/ArcTool.js";
 import CircleTool from "./tools/CircleTool.js";
 import RectTool from "./tools/RectTool.js";
@@ -1241,6 +1242,8 @@ export default class ProfileEditor {
 
         /** Saved PathEditor.onDeleteSymmetryGroup before edit mode — restored on exit. @type {Function|null} */
         this._origPathEditorOnDeleteSymmetryGroup = null;
+        /** Saved PathEditor.onConvertSymmetryGroup before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnConvertSymmetryGroup = null;
 
         /** The SVG <circle> dot drawn on the canvas overlay when an M row is selected in edit mode.
          *  Cleared when a segment is selected or edit mode exits. @type {SVGCircleElement|null} */
@@ -1603,6 +1606,7 @@ export default class ProfileEditor {
             this._pathEditor.onToPathRequest = this._origPathEditorOnToPathRequest ?? null;
             this._pathEditor.onDeactivate = this._origPathEditorOnDeactivate ?? null;
             this._pathEditor.onDeleteSymmetryGroup = this._origPathEditorOnDeleteSymmetryGroup ?? null;
+            this._pathEditor.onConvertSymmetryGroup = this._origPathEditorOnConvertSymmetryGroup ?? null;
             this.state.activeContourId = null;
             this.state.insertAfterSegId = null;
             this._pathEditor.setShapeElements([]);
@@ -1703,6 +1707,7 @@ export default class ProfileEditor {
         this._origPathEditorOnToPathRequest = pathEditor.onToPathRequest;
         this._origPathEditorOnDeactivate = pathEditor.onDeactivate;
         this._origPathEditorOnDeleteSymmetryGroup = pathEditor.onDeleteSymmetryGroup ?? null;
+        this._origPathEditorOnConvertSymmetryGroup = pathEditor.onConvertSymmetryGroup ?? null;
 
         pathEditor.onElementOrderChange = (order) => {
             if (!Array.isArray(order) || !this.state) return;
@@ -2187,6 +2192,63 @@ export default class ProfileEditor {
                 stateGroups: (this.state.elementGroups ?? []).length,
             });
         };
+
+        /**
+         * Convert a symmetry group into a regular editable group (detach from source link).
+         * @param {number} groupId
+         */
+        pathEditor.onConvertSymmetryGroup = (groupId) => {
+            const gid = Number(groupId);
+            if (!Number.isFinite(gid) || !this.state) return;
+            const groups = Array.isArray(this.state.elementGroups) ? this.state.elementGroups : [];
+            const target = groups.find((g) => Number(g?.groupId) === gid) ?? null;
+            if (!target || String(target?.linkType ?? '') !== 'symmetry') return;
+
+            this._debugLog('pathEditor.onConvertSymmetryGroup.start', {
+                groupId: gid,
+                stateSegments: this.state.segments.length,
+                stateGroups: groups.length,
+            });
+
+            this.state.elementGroups = groups.map((g) => {
+                if (Number(g?.groupId) !== gid) return g;
+                return {
+                    ...g,
+                    linkType: null,
+                    sourceGroupId: null,
+                    sourceGroupGuid: null,
+                    axis: null,
+                };
+            });
+
+            const updated = this.state.segments.map((seg) => {
+                if (Number(seg?.groupId) !== gid && Number(seg?.parentGroupId) !== gid) return seg;
+                if (String(seg?.linkType ?? '') !== 'symmetry') return seg;
+                return {
+                    ...seg,
+                    linkType: undefined,
+                    parentContourId: undefined,
+                    axis: undefined,
+                };
+            });
+
+            const changed = updated.some((seg, idx) => seg !== this.state.segments[idx]);
+            this.state.segments = updated;
+            this.state._symmetrySyncCache?.delete?.(gid);
+
+            if (changed) {
+                this.state._pushHistory('Convert Symmetry To Group');
+                this.state._notifySegments();
+            } else {
+                this.state._notifySegments();
+            }
+
+            this._debugLog('pathEditor.onConvertSymmetryGroup.applied', {
+                groupId: gid,
+                stateSegments: this.state.segments.length,
+                stateGroups: (this.state.elementGroups ?? []).length,
+            });
+        };
     }
 
     /**
@@ -2434,6 +2496,7 @@ export default class ProfileEditor {
             case "line": return new LineTool();
             case "mirror": return new MirrorTool("mirror");
             case "symmetry": return new MirrorTool("symmetry");
+            case "flip": return new FlipTool();
             case "arc3pt":
             case "arc": return new ArcTool();
             case "circle2pt": return new CircleTool("circle2pt");

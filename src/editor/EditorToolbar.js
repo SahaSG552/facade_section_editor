@@ -29,6 +29,7 @@ const TOOL_DEFINITIONS = [
     { id: "move", label: "Move", icon: "✥", group: "draw", key: "m" },
     { id: "rotate", label: "Rotate", icon: "⟳", group: "draw", key: "q" },
     { id: "mirror", label: "Mirror (LMB) / Symmetry (RMB)", icon: "⊳", group: "draw", lmbTool: "mirror", rmbTool: "symmetry" },
+    { id: "flip", label: "Flip Direction", icon: "⇄", group: "draw", key: "f" },
     { id: "line", label: "Line", icon: "╱", group: "draw", key: "l" },
     { id: "arc", label: "Arc (3pt + R)", icon: "⌒", group: "draw", key: "a", lmbTool: "arc3pt" },
     { id: "circle", label: "Circle (LMB: 2pt · RMB: 3pt)", icon: "○", group: "draw", key: "c", lmbTool: "circle2pt", rmbTool: "circle3pt" },
@@ -36,7 +37,7 @@ const TOOL_DEFINITIONS = [
     { id: "ellipse", label: "Ellipse (LMB: 2pt · RMB: 3pt)", icon: "⬭", group: "draw", key: "e", lmbTool: "ellipse2pt", rmbTool: "ellipse3pt" },
     { id: "group", label: "Group (LMB) / Ungroup (RMB)", icon: "◫", group: "draw", key: "g", lmbTool: "group", rmbTool: "ungroup" },
     // Edit tools
-    { id: "fillet", label: "Fillet", icon: "⌔", group: "edit", key: "f" },
+    { id: "fillet", label: "Fillet", icon: "⌔", group: "edit" },
     { id: "chamfer", label: "Chamfer", icon: "⌐", group: "edit" },
     { id: "trim", label: "Trim", icon: "✂", group: "edit", key: "t" },
     { id: "extend", label: "Extend", icon: "↔", group: "edit" },
