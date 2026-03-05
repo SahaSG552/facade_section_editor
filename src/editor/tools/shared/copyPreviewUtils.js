@@ -29,9 +29,10 @@ export function collectSegmentSnapshots(state, segmentIds) {
  * Assigns fresh segment ids and remaps contour ids consistently per source contour.
  * @param {import('../../EditorStateManager.js').default} state
  * @param {Array<object>} snapshots
+ * @param {{preserveGroupLinks?: boolean}} [options]
  * @returns {Array<object>}
  */
-export function materializeCopiedSegments(state, snapshots) {
+export function materializeCopiedSegments(state, snapshots, { preserveGroupLinks = false } = {}) {
     if (!state || !Array.isArray(snapshots) || snapshots.length === 0) return [];
 
     const contourMap = new Map();
@@ -41,12 +42,19 @@ export function materializeCopiedSegments(state, snapshots) {
         return contourMap.get(key);
     };
 
-    return snapshots.map(seg => ({
-        ...seg,
-        id: `seg-${state._nextSegmentId++}`,
-        selected: false,
-        contourId: mapContour(seg.contourId),
-    }));
+    return snapshots.map(seg => {
+        const cloned = {
+            ...seg,
+            id: `seg-${state._nextSegmentId++}`,
+            selected: false,
+            contourId: mapContour(seg.contourId),
+        };
+        if (!preserveGroupLinks) {
+            delete cloned.groupId;
+            delete cloned.parentGroupId;
+        }
+        return cloned;
+    });
 }
 
 /**
@@ -57,6 +65,7 @@ export function materializeCopiedSegments(state, snapshots) {
  * @param {string} options.historyLabel
  * @param {boolean} [options.keepSourceSelection=false]
  * @param {string[]} [options.sourceIds=[]]
+ * @param {boolean} [options.preserveGroupLinks=false]
  * @returns {boolean}
  */
 export function commitCopiedSnapshots({
@@ -65,8 +74,9 @@ export function commitCopiedSnapshots({
     historyLabel,
     keepSourceSelection = false,
     sourceIds = [],
+    preserveGroupLinks = false,
 }) {
-    const created = materializeCopiedSegments(state, snapshots);
+    const created = materializeCopiedSegments(state, snapshots, { preserveGroupLinks });
     if (created.length === 0) return false;
 
     state.segments = [...state.segments, ...created];

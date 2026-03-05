@@ -889,8 +889,9 @@ export default class PathEditor {
         if (/\{[^}]+\}/.test(t)) return true;
         const numeric = Number(t);
         if (!Number.isNaN(numeric) && Number.isFinite(numeric)) return false;
-        return /[*/()]/.test(t)
-            || (/[+\-]/.test(t) && !/^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(t));
+        // Any non-numeric token is expression-like for parameter editing,
+        // including plain variable names (e.g. width, H, var_1).
+        return true;
     }
 
     /**
@@ -1877,6 +1878,21 @@ export default class PathEditor {
     }
 
     /**
+     * Collect selected sub-line indices for a specific path element.
+     * @param {object} parentElem
+     * @returns {number[]}
+     * @private
+     */
+    _collectSelectedLineIndices(parentElem) {
+        const out = [];
+        if (!parentElem || (parentElem.type !== 'path' && parentElem.type !== 'polyline')) return out;
+        for (let i = 0; i < (parentElem.lines?.length ?? 0); i++) {
+            if (parentElem.lines[i]?._elem?.classList.contains('path-line-selected')) out.push(i);
+        }
+        return out.sort((a, b) => a - b);
+    }
+
+    /**
      * Detect path/polyline elements that are intentionally kept in editor text form
      * and are not yet representable as drawable segments in canvas state.
      * Examples: empty contour, `M ...`, `M ... Z`.
@@ -1981,6 +1997,64 @@ export default class PathEditor {
             const subEl = this._buildSubLine(lineData, elem);
             lineData._elem = subEl;
             body.appendChild(subEl);
+        }
+
+        if (!isReadOnlyElem) {
+            const endDrop = document.createElement('div');
+            endDrop.className = 'path-line pe-sub-line pe-sub-line-drop-end';
+            endDrop.title = 'Drop here to append at end';
+
+            endDrop.addEventListener('dragover', (e) => {
+                if (!this._dragState) return;
+                if (!this._dragState.isElem) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    endDrop.classList.add('pe-sub-line-drag-over');
+                    return;
+                }
+                const fromIndices = Array.isArray(this._dragState?.fromIndices)
+                    ? this._dragState.fromIndices
+                    : [this._dragState?.fromIndex];
+                const movedElems = fromIndices.map(i => this._elements[i]).filter(Boolean);
+                const singlePath = movedElems.length === 1
+                    && (movedElems[0]?.type === 'path' || movedElems[0]?.type === 'polyline');
+                if (!singlePath) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                endDrop.classList.add('pe-sub-line-drag-over');
+            });
+
+            endDrop.addEventListener('dragleave', () => {
+                endDrop.classList.remove('pe-sub-line-drag-over');
+            });
+
+            endDrop.addEventListener('drop', (e) => {
+                e.preventDefault();
+                endDrop.classList.remove('pe-sub-line-drag-over');
+                if (!this._dragState) return;
+
+                if (!this._dragState.isElem) {
+                    const sourceElem = this._dragState.parentElem;
+                    const fromIndices = Array.isArray(this._dragState?.fromIndices)
+                        ? this._dragState.fromIndices
+                        : [this._dragState?.fromIndex];
+                    this._moveSubLineAcrossPaths(sourceElem, fromIndices, elem, elem.lines.length);
+                    return;
+                }
+
+                const fromIndices = Array.isArray(this._dragState?.fromIndices)
+                    ? this._dragState.fromIndices
+                    : [this._dragState?.fromIndex];
+                const movedElems = fromIndices.map(i => this._elements[i]).filter(Boolean);
+                const sourcePath = movedElems.length === 1
+                    && (movedElems[0]?.type === 'path' || movedElems[0]?.type === 'polyline')
+                    ? movedElems[0]
+                    : null;
+                if (!sourcePath || sourcePath === elem) return;
+                this._insertWholePathIntoPath(sourcePath, elem, elem.lines.length);
+            });
+
+            body.appendChild(endDrop);
         }
 
         // Expand button click → toggle collapsed/expanded ONLY.
@@ -2183,7 +2257,12 @@ export default class PathEditor {
 
         // ── Drag-to-reorder ──────────────────────────────────────────────
         lineEl.addEventListener('dragstart', (e) => {
-            this._dragState = { parentElem, fromIndex: parentElem.lines.indexOf(lineData) };
+            const fromIndex = parentElem.lines.indexOf(lineData);
+            const selectedIndices = this._collectSelectedLineIndices(parentElem);
+            const fromIndices = (lineEl.classList.contains('path-line-selected') && selectedIndices.length > 1)
+                ? selectedIndices
+                : [fromIndex];
+            this._dragState = { parentElem, fromIndex, fromIndices };
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', '');
             requestAnimationFrame(() => lineEl.classList.add('pe-sub-line-dragging'));
@@ -2195,9 +2274,25 @@ export default class PathEditor {
                 .forEach(el => el.classList.remove('pe-sub-line-drag-over'));
         });
         lineEl.addEventListener('dragover', (e) => {
-            // Reject top-level element drags; only accept same-parent sub-line reorders
-            if (this._dragState?.isElem) return;
-            if (this._dragState?.parentElem !== parentElem) return;
+            if (!this._dragState) return;
+
+            // Sub-line drag: allow same-path reorder and cross-path move.
+            if (!this._dragState.isElem) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                lineEl.classList.add('pe-sub-line-drag-over');
+                return;
+            }
+
+            // Top-level drag: allow dropping a single path into target path at this command position.
+            const fromIndices = Array.isArray(this._dragState?.fromIndices)
+                ? this._dragState.fromIndices
+                : [this._dragState?.fromIndex];
+            const movedElems = fromIndices.map(i => this._elements[i]).filter(Boolean);
+            const singlePath = movedElems.length === 1
+                && (movedElems[0]?.type === 'path' || movedElems[0]?.type === 'polyline');
+            if (!singlePath) return;
+
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
             lineEl.classList.add('pe-sub-line-drag-over');
@@ -2206,14 +2301,52 @@ export default class PathEditor {
         lineEl.addEventListener('drop', (e) => {
             e.preventDefault();
             lineEl.classList.remove('pe-sub-line-drag-over');
-            if (!this._dragState || this._dragState.isElem || this._dragState.parentElem !== parentElem) return;
-            const fromIndex = this._dragState.fromIndex;
-            const toIndex   = parentElem.lines.indexOf(lineData);
-            if (fromIndex === toIndex || fromIndex === -1 || toIndex === -1) return;
-            const [moved] = parentElem.lines.splice(fromIndex, 1);
-            parentElem.lines.splice(toIndex, 0, moved);
-            this._rebuildPathBody(parentElem);
-            this._fireOnChange();
+            if (!this._dragState) return;
+
+            // Move command row between same/different paths.
+            if (!this._dragState.isElem) {
+                const sourceElem = this._dragState.parentElem;
+                const fromIndices = Array.isArray(this._dragState?.fromIndices)
+                    ? this._dragState.fromIndices
+                    : [this._dragState?.fromIndex];
+                const toIndex = parentElem.lines.indexOf(lineData);
+                if (toIndex === -1 || fromIndices.some(i => i === -1)) return;
+
+                if (sourceElem === parentElem) {
+                    const block = [...new Set(fromIndices)].sort((a, b) => a - b);
+                    if (block.length === 0) return;
+                    if (block.length === 1 && block[0] === toIndex) return;
+
+                    const moving = block.map(i => parentElem.lines[i]);
+                    for (let i = block.length - 1; i >= 0; i--) {
+                        parentElem.lines.splice(block[i], 1);
+                    }
+                    const removedBefore = block.filter(i => i < toIndex).length;
+                    const insertAt = Math.max(0, Math.min(toIndex - removedBefore, parentElem.lines.length));
+                    parentElem.lines.splice(insertAt, 0, ...moving);
+                    this._refreshPathSegIdsFromLines(parentElem);
+                    this._rebuildPathBody(parentElem);
+                    this._fireOnChange();
+                    return;
+                }
+
+                this._moveSubLineAcrossPaths(sourceElem, fromIndices, parentElem, toIndex);
+                return;
+            }
+
+            // Move whole path into this path at concrete insertion point.
+            const fromIndices = Array.isArray(this._dragState?.fromIndices)
+                ? this._dragState.fromIndices
+                : [this._dragState?.fromIndex];
+            const movedElems = fromIndices.map(i => this._elements[i]).filter(Boolean);
+            const sourcePath = movedElems.length === 1
+                && (movedElems[0]?.type === 'path' || movedElems[0]?.type === 'polyline')
+                ? movedElems[0]
+                : null;
+            if (!sourcePath || sourcePath === parentElem) return;
+            const insertIndex = parentElem.lines.indexOf(lineData);
+            if (insertIndex === -1) return;
+            this._insertWholePathIntoPath(sourcePath, parentElem, insertIndex);
         });
 
         // ── Click → visual select + canvas callback + track active sub-line ──
@@ -2450,6 +2583,7 @@ export default class PathEditor {
         const params = [...parsed.params];
         while (params.length <= argIndex) params.push('0');
         params[argIndex] = newVal.trim() || '0';
+
         lineData.text = parsed.cmd + ' ' + params.join(' ');
         this._buildLineCellsInElem(lineEl, lineData, parentElem);
         this._fireOnChange();
@@ -2473,8 +2607,101 @@ export default class PathEditor {
         const idx = parentElem.lines.indexOf(lineData);
         if (idx === -1) return;
         parentElem.lines.splice(idx, 1);
+        this._refreshPathSegIdsFromLines(parentElem);
         this._rebuildPathBody(parentElem);
         this._fireOnChange();
+    }
+
+    /**
+     * Keep `segIds` in sync after editing/reordering/moving sub-lines.
+     * @param {object} pathElem
+     * @private
+     */
+    _refreshPathSegIdsFromLines(pathElem) {
+        if (!pathElem || (pathElem.type !== 'path' && pathElem.type !== 'polyline')) return;
+        pathElem.segIds = (pathElem.lines ?? [])
+            .map(l => l?.segId ?? null)
+            .filter(id => id != null && String(id).trim() !== '');
+    }
+
+    /**
+     * Move one command from source path to target path.
+     * @param {object} sourceElem
+     * @param {number} fromIndex
+     * @param {object} targetElem
+     * @param {number} toIndex
+     * @private
+     */
+    _moveSubLineAcrossPaths(sourceElem, fromIndices, targetElem, toIndex) {
+        if (!sourceElem || !targetElem) return false;
+        if ((sourceElem.type !== 'path' && sourceElem.type !== 'polyline')
+            || (targetElem.type !== 'path' && targetElem.type !== 'polyline')) return false;
+
+        const block = [...new Set((Array.isArray(fromIndices) ? fromIndices : [fromIndices]).map(Number))]
+            .filter(i => Number.isInteger(i))
+            .sort((a, b) => a - b);
+        if (block.length === 0) return false;
+        if (block.some(i => i < 0 || i >= (sourceElem.lines?.length ?? 0))) return false;
+        if (toIndex < 0 || toIndex > (targetElem.lines?.length ?? 0)) return false;
+
+        const moving = block.map(i => sourceElem.lines[i]).filter(Boolean);
+        if (moving.length === 0) return false;
+        for (let i = block.length - 1; i >= 0; i--) {
+            sourceElem.lines.splice(block[i], 1);
+        }
+        const insertAt = Math.max(0, Math.min(toIndex, targetElem.lines.length));
+        targetElem.lines.splice(insertAt, 0, ...moving);
+
+        this._refreshPathSegIdsFromLines(sourceElem);
+        this._refreshPathSegIdsFromLines(targetElem);
+
+        if ((sourceElem.lines?.length ?? 0) === 0) {
+            const idx = this._elements.indexOf(sourceElem);
+            if (idx !== -1) this._elements.splice(idx, 1);
+            this._expandedContours.delete(sourceElem.contourId);
+            if (this._activeElemId === `path:${sourceElem.contourId}`) this._activeElemId = null;
+        }
+
+        this._pruneEmptyGroups();
+        this._renderElements();
+        this._fireOnChange();
+        return true;
+    }
+
+    /**
+     * Insert all commands of source path into target path and remove source path row.
+     * @param {object} sourcePathElem
+     * @param {object} targetPathElem
+     * @param {number} insertIndex
+     * @private
+     */
+    _insertWholePathIntoPath(sourcePathElem, targetPathElem, insertIndex) {
+        if (!sourcePathElem || !targetPathElem) return false;
+        if ((sourcePathElem.type !== 'path' && sourcePathElem.type !== 'polyline')
+            || (targetPathElem.type !== 'path' && targetPathElem.type !== 'polyline')) return false;
+        if (sourcePathElem === targetPathElem) return false;
+
+        const movedLines = Array.isArray(sourcePathElem.lines) ? sourcePathElem.lines : [];
+        if (movedLines.length === 0) return false;
+
+        const idx = Math.max(0, Math.min(Number(insertIndex), targetPathElem.lines.length));
+        targetPathElem.lines.splice(idx, 0, ...movedLines);
+        sourcePathElem.lines = [];
+
+        this._refreshPathSegIdsFromLines(targetPathElem);
+
+        const srcIdx = this._elements.indexOf(sourcePathElem);
+        if (srcIdx !== -1) this._elements.splice(srcIdx, 1);
+        this._expandedContours.delete(sourcePathElem.contourId);
+        this._expandedContours.add(targetPathElem.contourId);
+        if (this._activeElemId === `path:${sourcePathElem.contourId}`) {
+            this._activeElemId = `path:${targetPathElem.contourId}`;
+        }
+
+        this._pruneEmptyGroups();
+        this._renderElements();
+        this._fireOnChange();
+        return true;
     }
 
     /**

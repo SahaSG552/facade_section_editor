@@ -492,6 +492,140 @@ function _restoreShapeFormulasIntoState(state, snapshot, vars) {
 }
 
 /**
+ * Restore arc radius formulas from raw PathEditor contour lines into state.
+ *
+ * Why needed:
+ * - PathEditor -> onChange imports evaluated contour path into state.
+ * - During that import, `A` command radius token often becomes numeric.
+ * - Symmetry sync mirrors state segments, so formula links are lost unless
+ *   we re-attach equivalent radius tokens before mirroring.
+ *
+ * @param {EditorStateManager} state
+ * @param {Array} sourceElements
+ * @param {Record<string,number>} vars
+ */
+function _restoreContourFormulasIntoState(state, sourceElements, vars) {
+    if (!state || !Array.isArray(sourceElements) || sourceElements.length === 0) return;
+
+    const isEq = (a, b) => !Number.isNaN(a) && !Number.isNaN(b) && Math.abs(a - b) <= 1e-4;
+    const parseCmd = (lineText) => {
+        const text = String(lineText ?? '').trim();
+        if (!text) return null;
+        const cmd = text[0];
+        if (!/[MmLlHhVvAaZz]/.test(cmd)) return null;
+        const params = text.slice(1).trim().split(/[\s,]+/).filter(Boolean);
+        return { cmd, cmdUpper: cmd.toUpperCase(), params };
+    };
+
+    const nextSegOfType = (queue, fromIdx, wantedType) => {
+        let idx = fromIdx;
+        while (idx < queue.length) {
+            const seg = queue[idx];
+            if (seg?.type === wantedType) return { seg, nextIdx: idx + 1 };
+            idx++;
+        }
+        return { seg: null, nextIdx: queue.length };
+    };
+
+    const comparableForKey = (seg, key) => {
+        if (seg?.type === 'line') {
+            if (key === 'ex') return Number(seg?.data?.end?.x);
+            if (key === 'ey') return Number(-Number(seg?.data?.end?.y));
+            return Number.NaN;
+        }
+        if (seg?.type === 'arc') {
+            if (key === 'rx' || key === 'ry' || key === 'r') {
+                const v = Number(seg?.data?.radius);
+                return Number.isFinite(v) ? v : Number(seg?.data?.[key]);
+            }
+            if (key === 'rot') return 0;
+            if (key === 'large') return Number(seg?.data?.largeArc ?? 0);
+            if (key === 'sweep') return Number(1 - Number(seg?.data?.sweep ?? 0));
+            if (key === 'ex') return Number(seg?.data?.end?.x);
+            if (key === 'ey') return Number(-Number(seg?.data?.end?.y));
+            return Number.NaN;
+        }
+        return Number.NaN;
+    };
+
+    const arcByContour = new Map();
+    for (const seg of state.segments) {
+        if (seg?.type !== 'line' && seg?.type !== 'arc') continue;
+        const cid = Number(seg?.contourId);
+        if (!Number.isFinite(cid)) continue;
+        const q = arcByContour.get(cid) ?? [];
+        q.push(seg);
+        arcByContour.set(cid, q);
+    }
+
+    const updates = [];
+
+    for (const elem of sourceElements) {
+        if (!(elem?.type === 'path' || elem?.type === 'polyline' || elem?.type === 'symmetry')) continue;
+        const cid = Number(elem?.contourId);
+        if (!Number.isFinite(cid)) continue;
+
+        const segQueue = arcByContour.get(cid) ?? [];
+        if (segQueue.length === 0) continue;
+        let segIdx = 0;
+
+        const lines = Array.isArray(elem?.lines) ? elem.lines : [];
+        for (const line of lines) {
+            const parsed = parseCmd(line?.text);
+            if (!parsed) continue;
+
+            const { cmdUpper, params } = parsed;
+            if (cmdUpper === 'M') continue;
+
+            let wantedType = null;
+            if (cmdUpper === 'A') wantedType = 'arc';
+            else if (cmdUpper === 'L' || cmdUpper === 'H' || cmdUpper === 'V' || cmdUpper === 'Z') wantedType = 'line';
+            if (!wantedType) continue;
+
+            const pick = nextSegOfType(segQueue, segIdx, wantedType);
+            segIdx = pick.nextIdx;
+            const seg = pick.seg;
+            if (!seg) continue;
+
+            if (cmdUpper === 'Z') continue;
+
+            const map = [];
+            if (cmdUpper === 'L') map.push(['ex', params[0]], ['ey', params[1]]);
+            if (cmdUpper === 'H') map.push(['ex', params[0]]);
+            if (cmdUpper === 'V') map.push(['ey', params[0]]);
+            if (cmdUpper === 'A') {
+                map.push(['rx', params[0]], ['ry', params[1]], ['rot', params[2]], ['large', params[3]], ['sweep', params[4]], ['ex', params[5]], ['ey', params[6]]);
+            }
+
+            if (map.length === 0) continue;
+
+            const nextData = { ...(seg.data ?? {}) };
+            const exprMap = { ...(nextData?._expr ?? {}) };
+            let changed = false;
+
+            for (const [key, rawToken] of map) {
+                const token = String(rawToken ?? '').trim();
+                if (!token || !isFormulaToken(token)) continue;
+                const tokenVal = _resolveTokenNumber(token, vars);
+                const currentVal = comparableForKey(seg, key);
+                if (!isEq(tokenVal, currentVal)) continue;
+                exprMap[key] = token;
+                changed = true;
+            }
+
+            if (!changed) continue;
+            nextData._expr = exprMap;
+            if (seg.type === 'arc' && typeof exprMap.rx === 'string') {
+                nextData.radiusExpr = exprMap.rx;
+            }
+            updates.push({ id: seg.id, changes: { data: nextData } });
+        }
+    }
+
+    if (updates.length > 0) state.updateSegments(updates);
+}
+
+/**
  * Sync top-level element transforms from PathEditor into segment metadata
  * without modifying segment geometry.
  *
@@ -1407,6 +1541,7 @@ export default class ProfileEditor {
             vars: variableValues,
         });
         _restoreContourLinkMetaFromElements(this.state, sourceElements);
+        _restoreContourFormulasIntoState(this.state, sourceElements, variableValues);
         _restoreShapeFormulasIntoState(this.state, shapeFormulaSnapshot, variableValues);
         _syncElementTransformsToState(this.state, pathEditor?.getElementTransformsSnapshot?.() ?? []);
         this.state.onDebugLog = (entry) => {
@@ -1448,12 +1583,19 @@ export default class ProfileEditor {
             this._syncToPathEditor();
         }
 
+        // If editor was entered from plain path text (no structured source snapshot),
+        // capture the fully built structure now so Cancel can always restore it.
+        if (this._pathEditor && (!Array.isArray(this._entryElementsSnapshot) || this._entryElementsSnapshot.length === 0)) {
+            this._entryElementsSnapshot = JSON.parse(JSON.stringify(this._pathEditor.getElementsDebugSnapshot?.() ?? []));
+        }
+
         // 7. Re-draw M-dot at updated scale whenever the user zooms/pans.
         // The dot radius is zoom-dependent (3px screen = 3/zoom SVG units),
         // so we must recreate it on every zoom change.
         this._prevOnZoom = canvasManager.config.onZoom;
         canvasManager.config.onZoom = (zoom, panX, panY) => {
             if (this._prevOnZoom) this._prevOnZoom(zoom, panX, panY);
+            this._currentTool?.onViewportChanged?.({ zoom, panX, panY });
             for (const id of (this.state?.selectedIds ?? new Set())) {
                 if (typeof id === 'string' && id.startsWith('m:')) {
                     this._showMDotForContour(Number(id.slice(2)));
@@ -1924,6 +2066,11 @@ export default class ProfileEditor {
             // source-contour text in PathEditor (fixes issues: re-edit breaks symmetry,
             // text edits not mirrored, new elements not appearing in mirror immediately).
             _restoreContourLinkMetaFromElements(this.state, snapshot);
+            _restoreContourFormulasIntoState(
+                this.state,
+                snapshot,
+                this._pathEditor?.variableValues ?? this.state.variableValues ?? {}
+            );
             if (typeof this.state._syncSymmetryContours === 'function') {
                 this.state._syncSymmetryContours();
             }

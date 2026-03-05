@@ -16,9 +16,55 @@ import {
 
 const log = LoggerFactory.createLogger("MirrorTool");
 const SVG_NS = "http://www.w3.org/2000/svg";
+const FORMULA_EQ_EPS = 1e-4;
 
 function _clone(value) {
     return JSON.parse(JSON.stringify(value));
+}
+
+function _numbersClose(a, b) {
+    return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= FORMULA_EQ_EPS;
+}
+
+function _normalizeExprMap(exprMap) {
+    return exprMap && Object.keys(exprMap).length > 0 ? exprMap : undefined;
+}
+
+function _resolveFormulaComparableValue(data, key) {
+    if (!data || typeof data !== "object") return Number.NaN;
+    if (key === "cx") return Number(data?.cx ?? data?.center?.x);
+    if (key === "cy") return Number(data?.cy ?? data?.center?.y);
+    if (key === "r") return Number(data?.r ?? data?.radius);
+    return Number(data?.[key]);
+}
+
+function _carryMirrorFormulas(originData, nextData) {
+    const out = nextData && typeof nextData === "object" ? nextData : {};
+    const origin = originData && typeof originData === "object" ? originData : {};
+
+    const srcExpr = origin?._expr;
+    const nextExpr = {};
+    if (srcExpr && typeof srcExpr === "object") {
+        for (const [key, token] of Object.entries(srcExpr)) {
+            const oldVal = _resolveFormulaComparableValue(origin, key);
+            const newVal = _resolveFormulaComparableValue(out, key);
+            if (_numbersClose(oldVal, newVal)) {
+                nextExpr[key] = token;
+            }
+        }
+    }
+
+    out._expr = _normalizeExprMap(nextExpr);
+
+    const oldRadius = Number(origin?.radius);
+    const newRadius = Number(out?.radius);
+    if (typeof origin?.radiusExpr === "string" && _numbersClose(oldRadius, newRadius)) {
+        out.radiusExpr = origin.radiusExpr;
+    } else {
+        delete out.radiusExpr;
+    }
+
+    return out;
 }
 
 function _reverseSegmentDirectionSnapshot(seg) {
@@ -521,9 +567,10 @@ class MirrorTool extends BaseTool {
                     : "Mirror",
                 keepSourceSelection: this._modeType === "mirror" && keepOriginals,
                 sourceIds: this._sourceSegIds,
+                preserveGroupLinks: this._modeType === "symmetry",
             });
         } else {
-            const createdSegments = materializeCopiedSegments(state, newSegments);
+            const createdSegments = materializeCopiedSegments(state, newSegments, { preserveGroupLinks: true });
             if (createdSegments.length === 0) return false;
             const drop = new Set(sourceIds);
             state.segments = [...state.segments.filter(s => !drop.has(s.id)), ...createdSegments];
@@ -557,7 +604,7 @@ class MirrorTool extends BaseTool {
         if (seg.type === "line") {
             data.start = mirrorRawPointKeepRt(data.start);
             data.end = mirrorRawPointKeepRt(data.end);
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data);
             return { data, transforms };
         }
 
@@ -567,13 +614,13 @@ class MirrorTool extends BaseTool {
             if (data.center) data.center = mirrorRawPointKeepRt(data.center);
             if (data.pt3) data.pt3 = mirrorRawPointKeepRt(data.pt3);
             if (typeof data.sweep === "number") data.sweep = 1 - data.sweep;
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data);
             return { data, transforms };
         }
 
         if (seg.type === "circle") {
             data.center = mirrorRawPointKeepRt(data.center);
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data);
             return { data, transforms };
         }
 
@@ -603,7 +650,7 @@ class MirrorTool extends BaseTool {
             data.h = Math.abs(hSigned);
             data.dirW = wSigned >= 0 ? 1 : -1;
             data.dirH = hSigned >= 0 ? 1 : -1;
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data);
             return { data, transforms: withRtAngle(transforms, nextRt) };
         }
 
@@ -613,7 +660,7 @@ class MirrorTool extends BaseTool {
             const p = mirrorRawPointWithRt({ x: data.cx, y: data.cy }, nextRt);
             data.cx = p.x;
             data.cy = p.y;
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data);
             return { data, transforms: withRtAngle(transforms, nextRt) };
         }
 

@@ -34,11 +34,33 @@
 - [x] Реализовать `FlipTool` staged selection/confirm flow с ghost-стрелками направления.
 - [x] Реализовать commit реверса направления по контурам (reverse order + reverse segment direction).
 - [x] Обновить `Symmetry` генерацию: mirrored-контуры всегда в противоположном направлении к source.
+- [x] `Flip` arrows: увеличен размер и добавлен zoom-aware refresh (не пропадают при zoom/pan в preview stage).
 - [ ] Применить тот же Flip-пайплайн к элементам symmetry в отдельной итерации (после UX валидации).
 
 ### Следующая задача (backlog)
-- [ ] Drag-and-drop одной/нескольких команд или целых path-элементов в структуру другого path:
+- [~] Drag-and-drop одной/нескольких команд или целых path-элементов в структуру другого path:
   вставка в конкретную позицию или в конец.
+  - [x] Перемещение одиночной команды (sub-line) между разными Path.
+  - [x] Вставка целого Path в другой Path по drop на конкретную команду (позиционный insert).
+  - [x] Multi-select перенос нескольких команд между Path.
+  - [x] Drop целого Path в конец target Path (через end drop-zone в теле path).
+
+### Hotfix batch (05.03.2026)
+- [x] Fix: два разных path, соприкасающихся стартовыми точками, больше не склеиваются в одно выделение.
+  Selection для line/arc теперь берёт связную компоненту внутри contour, а не все сегменты contourId.
+- [x] Fix: Cancel надёжно откатывает даже при входе из plain profilePath без исходного structured snapshot.
+  На enter сохраняется fallback snapshot из построенного PathEditor.
+- [x] Fix: добавлен drop target в конец path, чтобы переносить команды/целый path в конец, не только перед последней строкой.
+
+### Hotfix follow-up (05.03.2026)
+- [x] Fix: копии после Mirror/Move/Rotate больше не выделяются как «одна группа» по клику на canvas.
+  Причина: copied segments наследовали `groupId/parentGroupId`; теперь копии по умолчанию декуплируются от source groups.
+  Исключения: symmetry flow и mirror-replace path сохраняют group links намеренно.
+- [x] UX: убрано видимое `Drop to end`; end drop-zone оставлена невидимой и визуально проявляется только как стандартный drag-over индикатор (как между строками).
+- [x] Symmetry formula carry (phase 1): восстановление formula-токенов contour-команд (`L/H/V/A`) из raw PathEditor-строк в state перед `_syncSymmetryContours`.
+- [x] Symmetry formula carry (phase 2): рефактор `EditorStateManager` — добавлен affine-миррор токенов координат (`sx/sy/ex/ey`) в SVG-space, чтобы переносились не только `A`-параметры, но и формулы линейных команд.
+- [x] Рефактор и документация: добавлены JSDoc к новым helper-функциям (`_buildSvgMirrorAffine`, `_affineExpr`, `_carryMirrorFormulas` и универсальному восстановлению contour-formulas).
+- [~] Открытый follow-up: довести универсальный перенос до 100% покрытия редких параметров/edge-cases (например, flags/rotation в `A` при нетривиальных выражениях и смешанных токенах в командах).
 
 - [ ] Универсальная обработка параметров: любой параметр любой команды/элемента/модификатора может содержать формулу.
 - [ ] При изменениях с канваса (move/edit):

@@ -1,6 +1,7 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { arcCenterFromEndpoints } from "./tools/ArcTool.js";
 import { getRectGeomLocal } from "./geometry/rectGeometry.js";
+import { evaluateTokenWithVars, isFormulaToken } from "../utils/formulaPolicy.js";
 import {
     dot,
     mirrorPoint,
@@ -11,6 +12,7 @@ import {
 } from "./tools/shared/transformGeometry.js";
 
 const log = LoggerFactory.createLogger("EditorStateManager");
+const FORMULA_EQ_EPS = 1e-4;
 
 function _cloneDeep(value) {
     return JSON.parse(JSON.stringify(value));
@@ -18,6 +20,157 @@ function _cloneDeep(value) {
 
 function _isSymmetrySegment(seg) {
     return String(seg?.linkType ?? "") === "symmetry";
+}
+
+function _numbersClose(a, b) {
+    return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= FORMULA_EQ_EPS;
+}
+
+function _normalizeExprMap(exprMap) {
+    return exprMap && Object.keys(exprMap).length > 0 ? exprMap : undefined;
+}
+
+function _resolveFormulaComparableValue(data, key) {
+    if (!data || typeof data !== "object") return Number.NaN;
+    if (key === "cx") return Number(data?.cx ?? data?.center?.x);
+    if (key === "cy") return Number(data?.cy ?? data?.center?.y);
+    if (key === "r") return Number(data?.r ?? data?.radius);
+    if (key === "sx") return Number(data?.sx ?? data?.start?.x);
+    if (key === "sy") return Number(data?.sy ?? -Number(data?.start?.y));
+    if (key === "ex") return Number(data?.ex ?? data?.end?.x);
+    if (key === "ey") return Number(data?.ey ?? -Number(data?.end?.y));
+    if (key === "rx") return Number(data?.rx ?? data?.radius);
+    if (key === "ry") return Number(data?.ry ?? data?.radius);
+    if (key === "rot") return Number(data?.rot ?? 0);
+    if (key === "large") return Number(data?.large ?? data?.largeArc);
+    if (key === "sweep") return Number(data?.sweepExpr ?? (1 - Number(data?.sweep ?? 0)));
+    return Number(data?.[key]);
+}
+
+/**
+ * Format number for expression emission with stable precision.
+ * @param {number} value
+ * @returns {string}
+ */
+function _exprNum(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return "0";
+    return String(Number(n.toFixed(12)));
+}
+
+/**
+ * Build affine reflection coefficients in SVG-space (Y-down) from axis in raw-space (Y-up).
+ * Returns null for degenerate axis.
+ *
+ * @param {{p1:{x:number,y:number}, p2:{x:number,y:number}}|null|undefined} axis
+ * @returns {{r11:number,r12:number,r21:number,r22:number,tx:number,ty:number}|null}
+ */
+function _buildSvgMirrorAffine(axis) {
+    const x1 = Number(axis?.p1?.x);
+    const y1 = -Number(axis?.p1?.y);
+    const x2 = Number(axis?.p2?.x);
+    const y2 = -Number(axis?.p2?.y);
+    if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len <= 1e-9) return null;
+
+    const ux = dx / len;
+    const uy = dy / len;
+    const r11 = 2 * ux * ux - 1;
+    const r12 = 2 * ux * uy;
+    const r21 = r12;
+    const r22 = 2 * uy * uy - 1;
+    const tx = x1 - (r11 * x1 + r12 * y1);
+    const ty = y1 - (r21 * x1 + r22 * y1);
+    return { r11, r12, r21, r22, tx, ty };
+}
+
+/**
+ * Build affine expression `a*x + b*y + c` from token strings.
+ * @param {number} a
+ * @param {string} xTok
+ * @param {number} b
+ * @param {string} yTok
+ * @param {number} c
+ * @returns {string}
+ */
+function _affineExpr(a, xTok, b, yTok, c) {
+    const terms = [];
+    if (Math.abs(Number(a)) > 1e-12) terms.push(`(${_exprNum(a)})*(${xTok})`);
+    if (Math.abs(Number(b)) > 1e-12) terms.push(`(${_exprNum(b)})*(${yTok})`);
+    if (Math.abs(Number(c)) > 1e-12) terms.push(`${_exprNum(c)}`);
+    return terms.length > 0 ? terms.join(" + ") : "0";
+}
+
+/**
+ * Mirror contour parameter formulas from source data to mirrored data.
+ *
+ * Strategy:
+ * - Keep same-key formulas when numeric value stayed equivalent.
+ * - For coordinate keys (`sx/sy/ex/ey`) additionally try affine-transformed
+ *   token synthesis in SVG-space so non-A command formulas can survive symmetry.
+ *
+ * @param {object} originData
+ * @param {object} nextData
+ * @param {{axis?:{p1:{x:number,y:number},p2:{x:number,y:number}}, variableValues?:Record<string,number>}} [options]
+ * @returns {object}
+ */
+function _carryMirrorFormulas(originData, nextData, options = {}) {
+    const out = nextData && typeof nextData === "object" ? nextData : {};
+    const origin = originData && typeof originData === "object" ? originData : {};
+    const vars = options?.variableValues ?? {};
+    const affine = _buildSvgMirrorAffine(options?.axis);
+
+    const srcExpr = origin?._expr;
+    const nextExpr = {};
+    if (srcExpr && typeof srcExpr === "object") {
+        for (const [key, token] of Object.entries(srcExpr)) {
+            const oldVal = _resolveFormulaComparableValue(origin, key);
+            const newVal = _resolveFormulaComparableValue(out, key);
+            if (_numbersClose(oldVal, newVal)) {
+                nextExpr[key] = token;
+            }
+        }
+
+        const evalExpr = (token) => evaluateTokenWithVars(String(token ?? ""), vars, Number.NaN);
+        const maybeCarryMirroredCoord = (xKey, yKey) => {
+            if (!affine) return;
+            const srcX = srcExpr[xKey];
+            const srcY = srcExpr[yKey];
+            if (!isFormulaToken(srcX) && !isFormulaToken(srcY)) return;
+
+            const xTok = isFormulaToken(srcX) ? String(srcX).trim() : _exprNum(_resolveFormulaComparableValue(origin, xKey));
+            const yTok = isFormulaToken(srcY) ? String(srcY).trim() : _exprNum(_resolveFormulaComparableValue(origin, yKey));
+            const mirroredXTok = _affineExpr(affine.r11, xTok, affine.r12, yTok, affine.tx);
+            const mirroredYTok = _affineExpr(affine.r21, xTok, affine.r22, yTok, affine.ty);
+
+            const mirroredXVal = evalExpr(mirroredXTok);
+            const mirroredYVal = evalExpr(mirroredYTok);
+            const newXVal = _resolveFormulaComparableValue(out, xKey);
+            const newYVal = _resolveFormulaComparableValue(out, yKey);
+
+            if (_numbersClose(mirroredXVal, newXVal)) nextExpr[xKey] = mirroredXTok;
+            if (_numbersClose(mirroredYVal, newYVal)) nextExpr[yKey] = mirroredYTok;
+        };
+
+        maybeCarryMirroredCoord("sx", "sy");
+        maybeCarryMirroredCoord("ex", "ey");
+    }
+
+    out._expr = _normalizeExprMap(nextExpr);
+
+    const oldRadius = Number(origin?.radius);
+    const newRadius = Number(out?.radius);
+    if (typeof origin?.radiusExpr === "string" && _numbersClose(oldRadius, newRadius)) {
+        out.radiusExpr = origin.radiusExpr;
+    } else {
+        delete out.radiusExpr;
+    }
+
+    return out;
 }
 
 
@@ -1045,7 +1198,10 @@ export default class EditorStateManager {
         if (seg.type === "line") {
             data.start = mirrorRawPointKeepRt(data.start);
             data.end = mirrorRawPointKeepRt(data.end);
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data, {
+                axis,
+                variableValues: this.variableValues ?? {},
+            });
             return { type: "line", data, transforms, cmdHint: seg.cmdHint };
         }
 
@@ -1055,14 +1211,20 @@ export default class EditorStateManager {
             if (data.center) data.center = mirrorRawPointKeepRt(data.center);
             if (data.pt3) data.pt3 = mirrorRawPointKeepRt(data.pt3);
             data.sweep = Number(data.sweep ?? 0) ? 0 : 1;
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data, {
+                axis,
+                variableValues: this.variableValues ?? {},
+            });
             return { type: "arc", data, transforms, cmdHint: seg.cmdHint };
         }
 
         if (seg.type === "circle") {
             data.center = mirrorRawPointKeepRt(data.center);
             if (data.pt3) data.pt3 = mirrorRawPointKeepRt(data.pt3);
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data, {
+                axis,
+                variableValues: this.variableValues ?? {},
+            });
             return { type: "circle", data, transforms, cmdHint: seg.cmdHint };
         }
 
@@ -1087,7 +1249,10 @@ export default class EditorStateManager {
             data.h    = Math.abs(hSigned);
             data.dirW = wSigned  >= 0 ? 1 : -1;
             data.dirH = hSigned  >= 0 ? 1 : -1;
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data, {
+                axis,
+                variableValues: this.variableValues ?? {},
+            });
             return { type: "rect", data, transforms: withRtAngle(transforms, nextRt), cmdHint: seg.cmdHint };
         }
 
@@ -1095,7 +1260,10 @@ export default class EditorStateManager {
             const p = mirrorRawPointKeepRt({ x: Number(data.cx ?? 0), y: Number(data.cy ?? 0) });
             data.cx = p.x;
             data.cy = p.y;
-            delete data._expr;
+            _carryMirrorFormulas(seg.data, data, {
+                axis,
+                variableValues: this.variableValues ?? {},
+            });
             return { type: "ellipse", data, transforms, cmdHint: seg.cmdHint };
         }
 
@@ -1646,6 +1814,15 @@ export default class EditorStateManager {
         const r = n => parseFloat(n.toFixed(4));
         const EPS = 1e-6;
         const eq = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+        const vars = this.variableValues ?? {};
+        const chooseFormula = (token, numericValue) => {
+            if (!isFormulaToken(token)) return null;
+            const tok = String(token ?? '').trim();
+            const evalVal = evaluateTokenWithVars(tok, vars, Number.NaN);
+            if (!Number.isFinite(evalVal) || !Number.isFinite(Number(numericValue))) return null;
+            if (Math.abs(Number(evalVal) - Number(numericValue)) > 1e-4) return null;
+            return tok;
+        };
 
         const parts = [];
         const lineSegIds = [];
@@ -1775,26 +1952,51 @@ export default class EditorStateManager {
 
             if (seg.type === "arc") {
                 const { radius, largeArc, sweep, radiusExpr } = seg.data;
+                const expr = seg.data?._expr ?? {};
                 // Use the stored variable expression when present; otherwise emit the
                 // numeric radius.  Y is negated (bit-space Y-up), so sweep is flipped.
-                const rxStr = radiusExpr ?? r(radius);
-                parts.push(`A ${rxStr} ${rxStr} 0 ${largeArc} ${1 - sweep} ${r(end.x)} ${r(-end.y)}`);
+                const rxNum = Number(radius);
+                const ryNum = Number(radius);
+                const rotNum = 0;
+                const largeNum = Number(largeArc ?? 0);
+                const sweepNum = Number(1 - Number(sweep ?? 0));
+                const exNum = Number(end.x);
+                const eyNum = Number(-end.y);
+
+                const rxStr = chooseFormula(expr.rx, rxNum)
+                    ?? chooseFormula(radiusExpr, rxNum)
+                    ?? r(rxNum);
+                const ryStr = chooseFormula(expr.ry, ryNum)
+                    ?? chooseFormula(radiusExpr, ryNum)
+                    ?? r(ryNum);
+                const rotStr = chooseFormula(expr.rot, rotNum) ?? r(rotNum);
+                const largeStr = chooseFormula(expr.large, largeNum) ?? String(Math.round(largeNum));
+                const sweepStr = chooseFormula(expr.sweep, sweepNum) ?? String(Math.round(sweepNum));
+                const exStr = chooseFormula(expr.ex, exNum) ?? r(exNum);
+                const eyStr = chooseFormula(expr.ey, eyNum) ?? r(eyNum);
+
+                parts.push(`A ${rxStr} ${ryStr} ${rotStr} ${largeStr} ${sweepStr} ${exStr} ${eyStr}`);
             } else {
                 // line: choose command based on cmdHint + current geometry
                 const hint = seg.cmdHint;
+                const expr = seg.data?._expr ?? {};
                 const isH = Math.abs(start.y - end.y) < EPS;
                 const isV = Math.abs(start.x - end.x) < EPS;
+                const exNum = Number(end.x);
+                const eyNum = Number(-end.y);
+                const exStr = chooseFormula(expr.ex, exNum) ?? r(exNum);
+                const eyStr = chooseFormula(expr.ey, eyNum) ?? r(eyNum);
 
                 if (hint === 'H') {
-                    parts.push(isH ? `H ${r(end.x)}` : `L ${r(end.x)} ${r(-end.y)}`);
+                    parts.push(isH ? `H ${exStr}` : `L ${exStr} ${eyStr}`);
                 } else if (hint === 'V') {
-                    parts.push(isV ? `V ${r(-end.y)}` : `L ${r(end.x)} ${r(-end.y)}`);
+                    parts.push(isV ? `V ${eyStr}` : `L ${exStr} ${eyStr}`);
                 } else if (hint === 'L' || hint === 'Z') {
-                    parts.push(`L ${r(end.x)} ${r(-end.y)}`);
+                    parts.push(`L ${exStr} ${eyStr}`);
                 } else {
-                    if (isH) parts.push(`H ${r(end.x)}`);
-                    else if (isV) parts.push(`V ${r(-end.y)}`);
-                    else parts.push(`L ${r(end.x)} ${r(-end.y)}`);
+                    if (isH) parts.push(`H ${exStr}`);
+                    else if (isV) parts.push(`V ${eyStr}`);
+                    else parts.push(`L ${exStr} ${eyStr}`);
                 }
             }
 

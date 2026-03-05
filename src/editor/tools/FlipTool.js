@@ -157,6 +157,12 @@ export default class FlipTool extends BaseTool {
         return false;
     }
 
+    onViewportChanged() {
+        if (this._phase === "preview" && this._selectedSegIds.length > 0) {
+            this._renderDirectionGhost();
+        }
+    }
+
     _commitFlip() {
         const state = this.ctx.state;
         const selected = new Set(this._selectedSegIds);
@@ -199,8 +205,10 @@ export default class FlipTool extends BaseTool {
         const vars = this.ctx.state.variableValues ?? {};
         const selected = new Set(this._selectedSegIds);
         const zoom = this.ctx.canvas?.cm?.zoomLevel || 1;
-        const arrowSize = Math.max(0.5, 6 / zoom);
-        const tangentDelta = Math.max(0.01, arrowSize * 0.5);
+        // Scale arrow size with zoom (larger on zoom-in, smaller on zoom-out)
+        // while keeping bounds so arrows stay readable.
+        const arrowSize = Math.max(0.24, Math.min(1.1, 0.24 * Math.pow(zoom, 0.55)));
+        const tangentDelta = Math.max(0.01, arrowSize * 0.45);
 
         const g = document.createElementNS(SVG_NS, "g");
         g.classList.add("editor-flip-preview");
@@ -231,7 +239,7 @@ export default class FlipTool extends BaseTool {
             shaft.setAttribute("x2", String(tipPt.x));
             shaft.setAttribute("y2", String(tipPt.y));
             shaft.setAttribute("stroke", "#1f6feb");
-            shaft.setAttribute("stroke-width", String(Math.max(0.25, 1.5 / zoom)));
+            shaft.setAttribute("stroke-width", "1.8");
             shaft.setAttribute("vector-effect", "non-scaling-stroke");
             shaft.setAttribute("pointer-events", "none");
             g.appendChild(shaft);
@@ -239,7 +247,7 @@ export default class FlipTool extends BaseTool {
             const headPath = document.createElementNS(SVG_NS, "path");
             headPath.setAttribute("d", `M ${left.x} ${left.y} L ${tipPt.x} ${tipPt.y} L ${right.x} ${right.y}`);
             headPath.setAttribute("stroke", "#1f6feb");
-            headPath.setAttribute("stroke-width", String(Math.max(0.25, 1.5 / zoom)));
+            headPath.setAttribute("stroke-width", "1.8");
             headPath.setAttribute("fill", "none");
             headPath.setAttribute("vector-effect", "non-scaling-stroke");
             headPath.setAttribute("pointer-events", "none");

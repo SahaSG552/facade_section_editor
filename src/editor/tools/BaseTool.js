@@ -139,6 +139,14 @@ export default class BaseTool {
     onConfirm(pos, _e) { return false; }
 
     /**
+     * Called when canvas viewport changes (zoom/pan).
+     * Tools with zoom-dependent ghost overlays can refresh visuals here.
+     * @param {{ zoom:number, panX:number, panY:number }} _viewport
+     */
+    // eslint-disable-next-line no-unused-vars
+    onViewportChanged(_viewport) {}
+
+    /**
      * Returns true if this tool has an in-progress command that should
      * intercept right-click (to confirm/finish). False by default (for cursor).
      * @returns {boolean}

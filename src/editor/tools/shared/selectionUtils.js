@@ -137,10 +137,44 @@ function collectElementSegments(seedSeg, allSegments) {
     if (!seedSeg) return [];
     if (seedSeg.type === "line" || seedSeg.type === "arc") {
         const contourId = seedSeg.contourId ?? 0;
-        return allSegments.filter(
-            s => (s.type === "line" || s.type === "arc" || s.type === "circle" || s.type === "rect" || s.type === "ellipse")
+        const contourSegs = allSegments.filter(
+            s => (s.type === "line" || s.type === "arc") && (s.contourId ?? 0) === contourId,
+        );
+
+        const EPS = 1e-6;
+        const eq = (a, b) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
+
+        // Follow a contour chain using directed continuity rules, so paths that
+        // only touch by start-start/end-end vertices are not merged into one selection.
+        const visited = new Set([seedSeg.id]);
+        const out = [seedSeg];
+
+        // Forward: current.end -> next.start
+        let cur = seedSeg;
+        for (;;) {
+            const next = contourSegs.find((s) => !visited.has(s.id) && eq(cur.data.end, s.data.start));
+            if (!next) break;
+            visited.add(next.id);
+            out.push(next);
+            cur = next;
+        }
+
+        // Backward: prev.end -> current.start
+        cur = seedSeg;
+        for (;;) {
+            const prev = contourSegs.find((s) => !visited.has(s.id) && eq(s.data.end, cur.data.start));
+            if (!prev) break;
+            visited.add(prev.id);
+            out.unshift(prev);
+            cur = prev;
+        }
+
+        // Keep embedded/shape segments attached to this contour for parity with prior behavior.
+        const contourShapes = allSegments.filter(
+            s => (s.type === "circle" || s.type === "rect" || s.type === "ellipse")
                 && (s.contourId ?? 0) === contourId,
         );
+        return [...out, ...contourShapes];
     }
     return [seedSeg];
 }
