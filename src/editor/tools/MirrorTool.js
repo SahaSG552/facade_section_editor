@@ -361,6 +361,7 @@ class MirrorTool extends BaseTool {
     _captureSourceSelection() {
         const selected = [...this.ctx.state.selectedIds];
         if (this._modeType === "symmetry" && selected.length > 0) {
+            // Expand to include shapes embedded in selected contours.
             const selectedContourIds = new Set(
                 selected
                     .map((id) => this.ctx.state.segments.find((s) => s.id === id)?.contourId)
@@ -446,19 +447,70 @@ class MirrorTool extends BaseTool {
         }
 
         if (keepOriginals) {
-            const sourceContourId = Number(sourceSegments[0]?.contourId);
             const isSymmetryMode = this._modeType === "symmetry";
-            const snapshots = isSymmetryMode
-                ? newSegments.map((seg) => ({
+
+            let snapshots;
+            if (isSymmetryMode) {
+                if (!Array.isArray(state.elementGroups)) state.elementGroups = [];
+
+                const axisObj = {
+                    p1: { x: this._axisStart.x, y: this._axisStart.y },
+                    p2: { x: this._axisEnd.x, y: this._axisEnd.y },
+                };
+                const srcGroupName = "Symmetry";
+
+                // 1. Always create a new source group "Symmetry" for all selected segments.
+                const srcGroupId = typeof state._allocateGroupId === 'function'
+                    ? state._allocateGroupId()
+                    : ((state.elementGroups.reduce((m, g) => Math.max(m, Number(g?.groupId) || 0), 0)) + 1);
+                const srcGroupGuid = `grp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+                state.elementGroups = [...state.elementGroups, {
+                    groupId: srcGroupId,
+                    parentGroupId: null,
+                    guid: srcGroupGuid,
+                    name: srcGroupName,
+                    linkType: null,
+                    sourceGroupId: null,
+                    sourceGroupGuid: null,
+                    axis: null,
+                }];
+
+                // Move all source segments into the new source group.
+                const sourceIdSet = new Set(this._sourceSegIds);
+                state.segments = state.segments.map(s =>
+                    sourceIdSet.has(s.id)
+                        ? { ...s, groupId: srcGroupId, parentGroupId: srcGroupId }
+                        : s
+                );
+
+                // 2. Create sym group linked to source group (name tracks source group name).
+                const symGroupId = typeof state._allocateGroupId === 'function'
+                    ? state._allocateGroupId()
+                    : ((state.elementGroups.reduce((m, g) => Math.max(m, Number(g?.groupId) || 0), 0)) + 1);
+                state.elementGroups = [...state.elementGroups, {
+                    groupId: symGroupId,
+                    parentGroupId: null,
+                    guid: `sym-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+                    name: srcGroupName,
+                    linkType: 'symmetry',
+                    sourceGroupId: srcGroupId,
+                    sourceGroupGuid: srcGroupGuid,
+                    axis: axisObj,
+                }];
+
+                // 3. Mirrored snapshots go into sym group, linked to their source contour.
+                snapshots = newSegments.map((seg) => ({
                     ...seg,
                     linkType: "symmetry",
-                    parentContourId: Number.isFinite(sourceContourId) ? sourceContourId : null,
-                    axis: {
-                        p1: { x: this._axisStart.x, y: this._axisStart.y },
-                        p2: { x: this._axisEnd.x, y: this._axisEnd.y },
-                    },
-                }))
-                : newSegments;
+                    parentContourId: Number.isFinite(Number(seg?.contourId)) ? Number(seg.contourId) : null,
+                    axis: axisObj,
+                    groupId: symGroupId,
+                    parentGroupId: symGroupId,
+                }));
+            } else {
+                snapshots = newSegments;
+            }
+
             return commitCopiedSnapshots({
                 state,
                 snapshots,
@@ -745,6 +797,9 @@ class MirrorTool extends BaseTool {
             return;
         }
         this._clearRectSideSelection();
+        // Skip symmetry segments — they're read-only mirrors
+        const seg = this._findSeg(id);
+        if (String(seg?.linkType ?? '') === 'symmetry') return;
         const chainIds = this.ctx.state.getChain(id).map(s => s.id);
         this.ctx.state.setSelection(chainIds);
     }

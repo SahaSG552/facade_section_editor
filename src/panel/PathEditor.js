@@ -310,12 +310,21 @@ export default class PathEditor {
                         guid: String(elem?.guid ?? ''),
                         name: String(elem.name ?? ''),
                         parentGroupId: this._optId(elem?.parentGroupId),
+                        // Symmetry-group link metadata
+                        linkType: elem?.linkType ?? null,
+                        sourceGroupId: (elem?.sourceGroupId != null && Number.isFinite(Number(elem.sourceGroupId)))
+                            ? Number(elem.sourceGroupId) : null,
+                        sourceGroupGuid: String(elem?.sourceGroupGuid ?? ''),
+                        axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
                     }
                     : {
                     kind: 'shape',
                     segId: elem.segId,
+                    groupId: this._optId(elem?.groupId ?? elem?.parentGroupId),
                     parentContourId: this._optId(elem?.parentContourId),
                     parentGroupId: this._optId(elem?.parentGroupId),
+                    linkType: elem?.linkType ?? null,
+                    axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
                 }
         );
         if (this.onElementOrderChange) this.onElementOrderChange(order);
@@ -646,6 +655,12 @@ export default class PathEditor {
                     expanded: elem?.expanded !== false,
                     parentGroupId: this._optId(elem?.parentGroupId),
                     transforms: Array.isArray(elem.transforms) ? [...elem.transforms] : [],
+                    // Symmetry-group link metadata
+                    linkType: elem?.linkType ?? null,
+                    sourceGroupId: (elem?.sourceGroupId != null && Number.isFinite(Number(elem.sourceGroupId)))
+                        ? Number(elem.sourceGroupId) : null,
+                    sourceGroupGuid: String(elem?.sourceGroupGuid ?? ''),
+                    axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
                     _elem: null,
                 };
             }
@@ -675,8 +690,11 @@ export default class PathEditor {
                     segId: elem.segId,
                     data: nextData,
                     transforms,
+                    groupId: this._optId(elem?.groupId ?? elem?.parentGroupId),
                     parentContourId,
                     parentGroupId: this._optId(elem?.parentGroupId),
+                    linkType: elem?.linkType ?? null,
+                    axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
                     _isEmbeddedVisual: false,
                     _elem: null,
                 };
@@ -758,6 +776,7 @@ export default class PathEditor {
                 type: elem.type,
                 contourId: cid,
                 segIds: elem.segIds ?? [],
+                groupId: this._optId(elem?.groupId ?? elem?.parentGroupId),
                 expanded,
                 lines,
                 transforms,
@@ -1164,8 +1183,13 @@ export default class PathEditor {
             if (elem.type === 'path' || elem.type === 'polyline') rowNoByContour.set(Number(elem.contourId), rowLabel);
 
             if (elem.type === 'group') elem._elem = this._buildGroupRow(elem, rowLabel);
-            else if (PathEditor.isShapeType(elem.type)) elem._elem = this._buildShapeRow(elem, rowLabel);
-            else elem._elem = this._buildPathGroup(elem, rowLabel);
+            else if (PathEditor.isShapeType(elem.type)) {
+                elem._inSymmetryGroup = this._isInSymmetryGroup(elem);
+                elem._elem = this._buildShapeRow(elem, rowLabel);
+            } else {
+                elem._inSymmetryGroup = this._isInSymmetryGroup(elem);
+                elem._elem = this._buildPathGroup(elem, rowLabel);
+            }
 
             const depth = this._getGroupDepth(elem);
             if (elem._elem) elem._elem.style.marginLeft = depth > 0 ? `${depth * 14}px` : '';
@@ -1204,19 +1228,40 @@ export default class PathEditor {
     }
 
     /**
+     * Return true when any ancestor group of `elem` has `linkType='symmetry'`.
+     * Used to render children of a symmetry group as read-only.
+     * @param {object} elem
+     * @returns {boolean}
+     * @private
+     */
+    _isInSymmetryGroup(elem) {
+        let parent = this._resolveParentGroupById(elem);
+        const seen = new Set();
+        while (parent && !seen.has(Number(parent.groupId))) {
+            seen.add(Number(parent.groupId));
+            if (String(parent?.linkType ?? '') === 'symmetry') return true;
+            parent = this._resolveParentGroupById(parent);
+        }
+        return false;
+    }
+
+    /**
      * Build a group row element.
-     * @param {{type:'group', groupId:number, name:string}} elem
+     * @param {{type:'group', groupId:number, name:string, linkType?:string}} elem
      * @param {string|number} rowNum
      * @returns {HTMLElement}
      * @private
      */
     _buildGroupRow(elem, rowNum) {
+        const isSymmetryGroup = String(elem?.linkType ?? '') === 'symmetry';
         const wrap = document.createElement('div');
         wrap.className = 'pe-path-wrap';
 
         const row = document.createElement('div');
-        row.className = 'path-line pe-elem pe-elem-group pe-path-header';
-        row.draggable = true;
+        row.className = isSymmetryGroup
+            ? 'path-line pe-elem pe-elem-symmetry pe-path-header pe-elem-group-symmetry'
+            : 'path-line pe-elem pe-elem-group pe-path-header';
+        row.draggable = !isSymmetryGroup;
         row.dataset.groupId = String(elem.groupId);
 
         const numEl = document.createElement('span');
@@ -1228,25 +1273,38 @@ export default class PathEditor {
         elem.expanded = expanded;
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button';
-        expandBtn.className = 'path-cell path-cell-cmd pe-type-group';
-        expandBtn.textContent = `Group ${expanded ? '▼' : '►'}`;
-        expandBtn.title = 'Group';
+        expandBtn.className = isSymmetryGroup
+            ? 'path-cell path-cell-cmd pe-type-symmetry'
+            : 'path-cell path-cell-cmd pe-type-group';
+        expandBtn.textContent = isSymmetryGroup
+            ? `Symmetry ${expanded ? '▼' : '►'}`
+            : `Group ${expanded ? '▼' : '►'}`;
+        expandBtn.title = isSymmetryGroup ? 'Symmetry group (read-only)' : 'Group';
         row.appendChild(expandBtn);
 
         this._appendElemModCells(elem, row);
 
-        const nameCell = document.createElement('button');
-        nameCell.type = 'button';
-        const nameVal = String(elem.name ?? '').trim();
-        nameCell.className = 'path-cell path-cell-param' + (nameVal ? '' : ' cell-empty');
-        nameCell.dataset.groupName = '1';
-        nameCell.textContent = nameVal || `Group ${elem.groupId}`;
-        nameCell.title = nameCell.textContent;
-        nameCell.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this._activateGroupNameEdit(elem, nameCell);
-        });
-        row.appendChild(nameCell);
+        if (isSymmetryGroup) {
+            // Symmetry groups: show a read-only name param cell (source group name)
+            const nameCell = document.createElement('span');
+            nameCell.className = 'path-cell path-cell-param pe-symmetry-label';
+            nameCell.textContent = String(elem.name ?? '');
+            nameCell.title = `Symmetry of: ${String(elem.name ?? '')}` + ' (read-only)';
+            row.appendChild(nameCell);
+        } else {
+            const nameCell = document.createElement('button');
+            nameCell.type = 'button';
+            const nameVal = String(elem.name ?? '').trim();
+            nameCell.className = 'path-cell path-cell-param' + (nameVal ? '' : ' cell-empty');
+            nameCell.dataset.groupName = '1';
+            nameCell.textContent = nameVal || `Group ${elem.groupId}`;
+            nameCell.title = nameCell.textContent;
+            nameCell.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this._activateGroupNameEdit(elem, nameCell);
+            });
+            row.appendChild(nameCell);
+        }
 
         const body = document.createElement('div');
         body.className = 'pe-path-body';
@@ -1255,11 +1313,16 @@ export default class PathEditor {
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'path-line-delete';
-        delBtn.title = 'Delete group';
+        delBtn.title = isSymmetryGroup ? 'Delete symmetry group' : 'Delete group';
         delBtn.textContent = '×';
         delBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             const gid = Number(elem.groupId);
+            if (isSymmetryGroup) {
+                // Delete the entire symmetry group and all its children
+                this._deleteSymmetryGroup(gid);
+                return;
+            }
             const parentGroup = this._resolveParentGroupById(elem);
             const parentGid = Number(parentGroup?.groupId) || null;
             const parentGuid = String(parentGroup?.guid ?? '') || null;
@@ -1277,6 +1340,7 @@ export default class PathEditor {
 
         row.addEventListener('click', (e) => {
             if (e.target.closest('.path-cell') || e.target.closest('.path-line-delete')) return;
+            if (isSymmetryGroup) return; // symmetry group header is not selectable
             const rowRef = this._getTopLevelRef(elem);
             this._applyTopLevelSelection(row, rowRef, e);
             this._setActiveElem(`group:${elem.groupId}`);
@@ -1289,14 +1353,54 @@ export default class PathEditor {
         expandBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             elem.expanded = !elem.expanded;
-            expandBtn.textContent = `Group ${elem.expanded ? '▼' : '►'}`;
+            expandBtn.textContent = isSymmetryGroup
+                ? `Symmetry ${elem.expanded ? '▼' : '►'}`
+                : `Group ${elem.expanded ? '▼' : '►'}`;
             this._renderElements();
         });
 
-        this._attachElemDrag(row, elem);
+        if (!isSymmetryGroup) this._attachElemDrag(row, elem);
         wrap.appendChild(row);
         wrap.appendChild(body);
         return wrap;
+    }
+
+    /**
+     * Delete a symmetry group and all its direct children from `_elements`.
+     * Fires `onDeleteSymmetryGroup(groupId)` so the host can also remove the
+     * associated segments from the editor state.
+     *
+     * @param {number} groupId
+     * @private
+     */
+    _deleteSymmetryGroup(groupId) {
+        const gid = Number(groupId);
+        if (!Number.isFinite(gid)) return;
+        const dropGroupIds = new Set([gid]);
+        let grown = true;
+        while (grown) {
+            grown = false;
+            for (const item of this._elements) {
+                if (item?.type !== 'group') continue;
+                const itemGid = Number(item?.groupId);
+                const parentGid = Number(item?.parentGroupId);
+                if (!Number.isFinite(itemGid) || !Number.isFinite(parentGid)) continue;
+                if (!dropGroupIds.has(parentGid) || dropGroupIds.has(itemGid)) continue;
+                dropGroupIds.add(itemGid);
+                grown = true;
+            }
+        }
+        this._elements = this._elements.filter(item => {
+            if (item?.type === 'group' && dropGroupIds.has(Number(item?.groupId))) return false;
+            if (dropGroupIds.has(Number(item?.parentGroupId))) return false;
+            return true;
+        });
+        this._renderElements();
+        if (this.onDeleteSymmetryGroup) {
+            this.onDeleteSymmetryGroup(gid);
+        } else {
+            this._emitTopLevelOrder();
+        }
     }
 
     /**
@@ -1309,11 +1413,13 @@ export default class PathEditor {
     _buildShapeRow(elem, rowNum) {
         const def = PathEditor.SHAPE_DEFS[elem.type];
         if (!def) return document.createElement('div');
+        const isReadOnly = !!elem?._inSymmetryGroup || String(elem?.linkType ?? '') === 'symmetry';
 
         const row = document.createElement('div');
         row.className = `path-line pe-elem pe-elem-${elem.type}`;
+        if (isReadOnly) row.classList.add('pe-sub-line-readonly');
         if (elem?._isEmbeddedVisual) row.classList.add('pe-shape-embedded');
-        row.draggable = true;
+        row.draggable = !isReadOnly;
         row.dataset.segId = elem.segId;
         if (elem?._isEmbeddedVisual && Number.isFinite(this._optId(elem?.parentContourId))) {
             row.dataset.parentContourId = String(this._optId(elem.parentContourId));
@@ -1330,7 +1436,7 @@ export default class PathEditor {
         typeBtn.type = 'button';
         typeBtn.className = `path-cell path-cell-cmd pe-type-${elem.type}`;
         typeBtn.textContent = def.label;
-        typeBtn.title = def.label;
+        typeBtn.title = isReadOnly ? `${def.label} (read-only symmetry)` : def.label;
         row.appendChild(typeBtn);
 
         this._appendElemModCells(elem, row);
@@ -1346,10 +1452,15 @@ export default class PathEditor {
             cell.dataset.attr = attrKey;
             this._setParamCellTitle(cell, attrKey, val);
             cell.textContent = val || attrKey;
-            cell.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this._activateShapeParamEdit(elem, attrKey, cell);
-            });
+            if (isReadOnly) {
+                cell.disabled = true;
+                cell.title = `${attrKey}: ${val || ''} (read-only symmetry)`;
+            } else {
+                cell.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this._activateShapeParamEdit(elem, attrKey, cell);
+                });
+            }
             row.appendChild(cell);
         }
 
@@ -1357,19 +1468,23 @@ export default class PathEditor {
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'path-line-delete';
-        delBtn.title = 'Delete';
+        delBtn.title = isReadOnly ? 'Read-only symmetry' : 'Delete';
         delBtn.textContent = '×';
-        delBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            // Remove from elements list unconditionally (covers preview mode).
-            const idx = this._elements.indexOf(elem);
-            if (idx !== -1) this._elements.splice(idx, 1);
-            // Notify external handler (editor mode: will delete canvas segment).
-            if (this.onShapeElementChange) this.onShapeElementChange(elem.segId, null);
-            // Re-render and propagate the change.
-            this._renderElements();
-            this._fireOnChange();
-        });
+        if (isReadOnly) {
+            delBtn.disabled = true;
+        } else {
+            delBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // Remove from elements list unconditionally (covers preview mode).
+                const idx = this._elements.indexOf(elem);
+                if (idx !== -1) this._elements.splice(idx, 1);
+                // Notify external handler (editor mode: will delete canvas segment).
+                if (this.onShapeElementChange) this.onShapeElementChange(elem.segId, null);
+                // Re-render and propagate the change.
+                this._renderElements();
+                this._fireOnChange();
+            });
+        }
         row.appendChild(delBtn);
 
         // Row click → select + activate
@@ -1385,6 +1500,7 @@ export default class PathEditor {
         });
 
         row.addEventListener('contextmenu', (e) => {
+            if (isReadOnly) return;
             if (!this.onToPathRequest) return;
             e.preventDefault();
             e.stopPropagation();
@@ -1398,7 +1514,7 @@ export default class PathEditor {
         });
 
         // Drag to reorder top-level elements
-        this._attachElemDrag(row, elem);
+        if (!isReadOnly) this._attachElemDrag(row, elem);
 
         return row;
     }
@@ -1709,7 +1825,9 @@ export default class PathEditor {
     _buildPathGroup(elem, rowNum) {
         const type  = elem.type;
         const isSymmetry = !!elem.isSymmetry;
-        const label = isSymmetry ? 'Symmetry' : this._classifyContourLabel(elem.lines);
+        const inSymGroup = !!elem._inSymmetryGroup;
+        const isReadOnlyElem = isSymmetry || inSymGroup;
+        const label = isReadOnlyElem && !inSymGroup ? 'Symmetry' : this._classifyContourLabel(elem.lines);
 
         // Outer container (grouping wrapper, not pe-elem itself)
         const wrap = document.createElement('div');
@@ -1728,7 +1846,7 @@ export default class PathEditor {
 
         const expandBtn = document.createElement('button');
         expandBtn.type = 'button';
-        expandBtn.className = `path-cell path-cell-cmd pe-type-${isSymmetry ? 'symmetry' : type}`;
+        expandBtn.className = `path-cell path-cell-cmd pe-type-${(isSymmetry && !inSymGroup) ? 'symmetry' : type}`;
         expandBtn.textContent = label + (elem.expanded ? ' ▼' : ' ►');
         // Store label for live updates
         expandBtn.dataset.baseLabel = label;
@@ -1739,10 +1857,11 @@ export default class PathEditor {
         const delBtn = document.createElement('button');
         delBtn.type = 'button';
         delBtn.className = 'path-line-delete';
-        delBtn.title = isSymmetry ? 'Delete symmetry' : 'Delete path';
+        delBtn.title = isReadOnlyElem ? 'Delete path (part of symmetry)' : (isSymmetry ? 'Delete symmetry' : 'Delete path');
         delBtn.textContent = '×';
         delBtn.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (isReadOnlyElem) return; // read-only: delete disallowed
             const idx = this._elements.indexOf(elem);
             if (idx !== -1) this._elements.splice(idx, 1);
             for (const segId of elem.segIds) {
@@ -1797,6 +1916,7 @@ export default class PathEditor {
 
         header.addEventListener('contextmenu', (e) => {
             if (!this.onToPathRequest) return;
+            if (isReadOnlyElem) return; // read-only: no context menu
             e.preventDefault();
             e.stopPropagation();
             const rowRef = this._getTopLevelRef(elem);
@@ -1811,7 +1931,7 @@ export default class PathEditor {
         });
 
         // Drag to reorder top-level elements (by header)
-        this._attachElemDrag(header, elem);
+        if (!isReadOnlyElem) this._attachElemDrag(header, elem);
 
         wrap.appendChild(header);
         wrap.appendChild(body);
@@ -1951,7 +2071,7 @@ export default class PathEditor {
      * @private
      */
     _buildSubLine(lineData, parentElem) {
-        const isReadOnly = !!parentElem?.isSymmetry;
+        const isReadOnly = !!parentElem?.isSymmetry || !!parentElem?._inSymmetryGroup;
         const lineEl = document.createElement('div');
         lineEl.className = 'path-line pe-sub-line';
         if (isReadOnly) lineEl.classList.add('pe-sub-line-readonly');
@@ -2506,10 +2626,16 @@ export default class PathEditor {
                 return {
                     type: 'group',
                     groupId: Number(elem.groupId),
+                    guid: String(elem?.guid ?? ''),
                     name: String(elem.name ?? ''),
                     expanded: elem?.expanded !== false,
                     parentGroupId: this._optId(elem?.parentGroupId),
                     transforms,
+                    linkType: elem?.linkType ?? null,
+                    sourceGroupId: (elem?.sourceGroupId != null && Number.isFinite(Number(elem.sourceGroupId)))
+                        ? Number(elem.sourceGroupId) : null,
+                    sourceGroupGuid: String(elem?.sourceGroupGuid ?? ''),
+                    axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
                 };
             }
             if (elem.type === 'path' || elem.type === 'polyline') {
@@ -2523,6 +2649,7 @@ export default class PathEditor {
                         lineGuid: String(line?.lineGuid ?? this._newGuid()),
                     })),
                     transforms,
+                    groupId: this._optId(elem?.groupId ?? elem?.parentGroupId),
                     parentGroupId: this._optId(elem?.parentGroupId),
                 };
                 if (elem.isSymmetry) {
@@ -2536,8 +2663,11 @@ export default class PathEditor {
                 segId: elem.segId ?? null,
                 data: { ...(elem.data ?? {}) },
                 transforms,
+                groupId: this._optId(elem?.groupId ?? elem?.parentGroupId),
                 parentContourId: this._optId(elem?.parentContourId),
                 parentGroupId: this._optId(elem?.parentGroupId),
+                linkType: elem?.linkType ?? null,
+                axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
             };
         });
     }

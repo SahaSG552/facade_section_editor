@@ -1,5 +1,17 @@
 # Agent Progress Log - Profile Bit Type с 2D Cross-Section SVG Editor
 
+## ⚠️ АРХИТЕКТУРНЫЕ ПРАВИЛА (ОБЯЗАТЕЛЬНО К СОБЛЮДЕНИЮ)
+
+### PathEditor — главный источник истины для структуры профиля
+
+**PathEditor является источником истины для структуры профиля** (contour, shape, group, symmetry элементы).
+
+Следствия:
+- **Canvas-originated changes** (move, rotate, cursor edits) → обновляют `EditorStateManager.segments` напрямую, потом `_syncToPathEditor()` синхронизирует PathEditor.
+- **PathEditor-originated changes** (пользователь редактирует текст или порядок элементов) → `onChange` / `onElementOrderChange` являются master источником. `_importPath` + `_realignContourIdsToSourceOrder` + `_restoreStateStructureFromElements` + `_restoreContourLinkMetaFromElements` применяются последовательно для восстановления состояния из snapshot PathEditor'а.
+- **Симметрия**: `_restoreContourLinkMetaFromElements` всегда должна вызываться после `_restoreStateStructureFromElements` при PathEditor-originated изменениях — она восстанавливает `linkType`, `parentContourId`, `axis` на сегментах и вызывает `_syncSymmetryContours`.
+- **НЕ НУЖНО** вызывать `_syncToPathEditor` в PathEditor-originated ветке — это перезапишет пользовательские правки.
+
 ## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ (27.02.2026)
 
 - [ ] Универсальная обработка параметров: любой параметр любой команды/элемента/модификатора может содержать формулу.
@@ -99,6 +111,9 @@
   - [ ] Проверить line/arc/path/polyline/rect/ellipse/circle.
   - [ ] Проверить `RT`-модификаторы и selection рамкой у transformed-элементов.
   - [ ] Проверить undo/redo как одну атомарную операцию на commit.
+
+### TODO (refactor: shared geometry math)
+- [ ] Вынести дублируемую математику `rotate/mirror/world/raw` и helper `_withRtAngle` из `MirrorTool`/`EditorStateManager` в общий `src/editor/tools/shared/*` модуль с единым API.
 
 ## ✅ CANVAS GROUP/UNGROUP + SELECTION UNIFICATION (02.03.2026)
 
@@ -216,49 +231,70 @@
   - diagnostics по `MoveTool/RotateTool/MirrorTool/CursorTool/ProfileEditor/copyPreviewUtils` — без ошибок,
   - `npm run build` — успешно.
 
-## ▶ NEXT: SYMMETRY TOOL (PHASE 2) (01.03.2026)
+## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ: STRUCTURED SYMMETRY GROUP (03.03.2026)
 
-- Цель следующего шага:
-  - довести `symmetry` от геометрического MVP до согласованного продуктового режима
-    с фиксированной policy continuity и более явным UX-коммитом.
-- План:
-  - [ ] зафиксировать policy continuity для 2D (MVP: geometric mirror, no smoothing),
-  - [ ] верифицировать selection/commit semantics symmetry против move/rotate/mirror copy-flow,
-  - [ ] добавить целевые сценарии регрессии: multi-copy, cancel rollback, contour isolation.
+### Цель
+Реализовать Symmetry инструмент как структурированный объект PathEditor:
+- Результат симметрии — **Symmetry-группа** в PathEditor (тёмно-синяя, read-only дети)
+- Работает для **одиночных элементов** (path/shape) И **групп** (с вложенными элементами)
+- При изменении оригинальных объектов зеркальные копии **авто-обновляются** (через `_syncSymmetryContours`)
 
-## 🚩 НОВЫЙ ПЛАН: TO PATH → STRUCTURED SYMMETRY OBJECT (01.03.2026)
+### Архитектура
+
+**Модель данных:**
+- `state.elementGroups` получает поля: `linkType:'symmetry'`, `sourceGroupId`, `axis:{p1,p2}`
+- Symmetry-сегменты по-прежнему несут `linkType:'symmetry'`, `parentContourId`, `axis`
+- Symmetry-сегменты дополнительно несут `groupId` = ID Symmetry-группы
+- `state._allocateGroupId()` — новый вспомогательный метод
+
+**Sync механизм (существующий, расширенный):**
+- `_syncSymmetryContours()`: per-contour механизм sync остаётся без изменений
+- Дополнение: для replacement-сегментов сохраняются `groupId`/`parentGroupId`
+- Cleanup: пустые symmetry-группы удаляются из `elementGroups` после sync
+
+**PathEditor:**
+- `setElements`: propagate `linkType`/`sourceGroupId`/`axis` на group-элементы
+- `_buildGroupRow`: специальный рендер для `linkType='symmetry'` (тёмно-синий header, без rename)
+- `_emitTopLevelOrder`: включает `linkType`/`sourceGroupId`/`axis` в group-эмиссию
+- Дети symmetry-группы рендерятся с `_inSymmetryGroup: true` → read-only стиль
+
+**ProfileEditor:**
+- `_restoreStateStructureFromElements`: восстанавливает `linkType`/`sourceGroupId`/`axis` на `elementGroups`
+- `_restoreContourLinkMetaFromElements`: восстанавливает `groupId` на symmetry-сегменты
+
+### Чеклист — ✅ ПОЛНОСТЬЮ ЗАВЕРШЕНО (03.03.2026)
+- [x] `EditorStateManager._allocateGroupId()`
+- [x] `EditorStateManager.getElements()` → группы с `linkType`/`sourceGroupId`/`axis`
+- [x] `EditorStateManager._syncSymmetryContours()` → сохранение `groupId` + cleanup групп
+- [x] `MirrorTool._commitMirror` symmetry → создание Symmetry-группы + `groupId` на сегменты
+- [x] `PathEditor.setElements` → propagate `linkType`/`sourceGroupId`/`axis` на группы
+- [x] `PathEditor._buildGroupRow` → Symmetry-header для `linkType='symmetry'` групп
+- [x] `PathEditor._emitTopLevelOrder` → включает sym-метаданные групп
+- [x] `PathEditor._isInSymmetryGroup()` helper + `_inSymmetryGroup` flag в `_renderElements`
+- [x] `PathEditor._buildPathGroup` → read-only когда `_inSymmetryGroup`
+- [x] `PathEditor._buildSubLine` → read-only когда в Symmetry-группе
+- [x] `PathEditor._deleteSymmetryGroup()` → вызов `onDeleteSymmetryGroup` callback
+- [x] `ProfileEditor._restoreStateStructureFromElements` → restore sym-links на elementGroups
+- [x] `ProfileEditor._setupPathEditorCallbacks` → `onDeleteSymmetryGroup` удаляет state-сегменты
+- [x] `styles.css` → `.pe-elem-group-symmetry` стиль (тёмно-синий border)
+- [x] `npm run build` — успешно
+
+## ✅ НОВЫЙ ПЛАН: TO PATH → STRUCTURED SYMMETRY OBJECT (01.03.2026)
 
 ### Продуктовые требования (зафиксировано)
-- `Symmetry` работает только с **цельными элементами**, не с частями.
+- `Symmetry` работает с **цельными элементами** и **группами**.
 - Flow `Symmetry`:
-  1) выделение 1 цельного элемента + подтверждение `ПКМ`,
+  1) выделение элемента/группы,
   2) выбор 1-й точки оси + live ghost,
   3) выбор 2-й точки оси → создание зеркальной копии и сохранение оси,
-  4) формирование зависимой пары `Parent + Symmetry`:
-     - Symmetry отображается как отдельный top-level объект,
+  4) формирование Symmetry-группы в PathEditor:
+     - Symmetry отображается как отдельный объект-группа,
      - команды Symmetry не редактируются,
-     - изменение parent обновляет Symmetry,
-     - move/rotate/copy работают группой,
-     - удаление parent удаляет Symmetry.
+     - изменение parent обновляет Symmetry (через `_syncSymmetryContours`),
+     - move/rotate/copy работают группой (будущий этап),
+     - удаление Symmetry-группы — через кнопку delete на хедере.
 - `To Path`:
-  - доступен для выделенных non-path элементов и для объектов с Symmetry,
-  - для Symmetry-пары выполняет merge Symmetry внутрь parent path,
-    снимая зависимость и делая команды редактируемыми.
-- PathEditor:
-  - top-level row `Symmetry` (не `Path`), тёмно-синяя кнопка,
-  - внутри команды как у path, но read-only / non-selectable,
-  - `ПКМ` по parent/symmetry → context menu с `To Path`.
-
-### Архитектурные решения (перед кодом)
-- [ ] Ввести явную связь зависимых элементов в model/state:
-  - `groupId` / `linkType='symmetry'` / `parentContourId` / `axis:{p1,p2}`,
-  - метаданные симметрии хранятся отдельно от обычных transforms.
-- [ ] Зафиксировать single source-of-truth:
-  - parent хранит редактируемые команды,
-  - symmetry contour пересчитывается детерминированно из parent + axis.
-- [ ] Selection policy:
-  - выбор parent/symmetry автоматически расширяется до пары,
-  - part-selection для symmetry отключён.
+  - доступен для выделенных non-path элементов и для объектов с Symmetry (будущий этап).
 
 ### ЭТАП A — Инструмент To Path (первый внедряемый шаг)
 - [x] Добавить `To Path` command в editor-операции.
@@ -1353,3 +1389,58 @@ ellipse → <ellipse cx cy rx ry/>
 ---
 
 *Последнее обновление: 28.06.2026*
+
+---
+
+## Symmetry Group — сессия исправлений (29.06.2026)
+
+### Исправленные баги
+
+#### 1. `isReadOnlyElem is not defined` в `_buildPathGroup`
+**Файл:** `src/panel/PathEditor.js`  
+**Причина:** переменные `isReadOnlyElem`, `inSymGroup` объявлялись после первого использования.  
+**Исправление:** переменные перенесены в начало функции.
+
+#### 2. Зеркальные элементы отображались как siblings Symmetry-группы (не как дочерние)
+**Файл:** `src/editor/tools/MirrorTool.js` → `_commitMirror`  
+**Причина:** snapshots создавались с `parentGroupId: null` вместо `parentGroupId: symGroupId`.  
+**Исправление:** `parentGroupId: symGroupId` теперь проставляется для всех symmetry-снапшотов.
+
+#### 3. Symmetry-группа отображалась пустой
+**Файл:** `src/editor/EditorStateManager.js` → `getElements()`  
+**Причина:** группы добавлялись в конец массива → `_renderElements()` регистрировал номер строки группы ПОСЛЕ её дочерних элементов.  
+**Исправление:** multi-pass цикл вставляет каждую группу ПЕРЕД первым дочерним элементом.
+
+#### 4. Пустая дополнительная группа появлялась между source-группой и sym-группой
+**Файл:** `src/editor/ProfileEditor.js` → `_orderElementsLikePathEditor`  
+**Причина:** новые sym-группы попадали в `pool` (не в старый snapshot) и добавлялись в конец `ordered`, смещая другие группы на неверные позиции.  
+**Исправление:** sym-группы из `pool` вставляются сразу после последнего потомка source-группы в `ordered`.
+
+#### 5. `linkType`/`sourceGroupId`/`axis` теряются после редактирования текста
+**Файл:** `src/panel/PathEditor.js` → `getElementsDebugSnapshot()`  
+**Причина:** snapshot для групп не включал поля `linkType`, `sourceGroupId`, `axis`.  
+**Исправление:** группы в debug snapshot теперь включают `linkType`, `sourceGroupId`, `axis`.
+
+### Архитектурные изменения
+
+#### `EditorStateManager._syncSymmetryContours` — переписан полностью
+Group-driven режим:
+- Итерирует `elementGroups` с `linkType:'symmetry'`
+- Находит source segs по `groupId === sourceGroupId`
+- Добавляет/обновляет/удаляет зеркальные контуры синхронно с source-группой
+- Поддерживает contour segs и standalone shapes (circle/rect/ellipse)
+
+#### `MirrorTool` UX — симметрия только для групп
+- `_setSingleChainSelection`: в symmetry-mode выделяет всю группу
+- `_captureSourceSelection`: auto-группирует несгруппированные сегменты перед захватом
+- `_commitMirror`: имя sym-группы = имя source-группы
+
+#### `PathEditor._buildGroupRow` — формат "Symmetry ▼ | groupName"
+- Кнопка: `"Symmetry ▼"` для sym-групп
+- Имя source-группы — в отдельной read-only param-ячейке
+
+### Статус
+- ✅ `npm run build` — успешно
+- ✅ `_restoreStateStructureFromElements` уже корректно читал `linkType`/`sourceGroupId`/`axis` из групп
+
+*Последнее обновление: 29.06.2026*

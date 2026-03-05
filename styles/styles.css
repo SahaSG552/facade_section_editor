@@ -2097,8 +2097,9 @@ html {
 .pe-elem-ellipse  { border-left-color: hsl(180 50% 45%); }   /* teal   */
 .pe-elem-path     { border-left-color: hsl(217 80% 55%); }   /* blue   */
 .pe-elem-polyline { border-left-color: hsl(140 55% 45%); }   /* green  */
-.pe-elem-symmetry { border-left-color: hsl(220 65% 38%); }   /* dark blue */
-.pe-elem-group    { border-left-color: hsl(280 62% 48%); }   /* violet */
+.pe-elem-symmetry       { border-left-color: hsl(220 65% 38%); }   /* dark blue */
+.pe-elem-group          { border-left-color: hsl(280 62% 48%); }   /* violet */
+.pe-elem-group-symmetry { border-left-color: hsl(220 65% 38%); }   /* dark blue (symmetry group header) */
 
 /* pe-path-wrap: plain block container for path group (header + body) */
 .pe-path-wrap {

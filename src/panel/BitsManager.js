@@ -190,7 +190,9 @@ function normalizeProfileTransformsSnapshot(profileTransforms) {
     }
 
     return profileTransforms.map((entry) => ({
-        kind: entry?.kind === "shape" ? "shape" : "path",
+        kind: entry?.kind === "shape"
+            ? "shape"
+            : (entry?.kind === "group" ? "group" : "path"),
         contourId: entry?.contourId,
         segId: entry?.segId,
         transforms: Array.isArray(entry?.transforms)
@@ -203,15 +205,19 @@ function getTransformsForProfileElement(profileTransforms, elementIndex, element
     const snapshot = normalizeProfileTransformsSnapshot(profileTransforms);
     if (snapshot.length === 0) return [];
 
+    // Renderable profile elements are only path/shape. Group entries are structural
+    // metadata for PathEditor and must not shift per-subpath transform indexing.
+    const renderable = snapshot.filter((s) => s?.kind === "path" || s?.kind === "shape");
+
     // Exact order match (preferred)
-    if (snapshot.length === elementCount) {
-        return Array.isArray(snapshot[elementIndex]?.transforms)
-            ? snapshot[elementIndex].transforms
+    if (renderable.length === elementCount) {
+        return Array.isArray(renderable[elementIndex]?.transforms)
+            ? renderable[elementIndex].transforms
             : [];
     }
 
     // Fallback to path-only entries count
-    const pathOnly = snapshot.filter((s) => s?.kind === "path");
+    const pathOnly = renderable.filter((s) => s?.kind === "path");
     if (pathOnly.length === elementCount) {
         return Array.isArray(pathOnly[elementIndex]?.transforms)
             ? pathOnly[elementIndex].transforms
@@ -1870,12 +1876,16 @@ export default class BitsManager {
                         if (m) segNums.push(Number(m[1]));
                     }
                 }
-                const cid = Number(elem?.contourId);
-                if (Number.isFinite(cid)) usedContourIds.add(cid);
             }
 
             let nextSegNum = Math.max(1, ...segNums.filter(Number.isFinite).map(n => Math.floor(n) + 1));
-            let nextContourId = Math.max(1, ...[...usedContourIds].filter(Number.isFinite).map(n => Math.floor(n) + 1));
+            let nextContourId = Math.max(
+                1,
+                ...cloned
+                    .map(elem => Number(elem?.contourId))
+                    .filter(Number.isFinite)
+                    .map(n => Math.floor(n) + 1)
+            );
 
             const allocSegId = (candidate, prefix) => {
                 const c = String(candidate ?? "").trim();
@@ -2708,6 +2718,9 @@ export default class BitsManager {
                 <input id="bit-rawProfilePath" value="${rawProfilePathValue}">
                 <input id="bit-profileTransforms" value="${profileTransformsValue}">
                 <input id="bit-profileElements" value="${profileElementsValue}">
+                <div class="profile-path-header" style="margin-top:8px;">Profile Debug Log:</div>
+                <textarea id="bit-profileDebugLog" rows="10" style="width:100%;font-family:monospace;resize:vertical;"
+                    placeholder="Шаги воспроизведения: 1) ... 2) ...\nАвтологи редактора будут добавляться сюда автоматически."></textarea>
             </div>
         `;
     }

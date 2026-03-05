@@ -288,7 +288,136 @@ function _orderElementsLikePathEditor(elements, editorSnapshot) {
         }
     }
 
-    return [...ordered, ...pool];
+    // Any new elements remaining in pool (not in the old snapshot) are inserted
+    // intelligently:
+    //   1. Source groups (linkType=null) are placed BEFORE their first child in ordered.
+    //   2. Symmetry groups are placed AFTER their source group's last descendant.
+    //   3. Everything else is appended at the end.
+    if (pool.length > 0) {
+        // Helper: index of the last element in `ordered` that belongs to group `gid`
+        // (the group row itself or any element with parentGroupId===gid).
+        const lastDescendantIdx = (gid) => {
+            let last = -1;
+            for (let i = 0; i < ordered.length; i++) {
+                const e = ordered[i];
+                if (e?.type === 'group' && Number(e?.groupId) === gid) { last = i; continue; }
+                if (Number(e?.parentGroupId) === gid) last = i;
+            }
+            return last;
+        };
+
+        // Step 1: insert source groups before their first child currently in `ordered`.
+        const srcGroupsInPool = pool.filter(e => e?.type === 'group' && String(e?.linkType ?? '') !== 'symmetry');
+        for (const srcGroup of srcGroupsInPool) {
+            const gid = Number(srcGroup?.groupId);
+            const firstChildIdx = ordered.findIndex(e => Number(e?.parentGroupId) === gid);
+            const pIdx = pool.indexOf(srcGroup);
+            if (pIdx !== -1) pool.splice(pIdx, 1);
+            if (firstChildIdx >= 0) {
+                ordered.splice(firstChildIdx, 0, srcGroup);
+            } else {
+                ordered.push(srcGroup);
+            }
+        }
+
+        // Step 2: insert sym groups (with their children) after their source group's last descendant.
+        const symGroupsInPool = pool.filter(e => e?.type === 'group' && String(e?.linkType ?? '') === 'symmetry');
+        for (const symGroup of symGroupsInPool) {
+            const sourceGid = Number(symGroup?.sourceGroupId);
+            const insertAt = Number.isFinite(sourceGid) ? lastDescendantIdx(sourceGid) : -1;
+            // Collect this sym group's children from pool too.
+            const children = pool.filter(e =>
+                (e?.type === 'path' || e?.type === 'polyline' || e?.type === 'symmetry'
+                    || e?.type === 'circle' || e?.type === 'rect' || e?.type === 'ellipse')
+                && Number(e?.parentGroupId) === Number(symGroup.groupId)
+            );
+            const toInsert = [symGroup, ...children];
+            for (const item of toInsert) {
+                const idx = pool.indexOf(item);
+                if (idx !== -1) pool.splice(idx, 1);
+            }
+            if (insertAt >= 0) {
+                ordered.splice(insertAt + 1, 0, ...toInsert);
+            } else {
+                ordered.push(...toInsert);
+            }
+        }
+
+        // Step 3: attach any remaining pooled children under already-ordered
+        // parent groups (critical when parent group already existed in snapshot,
+        // but new children appeared after symmetry rebuild).
+        let moved;
+        do {
+            moved = false;
+            for (let i = pool.length - 1; i >= 0; i--) {
+                const item = pool[i];
+                const parentGid = Number(item?.parentGroupId);
+                if (!Number.isFinite(parentGid)) continue;
+                const parentExists = ordered.some(e => e?.type === 'group' && Number(e?.groupId) === parentGid);
+                if (!parentExists) continue;
+
+                const [picked] = pool.splice(i, 1);
+                const insertAt = lastDescendantIdx(parentGid);
+                if (insertAt >= 0) ordered.splice(insertAt + 1, 0, picked);
+                else ordered.push(picked);
+                moved = true;
+            }
+        } while (moved);
+    }
+
+    const merged = [...ordered, ...pool];
+
+    // Final guard: normalize by group hierarchy so every child is placed under
+    // its parent group block even if editorSnapshot was already inconsistent.
+    const groupById = new Map(
+        merged
+            .filter(e => e?.type === 'group' && Number.isFinite(Number(e?.groupId)))
+            .map(g => [Number(g.groupId), g])
+    );
+    const childrenByParent = new Map();
+    for (const item of merged) {
+        const parentGid = Number(item?.parentGroupId);
+        if (!Number.isFinite(parentGid) || !groupById.has(parentGid)) continue;
+        if (!childrenByParent.has(parentGid)) childrenByParent.set(parentGid, []);
+        childrenByParent.get(parentGid).push(item);
+    }
+
+    const normalized = [];
+    const seen = new Set();
+    const appendGroupBlock = (groupElem) => {
+        if (!groupElem || seen.has(groupElem)) return;
+        seen.add(groupElem);
+        normalized.push(groupElem);
+        const gid = Number(groupElem?.groupId);
+        const children = childrenByParent.get(gid) ?? [];
+        for (const child of children) {
+            if (seen.has(child)) continue;
+            if (child?.type === 'group') appendGroupBlock(child);
+            else {
+                seen.add(child);
+                normalized.push(child);
+            }
+        }
+    };
+
+    for (const item of merged) {
+        if (seen.has(item)) continue;
+        const parentGid = Number(item?.parentGroupId);
+        const hasValidParent = Number.isFinite(parentGid) && groupById.has(parentGid);
+        if (hasValidParent) continue;
+        if (item?.type === 'group') appendGroupBlock(item);
+        else {
+            seen.add(item);
+            normalized.push(item);
+        }
+    }
+    for (const item of merged) {
+        if (seen.has(item)) continue;
+        seen.add(item);
+        normalized.push(item);
+    }
+
+    return normalized;
 }
 
 /**
@@ -475,6 +604,7 @@ function _restoreContourLinkMetaFromElements(state, sourceElements) {
     if (!state || !Array.isArray(sourceElements) || sourceElements.length === 0) return;
 
     const byContour = new Map();
+    const byShapeSegId = new Map();
     for (const elem of sourceElements) {
         if (!(elem?.type === 'path' || elem?.type === 'polyline' || elem?.type === 'symmetry')) continue;
         const cid = Number(elem?.contourId);
@@ -485,12 +615,24 @@ function _restoreContourLinkMetaFromElements(state, sourceElements) {
             axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
         });
     }
-    if (byContour.size === 0) return;
+    for (const elem of sourceElements) {
+        if (!(elem?.type === 'circle' || elem?.type === 'rect' || elem?.type === 'ellipse')) continue;
+        const sid = String(elem?.segId ?? '').trim();
+        if (!sid) continue;
+        byShapeSegId.set(sid, {
+            linkType: String(elem?.linkType ?? '') === 'symmetry' ? 'symmetry' : null,
+            parentContourId: _optFiniteId(elem?.parentContourId),
+            axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
+        });
+    }
+    if (byContour.size === 0 && byShapeSegId.size === 0) return;
 
     let changed = false;
     state.segments = state.segments.map((seg) => {
         const cid = Number(seg?.contourId ?? 0);
-        const meta = byContour.get(cid);
+        const meta = (seg?.type === 'circle' || seg?.type === 'rect' || seg?.type === 'ellipse')
+            ? byShapeSegId.get(String(seg?.id ?? ''))
+            : byContour.get(cid);
         if (!meta) return seg;
 
         const nextLinkType = meta.linkType === 'symmetry' ? 'symmetry' : undefined;
@@ -555,17 +697,25 @@ function _sanitizeElementsSnapshot(elements) {
                 if (m) segNums.push(Number(m[1]));
             }
         }
-        const cid = Number(elem?.contourId);
-        if (Number.isFinite(cid)) usedContourIds.add(cid);
-        const gid = Number(elem?.groupId);
-        if (Number.isFinite(gid)) usedGroupIds.add(gid);
         const guid = String(elem?.guid ?? '').trim();
         if (guid) usedGroupGuids.add(guid);
     }
 
     let nextSegNum = Math.max(1, ...segNums.filter(Number.isFinite).map(n => Math.floor(n) + 1));
-    let nextContourId = Math.max(1, ...[...usedContourIds].filter(Number.isFinite).map(n => Math.floor(n) + 1));
-    let nextGroupId = Math.max(1, ...[...usedGroupIds].filter(Number.isFinite).map(n => Math.floor(n) + 1));
+    let nextContourId = Math.max(
+        1,
+        ...cloned
+            .map(elem => Number(elem?.contourId))
+            .filter(Number.isFinite)
+            .map(n => Math.floor(n) + 1)
+    );
+    let nextGroupId = Math.max(
+        1,
+        ...cloned
+            .map(elem => Number(elem?.groupId))
+            .filter(Number.isFinite)
+            .map(n => Math.floor(n) + 1)
+    );
 
     const allocSegId = (candidate, prefix) => {
         const c = String(candidate ?? '').trim();
@@ -617,22 +767,38 @@ function _sanitizeElementsSnapshot(elements) {
         return guid;
     };
 
-    // Pre-pass: allocate new groupIds for all group elements and build a remap
+    // Pre-pass: allocate groupIds for all group elements and build a remap
     // table so that parentGroupId references on ALL element types point to the
     // correct NEW ids after sanitisation.  Without this, nested groups would
     // retain stale parentGroupId values that no longer correspond to any groupId
     // in the sanitised snapshot, causing the hierarchy to appear flat on the
     // first canvas-triggered PathEditor rebuild.
     const groupIdRemap = new Map();
+    const groupGuidRemap = new Map();
     for (const elem of cloned) {
         if (elem?.type !== 'group') continue;
         const oldId = Number(elem.groupId);
         if (!Number.isFinite(oldId)) continue;
         groupIdRemap.set(oldId, allocGroupId(oldId));
+        groupGuidRemap.set(oldId, allocGroupGuid(elem.guid));
     }
     const remapGroupId = (oldId) => {
         const c = Number(oldId);
         return Number.isFinite(c) ? (groupIdRemap.get(c) ?? null) : null;
+    };
+
+    // Pre-pass: allocate contourIds and build contour remap so parentContourId
+    // links (e.g. symmetry parent contour) stay valid after sanitisation.
+    const contourIdRemap = new Map();
+    for (const elem of cloned) {
+        if (!(elem?.type === 'path' || elem?.type === 'polyline' || elem?.type === 'symmetry')) continue;
+        const oldCid = Number(elem.contourId);
+        if (!Number.isFinite(oldCid)) continue;
+        contourIdRemap.set(oldCid, allocContourId(oldCid));
+    }
+    const remapContourId = (oldId) => {
+        const c = Number(oldId);
+        return Number.isFinite(c) ? (contourIdRemap.get(c) ?? null) : null;
     };
 
     return cloned.map((elem) => {
@@ -642,8 +808,14 @@ function _sanitizeElementsSnapshot(elements) {
             return {
                 ...elem,
                 groupId: groupIdRemap.get(Number(elem.groupId)) ?? allocGroupId(elem.groupId),
-                guid: allocGroupGuid(elem.guid),
+                guid: groupGuidRemap.get(Number(elem.groupId)) ?? allocGroupGuid(elem.guid),
                 parentGroupId: remapGroupId(elem?.parentGroupId),
+                sourceGroupId: remapGroupId(elem?.sourceGroupId),
+                sourceGroupGuid: (() => {
+                    const srcOld = Number(elem?.sourceGroupId);
+                    if (Number.isFinite(srcOld) && groupGuidRemap.has(srcOld)) return groupGuidRemap.get(srcOld);
+                    return String(elem?.sourceGroupGuid ?? '').trim();
+                })(),
                 name: String(elem?.name ?? ''),
             };
         }
@@ -652,12 +824,15 @@ function _sanitizeElementsSnapshot(elements) {
             return {
                 ...elem,
                 segId: allocSegId(elem.segId, 'seg'),
+                parentContourId: remapContourId(elem?.parentContourId),
                 parentGroupId: remapGroupId(elem?.parentGroupId),
+                linkType: String(elem?.linkType ?? '') === 'symmetry' ? 'symmetry' : null,
+                axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
             };
         }
 
         if (elem.type === 'path' || elem.type === 'polyline' || elem.type === 'symmetry') {
-            const contourId = allocContourId(elem.contourId);
+            const contourId = contourIdRemap.get(Number(elem.contourId)) ?? allocContourId(elem.contourId);
             const lines = Array.isArray(elem.lines)
                 ? elem.lines.map((line) => ({
                     ...(line ?? {}),
@@ -677,6 +852,7 @@ function _sanitizeElementsSnapshot(elements) {
                 contourId,
                 lines,
                 segIds: [...new Set(segIds)],
+                parentContourId: remapContourId(elem?.parentContourId),
                 parentGroupId: remapGroupId(elem?.parentGroupId),
             };
         }
@@ -770,14 +946,19 @@ function _restoreStateStructureFromElements(state, elements, { resetHistoryBasel
         name: String(g?.name ?? ''),
         parentGroupId: _optFiniteId(g?.parentGroupId),
         transforms: Array.isArray(g?.transforms) ? g.transforms.map(t => ({ ...t })) : [],
+        // Symmetry-group link metadata (persisted through save/restore cycle)
+        linkType: g?.linkType ?? null,
+        sourceGroupId: _optFiniteId(g?.sourceGroupId),
+        sourceGroupGuid: String(g?.sourceGroupGuid ?? ''),
+        axis: g?.axis ? JSON.parse(JSON.stringify(g.axis)) : null,
     })).filter(g => Number.isFinite(g.groupId));
     // Keep only contour segments in state; shape rows are restored from snapshot below.
     const contourMetaByCid = new Map(
         elements
             .filter(e => e?.type === 'path' || e?.type === 'polyline' || e?.type === 'symmetry')
             .map(e => [Number(e.contourId), {
-                groupId: _optFiniteId(e?.groupId),
-                parentGroupId: _optFiniteId(e?.parentGroupId),
+                groupId: _optFiniteId(e?.groupId ?? e?.parentGroupId),
+                parentGroupId: _optFiniteId(e?.parentGroupId ?? e?.groupId),
             }])
     );
     state.segments = state.segments
@@ -951,6 +1132,10 @@ function _restoreStateStructureFromElements(state, elements, { resetHistoryBasel
             ...(hasParentContour ? { parentContourId: requestedParentCid } : {}),
             ...(Number.isFinite(_optFiniteId(elem?.groupId)) ? { groupId: _optFiniteId(elem.groupId) } : {}),
             ...(Number.isFinite(_optFiniteId(elem?.parentGroupId)) ? { parentGroupId: _optFiniteId(elem.parentGroupId) } : {}),
+            ...(String(elem?.linkType ?? '') === 'symmetry' ? { linkType: 'symmetry' } : {}),
+            ...(String(elem?.linkType ?? '') === 'symmetry'
+                ? { axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null }
+                : {}),
         };
         state.segments.push(seg);
         existingIds.add(id);
@@ -1051,6 +1236,9 @@ export default class ProfileEditor {
         /** Saved PathEditor.onDeactivate before edit mode — restored on exit. @type {Function|null} */
         this._origPathEditorOnDeactivate = null;
 
+        /** Saved PathEditor.onDeleteSymmetryGroup before edit mode — restored on exit. @type {Function|null} */
+        this._origPathEditorOnDeleteSymmetryGroup = null;
+
         /** The SVG <circle> dot drawn on the canvas overlay when an M row is selected in edit mode.
          *  Cleared when a segment is selected or edit mode exits. @type {SVGCircleElement|null} */
         this._mDotElement = null;
@@ -1093,6 +1281,42 @@ export default class ProfileEditor {
         this._pendingStructureContextmenuHandler = null;
         /** @type {boolean} */
         this._forceExpandGroupSelection = false;
+
+        /** @type {HTMLTextAreaElement|null} */
+        this._debugLogEl = null;
+        /** @type {number} */
+        this._debugLogSeq = 0;
+    }
+
+    /** @returns {HTMLTextAreaElement|null} @private */
+    _getDebugLogField() {
+        if (!this._modal) return null;
+        if (this._debugLogEl && this._debugLogEl.isConnected) return this._debugLogEl;
+        this._debugLogEl = this._modal.querySelector('#bit-profileDebugLog');
+        return this._debugLogEl;
+    }
+
+    /**
+     * Append one line to profile debug log textarea.
+     * @param {string} action
+     * @param {object|null} [details=null]
+     * @private
+     */
+    _debugLog(action, details = null) {
+        const el = this._getDebugLogField();
+        if (!el) return;
+        const time = new Date().toISOString().split('T')[1].replace('Z', '');
+        this._debugLogSeq += 1;
+        let line = `[${this._debugLogSeq}] ${time} ${action}`;
+        if (details && typeof details === 'object') {
+            try {
+                line += ` ${JSON.stringify(details)}`;
+            } catch (_) {
+                // ignore serialization issues in debug channel
+            }
+        }
+        el.value = el.value ? `${el.value}\n${line}` : line;
+        el.scrollTop = el.scrollHeight;
     }
 
     // ─── Public API ──────────────────────────────────────────────────────────
@@ -1119,6 +1343,8 @@ export default class ProfileEditor {
         this._onSave = onSave;
         this._onClose = onClose ?? null;
         this._pathEditor = pathEditor;
+        this._debugLogEl = this._modal?.querySelector('#bit-profileDebugLog') ?? null;
+        this._debugLogSeq = 0;
         const sourceElementsRaw = Array.isArray(profileElements) && profileElements.length > 0
             ? profileElements
             : (pathEditor?.getElementsDebugSnapshot?.() ?? []);
@@ -1133,6 +1359,11 @@ export default class ProfileEditor {
         const shapeFormulaSnapshot = pathEditor?.getShapeParamSnapshot?.() ?? [];
 
         log.info("Entering profile edit mode");
+        this._debugLog('enter', {
+            hasStructuredSource,
+            sourceElements: Array.isArray(sourceElements) ? sourceElements.length : 0,
+            profilePathLen: String(profilePath ?? '').length,
+        });
 
         // 1. Initialize state
         this.state = new EditorStateManager({
@@ -1148,6 +1379,9 @@ export default class ProfileEditor {
         _restoreContourLinkMetaFromElements(this.state, sourceElements);
         _restoreShapeFormulasIntoState(this.state, shapeFormulaSnapshot, variableValues);
         _syncElementTransformsToState(this.state, pathEditor?.getElementTransformsSnapshot?.() ?? []);
+        this.state.onDebugLog = (entry) => {
+            this._debugLog(`state.${String(entry?.event ?? 'event')}`, entry);
+        };
 
         // 2. Initialize canvas extension
         this.editorCanvas = new EditorCanvas(canvasManager, this.state);
@@ -1341,6 +1575,7 @@ export default class ProfileEditor {
             this._pathEditor.onGroupElemClick = this._origPathEditorOnGroupElemClick ?? null;
             this._pathEditor.onToPathRequest = this._origPathEditorOnToPathRequest ?? null;
             this._pathEditor.onDeactivate = this._origPathEditorOnDeactivate ?? null;
+            this._pathEditor.onDeleteSymmetryGroup = this._origPathEditorOnDeleteSymmetryGroup ?? null;
             this.state.activeContourId = null;
             this.state.insertAfterSegId = null;
             this._pathEditor.setShapeElements([]);
@@ -1378,6 +1613,8 @@ export default class ProfileEditor {
         this.editorCanvas = null;
 
         this.state = null;
+        this._debugLogEl = null;
+        this._debugLogSeq = 0;
         this._initialSyncDone = false;
         this._entryElementsSnapshot = [];
         this._entryVariableValues = {};
@@ -1438,9 +1675,15 @@ export default class ProfileEditor {
         this._origPathEditorOnGroupElemClick = pathEditor.onGroupElemClick;
         this._origPathEditorOnToPathRequest = pathEditor.onToPathRequest;
         this._origPathEditorOnDeactivate = pathEditor.onDeactivate;
+        this._origPathEditorOnDeleteSymmetryGroup = pathEditor.onDeleteSymmetryGroup ?? null;
 
         pathEditor.onElementOrderChange = (order) => {
             if (!Array.isArray(order) || !this.state) return;
+            this._debugLog('pathEditor.onElementOrderChange.start', {
+                orderItems: order.length,
+                stateSegments: this.state.segments.length,
+                stateGroups: (this.state.elementGroups ?? []).length,
+            });
             const used = new Set();
             const reordered = [];
             const orderedGroups = [];
@@ -1468,6 +1711,10 @@ export default class ProfileEditor {
                         name: String(item?.name ?? `Group ${gid}`),
                         parentGroupId: _optFiniteId(item?.parentGroupId),
                         transforms: Array.isArray(item?.transforms) ? item.transforms.map(t => ({ ...t })) : [],
+                        linkType: item?.linkType ?? null,
+                        sourceGroupId: _optFiniteId(item?.sourceGroupId),
+                        sourceGroupGuid: String(item?.sourceGroupGuid ?? ''),
+                        axis: item?.axis ? JSON.parse(JSON.stringify(item.axis)) : null,
                     });
                     continue;
                 }
@@ -1493,6 +1740,18 @@ export default class ProfileEditor {
                     const seg = this.state.segments.find(s => !used.has(s.id) && s.id === item.segId);
                     if (seg) {
                         const parentGroupId = _optFiniteId(item?.parentGroupId);
+                        const shapeGroupId = _optFiniteId(item?.groupId ?? item?.parentGroupId);
+                        const shapeLinkType = String(item?.linkType ?? '') === 'symmetry'
+                            ? 'symmetry'
+                            : (String(seg?.linkType ?? '') === 'symmetry' ? 'symmetry' : null);
+                        const shapeAxis = shapeLinkType === 'symmetry'
+                            ? (item?.axis
+                                ? JSON.parse(JSON.stringify(item.axis))
+                                : (seg?.axis ? JSON.parse(JSON.stringify(seg.axis)) : null))
+                            : undefined;
+                        const linkFields = shapeLinkType === 'symmetry'
+                            ? { linkType: 'symmetry', axis: shapeAxis }
+                            : { linkType: undefined, axis: undefined };
                         const desiredParent = Number(item?.parentContourId);
                         const hasDesiredParent = Number.isFinite(desiredParent);
                         let nextSeg = seg;
@@ -1501,9 +1760,10 @@ export default class ProfileEditor {
                                 ...seg,
                                 contourId: desiredParent,
                                 parentContourId: desiredParent,
-                                ...(Number.isFinite(parentGroupId)
-                                    ? { groupId: parentGroupId, parentGroupId }
+                                ...(Number.isFinite(shapeGroupId)
+                                    ? { groupId: shapeGroupId, parentGroupId: Number.isFinite(parentGroupId) ? parentGroupId : shapeGroupId }
                                     : { groupId: undefined, parentGroupId: undefined }),
+                                ...linkFields,
                             };
                         } else {
                             const currentCid = Number(seg.contourId ?? 0);
@@ -1514,17 +1774,19 @@ export default class ProfileEditor {
                                     ...seg,
                                     contourId: standaloneCid,
                                     parentContourId: undefined,
-                                    ...(Number.isFinite(parentGroupId)
-                                        ? { groupId: parentGroupId, parentGroupId }
+                                    ...(Number.isFinite(shapeGroupId)
+                                        ? { groupId: shapeGroupId, parentGroupId: Number.isFinite(parentGroupId) ? parentGroupId : shapeGroupId }
                                         : { groupId: undefined, parentGroupId: undefined }),
+                                    ...linkFields,
                                 };
                             } else {
                                 nextSeg = {
                                     ...seg,
                                     parentContourId: undefined,
-                                    ...(Number.isFinite(parentGroupId)
-                                        ? { groupId: parentGroupId, parentGroupId }
+                                    ...(Number.isFinite(shapeGroupId)
+                                        ? { groupId: shapeGroupId, parentGroupId: Number.isFinite(parentGroupId) ? parentGroupId : shapeGroupId }
                                         : { groupId: undefined, parentGroupId: undefined }),
+                                    ...linkFields,
                                 };
                             }
                         }
@@ -1534,9 +1796,42 @@ export default class ProfileEditor {
                 }
             }
             const tail = this.state.segments.filter(s => !used.has(s.id));
-            const next = [...reordered, ...tail];
+            let next = [...reordered, ...tail];
+
+            // Invariant: non-symmetry segments must never live inside a symmetry group.
+            // If UI order payload places them there, remap back to source group.
+            const symToSource = new Map(
+                orderedGroups
+                    .filter(g => String(g?.linkType ?? '') === 'symmetry')
+                    .map(g => [Number(g?.groupId), _optFiniteId(g?.sourceGroupId)])
+            );
+            if (symToSource.size > 0) {
+                next = next.map((seg) => {
+                    if (String(seg?.linkType ?? '') === 'symmetry') return seg;
+                    const gid = _optFiniteId(seg?.groupId);
+                    const pgid = _optFiniteId(seg?.parentGroupId);
+                    const badGid = Number.isFinite(gid) && symToSource.has(Number(gid));
+                    const badPgid = Number.isFinite(pgid) && symToSource.has(Number(pgid));
+                    if (!badGid && !badPgid) return seg;
+                    const src = badGid
+                        ? symToSource.get(Number(gid))
+                        : symToSource.get(Number(pgid));
+                    if (!Number.isFinite(src)) {
+                        return { ...seg, groupId: undefined, parentGroupId: undefined };
+                    }
+                    return { ...seg, groupId: src, parentGroupId: src };
+                });
+            }
+
             const sig = (arr) => arr.map(s => `${s.id}:${Number(s.contourId ?? 0)}:${Number(s?.parentContourId ?? NaN)}:${Number(s?.parentGroupId ?? NaN)}`).join('|');
-            const groupsSig = (arr) => arr.map(g => `${Number(g?.groupId)}:${String(g?.name ?? '')}:${Number(g?.parentGroupId ?? NaN)}`).join('|');
+            const groupsSig = (arr) => arr.map(g => [
+                Number(g?.groupId),
+                String(g?.name ?? ''),
+                Number(g?.parentGroupId ?? NaN),
+                String(g?.linkType ?? ''),
+                Number(g?.sourceGroupId ?? NaN),
+                String(g?.sourceGroupGuid ?? ''),
+            ].join(':')).join('|');
             const changed = sig(this.state.segments) !== sig(next)
                 || groupsSig(this.state.elementGroups ?? []) !== groupsSig(orderedGroups);
             if (!changed) return;
@@ -1544,9 +1839,18 @@ export default class ProfileEditor {
             this._pathEditorIsSource = true;
             this.state.segments = next;
             this.state.elementGroups = orderedGroups;
+            if (typeof this.state._syncSymmetryContours === 'function') {
+                this.state._syncSymmetryContours();
+            }
             this.state._pushHistory("Reorder elements");
-            this.state._notifySegments();
+            // Allow one state->PathEditor pass so derived symmetry rows appear
+            // immediately in PathEditor after structure reorder/group edits.
             this._pathEditorIsSource = false;
+            this.state._notifySegments();
+            this._debugLog('pathEditor.onElementOrderChange.applied', {
+                stateSegments: this.state.segments.length,
+                stateGroups: (this.state.elementGroups ?? []).length,
+            });
         };
 
         // PathEditor → canvas: user edited the text — re-import into state.
@@ -1561,11 +1865,20 @@ export default class ProfileEditor {
                 snapshot,
                 this._pathEditor?.variableValues ?? this.state.variableValues ?? {}
             );
+            this._debugLog('pathEditor.onChange.start', {
+                snapshotItems: snapshot.length,
+                contourPathLen: String(contourPath ?? '').length,
+                selectedRefs: Array.isArray(meta?.selectedLineRefs) ? meta.selectedLineRefs.length : 0,
+            });
             // Mark that this change originated in the text editor so that
             // _syncToPathEditor does NOT overwrite PathEditor content.
             this._pathEditorIsSource = true;
             if (contourPath && contourPath.trim()) {
                 this.state._importPath(contourPath, { resetHistory: false });
+                // Re-align freshly-created contourIds to match snapshot contourIds
+                // (positional order) so the lookups inside _restoreStateStructureFromElements
+                // and _restoreContourLinkMetaFromElements find the correct segments.
+                _realignContourIdsToSourceOrder(this.state, snapshot);
             } else {
                 this.state.segments = [];
                 this.state._pushHistory("Import");
@@ -1574,7 +1887,22 @@ export default class ProfileEditor {
                 resetHistoryBaseline: false,
                 vars: this._pathEditor?.variableValues ?? this.state.variableValues ?? {},
             });
+            // Restore per-contour linkType/parentContourId/axis and trigger symmetry sync.
+            // This ensures that mirrored contours stay in sync whenever the user edits
+            // source-contour text in PathEditor (fixes issues: re-edit breaks symmetry,
+            // text edits not mirrored, new elements not appearing in mirror immediately).
+            _restoreContourLinkMetaFromElements(this.state, snapshot);
+            if (typeof this.state._syncSymmetryContours === 'function') {
+                this.state._syncSymmetryContours();
+            }
+            // Allow one state->PathEditor pass so derived symmetry rows appear
+            // immediately after text-originated structural edits.
+            this._pathEditorIsSource = false;
             this.state._notifySegments();
+            this._debugLog('pathEditor.onChange.applied', {
+                stateSegments: this.state.segments.length,
+                stateGroups: (this.state.elementGroups ?? []).length,
+            });
 
             // Preserve row selection from PathEditor after text import.
             // PathEditor emits flat selected line indexes; convert them via fresh lineSegIds.
@@ -1600,8 +1928,6 @@ export default class ProfileEditor {
             }
 
             _syncElementTransformsToState(this.state, meta?.elementTransforms ?? []);
-
-            this._pathEditorIsSource = false;
         };
 
         // PathEditor row click → canvas selection (unified API: segId is always passed).
@@ -1679,18 +2005,24 @@ export default class ProfileEditor {
         // Shape element attribute edit: merge changes into the matching canvas segment.
         pathEditor.onShapeElementChange = (segId, changes) => {
             if (changes === null) {
+                this._debugLog('pathEditor.onShapeElementChange.delete', { segId });
                 this.state.deleteSegments([segId]);
                 return;
             }
             // Handle shape creation triggered by PathEditor “Add” buttons.
             // segId is null here; changes._create carries the type string.
             if (changes._create) {
+                this._debugLog('pathEditor.onShapeElementChange.create', { type: changes._create });
                 this._createDefaultShape(changes._create);
                 return;
             }
             // Merge changes into existing data (updateSegments replaces `data` at top level).
             const seg = this.state.segments.find(s => s.id === segId);
             if (!seg) return;
+            this._debugLog('pathEditor.onShapeElementChange.update', {
+                segId,
+                keys: Object.keys(changes ?? {}),
+            });
             const mergedData = { ...seg.data, ...changes };
             if (seg.type === 'circle' && (Object.prototype.hasOwnProperty.call(changes, 'radius')
                 || Object.prototype.hasOwnProperty.call(changes, 'center'))) {
@@ -1792,6 +2124,42 @@ export default class ProfileEditor {
             this.state.clearSelection();
             this._pathEditorIsSource = false;
         };
+
+        /**
+         * PathEditor requests deletion of a Symmetry group.
+         * Remove all segments belonging to the symmetry group and the group
+         * entry itself from state, then push history and notify canvas.
+         * @param {number} groupId - The symGroupId to delete.
+         */
+        pathEditor.onDeleteSymmetryGroup = (groupId) => {
+            const gid = Number(groupId);
+            if (!Number.isFinite(gid) || !this.state) return;
+            this._debugLog('pathEditor.onDeleteSymmetryGroup.start', {
+                groupId: gid,
+                stateSegments: this.state.segments.length,
+                stateGroups: (this.state.elementGroups ?? []).length,
+            });
+            const before = this.state.segments.length;
+            const beforeGroups = Array.isArray(this.state.elementGroups) ? this.state.elementGroups.length : 0;
+            this.state.segments = this.state.segments.filter(s => {
+                if (Number(s?.groupId) === gid) return false;
+                if (Number(s?.parentGroupId) === gid) return false;
+                return true;
+            });
+            if (Array.isArray(this.state.elementGroups)) {
+                this.state.elementGroups = this.state.elementGroups.filter(g => Number(g?.groupId) !== gid);
+            }
+            const groupsChanged = (Array.isArray(this.state.elementGroups) ? this.state.elementGroups.length : 0) !== beforeGroups;
+            if (this.state.segments.length !== before || groupsChanged) {
+                this.state._pushHistory('Delete Symmetry');
+                this.state._notifySegments();
+            }
+            this._debugLog('pathEditor.onDeleteSymmetryGroup.applied', {
+                groupId: gid,
+                stateSegments: this.state.segments.length,
+                stateGroups: (this.state.elementGroups ?? []).length,
+            });
+        };
     }
 
     /**
@@ -1831,7 +2199,20 @@ export default class ProfileEditor {
             this.state.variableValues = currentVars ?? {};
             const mergedPath = _mergeFormulaPath(path, this._formulaPath, currentVars ?? {});
             const editorSnapshot = this._pathEditor?.getElementsDebugSnapshot?.() ?? [];
-            const orderedElements = _orderElementsLikePathEditor(elements, editorSnapshot);
+            const hasSymmetryStructure = elements.some(e =>
+                (e?.type === 'group' && String(e?.linkType ?? '') === 'symmetry')
+                || e?.type === 'symmetry'
+            );
+            // For symmetry-heavy structures, canonical state order is the only stable
+            // order. Reordering against old PathEditor snapshot can reintroduce stale
+            // parent/child placement and mix multiple symmetry trees.
+            const orderedElements = hasSymmetryStructure
+                ? elements
+                : _orderElementsLikePathEditor(elements, editorSnapshot);
+            this._debugLog('syncToPathEditor.canvas', {
+                elements: elements.length,
+                usedCanonicalOrder: hasSymmetryStructure,
+            });
             const elemsWithPaths = _buildElemsWithPaths(orderedElements, mergedPath, lineSegIds);
             const needsRebuild = this._pathEditor.needsElementsRebuild?.(elemsWithPaths) ?? true;
             if (needsRebuild) {
