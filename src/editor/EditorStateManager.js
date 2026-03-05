@@ -1,7 +1,14 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { arcCenterFromEndpoints } from "./tools/ArcTool.js";
-import { evalAngle } from "./transforms/TransformCommands.js";
 import { getRectGeomLocal } from "./geometry/rectGeometry.js";
+import {
+    dot,
+    mirrorPoint,
+    rawFromWorld,
+    sumRtAngle,
+    withRtAngle,
+    worldFromRaw,
+} from "./tools/shared/transformGeometry.js";
 
 const log = LoggerFactory.createLogger("EditorStateManager");
 
@@ -13,44 +20,6 @@ function _isSymmetrySegment(seg) {
     return String(seg?.linkType ?? "") === "symmetry";
 }
 
-function _sumRtAngle(transforms, vars = {}) {
-    const list = Array.isArray(transforms) ? transforms : [];
-    let angle = 0;
-    for (const t of list) {
-        if (String(t?.type ?? "").toUpperCase() !== "RT") continue;
-        const v = evalAngle(t?.params?.[0] ?? "", vars);
-        if (Number.isFinite(v)) angle += v;
-    }
-    return angle;
-}
-
-function _rotatePoint(p, angleDeg) {
-    const r = angleDeg * Math.PI / 180;
-    const c = Math.cos(r);
-    const s = Math.sin(r);
-    return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };
-}
-
-function _mirrorPoint(p, A, B) {
-    const dx = B.x - A.x;
-    const dy = B.y - A.y;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq < 1e-12) return { x: p.x, y: p.y };
-    const t = ((p.x - A.x) * dx + (p.y - A.y) * dy) / lenSq;
-    const footX = A.x + t * dx;
-    const footY = A.y + t * dy;
-    return { x: 2 * footX - p.x, y: 2 * footY - p.y };
-}
-
-function _worldFromRaw(rawPoint, rtAngle) {
-    if (Math.abs(rtAngle) < 1e-9) return { x: rawPoint.x, y: rawPoint.y };
-    return _rotatePoint(rawPoint, rtAngle);
-}
-
-function _rawFromWorld(worldPoint, rtAngle) {
-    if (Math.abs(rtAngle) < 1e-9) return { x: worldPoint.x, y: worldPoint.y };
-    return _rotatePoint(worldPoint, -rtAngle);
-}
 
 function _optFiniteId(value) {
     if (value === null || value === undefined || value === '') return null;
@@ -58,23 +27,6 @@ function _optFiniteId(value) {
     return Number.isFinite(n) ? n : null;
 }
 
-function _dot(a, b) {
-    return a.x * b.x + a.y * b.y;
-}
-
-function _withRtAngle(transforms, nextAngle) {
-    const list = Array.isArray(transforms)
-        ? transforms.map(t => ({ ...t, params: Array.isArray(t.params) ? [...t.params] : [] }))
-        : [];
-    const token = String(parseFloat(nextAngle.toFixed(6)));
-    const idx = list.findIndex(t => String(t?.type ?? '').toUpperCase() === 'RT');
-    if (idx >= 0) {
-        list[idx] = { ...list[idx], raw: `MOD RT ${token}`, params: [token] };
-        return list;
-    }
-    list.push({ type: 'RT', raw: `MOD RT ${token}`, params: [token] });
-    return list;
-}
 
 /**
  * @typedef {"cursor"|"line"|"rect2pt"|"rect3pt"|"arc2pt"|"arc3pt"|"circle2pt"|"circle3pt"} DrawTool
@@ -1025,12 +977,12 @@ export default class EditorStateManager {
         const vars = this.variableValues ?? {};
         const data = _cloneDeep(seg.data ?? {});
         const transforms = _cloneDeep(Array.isArray(seg.transforms) ? seg.transforms : []);
-        const rt0 = _sumRtAngle(transforms, vars);
+        const rt0 = sumRtAngle(transforms, vars);
 
         const mirrorRawPointKeepRt = (rawPoint) => {
-            const world = _worldFromRaw(rawPoint, rt0);
-            const mirroredWorld = _mirrorPoint(world, axis.p1, axis.p2);
-            return _rawFromWorld(mirroredWorld, rt0);
+            const world = worldFromRaw(rawPoint, rt0);
+            const mirroredWorld = mirrorPoint(world, axis.p1, axis.p2);
+            return rawFromWorld(mirroredWorld, rt0);
         };
 
         if (seg.type === "line") {
@@ -1059,19 +1011,19 @@ export default class EditorStateManager {
 
         if (seg.type === "rect") {
             const g = getRectGeomLocal(data);
-            const p00 = _mirrorPoint(_worldFromRaw({ x: g.xStart, y: g.yStart }, rt0), axis.p1, axis.p2);
-            const p10 = _mirrorPoint(_worldFromRaw({ x: g.xOpp,   y: g.yStart }, rt0), axis.p1, axis.p2);
-            const p01 = _mirrorPoint(_worldFromRaw({ x: g.xStart, y: g.yOpp   }, rt0), axis.p1, axis.p2);
+            const p00 = mirrorPoint(worldFromRaw({ x: g.xStart, y: g.yStart }, rt0), axis.p1, axis.p2);
+            const p10 = mirrorPoint(worldFromRaw({ x: g.xOpp, y: g.yStart }, rt0), axis.p1, axis.p2);
+            const p01 = mirrorPoint(worldFromRaw({ x: g.xStart, y: g.yOpp }, rt0), axis.p1, axis.p2);
             const widthVec  = { x: p10.x - p00.x, y: p10.y - p00.y };
             const widthLen  = Math.hypot(widthVec.x, widthVec.y);
             if (widthLen < 1e-9) return null;
             const ux = { x: widthVec.x / widthLen, y: widthVec.y / widthLen };
             const uy = { x: -ux.y, y: ux.x };
             const heightVec = { x: p01.x - p00.x, y: p01.y - p00.y };
-            const wSigned   = _dot(widthVec, ux);
-            const hSigned   = _dot(heightVec, uy);
+            const wSigned   = dot(widthVec, ux);
+            const hSigned   = dot(heightVec, uy);
             const nextRt    = Math.atan2(ux.y, ux.x) * 180 / Math.PI;
-            const pRaw      = _rawFromWorld(p00, nextRt);
+            const pRaw      = rawFromWorld(p00, nextRt);
             data.x    = pRaw.x;
             data.y    = pRaw.y;
             data.w    = Math.abs(wSigned);
@@ -1079,7 +1031,7 @@ export default class EditorStateManager {
             data.dirW = wSigned  >= 0 ? 1 : -1;
             data.dirH = hSigned  >= 0 ? 1 : -1;
             delete data._expr;
-            return { type: "rect", data, transforms: _withRtAngle(transforms, nextRt), cmdHint: seg.cmdHint };
+            return { type: "rect", data, transforms: withRtAngle(transforms, nextRt), cmdHint: seg.cmdHint };
         }
 
         if (seg.type === "ellipse") {
@@ -1101,6 +1053,7 @@ export default class EditorStateManager {
             let work = srcSegments.filter(s => !_isSymmetrySegment(s));
             let changed = srcSegments.length !== work.length;
             const syncSummary = [];
+            const allElements = this.getElements();
 
             const allGroups = Array.isArray(this.elementGroups) ? this.elementGroups : [];
             const symGroups = allGroups.filter(g => String(g?.linkType ?? '') === 'symmetry');
@@ -1132,9 +1085,9 @@ export default class EditorStateManager {
                 if (!Number.isFinite(symGroupId) || !Number.isFinite(sourceGroupId) || !axis?.p1 || !axis?.p2) continue;
 
                 const sourceGroup = (sourceGroupGuid
-                    ? allGroups.find(g => String(g?.guid ?? '') === sourceGroupGuid)
+                    ? allGroups.find(g => String(g?.guid ?? '') === sourceGroupGuid && String(g?.linkType ?? '') !== 'symmetry')
                     : null)
-                    ?? allGroups.find(g => Number(g?.groupId) === sourceGroupId)
+                    ?? allGroups.find(g => Number(g?.groupId) === sourceGroupId && String(g?.linkType ?? '') !== 'symmetry')
                     ?? null;
                 const resolvedSourceGroupId = Number(sourceGroup?.groupId);
                 if (!Number.isFinite(resolvedSourceGroupId)) continue;
@@ -1166,7 +1119,6 @@ export default class EditorStateManager {
 
                 // Preserve source structure order exactly as PathEditor sees it.
                 const sourceSegById = new Map(sourceSegs.map(s => [s.id, s]));
-                const allElements = this.getElements();
                 const sourceItemsOrdered = allElements.filter((item) => {
                     if (item?.type === 'group') return false;
                     const parentGid = Number(item?.parentGroupId);

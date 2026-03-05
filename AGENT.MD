@@ -1444,3 +1444,33 @@ Group-driven режим:
 - ✅ `_restoreStateStructureFromElements` уже корректно читал `linkType`/`sourceGroupId`/`axis` из групп
 
 *Последнее обновление: 29.06.2026*
+
+---
+
+## Symmetry Stability + Performance (05.03.2026)
+
+### Что исправлено
+- [x] Фикс перепутывания source/symmetry shape после `save -> preview -> edit`:
+  - `shape.groupId` теперь сохраняется в snapshot/sanitize и корректно восстанавливается при `enter()`.
+  - В restore добавлен fallback `groupId <- parentGroupId`, чтобы ownership не терялся.
+- [x] Усилен `EditorStateManager._syncSymmetryContours`:
+  - source-группа резолвится только из `linkType != 'symmetry'`.
+  - Убран лишний тяжелый пересчёт `getElements()` внутри цикла по sym-группам (считается один раз на sync).
+
+### Рефакторинг
+- [x] Вынесена общая геометрическая математика в shared-модуль:
+  - `src/editor/tools/shared/transformGeometry.js`
+  - Экспорт: `sumRtAngle`, `withRtAngle`, `rotatePoint`, `mirrorPoint`, `worldFromRaw`, `rawFromWorld`, `dot`, `axisAngleDeg`.
+- [x] `MirrorTool` переведен на shared helper-ы.
+- [x] `EditorStateManager` переведен на shared helper-ы.
+
+### Оптимизация UI/логирования
+- [x] В `ProfileEditor._debugLog` добавлен throttle для шумных событий:
+  - `state.updateSegments`, `state.syncSymmetryContours`, `syncToPathEditor.canvas`.
+- [x] Добавлен cap debug-textarea (хранится последние ~400 строк), чтобы не разгонять reflow/GC при drag.
+
+### Эффект
+- Стабильная принадлежность shape к source/symmetry после повторного входа в edit.
+- Меньше фризов при перемещении/редактировании элементов в symmetry-сценариях.
+
+*Последнее обновление: 05.03.2026*

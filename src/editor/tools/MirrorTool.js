@@ -1,10 +1,18 @@
 import LoggerFactory from "../../core/LoggerFactory.js";
 import BaseTool from "./BaseTool.js";
-import { evalAngle } from "../transforms/TransformCommands.js";
 import { evaluateTokenWithVars } from "../../utils/formulaPolicy.js";
 import { getRectGeomLocal } from "../geometry/rectGeometry.js";
 import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 import { collectSegmentSnapshots, commitCopiedSnapshots, materializeCopiedSegments } from "./shared/copyPreviewUtils.js";
+import {
+    axisAngleDeg,
+    dot,
+    mirrorPoint,
+    rawFromWorld,
+    sumRtAngle,
+    withRtAngle,
+    worldFromRaw,
+} from "./shared/transformGeometry.js";
 
 const log = LoggerFactory.createLogger("MirrorTool");
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -13,66 +21,6 @@ function _clone(value) {
     return JSON.parse(JSON.stringify(value));
 }
 
-function _sumRtAngle(transforms, vars = {}) {
-    const list = Array.isArray(transforms) ? transforms : [];
-    let angle = 0;
-    for (const t of list) {
-        if (String(t?.type ?? "").toUpperCase() !== "RT") continue;
-        const v = evalAngle(t?.params?.[0] ?? "", vars);
-        if (Number.isFinite(v)) angle += v;
-    }
-    return angle;
-}
-
-function _withRtAngle(transforms, nextAngle) {
-    const list = Array.isArray(transforms)
-        ? transforms.map(t => ({ ...t, params: Array.isArray(t.params) ? [...t.params] : [] }))
-        : [];
-    const token = String(parseFloat(nextAngle.toFixed(6)));
-    const idx = list.findIndex(t => String(t?.type ?? "").toUpperCase() === "RT");
-    if (idx >= 0) {
-        list[idx] = { ...list[idx], raw: `MOD RT ${token}`, params: [token] };
-        return list;
-    }
-    list.push({ type: "RT", raw: `MOD RT ${token}`, params: [token] });
-    return list;
-}
-
-function _rotatePoint(p, angleDeg) {
-    const r = angleDeg * Math.PI / 180;
-    const c = Math.cos(r);
-    const s = Math.sin(r);
-    return { x: p.x * c - p.y * s, y: p.x * s + p.y * c };
-}
-
-function _mirrorPoint(p, A, B) {
-    const dx = B.x - A.x;
-    const dy = B.y - A.y;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq < 1e-12) return { x: p.x, y: p.y };
-    const t = ((p.x - A.x) * dx + (p.y - A.y) * dy) / lenSq;
-    const footX = A.x + t * dx;
-    const footY = A.y + t * dy;
-    return { x: 2 * footX - p.x, y: 2 * footY - p.y };
-}
-
-function _axisAngleDeg(A, B) {
-    return Math.atan2(B.y - A.y, B.x - A.x) * 180 / Math.PI;
-}
-
-function _dot(a, b) {
-    return a.x * b.x + a.y * b.y;
-}
-
-function _worldFromRaw(rawPoint, rtAngle) {
-    if (Math.abs(rtAngle) < 1e-9) return { x: rawPoint.x, y: rawPoint.y };
-    return _rotatePoint(rawPoint, rtAngle);
-}
-
-function _rawFromWorld(worldPoint, rtAngle) {
-    if (Math.abs(rtAngle) < 1e-9) return { x: worldPoint.x, y: worldPoint.y };
-    return _rotatePoint(worldPoint, -rtAngle);
-}
 
 class MirrorTool extends BaseTool {
     /**
@@ -538,18 +486,18 @@ class MirrorTool extends BaseTool {
         const data = _clone(seg.data ?? {});
         const transforms = _clone(Array.isArray(seg.transforms) ? seg.transforms : []);
 
-        const rt0 = _sumRtAngle(transforms, vars);
+        const rt0 = sumRtAngle(transforms, vars);
 
         const mirrorRawPointKeepRt = (rawPoint) => {
-            const world = _worldFromRaw(rawPoint, rt0);
-            const mirroredWorld = _mirrorPoint(world, axisStart, axisEnd);
-            return _rawFromWorld(mirroredWorld, rt0);
+            const world = worldFromRaw(rawPoint, rt0);
+            const mirroredWorld = mirrorPoint(world, axisStart, axisEnd);
+            return rawFromWorld(mirroredWorld, rt0);
         };
 
         const mirrorRawPointWithRt = (rawPoint, nextRt) => {
-            const world = _worldFromRaw(rawPoint, rt0);
-            const mirroredWorld = _mirrorPoint(world, axisStart, axisEnd);
-            return _rawFromWorld(mirroredWorld, nextRt);
+            const world = worldFromRaw(rawPoint, rt0);
+            const mirroredWorld = mirrorPoint(world, axisStart, axisEnd);
+            return rawFromWorld(mirroredWorld, nextRt);
         };
 
         if (seg.type === "line") {
@@ -577,9 +525,9 @@ class MirrorTool extends BaseTool {
 
         if (seg.type === "rect") {
             const g = getRectGeomLocal(data);
-            const p00 = _mirrorPoint(_worldFromRaw({ x: g.xStart, y: g.yStart }, rt0), axisStart, axisEnd);
-            const p10 = _mirrorPoint(_worldFromRaw({ x: g.xOpp, y: g.yStart }, rt0), axisStart, axisEnd);
-            const p01 = _mirrorPoint(_worldFromRaw({ x: g.xStart, y: g.yOpp }, rt0), axisStart, axisEnd);
+            const p00 = mirrorPoint(worldFromRaw({ x: g.xStart, y: g.yStart }, rt0), axisStart, axisEnd);
+            const p10 = mirrorPoint(worldFromRaw({ x: g.xOpp, y: g.yStart }, rt0), axisStart, axisEnd);
+            const p01 = mirrorPoint(worldFromRaw({ x: g.xStart, y: g.yOpp }, rt0), axisStart, axisEnd);
 
             const widthVec = { x: p10.x - p00.x, y: p10.y - p00.y };
             const widthLen = Math.hypot(widthVec.x, widthVec.y);
@@ -589,11 +537,11 @@ class MirrorTool extends BaseTool {
             const uy = { x: -ux.y, y: ux.x };
             const heightVec = { x: p01.x - p00.x, y: p01.y - p00.y };
 
-            const wSigned = _dot(widthVec, ux);
-            const hSigned = _dot(heightVec, uy);
+            const wSigned = dot(widthVec, ux);
+            const hSigned = dot(heightVec, uy);
 
             const nextRt = Math.atan2(ux.y, ux.x) * 180 / Math.PI;
-            const pRaw = _rawFromWorld(p00, nextRt);
+            const pRaw = rawFromWorld(p00, nextRt);
 
             data.x = pRaw.x;
             data.y = pRaw.y;
@@ -602,17 +550,17 @@ class MirrorTool extends BaseTool {
             data.dirW = wSigned >= 0 ? 1 : -1;
             data.dirH = hSigned >= 0 ? 1 : -1;
             delete data._expr;
-            return { data, transforms: _withRtAngle(transforms, nextRt) };
+            return { data, transforms: withRtAngle(transforms, nextRt) };
         }
 
         if (seg.type === "ellipse") {
-            const axisAngle = _axisAngleDeg(axisStart, axisEnd);
+            const axisAngle = axisAngleDeg(axisStart, axisEnd);
             const nextRt = 2 * axisAngle - rt0;
             const p = mirrorRawPointWithRt({ x: data.cx, y: data.cy }, nextRt);
             data.cx = p.x;
             data.cy = p.y;
             delete data._expr;
-            return { data, transforms: _withRtAngle(transforms, nextRt) };
+            return { data, transforms: withRtAngle(transforms, nextRt) };
         }
 
         return null;

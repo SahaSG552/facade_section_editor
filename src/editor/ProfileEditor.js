@@ -824,6 +824,7 @@ function _sanitizeElementsSnapshot(elements) {
             return {
                 ...elem,
                 segId: allocSegId(elem.segId, 'seg'),
+                groupId: remapGroupId(elem?.groupId ?? elem?.parentGroupId),
                 parentContourId: remapContourId(elem?.parentContourId),
                 parentGroupId: remapGroupId(elem?.parentGroupId),
                 linkType: String(elem?.linkType ?? '') === 'symmetry' ? 'symmetry' : null,
@@ -1130,7 +1131,9 @@ function _restoreStateStructureFromElements(state, elements, { resetHistoryBasel
             data: evalShapeData(elem.type, elem.data),
             transforms: normalizeTransforms(elem.transforms),
             ...(hasParentContour ? { parentContourId: requestedParentCid } : {}),
-            ...(Number.isFinite(_optFiniteId(elem?.groupId)) ? { groupId: _optFiniteId(elem.groupId) } : {}),
+            ...(Number.isFinite(_optFiniteId(elem?.groupId ?? elem?.parentGroupId))
+                ? { groupId: _optFiniteId(elem?.groupId ?? elem?.parentGroupId) }
+                : {}),
             ...(Number.isFinite(_optFiniteId(elem?.parentGroupId)) ? { parentGroupId: _optFiniteId(elem.parentGroupId) } : {}),
             ...(String(elem?.linkType ?? '') === 'symmetry' ? { linkType: 'symmetry' } : {}),
             ...(String(elem?.linkType ?? '') === 'symmetry'
@@ -1286,6 +1289,10 @@ export default class ProfileEditor {
         this._debugLogEl = null;
         /** @type {number} */
         this._debugLogSeq = 0;
+        /** @type {Map<string, number>} */
+        this._debugLastTsByAction = new Map();
+        /** @type {number} */
+        this._debugLastTrimSeq = 0;
     }
 
     /** @returns {HTMLTextAreaElement|null} @private */
@@ -1305,6 +1312,18 @@ export default class ProfileEditor {
     _debugLog(action, details = null) {
         const el = this._getDebugLogField();
         if (!el) return;
+
+        // Skip ultra-frequent noisy events to keep the UI responsive while dragging.
+        const now = performance.now();
+        const throttleMs = (action === 'state.updateSegments' || action === 'state.syncSymmetryContours' || action === 'syncToPathEditor.canvas')
+            ? 120
+            : 0;
+        if (throttleMs > 0) {
+            const last = Number(this._debugLastTsByAction.get(action) ?? 0);
+            if (now - last < throttleMs) return;
+            this._debugLastTsByAction.set(action, now);
+        }
+
         const time = new Date().toISOString().split('T')[1].replace('Z', '');
         this._debugLogSeq += 1;
         let line = `[${this._debugLogSeq}] ${time} ${action}`;
@@ -1316,6 +1335,14 @@ export default class ProfileEditor {
             }
         }
         el.value = el.value ? `${el.value}\n${line}` : line;
+        // Hard cap debug textarea size: keep last ~400 lines.
+        if (this._debugLogSeq - this._debugLastTrimSeq > 100) {
+            const lines = el.value.split('\n');
+            if (lines.length > 400) {
+                el.value = lines.slice(-400).join('\n');
+                this._debugLastTrimSeq = this._debugLogSeq;
+            }
+        }
         el.scrollTop = el.scrollHeight;
     }
 
