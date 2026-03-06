@@ -8,6 +8,7 @@ import RotateTool from "./tools/RotateTool.js";
 import LineTool from "./tools/LineTool.js";
 import MirrorTool from "./tools/MirrorTool.js";
 import FlipTool from "./tools/FlipTool.js";
+import FilletTool from "./tools/FilletTool.js";
 import ArcTool from "./tools/ArcTool.js";
 import CircleTool from "./tools/CircleTool.js";
 import RectTool from "./tools/RectTool.js";
@@ -2644,6 +2645,8 @@ export default class ProfileEditor {
             case "mirror": return new MirrorTool("mirror");
             case "symmetry": return new MirrorTool("symmetry");
             case "flip": return new FlipTool();
+            case "fillet": return new FilletTool("fillet");
+            case "filletCorners": return new FilletTool("filletCorners");
             case "arc3pt":
             case "arc": return new ArcTool();
             case "circle2pt": return new CircleTool("circle2pt");

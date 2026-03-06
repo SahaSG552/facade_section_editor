@@ -37,7 +37,7 @@ const TOOL_DEFINITIONS = [
     { id: "ellipse", label: "Ellipse (LMB: 2pt · RMB: 3pt)", icon: "⬭", group: "draw", key: "e", lmbTool: "ellipse2pt", rmbTool: "ellipse3pt" },
     { id: "group", label: "Group (LMB) / Ungroup (RMB)", icon: "◫", group: "draw", key: "g", lmbTool: "group", rmbTool: "ungroup" },
     // Edit tools
-    { id: "fillet", label: "Fillet", icon: "⌔", group: "edit" },
+    { id: "fillet", label: "Fillet corner (LMB) / Fillet all corners (RMB)", icon: "⌔", group: "edit", key: "i", lmbTool: "fillet", rmbTool: "filletCorners" },
     { id: "chamfer", label: "Chamfer", icon: "⌐", group: "edit" },
     { id: "trim", label: "Trim", icon: "✂", group: "edit", key: "t" },
     { id: "extend", label: "Extend", icon: "↔", group: "edit" },

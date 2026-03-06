@@ -2463,7 +2463,8 @@ export default class BitsManager {
                 // Snapshot the raw formula path BEFORE entering edit (setPath will overwrite it).
                 const originalRawPath = pathEditorInstance?.getPath() ?? "";
                 const originalElementsSnapshot = pathEditorInstance?.getElementsDebugSnapshot?.() ?? [];
-
+                // Capture original transforms to properly revert on Cancel.
+                const originalTransformsSnapshot = pathEditorInstance?.getElementTransformsSnapshot?.() ?? [];
 
                 // Track whether the user confirmed the edit (Done) or cancelled it.
                 let editSaved = false;
@@ -2495,13 +2496,15 @@ export default class BitsManager {
                         if (!editSaved && pathEditorInstance) {
                             // Cancel: restore the path that was in the PathEditor before
                             // editing started (preserving any formula tokens).
-                            const transformsSnapshot = pathEditorInstance.getElementTransformsSnapshot?.() ?? [];
                             restorePathEditorState(pathEditorInstance, {
                                 elementsSnapshot: originalElementsSnapshot,
-                                transformsSnapshot,
+                                transformsSnapshot: originalTransformsSnapshot,
                                 legacyPath: originalRawPath,
                                 suppressOnChange: true,
                             });
+                            // Force sync to inputs so preview reads the restored state
+                            pathEditorInstance.syncHiddenInputsFromElements?.();
+                            updateBitPreview();
                         }
                         previewRenderState.signature = null;
                         previewRenderState.shape = null;
