@@ -4,7 +4,8 @@
   "description": "This project aims to create furniture facade cross sections using router bits and CNC operations. The upcoming phase will involve generating 3D models of furniture facades with custom designs.",
   "main": "index.js",
   "scripts": {
-    "dev": "vite --host",
+    "dev": "vite dev",
+    "host": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
     "cap:init": "cap init",
@@ -47,6 +48,7 @@
     "@capacitor/core": "^5.0.0",
     "@capacitor/ios": "^5.0.0",
     "@types/three": "^0.182.0",
+    "@vitejs/plugin-basic-ssl": "^2.1.4",
     "acorn": "^8.15.0",
     "vite": "^7.3.0"
   }

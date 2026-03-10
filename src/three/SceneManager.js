@@ -1,8 +1,9 @@
 import * as THREE from "three";
-import { WebGPURenderer } from "three/webgpu";
+import { WebGLRenderer } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import LoggerFactory from "../core/LoggerFactory.js";
 import ViewCubeGizmo from "./ViewCubeGizmo.js";
+
 
 
 /**
@@ -87,32 +88,44 @@ export default class SceneManager {
         this.camera.lookAt(0, 0, 0);
 
         // Create renderer
-        // Create renderer
-        // Use WebGPURenderer if available
-        // Note: As of r167+, WebGPURenderer is imported from 'three/webgpu'
-        // We will assume the import is handled or shimmed; if strictly separate package, might need adjustment.
-        // For standard three.js imports in newer versions:
+        // WebGPURenderer requires a secure context (HTTPS or localhost).
+        // Using a static import of 'three/webgpu' crashes on plain HTTP network URLs
+        // because the module tries to access WebGPU constants (e.g. GPUShaderStage.VERTEX)
+        // at load time when navigator.gpu is undefined.
+        // Fix: only dynamically import the WebGPU module when we know it's safe.
+        const isSecureCtx =
+            window.isSecureContext ||
+            ["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname);
 
-        // Dynamic import or check if possible? 
-        // Since we are module based, we can try to import it at the top, but for now let's stick to the plan.
-        // Actually, I need to change the imports at the top first.
-        // Re-reading file via replace might be tricky if I need to change imports.
-        // I will use multi_replace for this to handle imports and the renderer creation.
+        const webGpuAvailable = isSecureCtx && typeof navigator.gpu !== "undefined";
+        this._usingWebGPU = webGpuAvailable;
 
-        this.renderer = new WebGPURenderer({ antialias: true, forceWebGL: false });
-        this.renderer.setSize(
-            Math.max(1, this.container.clientWidth),
-            Math.max(1, this.container.clientHeight)
-        );
-        this.renderer.setPixelRatio(window.devicePixelRatio);
-        // ShadowMap is handled differently in WebGPU usually, but basics might map. 
-        // WebGPURenderer handles lights differently (node based), but basic compatibility exists.
-        this.renderer.shadowMap.enabled = true;
-        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        this.container.appendChild(this.renderer.domElement);
-
-        // WebGPURenderer initialization
-        await this.renderer.init();
+        if (webGpuAvailable) {
+            this.log.info("Secure context detected — using WebGPURenderer");
+            // Dynamic import: the module is only loaded when safe to do so.
+            const { WebGPURenderer } = await import("three/webgpu");
+            this.renderer = new WebGPURenderer({ antialias: true, forceWebGL: false });
+            this.renderer.setSize(
+                Math.max(1, this.container.clientWidth),
+                Math.max(1, this.container.clientHeight)
+            );
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+            this.renderer.shadowMap.enabled = true;
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            this.container.appendChild(this.renderer.domElement);
+            await this.renderer.init();
+        } else {
+            this.log.info("WebGPU not available — using WebGLRenderer (HTTP or unsupported browser)");
+            this.renderer = new WebGLRenderer({ antialias: true });
+            this.renderer.setSize(
+                Math.max(1, this.container.clientWidth),
+                Math.max(1, this.container.clientHeight)
+            );
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+            this.renderer.shadowMap.enabled = true;
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            this.container.appendChild(this.renderer.domElement);
+        }
 
         // Create controls
         this.controls = new OrbitControls(
@@ -334,10 +347,10 @@ export default class SceneManager {
         this.startQuaternion.copy(this.camera.quaternion);
         this.isTransitioning = true;
         this.transitionStartTime = performance.now();
-        
+
         if (this.viewCube) this.viewCube.isTransitioning = true;
         if (this.controls) this.controls.enabled = false;
-        
+
         this.log.debug("Starting view transition");
     }
 
@@ -363,10 +376,10 @@ export default class SceneManager {
 
             // Smoothstep easing
             const t = alpha * alpha * (3 - 2 * alpha);
-            
+
             // Interpolate rotation
             this.camera.quaternion.slerpQuaternions(this.startQuaternion, this.targetQuaternion, t);
-            
+
             // Update camera position while maintaining distance to target
             if (this.controls) {
                 const distance = this.camera.position.distanceTo(this.controls.target);

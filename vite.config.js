@@ -1,6 +1,14 @@
 import { defineConfig } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import basicSsl from "@vitejs/plugin-basic-ssl";
+
+// Detect if running with --host (npm run host) so we only enable HTTPS on the network server.
+// Local `npm run dev` stays on plain HTTP to avoid self-signed cert warnings.
+const isHost = process.argv.some(
+    (arg) => arg === "--host" || arg.startsWith("--host=")
+);
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,7 +32,7 @@ function stripManifoldWasmBadSourceMap() {
 }
 
 export default defineConfig({
-    plugins: [stripManifoldWasmBadSourceMap()],
+    plugins: [stripManifoldWasmBadSourceMap(), ...(isHost ? [basicSsl()] : [])],
     resolve: {
         alias: {
             // Provide empty shim for Node.js 'module' package in browser
@@ -39,6 +47,7 @@ export default defineConfig({
         },
     },
     server: {
+        ...(isHost ? { https: true, host: true } : {}),
         fs: {
             // Allow serving files from node_modules
             allow: [".."],
