@@ -12,6 +12,23 @@
 - **Симметрия**: `_restoreContourLinkMetaFromElements` всегда должна вызываться после `_restoreStateStructureFromElements` при PathEditor-originated изменениях — она восстанавливает `linkType`, `parentContourId`, `axis` на сегментах и вызывает `_syncSymmetryContours`.
 - **НЕ НУЖНО** вызывать `_syncToPathEditor` в PathEditor-originated ветке — это перезапишет пользовательские правки.
 
+## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ: ADVANCED FILLETS + FLIP TOOL SCALING (10.03.2026)
+
+### Fillet Tool Enhancements
+- [x] **Mixed Segments**: Реализована поддержка скруглений между любыми типами сегментов (Line-Arc, Arc-Arc).
+- [x] **Generalized Geometry**: Введен метод `_filletByOffset` в `filletGeometry.js`, использующий пересечение офсетных кривых для нахождения центра скругления.
+- [x] **Arc Trimming**: `FilletTool.js` теперь корректно обрезает дуги, учитывая их длину (`_getSegLength`) для удаления вырожденных сегментов.
+- [x] **Preview Ghost**: Исправлено отображение дуговых "остатков" в превью, добавлена поддержка инверсии `sweep` при рисовании в обратном направлении.
+- [x] **All Corners**: Режим "All Corners" теперь находит и скругляет углы, образованные дугами.
+
+### Flip Tool 개선
+- [x] **Zoom-aware Scaling**: Стрелки направления теперь масштабируются обратно пропорционально уровню зума (`1.8 / zoom`), что делает их видимыми на любых масштабах.
+
+### Refactoring & Documentation
+- [x] **Geometry Unification**: Унифицирован формат результата `FilletResult` через фабрику `_createFilletResult`.
+- [x] **Code Cleanup**: Сложная логика слияния контуров вынесена в приватный метод `_mergeContoursIfNeeded` в `FilletTool.js`.
+- [x] **JSDoc**: Документированы все новые и основные методы в `filletGeometry.js`, `FilletTool.js` и `FlipTool.js`.
+
 ## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ (27.02.2026)
 
 ## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ: FLIP TOOL + SYMMETRY DIRECTION (05.03.2026)

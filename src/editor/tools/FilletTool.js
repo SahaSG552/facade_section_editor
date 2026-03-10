@@ -158,18 +158,40 @@ export default class FilletTool extends BaseTool {
 
     // ─── Lifecycle ─────────────────────────────────────────────────────────
 
-    activate(ctx) { super.activate(ctx); this._reset(); log.debug("FilletTool activated, mode=", this._mode); }
-    deactivate() { this._removePopup(); this._clearHover(); super.deactivate(); }
+    /**
+     * Tool activation lifecycle. Subscribes to toolbar events.
+     */
+    activate(ctx) {
+        super.activate(ctx);
+        this._reset();
+        log.debug("FilletTool activated, mode=", this._mode);
+    }
+
+    /**
+     * Tool deactivation lifecycle. Clears ghosts and popups.
+     */
+    deactivate() {
+        this._removePopup();
+        this._clearHover();
+        super.deactivate();
+    }
     hasActiveCommand() { return true; }
 
     // ─── Events ────────────────────────────────────────────────────────────
 
+    /**
+     * Handles mouse/touch down on the canvas.
+     * Manages segment selection phases.
+     */
     onPointerDown(pos, e) {
         if (e.button !== 0) return;
         if (this._mode === "fillet") this._filletDown(pos, e);
         else this._cornersDown(pos, e);
     }
 
+    /**
+     * Updates preview during cross-segment fillet picking.
+     */
     onPointerMove(pos, e) {
         this._cursorPos = pos;
         if (this._popup && e) this._positionPopup(e);
@@ -313,6 +335,11 @@ export default class FilletTool extends BaseTool {
         this.ctx.canvas.setGhost(_buildSingleFilletGhost(result, seg1FarEnd, seg2FarEnd, seg1.type, seg2.type, w1, w2, result.seg1TrimKey, result.seg2TrimKey));
     }
 
+    /**
+     * Applies the fillet to the state by trimming original segments and adding the new arc.
+     * Handles cross-contour merging and degenerate segment cleanup.
+     * @private
+     */
     _commitSingleFillet() {
         const result = this._filletResult;
         const seg1 = this._findSeg(this._seg1Id);
@@ -323,30 +350,93 @@ export default class FilletTool extends BaseTool {
         const state = this.ctx.state;
         const DEGEN_EPS = 0.01; // segments shorter than this are removed
 
-        // Trim seg1: move its near-end to arcStart (in local coords)
+        // ── Stage 1: Trim segments ──
         const newS1Data = { ...seg1.data };
         newS1Data[result.seg1TrimKey] = _worldToLocal(result.arcStart, seg1, vars);
 
-        // Trim seg2: move its near-end to arcEnd
         const newS2Data = { ...seg2.data };
         newS2Data[result.seg2TrimKey] = _worldToLocal(result.arcEnd, seg2, vars);
 
-        // Check for degenerate segments after trim
         const s1Len = _getSegLength(newS1Data, seg1.type);
         const s2Len = _getSegLength(newS2Data, seg2.type);
         const s1Degenerate = s1Len < DEGEN_EPS;
         const s2Degenerate = s2Len < DEGEN_EPS;
 
-        // Update non-degenerate segments
         const updates = [];
         if (!s1Degenerate) updates.push({ id: seg1.id, changes: { data: newS1Data } });
         if (!s2Degenerate) updates.push({ id: seg2.id, changes: { data: newS2Data } });
         if (updates.length > 0) state.updateSegments(updates);
 
-        // Use seg1's contourId; if cross-path, merge seg2 into same contour
+        // ── Stage 2: Merge contours if cross-path ──
+        const contourId = seg1.contourId ?? 0;
+        const s2DegenerateId = this._mergeContoursIfNeeded(seg1, seg2, result);
+
+        // ── Stage 3: Resolve arc direction and topology ──
+        let arcStartWorld, arcEndWorld, insertAfter;
+        if (result.seg1TrimKey === 'end') {
+            arcStartWorld = result.arcStart;
+            arcEndWorld = result.arcEnd;
+            insertAfter = s1Degenerate ? null : seg1.id;
+        } else {
+            arcStartWorld = result.arcEnd;
+            arcEndWorld = result.arcStart;
+            insertAfter = s2Degenerate ? null : seg2.id;
+        }
+
+        const arcStartLocal = _worldToLocal(arcStartWorld, seg1, vars);
+        const arcEndLocal = _worldToLocal(arcEndWorld, seg1, vars);
+        let arcSweep = result.sweep;
+        if (result.seg1TrimKey !== 'end') arcSweep = 1 - result.sweep;
+
+        // ── Stage 4: Insertion ──
+        const prevInsertAfter = state.insertAfterSegId;
+        if (insertAfter) state.insertAfterSegId = insertAfter;
+
+        state.addSegment({
+            type: "arc",
+            contourId,
+            groupId: seg1.groupId,
+            parentGroupId: seg1.parentGroupId,
+            transforms: [...(seg1.transforms ?? [])],
+            data: {
+                start: arcStartLocal,
+                end: arcEndLocal,
+                center: _worldToLocal(result.center, seg1, vars),
+                radius: result.radius,
+                largeArc: result.largeArc,
+                sweep: arcSweep,
+                arcMode: "arc2pt",
+            },
+        });
+        state.insertAfterSegId = prevInsertAfter;
+
+        // ── Stage 5: Cleanup ──
+        const toDelete = [];
+        if (s1Degenerate) toDelete.push(seg1.id);
+        if (s2Degenerate) toDelete.push(s2DegenerateId);
+        if (toDelete.length > 0) state.deleteSegments(toDelete);
+
+        state._pushHistory("Fillet");
+
+        const contourSegIds = state.segments
+            .filter(s => (s.contourId ?? 0) === contourId)
+            .map(s => s.id);
+        state.setSelection(contourSegIds);
+
+        log.debug("FilletTool: committed single fillet r=", result.radius,
+            s1Degenerate ? "(seg1 removed)" : "", s2Degenerate ? "(seg2 removed)" : "");
+    }
+
+    /**
+     * Internal helper to merge seg2's contour into seg1's contour if they are different.
+     * If the fillet connects matching trim keys (e.g. end and end), the entire seg2 contour is reversed.
+     * @private
+     * @returns {number} The (potentially remapped) id of seg2 to delete if degenerate.
+     */
+    _mergeContoursIfNeeded(seg1, seg2, result) {
+        const state = this.ctx.state;
         const contourId = seg1.contourId ?? 0;
         const s2ContourId = seg2.contourId;
-
         let s2DegenerateId = seg2.id;
 
         if (s2ContourId !== undefined && s2ContourId !== contourId) {
@@ -355,14 +445,13 @@ export default class FilletTool extends BaseTool {
             const updatesS2 = [];
 
             if (reverseS2) {
+                // Reverse the entire contour to maintain consistent winding direction
                 const reversed = [...contourSegs].reverse();
                 for (let i = 0; i < contourSegs.length; i++) {
                     const target = contourSegs[i];
                     const source = reversed[i];
 
-                    if (source.id === seg2.id) {
-                        s2DegenerateId = target.id;
-                    }
+                    if (source.id === seg2.id) s2DegenerateId = target.id;
 
                     let sourceData = { ...source.data };
 
@@ -389,70 +478,14 @@ export default class FilletTool extends BaseTool {
                     });
                 }
             } else {
+                // Just update contourId for all segments in the other path
                 for (const target of contourSegs) {
                     updatesS2.push({ id: target.id, changes: { contourId } });
                 }
             }
             if (updatesS2.length > 0) state.updateSegments(updatesS2);
         }
-
-        // Determine arc direction for chain continuity
-        let arcStartWorld, arcEndWorld, insertAfter;
-        if (result.seg1TrimKey === 'end') {
-            arcStartWorld = result.arcStart;
-            arcEndWorld = result.arcEnd;
-            insertAfter = s1Degenerate ? null : seg1.id;
-        } else {
-            arcStartWorld = result.arcEnd;
-            arcEndWorld = result.arcStart;
-            insertAfter = s2Degenerate ? null : seg2.id;
-        }
-
-        const arcStartLocal = _worldToLocal(arcStartWorld, seg1, vars);
-        const arcEndLocal = _worldToLocal(arcEndWorld, seg1, vars);
-
-        let arcSweep = result.sweep;
-        if (result.seg1TrimKey !== 'end') arcSweep = 1 - result.sweep;
-
-        // Insert arc
-        const prevInsertAfter = state.insertAfterSegId;
-        if (insertAfter) state.insertAfterSegId = insertAfter;
-
-        state.addSegment({
-            type: "arc",
-            contourId,
-            groupId: seg1.groupId,
-            parentGroupId: seg1.parentGroupId,
-            transforms: [...(seg1.transforms ?? [])],
-            data: {
-                start: arcStartLocal,
-                end: arcEndLocal,
-                center: _worldToLocal(result.center, seg1, vars),
-                radius: result.radius,
-                largeArc: result.largeArc,
-                sweep: arcSweep,
-                arcMode: "arc2pt",
-            },
-        });
-
-        state.insertAfterSegId = prevInsertAfter;
-
-        // Delete degenerate segments
-        const toDelete = [];
-        if (s1Degenerate) toDelete.push(seg1.id);
-        if (s2Degenerate) toDelete.push(s2DegenerateId);
-        if (toDelete.length > 0) state.deleteSegments(toDelete);
-
-        state._pushHistory("Fillet");
-
-        // Re-select all segments of the contour so the new arc is included
-        const contourSegIds = state.segments
-            .filter(s => (s.contourId ?? 0) === contourId)
-            .map(s => s.id);
-        state.setSelection(contourSegIds);
-
-        log.debug("FilletTool: committed single fillet r=", result.radius,
-            s1Degenerate ? "(seg1 removed)" : "", s2Degenerate ? "(seg2 removed)" : "");
+        return s2DegenerateId;
     }
 
     // ═══════════════════════════════════════════════════════════════════════

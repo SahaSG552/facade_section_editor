@@ -30,6 +30,14 @@ function _reverseSegmentData(seg) {
     return data;
 }
 
+/**
+ * FlipTool provides a staged workflow to reverse the direction of path contours.
+ * 
+ * Flow:
+ * 1. Selecting: Choose segments/contours/groups.
+ * 2. Confirm (RMB): Enter preview mode to see direction arrows.
+ * 3. Confirm (RMB): Execute reverse and exit.
+ */
 export default class FlipTool extends BaseTool {
     constructor() {
         super();
@@ -44,6 +52,7 @@ export default class FlipTool extends BaseTool {
         this._selectedSegIds = [];
     }
 
+    /** @override */
     activate(ctx) {
         super.activate(ctx);
         this._phase = "selecting";
@@ -51,6 +60,7 @@ export default class FlipTool extends BaseTool {
         log.debug("FlipTool active");
     }
 
+    /** @override */
     deactivate() {
         this._clearHover();
         this._endDrag();
@@ -124,6 +134,9 @@ export default class FlipTool extends BaseTool {
         }
     }
 
+    /**
+     * Handles staged confirmation logic (Selecting -> Preview -> Commit).
+     */
     onConfirm(_pos, _e) {
         if (this._phase === "selecting") {
             const selected = [...this.ctx.state.selectedIds].filter((id) => {
@@ -163,6 +176,11 @@ export default class FlipTool extends BaseTool {
         }
     }
 
+    /**
+     * Executes the actual reversal of all segments in the contours
+     * associated with the current selection.
+     * @private
+     */
     _commitFlip() {
         const state = this.ctx.state;
         const selected = new Set(this._selectedSegIds);
@@ -201,6 +219,11 @@ export default class FlipTool extends BaseTool {
         state._pushHistory("Flip");
     }
 
+    /**
+     * Renders zoom-aware direction arrows for the selected segments.
+     * Arrows scale with zoom to remain legible.
+     * @private
+     */
     _renderDirectionGhost() {
         const vars = this.ctx.state.variableValues ?? {};
         const selected = new Set(this._selectedSegIds);

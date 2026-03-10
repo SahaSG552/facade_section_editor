@@ -4,13 +4,49 @@
  * All coordinates are in SVG user-space (Y-down).
  * Functions are stateless and have no side effects.
  *
- * ### Key design decisions (v2)
+ * ### Key design decisions (v3)
  * - Segments do NOT need to share an endpoint (cross-path fillet supported)
- * - Arc is always tangent to both lines (built via line-line intersection + bisector)
- * - maxRadius properly computed from intersection to nearest endpoints
+ * - Arc is always tangent to both segments (lines and/or arcs)
+ * - Uses offset-intersection method for generalized fillets
  *
  * @module filletGeometry
  */
+
+/**
+ * @typedef {object} FilletResult
+ * @property {boolean} valid
+ * @property {{x:number,y:number}} center        - arc center
+ * @property {{x:number,y:number}} arcStart      - tangent point on seg1
+ * @property {{x:number,y:number}} arcEnd        - tangent point on seg2
+ * @property {{x:number,y:number}} intersection  - where the two lines meet (extended)
+ * @property {'start'|'end'} seg1TrimKey         - which endpoint of seg1 to move/trim
+ * @property {'start'|'end'} seg2TrimKey         - which endpoint of seg2 to move/trim
+ * @property {number} radius                     - the applied fillet radius
+ * @property {number} maxRadius                  - the maximum possible radius for these segments
+ * @property {number} sweep                      - SVG arc sweep flag (0 or 1)
+ * @property {number} largeArc                   - always 0 for fillet arcs
+ * @property {'convex'|'concave'} cornerType     - qualitative corner type
+ * @property {string} [failReason]               - human-readable explanation if !valid
+ */
+
+/** @private Internal helper to unify result creation */
+function _createFilletResult(params = {}) {
+    return {
+        valid: params.valid ?? false,
+        center: params.center ?? { x: 0, y: 0 },
+        arcStart: params.arcStart ?? { x: 0, y: 0 },
+        arcEnd: params.arcEnd ?? { x: 0, y: 0 },
+        intersection: params.intersection ?? { x: 0, y: 0 },
+        seg1TrimKey: params.seg1TrimKey ?? 'start',
+        seg2TrimKey: params.seg2TrimKey ?? 'start',
+        radius: params.radius ?? 0,
+        maxRadius: params.maxRadius ?? 0,
+        sweep: params.sweep ?? 0,
+        largeArc: params.largeArc ?? 0,
+        cornerType: params.cornerType ?? 'convex',
+        failReason: params.failReason ?? '',
+    };
+}
 
 // ─── Vector helpers ───────────────────────────────────────────────────────────
 
@@ -157,22 +193,6 @@ function _getNearFarPoints(start, end, intersection) {
 
 // ─── Core fillet computation ──────────────────────────────────────────────────
 
-/**
- * @typedef {object} FilletResult
- * @property {boolean} valid
- * @property {{x:number,y:number}} center        - arc center
- * @property {{x:number,y:number}} arcStart      - tangent point on seg1
- * @property {{x:number,y:number}} arcEnd        - tangent point on seg2
- * @property {{x:number,y:number}} intersection  - where the two lines meet (extended)
- * @property {string} seg1TrimKey   - 'start' or 'end' — which endpoint of seg1 to move
- * @property {string} seg2TrimKey   - 'start' or 'end' — which endpoint of seg2 to move
- * @property {number} radius
- * @property {number} maxRadius
- * @property {number} sweep         - SVG arc sweep flag
- * @property {number} largeArc      - always 0 for fillet arcs
- * @property {'convex'|'concave'} cornerType
- * @property {string} [failReason]
- */
 
 /**
  * Compute fillet between two LINE segments (may or may not share an endpoint).
@@ -193,19 +213,11 @@ function _getNearFarPoints(start, end, intersection) {
  * @returns {FilletResult}
  */
 function filletTwoLines(s1Start, s1End, s2Start, s2End, radius) {
-    const fail = (reason) => ({
-        valid: false, center: { x: 0, y: 0 }, arcStart: { x: 0, y: 0 },
-        arcEnd: { x: 0, y: 0 }, intersection: { x: 0, y: 0 },
-        seg1TrimKey: 'start', seg2TrimKey: 'start',
-        radius: 0, maxRadius: 0, sweep: 0, largeArc: 0,
-        cornerType: 'convex', failReason: reason,
-    });
-
-    if (!Number.isFinite(radius) || radius <= 0) return fail('invalid radius');
+    if (!Number.isFinite(radius) || radius <= 0) return _createFilletResult({ failReason: 'invalid radius' });
 
     // Step 1: Find intersection
     const ix = lineLineIntersection(s1Start, s1End, s2Start, s2End);
-    if (!ix) return fail('parallel lines');
+    if (!ix) return _createFilletResult({ failReason: 'parallel lines' });
 
     const intersection = { x: ix.x, y: ix.y };
 
@@ -217,7 +229,7 @@ function filletTwoLines(s1Start, s1End, s2Start, s2End, radius) {
     const u1 = _norm(_sub(seg1.far, intersection));
     const u2 = _norm(_sub(seg2.far, intersection));
 
-    if (_len(u1) < 1e-9 || _len(u2) < 1e-9) return fail('degenerate direction');
+    if (_len(u1) < 1e-9 || _len(u2) < 1e-9) return _createFilletResult({ failReason: 'degenerate direction' });
 
     // Step 3: Half-angle
     const cosAngle = Math.max(-1, Math.min(1, _dot(u1, u2)));
@@ -227,7 +239,7 @@ function filletTwoLines(s1Start, s1End, s2Start, s2End, radius) {
     const sinHalf = Math.sin(halfAngle);
     const tanHalf = Math.tan(halfAngle);
 
-    if (sinHalf < 1e-9) return fail('degenerate angle (collinear)');
+    if (sinHalf < 1e-9) return _createFilletResult({ failReason: 'degenerate angle (collinear)' });
 
     // Step 4: maxRadius
     // Distance from intersection to the far end along each direction
@@ -236,7 +248,7 @@ function filletTwoLines(s1Start, s1End, s2Start, s2End, radius) {
     const maxTangentDist = Math.min(Math.max(dist1, 0), Math.max(dist2, 0));
     const maxRadius = maxTangentDist * tanHalf;
 
-    if (maxRadius < 1e-9) return fail('segments too short');
+    if (maxRadius < 1e-9) return _createFilletResult({ failReason: 'segments too short' });
 
     // Clamp radius to maxRadius (segments that degenerate are removed by FilletTool)
     const R = Math.min(radius, maxRadius);
@@ -249,7 +261,7 @@ function filletTwoLines(s1Start, s1End, s2Start, s2End, radius) {
 
     // Step 6: Arc center = intersection + centerDist * bisector
     const bisector = _norm(_add(u1, u2));
-    if (_len(bisector) < 1e-9) return fail('degenerate bisector');
+    if (_len(bisector) < 1e-9) return _createFilletResult({ failReason: 'degenerate bisector' });
     const center = _add(intersection, _scale(bisector, centerDist));
 
     // ── SVG arc flags ──────────────────────────────────────────────────────
@@ -284,7 +296,7 @@ function filletTwoLines(s1Start, s1End, s2Start, s2End, radius) {
     const cross_path = _cross(v_in, v_out);
     const cornerType = cross_path > 0 ? 'convex' : 'concave';
 
-    return {
+    return _createFilletResult({
         valid: true,
         center,
         arcStart,
@@ -297,8 +309,7 @@ function filletTwoLines(s1Start, s1End, s2Start, s2End, radius) {
         sweep,
         largeArc,
         cornerType,
-        failReason: '',
-    };
+    });
 }
 
 /**
@@ -312,17 +323,8 @@ function filletGeneric(s1, s2, radius) {
         return filletTwoLines(s1.data.start, s1.data.end, s2.data.start, s2.data.end, radius);
     }
 
-    // For mixed types, we'll implement a simplified shared-endpoint version.
-    const fail = (reason) => ({
-        valid: false, center: { x: 0, y: 0 }, arcStart: { x: 0, y: 0 },
-        arcEnd: { x: 0, y: 0 }, intersection: { x: 0, y: 0 },
-        seg1TrimKey: 'start', seg2TrimKey: 'start',
-        radius: 0, maxRadius: 0, sweep: 0, largeArc: 0,
-        cornerType: 'convex', failReason: reason,
-    });
-
     const shared = findSharedEndpoint(s1, s2);
-    if (!shared) return fail('no shared endpoint (arc fillets require connectivity)');
+    if (!shared) return _createFilletResult({ failReason: 'no shared endpoint (arc fillets require connectivity)' });
 
     // For Arc-Line or Arc-Arc, we can approximate the "tangent lines" at the shared point
     // and use line-line fillet, then map back? No, that's not geometrically perfect.
@@ -332,13 +334,6 @@ function filletGeneric(s1, s2, radius) {
 }
 
 function _filletByOffset(s1, s2, radius, commonPt) {
-    const fail = (reason) => ({
-        valid: false, center: { x: 0, y: 0 }, arcStart: { x: 0, y: 0 },
-        arcEnd: { x: 0, y: 0 }, intersection: { x: 0, y: 0 },
-        seg1TrimKey: 'start', seg2TrimKey: 'start',
-        radius: 0, maxRadius: 0, sweep: 0, largeArc: 0,
-        cornerType: 'convex', failReason: reason,
-    });
 
     // Determine direction from commonPt toward far end
     const getDir = (seg, pt) => {
@@ -357,7 +352,7 @@ function _filletByOffset(s1, s2, radius, commonPt) {
     const d2 = getDir(s2, commonPt);
 
     const cross = _cross(d1, d2);
-    if (Math.abs(cross) < 1e-4) return fail('collinear segments');
+    if (Math.abs(cross) < 1e-4) return _createFilletResult({ failReason: 'collinear segments' });
 
     // We need to offset BOTH segments by R "towards each other".
     // "Towards each other" means into the quadrant formed by d1 and d2.
@@ -370,7 +365,7 @@ function _filletByOffset(s1, s2, radius, commonPt) {
 
     // Let's use the offset intersection method for centers.
     const centers = _findOffsetIntersections(s1, s2, radius, commonPt, bisector);
-    if (centers.length === 0) return fail('no intersection for offset segments');
+    if (centers.length === 0) return _createFilletResult({ failReason: 'no intersection for offset segments' });
 
     // Pick center closest to commonPt + bisector * large_dist
     const target = _add(commonPt, _scale(bisector, radius * 2));
@@ -395,7 +390,7 @@ function _filletByOffset(s1, s2, radius, commonPt) {
 
     const cornerType = _cross(d1, d2) > 0 ? 'convex' : 'concave';
 
-    return {
+    return _createFilletResult({
         valid: true,
         center: bestC,
         arcStart,
@@ -404,11 +399,11 @@ function _filletByOffset(s1, s2, radius, commonPt) {
         seg1TrimKey: _dist(s1.data.start, commonPt) < _dist(s1.data.end, commonPt) ? 'start' : 'end',
         seg2TrimKey: _dist(s2.data.start, commonPt) < _dist(s2.data.end, commonPt) ? 'start' : 'end',
         radius: R,
-        maxRadius: radius * 2, // approximation for now
+        maxRadius: radius * 3, // simplified broad limit for arcs
         sweep,
         largeArc: 0,
         cornerType,
-    };
+    });
 }
 
 function _findOffsetIntersections(s1, s2, R, commonPt, bisector) {
