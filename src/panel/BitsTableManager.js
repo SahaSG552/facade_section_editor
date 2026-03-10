@@ -1,3 +1,5 @@
+import { addUnifiedPressListener } from "../ui/pressEvents.js";
+
 /**
  * BitWarningsBuilder - Строит массив предупреждений для бита
  */
@@ -94,6 +96,14 @@ class BitsTableManager {
 
     setCallbacks(callbacks) {
         this.callbacks = { ...this.callbacks, ...callbacks };
+    }
+
+    bindPress(element, handler) {
+        if (!element || typeof handler !== "function") return;
+        addUnifiedPressListener(element, (e) => {
+            e.stopPropagation();
+            handler(e);
+        });
     }
 
     /**
@@ -197,19 +207,16 @@ class BitsTableManager {
         if (this.headerHandlersAttached) return;
 
         if (this.copyAllBtn) {
-            this.copyAllBtn.addEventListener("click", this.boundCopyAllHandler);
+            this.bindPress(this.copyAllBtn, this.boundCopyAllHandler);
         }
         if (this.hideAllBtn) {
-            this.hideAllBtn.addEventListener("click", this.boundHideAllHandler);
+            this.bindPress(this.hideAllBtn, this.boundHideAllHandler);
         }
         if (this.deleteAllBtn) {
-            this.deleteAllBtn.addEventListener(
-                "click",
-                this.boundDeleteAllHandler
-            );
+            this.bindPress(this.deleteAllBtn, this.boundDeleteAllHandler);
         }
         if (this.nameHeader) {
-            this.nameHeader.addEventListener("click", (e) => {
+            this.bindPress(this.nameHeader, (e) => {
                 e.stopPropagation();
                 this.callbacks.onSelectAllBits();
             });
@@ -324,7 +331,7 @@ class BitsTableManager {
         alignBtn.appendChild(
             this.createAlignmentButton(bit.alignment || "center")
         );
-        alignBtn.addEventListener("click", async (e) => {
+        this.bindPress(alignBtn, async (e) => {
             e.stopPropagation();
             await this.callbacks.onCycleAlignment(bitIndex);
         });
@@ -390,7 +397,7 @@ class BitsTableManager {
         copyBtn.className = "bit-action-btn";
         copyBtn.textContent = "⧉";
         copyBtn.title = "Copy bit";
-        copyBtn.addEventListener("click", (e) => {
+        this.bindPress(copyBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onCopyBit(bitIndex);
         });
@@ -406,7 +413,7 @@ class BitsTableManager {
         }`;
         visibilityBtn.textContent = isVisible ? "◎" : "◉";
         visibilityBtn.title = isVisible ? "Hide bit" : "Show bit";
-        visibilityBtn.addEventListener("click", (e) => {
+        this.bindPress(visibilityBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onToggleVisibility(bitIndex);
         });
@@ -419,7 +426,7 @@ class BitsTableManager {
         delBtn.className = "del-btn";
         delBtn.textContent = "✕";
         delBtn.title = "Delete bit from canvas";
-        delBtn.addEventListener("click", (e) => {
+        this.bindPress(delBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onDeleteBit(bitIndex);
         });
@@ -536,7 +543,7 @@ class BitsTableManager {
         copyBtn.className = "bit-action-btn";
         copyBtn.textContent = "⧉";
         copyBtn.title = "Copy LCS";
-        copyBtn.addEventListener("click", (e) => {
+        this.bindPress(copyBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onCopyLcs(lcs.id);
         });
@@ -553,7 +560,7 @@ class BitsTableManager {
         delBtn.className = "del-btn";
         delBtn.textContent = "✕";
         delBtn.title = "Delete LCS";
-        delBtn.addEventListener("click", (e) => {
+        this.bindPress(delBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onDeleteLcs(lcs.id);
         });

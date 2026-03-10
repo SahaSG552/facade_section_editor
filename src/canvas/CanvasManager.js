@@ -317,6 +317,22 @@ class CanvasManager {
         );
     }
 
+    /**
+     * Returns true when touch starts from UI controls instead of canvas gesture surface.
+     * Used to prevent pan/pinch handlers from stealing taps on buttons/inputs.
+     *
+     * @param {EventTarget|null} target
+     * @returns {boolean}
+     */
+    _isInteractiveTouchTarget(target) {
+        if (!(target instanceof Element)) return false;
+        return Boolean(
+            target.closest(
+                "#preview-toolbar, button, input, select, textarea, [contenteditable='true']"
+            )
+        );
+    }
+
     // === GRID FUNCTIONS ===
     drawGrid() {
         if (!this.gridEnabled || !this.gridLayer) return;
@@ -554,6 +570,9 @@ class CanvasManager {
 
     // === TOUCH EVENT HANDLERS ===
     handleTouchStart(e) {
+        if (e.defaultPrevented) return;
+        if (this._isInteractiveTouchTarget(e.target)) return;
+
         if (e.touches.length === 1 && this.config.enablePan) {
             // Single touch for panning
             e.preventDefault();
@@ -568,6 +587,8 @@ class CanvasManager {
     }
 
     handleTouchMove(e) {
+        if (e.defaultPrevented) return;
+
         if (
             this.isDragging &&
             e.touches.length === 1 &&
@@ -596,6 +617,8 @@ class CanvasManager {
     }
 
     handleTouchEnd(e) {
+        if (e.defaultPrevented) return;
+
         if (this.isDragging) {
             this.isDragging = false;
         }
@@ -631,12 +654,56 @@ class CanvasManager {
             newZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
 
             // Only update if zoom changed significantly
-            if (Math.abs(newZoom - this.zoomLevel) > 0.01) {
-                this.zoomLevel = newZoom;
-                this.updateViewBox();
+            if (Math.abs(newZoom - this.zoomLevel) > 0.001) {
+                this.setZoom(
+                    newZoom,
+                    this.pinchStartCenterX,
+                    this.pinchStartCenterY
+                );
                 this.lastFitRequest = null;
             }
         }
+    }
+
+    /**
+     * Sets zoom level with optional screen-space anchor point.
+     * When anchor is provided, keeps the same SVG point under that screen position.
+     *
+     * @param {number} newZoom
+     * @param {number|null} [clientX=null]
+     * @param {number|null} [clientY=null]
+     */
+    setZoom(newZoom, clientX = null, clientY = null) {
+        const clampedZoom = Math.max(
+            this.config.minZoom,
+            Math.min(this.config.maxZoom, newZoom)
+        );
+
+        if (clientX != null && clientY != null) {
+            const rect = this.canvas.getBoundingClientRect();
+            const mouseX = clientX - rect.left;
+            const mouseY = clientY - rect.top;
+
+            const oldZoom = this.zoomLevel;
+            const oldViewBoxWidth = rect.width / oldZoom;
+            const oldViewBoxHeight = rect.height / oldZoom;
+            const oldViewBoxX = this.panX - oldViewBoxWidth / 2;
+            const oldViewBoxY = this.panY - oldViewBoxHeight / 2;
+
+            const svgX = oldViewBoxX + (mouseX / rect.width) * oldViewBoxWidth;
+            const svgY = oldViewBoxY + (mouseY / rect.height) * oldViewBoxHeight;
+
+            const newViewBoxWidth = rect.width / clampedZoom;
+            const newViewBoxHeight = rect.height / clampedZoom;
+            const newViewBoxX = svgX - (mouseX / rect.width) * newViewBoxWidth;
+            const newViewBoxY = svgY - (mouseY / rect.height) * newViewBoxHeight;
+
+            this.panX = newViewBoxX + newViewBoxWidth / 2;
+            this.panY = newViewBoxY + newViewBoxHeight / 2;
+        }
+
+        this.zoomLevel = clampedZoom;
+        this.updateViewBox();
     }
 
     getTouchDistance(touch1, touch2) {

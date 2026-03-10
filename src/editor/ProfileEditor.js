@@ -2685,8 +2685,27 @@ export default class ProfileEditor {
 
         const ecvs = this.editorCanvas;
 
+        /**
+         * Convert touch point to editor SVG coordinates.
+         *
+         * TODO(editor-touch-interaction): Current touch route only forwards low-level
+         * pointer lifecycle into tools. Selection/hit-testing parity with desktop is
+         * incomplete and should be finalized in dedicated editor interaction pass.
+         *
+         * @param {Touch} touch
+         * @returns {{x:number, y:number}}
+         */
+        const touchPointToSvg = (touch) => {
+            const fakeMouseEvent = {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+            };
+            return ecvs.screenToSVG(fakeMouseEvent);
+        };
+
         // Track right-button screen position for click-vs-drag detection.
         let rightDownClient = null;
+        let activeTouchId = null;
 
         cm._editorMouseDown = (e) => {
             if (e.button === 2) {
@@ -2737,10 +2756,49 @@ export default class ProfileEditor {
             this._currentTool.onConfirm(snapped, e);
         };
 
+        // TODO(editor-touch-interaction): Rework editor touch gesture arbitration with
+        // selection + drawing tools to match desktop click semantics.
+        cm._editorTouchStart = (e) => {
+            if (e.defaultPrevented) return;
+            if (!e.touches || e.touches.length !== 1) return;
+            const touch = e.touches[0];
+            activeTouchId = touch.identifier;
+            const raw = touchPointToSvg(touch);
+            const snapped = ecvs.snap(raw, this._lastPoint, e);
+            this._lastPoint = snapped;
+            tool.onPointerDown(snapped, e);
+            e.preventDefault();
+        };
+
+        cm._editorTouchMove = (e) => {
+            if (e.defaultPrevented) return;
+            if (!e.touches || e.touches.length === 0) return;
+            const touch = Array.from(e.touches).find((t) => t.identifier === activeTouchId) || e.touches[0];
+            const raw = touchPointToSvg(touch);
+            const snapped = ecvs.snap(raw, this._lastPoint, e);
+            tool.onPointerMove(snapped, e);
+            e.preventDefault();
+        };
+
+        cm._editorTouchEnd = (e) => {
+            if (e.defaultPrevented) return;
+            const touch = Array.from(e.changedTouches || []).find((t) => t.identifier === activeTouchId);
+            if (!touch) return;
+            const raw = touchPointToSvg(touch);
+            const snapped = ecvs.snap(raw, this._lastPoint, e);
+            tool.onPointerUp(snapped, e);
+            activeTouchId = null;
+            e.preventDefault();
+        };
+
         canvas.addEventListener("mousedown", cm._editorMouseDown);
         canvas.addEventListener("mousemove", cm._editorMouseMove);
         canvas.addEventListener("mouseup", cm._editorMouseUp);
         canvas.addEventListener("dblclick", cm._editorDblClick);
+        canvas.addEventListener("touchstart", cm._editorTouchStart, { passive: false });
+        canvas.addEventListener("touchmove", cm._editorTouchMove, { passive: false });
+        canvas.addEventListener("touchend", cm._editorTouchEnd, { passive: false });
+        canvas.addEventListener("touchcancel", cm._editorTouchEnd, { passive: false });
         // NOTE: _editorRightClick (capture-phase) is intentionally NOT registered anymore.
         canvas.addEventListener("contextmenu", cm._editorContextMenu);
     }
@@ -2754,10 +2812,15 @@ export default class ProfileEditor {
         if (cm._editorMouseMove) canvas.removeEventListener("mousemove", cm._editorMouseMove);
         if (cm._editorMouseUp) canvas.removeEventListener("mouseup", cm._editorMouseUp);
         if (cm._editorDblClick) canvas.removeEventListener("dblclick", cm._editorDblClick);
+        if (cm._editorTouchStart) canvas.removeEventListener("touchstart", cm._editorTouchStart);
+        if (cm._editorTouchMove) canvas.removeEventListener("touchmove", cm._editorTouchMove);
+        if (cm._editorTouchEnd) canvas.removeEventListener("touchend", cm._editorTouchEnd);
+        if (cm._editorTouchEnd) canvas.removeEventListener("touchcancel", cm._editorTouchEnd);
         if (cm._editorRightClick) canvas.removeEventListener("mousedown", cm._editorRightClick, { capture: true });
         if (cm._editorContextMenu) canvas.removeEventListener("contextmenu", cm._editorContextMenu);
         cm._editorMouseDown = cm._editorMouseMove = cm._editorMouseUp =
-            cm._editorDblClick = cm._editorRightClick = cm._editorContextMenu = null;
+            cm._editorDblClick = cm._editorTouchStart = cm._editorTouchMove =
+            cm._editorTouchEnd = cm._editorRightClick = cm._editorContextMenu = null;
     }
 
     /** @type {{ x: number, y: number }|null} */

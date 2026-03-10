@@ -573,7 +573,17 @@ export default class InteractionManager {
     // ========== Touch Event Handlers ==========
 
     handleTouchStart(e) {
-        e.preventDefault();
+        // Let CanvasManager own multi-touch pan/pinch smoothing.
+        // InteractionManager handles only single-touch select/drag.
+        if (e.touches.length >= 2) {
+            this.isPinching = true;
+            this.isTouchPanning = false;
+            this.isTouchDragging = false;
+            this.touchIdentifier = null;
+            return;
+        }
+
+        if (e.cancelable) e.preventDefault();
 
         // Allow multi-touch gestures (e.g. pinch) to proceed to other handlers (CanvasManager)
         // by only handling single touch here for drag/pan
@@ -675,7 +685,13 @@ export default class InteractionManager {
     }
 
     handleTouchMove(e) {
-        e.preventDefault();
+        // Multi-touch zoom/pan is handled by CanvasManager.
+        if (e.touches.length >= 2) {
+            this.isPinching = true;
+            return;
+        }
+
+        if (e.cancelable) e.preventDefault();
 
         if (this.isTouchDragging && e.touches.length === 1) {
             const touch = Array.from(e.touches).find(
@@ -735,6 +751,17 @@ export default class InteractionManager {
     }
 
     handleTouchEnd(e) {
+        const wasPinching = this.isPinching;
+        if (e.touches && e.touches.length < 2) {
+            this.isPinching = false;
+        }
+
+        // Do not process ended-touch selection/drag logic when pinch was active.
+        if (wasPinching) {
+            this.stopAutoScroll();
+            return;
+        }
+
         // ALWAYS stop auto-scroll on touch end
         this.stopAutoScroll();
 
@@ -771,27 +798,12 @@ export default class InteractionManager {
     }
 
     // ========== Gesture Event Handlers (Pinch-to-Zoom) ==========
-
-    handleGestureStart(e) {
-        e.preventDefault();
-        this.isPinching = true;
-        this.initialZoomLevel = this.canvasManager.zoomLevel;
-    }
-
-    handleGestureChange(e) {
-        e.preventDefault();
-
-        if (this.isPinching) {
-            const newZoomLevel = this.initialZoomLevel * e.scale;
-            const clampedZoom = Math.max(0.1, Math.min(10, newZoomLevel));
-            this.canvasManager.setZoom(clampedZoom);
-        }
-    }
-
-    handleGestureEnd(e) {
-        e.preventDefault();
-        this.isPinching = false;
-    }
+    // Pinch is owned by CanvasManager touch handlers for stable behavior.
+    // TODO(editor-touch-interaction): unify editor/main interaction routing so touch
+    // selection/drawing tool semantics match desktop click behavior.
+    handleGestureStart(_e) { }
+    handleGestureChange(_e) { }
+    handleGestureEnd(_e) { }
 
     // ========== Auto-Scroll ==========
 

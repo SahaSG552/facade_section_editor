@@ -17,6 +17,7 @@ import { fitAllVisibleElements } from "../canvas/zoomUtils.js";
 import variablesManager from "../data/VariablesManager.js";
 import PathEditor from "./PathEditor.js";
 import ProfileEditor from "../editor/ProfileEditor.js";
+import { addUnifiedPressListener } from "../ui/pressEvents.js";
 import {
     evalAngle,
     modListToSvgTransform,
@@ -2432,32 +2433,34 @@ export default class BitsManager {
         // Initialize preview canvas
         initializePreviewCanvas();
 
-        // Helper function to add touch-friendly event listeners
-        const addTouchHandler = (element, handler) => {
-            if (!element) return;
-            // Use pointerup for better cross-device support (works with mouse, touch, pen)
-            element.addEventListener("pointerup", (e) => {
-                e.preventDefault();
-                handler();
-            });
-            // Fallback for older browsers
-            element.addEventListener("click", handler);
+        /**
+         * Unified press binding for preview toolbar controls.
+         *
+         * @param {HTMLElement|SVGElement|null} element
+         * @param {(event: Event) => void} handler
+         */
+        const bindPreviewPress = (element, handler) => {
+            if (!element || typeof handler !== "function") return;
+            addUnifiedPressListener(element, (e) => {
+                e.stopPropagation();
+                handler(e);
+            }, { preventDefaultTouch: false });
         };
 
         // Add event listeners for zoom buttons
-        addTouchHandler(modal.querySelector("#preview-zoom-in"), () => {
+        bindPreviewPress(modal.querySelector("#preview-zoom-in"), () => {
             previewZoomIn();
         });
 
-        addTouchHandler(modal.querySelector("#preview-zoom-out"), () => {
+        bindPreviewPress(modal.querySelector("#preview-zoom-out"), () => {
             previewZoomOut();
         });
 
-        addTouchHandler(modal.querySelector("#preview-fit"), () => {
+        bindPreviewPress(modal.querySelector("#preview-fit"), () => {
             previewFitToScale();
         });
 
-        addTouchHandler(modal.querySelector("#preview-toggle-grid"), () => {
+        bindPreviewPress(modal.querySelector("#preview-toggle-grid"), () => {
             togglePreviewGrid();
         });
 
@@ -2465,7 +2468,12 @@ export default class BitsManager {
         if (groupName === "profile") {
             const profileEditor = new ProfileEditor();
 
-            modal.querySelector("#preview-edit")?.addEventListener("click", () => {
+            const previewEditBtn = modal.querySelector("#preview-edit");
+            /**
+             * Enters profile edit mode from preview modal.
+             * Kept as dedicated function to reuse in touch/click handlers.
+             */
+            const startProfileEditMode = () => {
                 const variableValues = this.collectVariableValues(form, groupName);
                 // Use the evaluated path from the hidden input (set by PathEditor).
                 // Fall back to defaultValues.profilePath (bit.profilePath for existing bits).
@@ -2523,7 +2531,26 @@ export default class BitsManager {
                         updateBitPreview();
                     },
                 });
-            });
+            };
+
+            if (previewEditBtn) {
+                let lastTouchTs = 0;
+
+                // NOTE: Explicit touch+click wiring is intentionally kept here
+                // for Android/WebView reliability of the Edit action.
+                previewEditBtn.addEventListener("touchend", (e) => {
+                    if (e.cancelable) e.preventDefault();
+                    e.stopPropagation();
+                    lastTouchTs = performance.now();
+                    startProfileEditMode();
+                }, { passive: false });
+
+                previewEditBtn.addEventListener("click", (e) => {
+                    if (performance.now() - lastTouchTs < 450) return;
+                    e.stopPropagation();
+                    startProfileEditMode();
+                });
+            }
         }
 
         // Add input event listeners

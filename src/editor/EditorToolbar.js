@@ -1,4 +1,5 @@
 import LoggerFactory from "../core/LoggerFactory.js";
+import { addUnifiedPressListener } from "../ui/pressEvents.js";
 
 const log = LoggerFactory.createLogger("EditorToolbar");
 
@@ -244,6 +245,14 @@ export default class EditorToolbar {
     _bindButtons() {
         if (!this._toolbar) return;
 
+        const bindTap = (el, handler) => {
+            if (!el || typeof handler !== "function") return;
+            addUnifiedPressListener(el, (e) => {
+                e.stopPropagation();
+                handler(e);
+            });
+        };
+
         this._toolbar.querySelectorAll("[data-tool]").forEach(btn => {
             const toolId = btn.dataset.tool;
             const def = TOOL_DEFINITIONS.find(t => t.id === toolId);
@@ -253,7 +262,7 @@ export default class EditorToolbar {
                 // Register under lmbTool (and rmbTool if present) so setActiveTool()
                 // highlights this button for either active tool.
                 this._buttons.set(def.lmbTool, btn);
-                btn.addEventListener("click", () => this.onToolChange?.(def.lmbTool));
+                bindTap(btn, () => this.onToolChange?.(def.lmbTool));
                 if (def.rmbTool) {
                     this._buttons.set(def.rmbTool, btn);
                     btn.addEventListener("contextmenu", (e) => {
@@ -264,7 +273,7 @@ export default class EditorToolbar {
                 }
             } else {
                 this._buttons.set(toolId, btn);
-                btn.addEventListener("click", () => {
+                bindTap(btn, () => {
                     if (this.onToolChange) this.onToolChange(toolId);
                 });
             }
@@ -275,7 +284,7 @@ export default class EditorToolbar {
             const snapType = btn.dataset.snap;
             if (this.onSnapChange) this.onSnapChange(snapType, _saved.snaps[snapType] ?? false);
 
-            btn.addEventListener("click", () => {
+            bindTap(btn, () => {
                 btn.classList.toggle("active");
                 const isActive = btn.classList.contains("active");
                 _saved.snaps[snapType] = isActive; // persist
@@ -297,8 +306,8 @@ export default class EditorToolbar {
 
         const doneBtn = this._toolbar.querySelector("#editor-done-btn");
         const cancelBtn = this._toolbar.querySelector("#editor-cancel-btn");
-        if (doneBtn) doneBtn.addEventListener("click", () => this.onDone?.());
-        if (cancelBtn) cancelBtn.addEventListener("click", () => this.onCancel?.());
+        if (doneBtn) bindTap(doneBtn, () => this.onDone?.());
+        if (cancelBtn) bindTap(cancelBtn, () => this.onCancel?.());
     }
 
     _registerKeyboard() {

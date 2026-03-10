@@ -26,6 +26,7 @@ import PanelManager from "./panel/PanelManager.js";
 import SVGElementFactory from "./canvas/SVGElementFactory.js";
 import ExtensionCalculator from "./bits/ExtensionCalculator.js";
 import PhantomBitCalculator from "./bits/PhantomBitCalculator.js";
+import { addUnifiedPressListener } from "./ui/pressEvents.js";
 import {
     ARC_APPROX_TOLERANCE,
     ARC_RADIUS_TOLERANCE,
@@ -225,6 +226,12 @@ let sceneAnchorY = null;
  * **PHASE 1 REFACTORING** - Simplified from 440 to ~300 lines with ManagerFactory
  */
 function initializeSVG() {
+    const bindPressById = (id, handler) => {
+        const element = document.getElementById(id);
+        if (!element) return;
+        addUnifiedPressListener(element, handler);
+    };
+
     // **PHASE 1 REFACTORING** - Initialize new managers and helpers
     // Create ManagerFactory for dependency injection
     managerFactory = new ManagerFactory(appConfig);
@@ -362,21 +369,11 @@ function initializeSVG() {
     panelLayer.appendChild(lcsIndicatorsLayer);
 
     // Add zoom button event listeners
-    document
-        .getElementById("zoom-in-btn")
-        .addEventListener("click", () => mainCanvasManager.zoomIn());
-    document
-        .getElementById("zoom-out-btn")
-        .addEventListener("click", () => mainCanvasManager.zoomOut());
-    document
-        .getElementById("fit-scale-btn")
-        .addEventListener("click", fitToScale);
-    document
-        .getElementById("zoom-selected-btn")
-        .addEventListener("click", zoomToSelected);
-    document
-        .getElementById("toggle-grid-btn")
-        .addEventListener("click", () => mainCanvasManager.toggleGrid());
+    bindPressById("zoom-in-btn", () => mainCanvasManager.zoomIn());
+    bindPressById("zoom-out-btn", () => mainCanvasManager.zoomOut());
+    bindPressById("fit-scale-btn", fitToScale);
+    bindPressById("zoom-selected-btn", zoomToSelected);
+    bindPressById("toggle-grid-btn", () => mainCanvasManager.toggleGrid());
 
     // Add grid scale select listener
     document.getElementById("grid-scale").addEventListener("change", (e) => {
@@ -394,45 +391,33 @@ function initializeSVG() {
     // Setup panel anchor button
     const panelAnchorBtn = document.getElementById("panel-anchor-btn");
     panelAnchorBtn.appendChild(createpanelAnchorButton(panelAnchor));
-    panelAnchorBtn.addEventListener("click", cyclePanelAnchor);
+    addUnifiedPressListener(panelAnchorBtn, cyclePanelAnchor);
     const lcsBtn = document.getElementById("lcs-btn");
     if (lcsBtn) {
-        lcsBtn.addEventListener("click", addLcsRow);
+        addUnifiedPressListener(lcsBtn, addLcsRow);
     }
 
     // Setup part button
-    document
-        .getElementById("part-btn")
-        .addEventListener("click", togglePartView);
+    bindPressById("part-btn", togglePartView);
 
     // Setup bits visibility button
     const bitsBtn = document.getElementById("bits-btn");
-    bitsBtn.addEventListener("click", toggleBitsVisibility);
+    addUnifiedPressListener(bitsBtn, toggleBitsVisibility);
     bitsBtn.classList.add("bits-visible"); // Initial state - bits are visible
 
     // Setup shank visibility button
     const shankBtn = document.getElementById("shank-btn");
-    shankBtn.addEventListener("click", toggleShankVisibility);
+    addUnifiedPressListener(shankBtn, toggleShankVisibility);
     shankBtn.classList.add("shank-visible"); // Initial state - shank is visible
 
     // Setup DXF export button
-    document
-        .getElementById("export-dxf-btn")
-        .addEventListener("click", exportToDXF);
+    bindPressById("export-dxf-btn", exportToDXF);
 
     // Setup operations toolbar buttons
-    document
-        .getElementById("save-btn")
-        .addEventListener("click", saveBitPositions);
-    document
-        .getElementById("save-as-btn")
-        .addEventListener("click", saveBitPositionsAs);
-    document
-        .getElementById("load-btn")
-        .addEventListener("click", loadBitPositions);
-    document
-        .getElementById("clear-btn")
-        .addEventListener("click", clearAllBits);
+    bindPressById("save-btn", saveBitPositions);
+    bindPressById("save-as-btn", saveBitPositionsAs);
+    bindPressById("load-btn", loadBitPositions);
+    bindPressById("clear-btn", clearAllBits);
 
     // Create BitsManager instance now that CanvasManager is available
     bitsManager = new BitsManager(mainCanvasManager);
@@ -755,13 +740,13 @@ function initializeSVG() {
     }
 
     // Setup export/import buttons
-    document.getElementById("export-bits-btn").addEventListener("click", () => {
+    bindPressById("export-bits-btn", () => {
         import("./data/bitsStore.js").then((module) => {
             module.exportToJSON();
         });
     });
 
-    document.getElementById("import-bits-btn").addEventListener("click", () => {
+    bindPressById("import-bits-btn", () => {
         const input = document.createElement("input");
         input.type = "file";
         input.accept = ".json";
@@ -798,17 +783,13 @@ function initializeSVG() {
 
     // Setup panel toggle buttons - now handled by UI Module
     const uiModule = app.getModule("ui");
-    document
-        .getElementById("toggle-left-panel")
-        .addEventListener("click", () => uiModule.toggleLeftPanel());
+    bindPressById("toggle-left-panel", () => uiModule.toggleLeftPanel());
 
-    document
-        .getElementById("toggle-right-menu")
-        .addEventListener("click", () => uiModule.toggleRightMenu());
+    bindPressById("toggle-right-menu", () => uiModule.toggleRightMenu());
 
     // Setup theme toggle button
     const themeToggle = document.getElementById("theme-toggle");
-    themeToggle.addEventListener("click", () => {
+    addUnifiedPressListener(themeToggle, () => {
         const uiModule = app.getModule("ui");
         uiModule.toggleTheme();
     });

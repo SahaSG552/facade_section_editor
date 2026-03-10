@@ -1041,6 +1041,23 @@ html {
   -webkit-user-select: none;
 }
 
+#preview-toolbar input[type="color"],
+#zoom-toolbar button,
+#operations-toolbar button,
+#app-header button,
+#bits-actions button,
+button,
+.bit-action-btn,
+.table-header-btn,
+.editor-tool-btn,
+.editor-snap-btn,
+.editor-action-btn,
+.preview-edit-btn,
+#lcs-btn {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .modal-content h2 {
   margin-top: 0;
   font-size: 18px;
