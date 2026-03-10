@@ -24,29 +24,39 @@ const CORNER_MODE_LABELS = { all: "All corners", convex: "Convex only", concave:
 /**
  * Build ghost SVG for a single fillet preview: arc + trimmed segment stubs.
  */
-function _buildSingleFilletGhost(result, seg1FarEnd, seg2FarEnd) {
+function _buildSingleFilletGhost(result, s1Far, s2Far, s1Type, s2Type, w1, w2, t1Key, t2Key) {
     const g = document.createElementNS(SVG_NS, "g");
 
-    // Trimmed portion of seg1 (far end → arcStart)
-    if (seg1FarEnd) {
-        const l = document.createElementNS(SVG_NS, "line");
-        l.setAttribute("x1", seg1FarEnd.x); l.setAttribute("y1", seg1FarEnd.y);
-        l.setAttribute("x2", result.arcStart.x); l.setAttribute("y2", result.arcStart.y);
-        l.classList.add("editor-fillet-preview-seg");
-        l.setAttribute("vector-effect", "non-scaling-stroke");
-        l.setAttribute("pointer-events", "none");
-        g.appendChild(l);
-    }
-    // Trimmed portion of seg2 (arcEnd → far end)
-    if (seg2FarEnd) {
-        const l = document.createElementNS(SVG_NS, "line");
-        l.setAttribute("x1", result.arcEnd.x); l.setAttribute("y1", result.arcEnd.y);
-        l.setAttribute("x2", seg2FarEnd.x); l.setAttribute("y2", seg2FarEnd.y);
-        l.classList.add("editor-fillet-preview-seg");
-        l.setAttribute("vector-effect", "non-scaling-stroke");
-        l.setAttribute("pointer-events", "none");
-        g.appendChild(l);
-    }
+    // Helper for trimmed portion
+    const addStub = (farPt, tangentPt, type, worldSeg, trimKey) => {
+        if (!farPt || !tangentPt) return;
+        if (type === "line") {
+            const l = document.createElementNS(SVG_NS, "line");
+            l.setAttribute("x1", farPt.x); l.setAttribute("y1", farPt.y);
+            l.setAttribute("x2", tangentPt.x); l.setAttribute("y2", tangentPt.y);
+            l.classList.add("editor-fillet-preview-seg");
+            l.setAttribute("vector-effect", "non-scaling-stroke");
+            l.setAttribute("pointer-events", "none");
+            g.appendChild(l);
+        } else if (type === "arc" && worldSeg) {
+            const p = document.createElementNS(SVG_NS, "path");
+            // If trimKey is 'start', farPt is the original 'end'.
+            // Drawing from 'end' to 'tangentPt' (towards start) is REVERSE direction,
+            // so we must flip the sweep flag for the path command.
+            let sweep = worldSeg.data.sweep;
+            if (trimKey === "start") sweep = sweep ? 0 : 1;
+
+            p.setAttribute("d", `M ${farPt.x} ${farPt.y} A ${worldSeg.data.radius} ${worldSeg.data.radius} 0 ${worldSeg.data.largeArc} ${sweep} ${tangentPt.x} ${tangentPt.y}`);
+            p.setAttribute("fill", "none");
+            p.classList.add("editor-fillet-preview-seg");
+            p.setAttribute("vector-effect", "non-scaling-stroke");
+            p.setAttribute("pointer-events", "none");
+            g.appendChild(p);
+        }
+    };
+
+    addStub(s1Far, result.arcStart, s1Type, w1, t1Key);
+    addStub(s2Far, result.arcEnd, s2Type, w2, t2Key);
 
     // Fillet arc
     const arc = document.createElementNS(SVG_NS, "path");
@@ -86,7 +96,24 @@ function _buildMultiFilletGhost(fillets) {
  * Convert world pt to segment-local coords (inverse RT).
  */
 function _worldToLocal(worldPt, seg, vars) {
-    return toLocal(worldPt, seg.transforms ?? [], vars);
+    if (!seg) return worldPt;
+    return toLocal(worldPt, seg.transforms, vars);
+}
+
+function _getSegLength(data, type) {
+    if (type === "line") {
+        return Math.hypot(data.end.x - data.start.x, data.end.y - data.start.y);
+    }
+    if (type === "arc") {
+        // Approximate arc length: chord length or angular length
+        const r = Number(data.radius || 0);
+        if (r <= 0) return 0;
+        const chord = Math.hypot(data.end.x - data.start.x, data.end.y - data.start.y);
+        if (chord > 2 * r) return chord; // fallback
+        const angle = 2 * Math.asin(chord / (2 * r));
+        return r * angle;
+    }
+    return 0;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,7 +219,7 @@ export default class FilletTool extends BaseTool {
         if (this._phase === "idle") {
             if (!hitId) return;
             const seg = this._findSeg(hitId);
-            if (!seg || seg.type !== "line") return;
+            if (!seg || (seg.type !== "line" && seg.type !== "arc")) return;
             this._seg1Id = hitId;
             this._phase = "pick-seg2";
             this._updateHover(pos, hitId);
@@ -203,7 +230,7 @@ export default class FilletTool extends BaseTool {
             if (!hitId || hitId === this._seg1Id) return;
             const seg1 = this._findSeg(this._seg1Id);
             const seg2 = this._findSeg(hitId);
-            if (!seg2 || seg2.type !== "line" || !seg1) return;
+            if (!seg2 || (seg2.type !== "line" && seg2.type !== "arc") || !seg1) return;
 
             // Verify fillet is possible
             const testResult = computeFilletForSegments(seg1, seg2, this._radius || 1, this._vars());
@@ -283,7 +310,7 @@ export default class FilletTool extends BaseTool {
         const seg1FarEnd = result.seg1TrimKey === 'start' ? w1.data.end : w1.data.start;
         const seg2FarEnd = result.seg2TrimKey === 'start' ? w2.data.end : w2.data.start;
 
-        this.ctx.canvas.setGhost(_buildSingleFilletGhost(result, seg1FarEnd, seg2FarEnd));
+        this.ctx.canvas.setGhost(_buildSingleFilletGhost(result, seg1FarEnd, seg2FarEnd, seg1.type, seg2.type, w1, w2, result.seg1TrimKey, result.seg2TrimKey));
     }
 
     _commitSingleFillet() {
@@ -305,8 +332,8 @@ export default class FilletTool extends BaseTool {
         newS2Data[result.seg2TrimKey] = _worldToLocal(result.arcEnd, seg2, vars);
 
         // Check for degenerate segments after trim
-        const s1Len = Math.hypot(newS1Data.end.x - newS1Data.start.x, newS1Data.end.y - newS1Data.start.y);
-        const s2Len = Math.hypot(newS2Data.end.x - newS2Data.start.x, newS2Data.end.y - newS2Data.start.y);
+        const s1Len = _getSegLength(newS1Data, seg1.type);
+        const s2Len = _getSegLength(newS2Data, seg2.type);
         const s1Degenerate = s1Len < DEGEN_EPS;
         const s2Degenerate = s2Len < DEGEN_EPS;
 

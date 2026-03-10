@@ -2432,20 +2432,32 @@ export default class BitsManager {
         // Initialize preview canvas
         initializePreviewCanvas();
 
+        // Helper function to add touch-friendly event listeners
+        const addTouchHandler = (element, handler) => {
+            if (!element) return;
+            // Use pointerup for better cross-device support (works with mouse, touch, pen)
+            element.addEventListener("pointerup", (e) => {
+                e.preventDefault();
+                handler();
+            });
+            // Fallback for older browsers
+            element.addEventListener("click", handler);
+        };
+
         // Add event listeners for zoom buttons
-        modal.querySelector("#preview-zoom-in").addEventListener("click", () => {
+        addTouchHandler(modal.querySelector("#preview-zoom-in"), () => {
             previewZoomIn();
         });
 
-        modal.querySelector("#preview-zoom-out").addEventListener("click", () => {
+        addTouchHandler(modal.querySelector("#preview-zoom-out"), () => {
             previewZoomOut();
         });
 
-        modal.querySelector("#preview-fit").addEventListener("click", () => {
+        addTouchHandler(modal.querySelector("#preview-fit"), () => {
             previewFitToScale();
         });
 
-        modal.querySelector("#preview-toggle-grid").addEventListener("click", () => {
+        addTouchHandler(modal.querySelector("#preview-toggle-grid"), () => {
             togglePreviewGrid();
         });
 

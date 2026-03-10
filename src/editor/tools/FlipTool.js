@@ -205,10 +205,11 @@ export default class FlipTool extends BaseTool {
         const vars = this.ctx.state.variableValues ?? {};
         const selected = new Set(this._selectedSegIds);
         const zoom = this.ctx.canvas?.cm?.zoomLevel || 1;
-        // Scale arrow size with zoom (larger on zoom-in, smaller on zoom-out)
-        // while keeping bounds so arrows stay readable.
-        const arrowSize = Math.max(0.24, Math.min(1.1, 0.24 * Math.pow(zoom, 0.55)));
-        const tangentDelta = Math.max(0.01, arrowSize * 0.45);
+        // Scale arrow size with zoom: larger SVG units when zoomed out,
+        // smaller when zoomed in, to keep screen size roughly constant but
+        // slightly larger when far away for better visibility.
+        const arrowSize = Math.max(0.12, Math.min(6.0, 1.8 / zoom));
+        const tangentDelta = Math.max(0.001, arrowSize * 0.2);
 
         const g = document.createElementNS(SVG_NS, "g");
         g.classList.add("editor-flip-preview");
