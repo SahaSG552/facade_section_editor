@@ -13,6 +13,7 @@ import ArcTool from "./tools/ArcTool.js";
 import CircleTool from "./tools/CircleTool.js";
 import RectTool from "./tools/RectTool.js";
 import EllipseTool from "./tools/EllipseTool.js";
+import OffsetTool from "./tools/OffsetTool.js";
 import { evaluateMathExpression } from "../utils/utils.js";
 import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
 import { isFormulaToken, evaluateTokenWithVars } from "../utils/formulaPolicy.js";
@@ -2655,6 +2656,8 @@ export default class ProfileEditor {
             case "rect3pt": return new RectTool("rect3pt");
             case "ellipse2pt": return new EllipseTool("ellipse2pt");
             case "ellipse3pt": return new EllipseTool("ellipse3pt");
+            case "offset": return new OffsetTool("offset");
+            case "offsetMultiple": return new OffsetTool("offsetMultiple");
             default:
                 log.debug("_createTool: tool not implemented:", toolId);
                 return null;

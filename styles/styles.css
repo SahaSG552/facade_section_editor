@@ -1443,6 +1443,8 @@ button,
 /* ===== EDITOR CANVAS — ghost (in-progress drawing) ===== */
 .editor-ghost line,
 .editor-ghost circle,
+.editor-ghost rect,
+.editor-ghost ellipse,
 .editor-ghost path {
   stroke: hsl(var(--primary));
   fill: none;
@@ -1451,6 +1453,8 @@ button,
 
 .editor-ghost line,
 .editor-ghost circle,
+.editor-ghost rect,
+.editor-ghost ellipse,
 .editor-ghost path {
   stroke-width: 0.5;
   vector-effect: non-scaling-stroke;

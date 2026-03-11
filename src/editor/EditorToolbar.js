@@ -42,7 +42,7 @@ const TOOL_DEFINITIONS = [
     { id: "chamfer", label: "Chamfer", icon: "⌐", group: "edit" },
     { id: "trim", label: "Trim", icon: "✂", group: "edit", key: "t" },
     { id: "extend", label: "Extend", icon: "↔", group: "edit" },
-    { id: "offset", label: "Offset", icon: "⊙", group: "edit", key: "o" },
+    { id: "offset", label: "Offset (LMB) / Offset multiple (RMB)", icon: "⊙", group: "edit", key: "o", lmbTool: "offset", rmbTool: "offsetMultiple" },
     { id: "join", label: "Join", icon: "⊕", group: "edit", key: "j" },
     { id: "explode", label: "Explode", icon: "⊗", group: "edit" },
     { id: "close", label: "Close", icon: "⬡", group: "edit" },

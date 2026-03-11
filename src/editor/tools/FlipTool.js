@@ -231,7 +231,7 @@ export default class FlipTool extends BaseTool {
         // Scale arrow size with zoom: larger SVG units when zoomed out,
         // smaller when zoomed in, to keep screen size roughly constant but
         // slightly larger when far away for better visibility.
-        const arrowSize = Math.max(0.12, Math.min(6.0, 1.8 / zoom));
+        const arrowSize = Math.max(0.12, Math.min(6.0, 10 / zoom));
         const tangentDelta = Math.max(0.001, arrowSize * 0.2);
 
         const g = document.createElementNS(SVG_NS, "g");
@@ -262,7 +262,7 @@ export default class FlipTool extends BaseTool {
             shaft.setAttribute("y1", String(tailPt.y));
             shaft.setAttribute("x2", String(tipPt.x));
             shaft.setAttribute("y2", String(tipPt.y));
-            shaft.setAttribute("stroke", "#1f6feb");
+            shaft.setAttribute("stroke", "#eb1f3e");
             shaft.setAttribute("stroke-width", "1.8");
             shaft.setAttribute("vector-effect", "non-scaling-stroke");
             shaft.setAttribute("pointer-events", "none");
@@ -270,7 +270,7 @@ export default class FlipTool extends BaseTool {
 
             const headPath = document.createElementNS(SVG_NS, "path");
             headPath.setAttribute("d", `M ${left.x} ${left.y} L ${tipPt.x} ${tipPt.y} L ${right.x} ${right.y}`);
-            headPath.setAttribute("stroke", "#1f6feb");
+            headPath.setAttribute("stroke", "#eb1f3e");
             headPath.setAttribute("stroke-width", "1.8");
             headPath.setAttribute("fill", "none");
             headPath.setAttribute("vector-effect", "non-scaling-stroke");

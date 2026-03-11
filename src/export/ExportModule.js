@@ -3387,7 +3387,9 @@ class DXFExporter {
         const perpX = -dy / distance;
         const perpY = dx / distance;
 
-        const centerOffset = height * (sweepFlag ? -1 : 1);
+        // SVG spec: both largeArcFlag and sweepFlag determine which center to use
+        // centerOffset sign = (largeArcFlag !== sweepFlag) ? 1 : -1
+        const centerOffset = height * (largeArcFlag !== sweepFlag ? 1 : -1);
         const centerX = midX + perpX * centerOffset;
         const centerY = midY + perpY * centerOffset;
 

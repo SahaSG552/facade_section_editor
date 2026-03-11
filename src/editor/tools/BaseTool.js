@@ -144,7 +144,9 @@ export default class BaseTool {
      * @param {{ zoom:number, panX:number, panY:number }} _viewport
      */
     // eslint-disable-next-line no-unused-vars
-    onViewportChanged(_viewport) {}
+    onViewportChanged(_viewport) {
+        this.ctx?.canvas?.refreshGhost?.();
+    }
 
     /**
      * Returns true if this tool has an in-progress command that should

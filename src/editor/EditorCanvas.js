@@ -402,6 +402,18 @@ export default class EditorCanvas {
         }
     }
 
+    /**
+     * Re-append the current ghost element to keep it visible/updated after
+     * viewport events that may reorder overlay children.
+     */
+    refreshGhost() {
+        if (!this._ghostElement) return;
+        const overlay = this.cm.getLayer("overlay");
+        if (!overlay) return;
+        const clone = this._ghostElement.cloneNode(true);
+        this.setGhost(clone);
+    }
+
     // ─── Segment rendering ──────────────────────────────────────────────────
 
     /**

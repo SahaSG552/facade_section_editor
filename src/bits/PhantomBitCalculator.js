@@ -1,4 +1,5 @@
 import { angleToRad } from "../utils/utils.js";
+import { buildPartialSeries } from "../utils/offsetSeries.js";
 
 /**
  * Calculator for V-Carve phantom bits (multi-pass depth simulation)
@@ -108,10 +109,7 @@ export class PhantomBitCalculator {
 
             const passes = bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
 
-            const partialResults = [];
-            for (let i = 0; i < passes; i++) {
-                partialResults.push((bitY * (i + 1)) / passes);
-            }
+            const partialResults = buildPartialSeries(bitY, passes);
 
             const depths = [...partialResults].reverse();
             const contourOffsets = [];

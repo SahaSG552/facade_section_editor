@@ -62,6 +62,50 @@
   - [x] Multi-select перенос нескольких команд между Path.
   - [x] Drop целого Path в конец target Path (через end drop-zone в теле path).
 
+## 🚩 ТЕКУЩИЙ ПРИОРИТЕТ: OFFSET TOOL (11.03.2026)
+
+### Rhino parity (Offset / OffsetMultiple)
+- [x] Изучены команды Rhino 8: `Offset`, `OffsetMultiple`.
+- [x] Зафиксирован staged UX: selection -> side pick/dynamic preview -> confirm.
+- [x] Зафиксированы corner modes: `Sharp`, `Round`, `Smooth`, `Chamfer`, `None`.
+- [x] Зафиксирован `Trim` semantics: при `No` допускаются self-intersections, при `Yes` подрезка на углах.
+- [x] Для open curves: `Cap` режимы `None`, `Flat`, `Round`.
+- [x] Для multiple: единая сторона относительно курсора; islands (вложенные closed контуры) инвертируют направление относительно контейнера.
+
+### Продуктовые режимы (editor)
+- [ ] `Offset` (LMB):
+  - [ ] Stage 1 selection (элементы/сегменты/шейпы) + RMB confirm.
+  - [ ] Stage 2 dynamic ghost + near-cursor input дистанции (поддержка отрицательных значений).
+  - [ ] Stage 3 freeze preview по LMB/Enter и финальный confirm (LMB) / rollback (RMB).
+- [ ] `Offset multiple` (RMB):
+  - [ ] Ввод `distance count` (по умолчанию count=1).
+  - [ ] Динамический предпросмотр всех оффсетов.
+  - [ ] Расчёт дистанций последовательности как `partialResults` (вынести в shared util для переиспользования с PhantomBitCalculator).
+
+### Технический план внедрения
+- [x] Добавить `OffsetTool` в `src/editor/tools/OffsetTool.js` с базовой staged state-machine (`selecting -> dynamic -> confirming`).
+- [x] Зарегистрировать инструмент в `ProfileEditor._createTool(...)` и в `EditorToolbar` dual-mode (LMB offset / RMB offset-multiple).
+- [x] Вынести helper генерации последовательности глубин/дистанций (`partialResults`) в `src/utils/offsetSeries.js` и использовать в `PhantomBitCalculator` + `OffsetTool`.
+- [ ] Реализовать адаптер сегментов editor <-> SVG path для передачи в `CustomOffsetProcessor` без деградации примитивов там, где возможно.
+- [ ] Добавить fallback-пайплайн для сложных self-intersection кейсов через `PaperBooleanProcessor` / Paper.js.
+- [ ] Сохранение примитивов:
+  - [ ] line/arc по возможности сохранять как line/arc,
+  - [ ] shape offset (rect/circle/ellipse) не деградировать в polyline в обычных кейсах.
+
+### Валидация (итеративно с edge-cases)
+- [ ] Open/Closed контуры, mixed line+arc, shape-only.
+- [ ] Self-intersections: trim vs keep-поведение.
+- [ ] Негативные distance, крупные distance, multi-count > 1.
+- [ ] Совместимость с undo/redo, symmetry links и formula-параметрами.
+
+### Hotfix / Refactor (11.03.2026)
+- [x] Ghost styling унифицирован через CSS `.editor-ghost` для `line/circle/rect/ellipse/path`.
+- [x] В `OffsetTool` удалены инлайн-визуальные атрибуты ghost (`stroke/stroke-width/opacity`); в JS оставлены только геометрия + `stroke-dasharray`.
+- [x] Удалены мёртвые helper-функции: `createShapeGhostElement`, `shapeToGhostPathData`, `estimatePathOffsetNormal`, `signedAreaOfSegments`.
+- [x] Очищен `_captureSources`: убраны неиспользуемые поля `signedArea/isCCW/estimatedNormal` и лишний `pathData` для shape-entry.
+- [x] Направление offset стабилизировано для разного обхода open-path через dual-candidate выбор (`+D/-D`) с оценкой смещения центра относительно reference normal.
+- [x] Добавлены/уточнены JSDoc для новых transform/offset utility-функций.
+
 ### Hotfix batch (05.03.2026)
 - [x] Fix: два разных path, соприкасающихся стартовыми точками, больше не склеиваются в одно выделение.
   Selection для line/arc теперь берёт связную компоненту внутри contour, а не все сегменты contourId.
