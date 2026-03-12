@@ -2758,6 +2758,7 @@ export default class BitsManager {
                 <div id="path-editor-container"></div>
                 <input id="bit-profilePath" value="${profilePathValue}">
                 <input id="bit-rawProfilePath" value="${rawProfilePathValue}">
+                <input id="bit-offsetDebugLog" value="${defaultValues.offsetDebugLog || ""}">
                 <input id="bit-profileTransforms" value="${profileTransformsValue}">
                 <input id="bit-profileElements" value="${profileElementsValue}">
                 <div class="profile-path-header" style="margin-top:8px;">Profile Debug Log:</div>

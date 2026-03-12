@@ -245,6 +245,40 @@ function contourToPathData(segments) {
     return parts.join(" ");
 }
 
+/**
+ * Build contour path data in editor space (Y-down), without SVG Y inversion.
+ * Used by debug overlays that should match canvas coordinates exactly.
+ *
+ * @param {Array} segments
+ * @returns {string}
+ */
+function contourToEditorPathData(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return "";
+    const first = segments[0];
+    const s0 = first?.data?.start;
+    if (!s0) return "";
+
+    const parts = [`M ${r4(s0.x)} ${r4(s0.y)}`];
+    for (const seg of segments) {
+        if (seg.type === "arc") {
+            const d = seg.data ?? {};
+            const radius = d.radiusExpr ?? d._expr?.rx ?? d._expr?.ry ?? r4(d.radius ?? 0);
+            const large = Math.round(num(d.largeArc, 0));
+            const sweep = Math.round(num(d.sweep, 0));
+            parts.push(`A ${radius} ${radius} 0 ${large} ${sweep} ${r4(d.end?.x)} ${r4(d.end?.y)}`);
+        } else {
+            const hint = String(seg.cmdHint ?? "").toUpperCase();
+            const ex = dval(seg.data?.end?.x);
+            const ey = dval(seg.data?.end?.y);
+            if (hint === "H") parts.push(`H ${r4(ex)}`);
+            else if (hint === "V") parts.push(`V ${r4(ey)}`);
+            else parts.push(`L ${r4(ex)} ${r4(ey)}`);
+        }
+    }
+
+    return parts.join(" ");
+}
+
 function dval(v) {
     return Number.isFinite(Number(v)) ? Number(v) : 0;
 }
@@ -539,6 +573,38 @@ function parsePathToSegments(pathStr, state, { allowClose = true } = {}) {
     return out;
 }
 
+/**
+ * Serialize parsed editor segments back into editor-space path data.
+ *
+ * @param {Array} segments
+ * @param {boolean} [allowClose=true]
+ * @returns {string}
+ */
+function segmentsToEditorPathData(segments, allowClose = true) {
+    if (!Array.isArray(segments) || segments.length === 0) return "";
+    const first = segments[0];
+    const s0 = first?.data?.start;
+    if (!s0) return "";
+
+    const parts = [`M ${r4(s0.x)} ${r4(s0.y)}`];
+    for (const seg of segments) {
+        if (seg.type === "arc") {
+            const d = seg.data ?? {};
+            parts.push(
+                `A ${r4(num(d.radius))} ${r4(num(d.radius))} 0 ${Math.round(num(d.largeArc, 0))} ${Math.round(num(d.sweep, 0))} ${r4(num(d.end?.x))} ${r4(num(d.end?.y))}`,
+            );
+        } else {
+            parts.push(`L ${r4(num(seg.data?.end?.x))} ${r4(num(seg.data?.end?.y))}`);
+        }
+    }
+
+    if (allowClose) {
+        const end = segments[segments.length - 1]?.data?.end;
+        if (pointsEqual(s0, end, 1e-5)) parts.push("Z");
+    }
+    return parts.join(" ");
+}
+
 export default class OffsetTool extends BaseTool {
     constructor(mode = "offset") {
         super();
@@ -565,6 +631,7 @@ export default class OffsetTool extends BaseTool {
         this._popup = null;
         this._input = null;
         this._inputFocused = false;
+        this._lastNonEmptyDebugPayload = null;
 
         this._exportModule = null;
     }
@@ -580,6 +647,7 @@ export default class OffsetTool extends BaseTool {
         this._manualValue = "";
         this._referenceSegId = null;
         this._referenceRectRole = null;
+        this._lastNonEmptyDebugPayload = null;
         this._exportModule = app.getModule("export");
     }
 
@@ -1034,6 +1102,7 @@ export default class OffsetTool extends BaseTool {
         for (const [cid] of byContour.entries()) {
             const chain = this.ctx.state.segments.filter((s) => (s.type === "line" || s.type === "arc") && Number(s.contourId) === cid);
             const pathData = contourToPathData(chain);
+            const editorPathData = contourToEditorPathData(chain);
             if (!pathData) continue;
             const first = chain[0]?.data?.start;
             const last = chain[chain.length - 1]?.data?.end;
@@ -1051,6 +1120,7 @@ export default class OffsetTool extends BaseTool {
                 sourceId: `cid:${cid}`,
                 contourId: cid,
                 pathData,
+                editorPathData,
                 chain,
                 closed,
                 center: bb ? { x: bb.cx, y: bb.cy } : null,
@@ -1147,6 +1217,7 @@ export default class OffsetTool extends BaseTool {
                         sourceId: entry.sourceId,
                         distance: dist,
                         pathData: picked.pathData,
+                        editorPathData: segmentsToEditorPathData(picked.segments, picked.allowClose),
                         allowClose: picked.allowClose,
                         segments: picked.segments,
                         entryKind: "contour",
@@ -1156,7 +1227,56 @@ export default class OffsetTool extends BaseTool {
             }
         }
 
+        this._publishOffsetDebugInfo();
         this._renderGhost();
+    }
+
+    _publishOffsetDebugInfo() {
+        const previewEntries = (this._previewPaths ?? [])
+            .filter((p) => p.entryKind === "contour")
+            .map((p) => ({
+                sourceId: p.sourceId,
+                distance: p.distance,
+                customPathDataSvg: p.pathData || "",
+                customPathDataEditor: p.editorPathData || "",
+            }));
+
+        const sourceEntries = (this._sourceEntries ?? [])
+            .filter((e) => e.kind === "contour")
+            .map((e) => ({
+                sourceId: e.sourceId,
+                contourId: e.contourId,
+                inputPathDataSvg: e.pathData || "",
+                inputPathDataEditor: e.editorPathData || "",
+            }));
+
+        const payload = {
+            phase: this._phase,
+            mode: this._modeType,
+            referenceSegId: this._referenceSegId,
+            refPoint: this._refPoint,
+            refNormal: this._refNormal,
+            sources: sourceEntries,
+            previews: previewEntries,
+            timestamp: Date.now(),
+        };
+
+        const isNonEmpty = sourceEntries.length > 0 || previewEntries.length > 0;
+        if (isNonEmpty) {
+            this._lastNonEmptyDebugPayload = JSON.parse(JSON.stringify(payload));
+            window.offsetDebugInfo = payload;
+        } else if (this._lastNonEmptyDebugPayload) {
+            window.offsetDebugInfo = this._lastNonEmptyDebugPayload;
+        } else {
+            window.offsetDebugInfo = payload;
+        }
+        const debugTextarea = document.getElementById("bit-offsetDebugLog");
+        if (debugTextarea) {
+            const textPayload = isNonEmpty
+                ? payload
+                : (this._lastNonEmptyDebugPayload || payload);
+            debugTextarea.value = JSON.stringify(textPayload, null, 2);
+        }
     }
 
     _renderGhost() {
@@ -1225,6 +1345,7 @@ export default class OffsetTool extends BaseTool {
                 pg.appendChild(ghostEl);
                 idx += 1;
             }
+
             g.appendChild(pg);
         }
         this.ctx.canvas.setGhost(g);
@@ -1250,7 +1371,8 @@ export default class OffsetTool extends BaseTool {
                 continue;
             }
             const sourceEntry = this._sourceEntries.find((e) => e.sourceId === preview.sourceId);
-            const groups = splitByContour(preview.segments ?? []);
+            const commitSegments = preview.segments ?? [];
+            const groups = splitByContour(commitSegments);
             for (const group of groups) {
                 if (group.length === 0) continue;
                 const contourId = state._nextContourId++;
