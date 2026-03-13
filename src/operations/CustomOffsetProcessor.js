@@ -11,6 +11,7 @@ import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 const EPSILON = 1e-6;
+const ARC_EXTENSION_LIMIT = 5 * Math.PI / 180; // 5 degrees tolerance for sweep growth
 
 /**
  * @typedef {Object} CustomOffsetOptions
@@ -367,20 +368,30 @@ function offsetArcSegment(segment, offset) {
     const normal = leftNormal(tangent);
     const radialSign = dot(normal, radial) >= 0 ? 1 : -1;
 
-    const newRadius = radius + offset * radialSign;
-    if (newRadius <= EPSILON) return null;
+    let newRadius = radius + offset * radialSign;
+    let finalSweepFlag = sweepFlag;
+    let finalStartAngle = startAngle;
+    let finalEndAngle = endAngle;
+
+    if (newRadius < EPSILON) {
+        newRadius = Math.max(EPSILON, Math.abs(newRadius));
+        finalSweepFlag = sweepFlag === 1 ? 0 : 1;
+        finalStartAngle = startAngle + Math.PI;
+        finalEndAngle = endAngle + Math.PI;
+    }
 
     const center = { x: arc.centerX, y: arc.centerY };
     const start = {
-        x: center.x + Math.cos(startAngle) * newRadius,
-        y: center.y + Math.sin(startAngle) * newRadius,
+        x: center.x + Math.cos(finalStartAngle) * newRadius,
+        y: center.y + Math.sin(finalStartAngle) * newRadius,
     };
     const end = {
-        x: center.x + Math.cos(endAngle) * newRadius,
-        y: center.y + Math.sin(endAngle) * newRadius,
+        x: center.x + Math.cos(finalEndAngle) * newRadius,
+        y: center.y + Math.sin(finalEndAngle) * newRadius,
     };
 
-    const largeArcFlag = Math.abs(delta) > Math.PI ? 1 : 0;
+    const finalDelta = computeAngleDelta(finalStartAngle, finalEndAngle, finalSweepFlag);
+    const largeArcFlag = Math.abs(finalDelta) > Math.PI ? 1 : 0;
 
     return {
         type: "arc",
@@ -392,11 +403,11 @@ function offsetArcSegment(segment, offset) {
             ry: newRadius,
             xAxisRotation: arc.xAxisRotation || 0,
             largeArcFlag,
-            sweepFlag,
+            sweepFlag: finalSweepFlag,
             centerX: center.x,
             centerY: center.y,
-            startAngle,
-            endAngle,
+            startAngle: finalStartAngle,
+            endAngle: finalEndAngle,
         },
     };
 }
@@ -596,6 +607,8 @@ function pickBestArcArcIntersection(candidates, current, next) {
     const nextRadius = Math.abs(next?.arc?.radius || next?.arc?.rx || 0);
 
     for (const candidate of candidates ?? []) {
+        // Calculate scores even for points that might be outside tolerance, 
+        // but we will filter them in buildJoinSegment.
         const tA = arcTangentAtPoint(current, candidate);
         const tB = arcTangentAtPoint(next, candidate);
         const tangentScore = dot(tA, tB);
@@ -614,6 +627,34 @@ function pickBestArcArcIntersection(candidates, current, next) {
     }
 
     return best;
+}
+
+function getArcExtensionAngle(segment, point) {
+    const arc = segment.arc;
+    if (!arc) return Infinity;
+    const center = { x: arc.centerX, y: arc.centerY };
+    const angle = Math.atan2(point.y - center.y, point.x - center.x);
+    const sweep = arc.sweepFlag ?? 1;
+    
+    // Check total and part deltas
+    const total = computeAngleDelta(arc.startAngle, arc.endAngle, sweep);
+    const part = computeAngleDelta(arc.startAngle, angle, sweep);
+    
+    // If sweep = 1 (CW/increasing):
+    // Part is in [0, 2PI]. If part <= total, no extension (it's inside).
+    // Extension at start: part is near 2PI. Angle to start is 2PI - part.
+    // Extension at end: part > total. Angle to end is part - total.
+    if (sweep === 1) {
+        if (part >= 0 && part <= total) return 0;
+        return Math.min(Math.abs(2 * Math.PI - part), Math.abs(part - total));
+    } else {
+        // sweep = 0 (CCW/decreasing):
+        // total and part are in [-2PI, 0]. If part >= total, it's inside.
+        // Extension at start: part is near -2PI. Angle to start is 2PI + part.
+        // Extension at end: part < total. Angle to end is total - part.
+        if (part <= 0 && part >= total) return 0;
+        return Math.min(Math.abs(2 * Math.PI + part), Math.abs(total - part));
+    }
 }
 
 function pickBestLineArcIntersection(candidates, lineTangent, arcSegment, linePoint, arcPoint) {
@@ -757,24 +798,126 @@ function buildJoinSegment(
         return Math.max(arcSnapTolerance, arcRadius * 0.35);
     };
 
+    if (current.type === "arc" && next.type === "arc" && current.arc && next.arc) {
+        const centerA = { x: current.arc.centerX, y: current.arc.centerY };
+        const centerB = { x: next.arc.centerX, y: next.arc.centerY };
+        const radiusA = current.arc.radius || current.arc.rx || 0;
+        const radiusB = next.arc.radius || next.arc.rx || 0;
+
+        if (radiusA > EPSILON && radiusB > EPSILON) {
+            const candidates = circleCircleIntersections(centerA, radiusA, centerB, radiusB);
+            
+            // FILTER BY TOLERANCE: Only allow arcs to extend sweep up to ARC_EXTENSION_LIMIT
+            const validCandidates = candidates.filter(c => {
+                const extA = getArcExtensionAngle(current, c);
+                const extB = getArcExtensionAngle(next, c);
+                return extA <= ARC_EXTENSION_LIMIT && extB <= ARC_EXTENSION_LIMIT;
+            });
+
+            const bestPoint = validCandidates.length > 0
+                ? pickBestArcArcIntersection(validCandidates, current, next)
+                : null;
+                
+            if (bestPoint) {
+                const currentUpdated = updateArcEndpoint(current, bestPoint, false);
+                const nextUpdated = updateArcEndpoint(next, bestPoint, true);
+                if (currentUpdated && nextUpdated) {
+                    return { current, next, joinSegment: null };
+                }
+            }
+        }
+    }
+
+    if (current.type === "line" && next.type === "arc" && next.arc) {
+        const center = { x: next.arc.centerX, y: next.arc.centerY };
+        const radiusValue = next.arc.radius || next.arc.rx || 0;
+        if (radiusValue > EPSILON) {
+            const candidates = lineCircleIntersections(
+                current.end,
+                currentTangent,
+                center,
+                radiusValue
+            );
+            
+            // FILTER BY TOLERANCE: Only allow arc to extend sweep.
+            const validCandidates = candidates.filter(c => getArcExtensionAngle(next, c) <= ARC_EXTENSION_LIMIT);
+            
+            const bestPoint = validCandidates.length > 0
+                ? pickBestLineArcIntersection(validCandidates, currentTangent, next, current.end, next.start)
+                : null;
+                
+            if (bestPoint) {
+                const currentUpdated = updateSegmentEndpoint(current, bestPoint, false, arcSnapTolerance);
+                const nextUpdated = updateArcEndpoint(next, bestPoint, true);
+                if (currentUpdated && nextUpdated) {
+                    return { current, next, joinSegment: null };
+                }
+            }
+        }
+    }
+
+    if (current.type === "arc" && next.type === "line" && current.arc) {
+        const center = { x: current.arc.centerX, y: current.arc.centerY };
+        const radiusValue = current.arc.radius || current.arc.rx || 0;
+        if (radiusValue > EPSILON) {
+            const candidates = lineCircleIntersections(
+                next.start,
+                nextTangent,
+                center,
+                radiusValue
+            );
+            
+            // FILTER BY TOLERANCE: Only allow arc to extend sweep.
+            const validCandidates = candidates.filter(c => getArcExtensionAngle(current, c) <= ARC_EXTENSION_LIMIT);
+            
+            const bestPoint = validCandidates.length > 0
+                ? pickBestLineArcIntersection(validCandidates, nextTangent, current, next.start, current.end)
+                : null;
+                
+            if (bestPoint) {
+                const nextUpdated = updateSegmentEndpoint(next, bestPoint, true, arcSnapTolerance);
+                const currentUpdated = updateArcEndpoint(current, bestPoint, false);
+                if (currentUpdated && nextUpdated) {
+                    return { current, next, joinSegment: null };
+                }
+            }
+        }
+    }
+
     if (intersection) {
         const miterLength = distance(current.end, intersection);
-        if (joinStyle === "miter" && miterLength <= radius * limit) {
-            const currentUpdated = updateSegmentEndpoint(
-                current,
-                intersection,
-                false,
-                arcEndpointTolerance(current)
-            );
-            const nextUpdated = updateSegmentEndpoint(
-                next,
-                intersection,
-                true,
-                arcEndpointTolerance(next)
-            );
-            if (currentUpdated && nextUpdated) {
+        const tangentDot = dot(currentTangent, nextTangent);
+        const isNearlyParallel = Math.abs(tangentDot) > 0.9999;
+        
+        if (!isNearlyParallel && joinStyle === "miter" && miterLength <= radius * (limit || 10)) {
+            // For perfectly parallel lines or smooth continuing lines/arcs we allow miter intersection joining
+            
+            let currentUpdated = true;
+            let nextUpdated = true;
+            
+            // Only stretch endpoint if it's a Line or Bezier (arc radii explode if stretched)
+            if (current.type !== "arc") {
+                currentUpdated = updateSegmentEndpoint(current, intersection, false, arcEndpointTolerance(current));
+            }
+            if (next.type !== "arc") {
+                nextUpdated = updateSegmentEndpoint(next, intersection, true, arcEndpointTolerance(next));
+            }
+            
+            // If both were non-arcs and updated successfully, no extra join segment needed
+            if (currentUpdated && nextUpdated && current.type !== "arc" && next.type !== "arc") {
                 return { current, next, joinSegment: null };
             }
+            
+            // If at least one is an arc, we cannot stretch it to the miter intersection.
+            // Bridge the gap with a miter corner (two lines) to the intersection.
+            return {
+                current,
+                next,
+                joinSegment: [
+                    { type: "line", start: clonePoint(current.end), end: clonePoint(intersection) },
+                    { type: "line", start: clonePoint(intersection), end: clonePoint(next.start) }
+                ]
+            };
         }
 
         if (joinStyle === "round" && radius > EPSILON) {
@@ -813,89 +956,6 @@ function buildJoinSegment(
         }
     }
 
-    if (current.type === "arc" && next.type === "arc" && current.arc && next.arc) {
-        const centerA = { x: current.arc.centerX, y: current.arc.centerY };
-        const centerB = { x: next.arc.centerX, y: next.arc.centerY };
-        const radiusA = current.arc.radius || current.arc.rx || 0;
-        const radiusB = next.arc.radius || next.arc.rx || 0;
-
-        if (radiusA > EPSILON && radiusB > EPSILON) {
-            const candidates = circleCircleIntersections(centerA, radiusA, centerB, radiusB);
-            const validCandidates = candidates.filter((candidate) => (
-                isPointOnArcSegment(current, candidate)
-                && isPointOnArcSegment(next, candidate)
-            ));
-            const bestPoint = validCandidates.length > 0
-                ? pickBestArcArcIntersection(validCandidates, current, next)
-                : null;
-            if (bestPoint) {
-                const currentUpdated = updateArcEndpoint(current, bestPoint, false);
-                const nextUpdated = updateArcEndpoint(next, bestPoint, true);
-                if (currentUpdated && nextUpdated) {
-                    return { current, next, joinSegment: null };
-                }
-            }
-        }
-    }
-
-    if (current.type === "line" && next.type === "arc" && next.arc) {
-        const center = { x: next.arc.centerX, y: next.arc.centerY };
-        const radiusValue = next.arc.radius || next.arc.rx || 0;
-        if (radiusValue > EPSILON) {
-            const candidates = lineCircleIntersections(
-                current.end,
-                currentTangent,
-                center,
-                radiusValue
-            );
-            const validCandidates = candidates.filter((candidate) => isPointOnArcSegment(next, candidate));
-            const bestPoint = validCandidates.length > 0
-                ? pickBestLineArcIntersection(validCandidates, currentTangent, next, current.end, next.start)
-                : null;
-            if (bestPoint) {
-                const currentUpdated = updateSegmentEndpoint(
-                    current,
-                    bestPoint,
-                    false,
-                    arcSnapTolerance
-                );
-                const nextUpdated = updateArcEndpoint(next, bestPoint, true);
-                if (currentUpdated && nextUpdated) {
-                    return { current, next, joinSegment: null };
-                }
-            }
-        }
-    }
-
-    if (current.type === "arc" && next.type === "line" && current.arc) {
-        const center = { x: current.arc.centerX, y: current.arc.centerY };
-        const radiusValue = current.arc.radius || current.arc.rx || 0;
-        if (radiusValue > EPSILON) {
-            const candidates = lineCircleIntersections(
-                next.start,
-                nextTangent,
-                center,
-                radiusValue
-            );
-            const validCandidates = candidates.filter((candidate) => isPointOnArcSegment(current, candidate));
-            const bestPoint = validCandidates.length > 0
-                ? pickBestLineArcIntersection(validCandidates, nextTangent, current, next.start, current.end)
-                : null;
-            if (bestPoint) {
-                const nextUpdated = updateSegmentEndpoint(
-                    next,
-                    bestPoint,
-                    true,
-                    arcSnapTolerance
-                );
-                const currentUpdated = updateArcEndpoint(current, bestPoint, false);
-                if (currentUpdated && nextUpdated) {
-                    return { current, next, joinSegment: null };
-                }
-            }
-        }
-    }
-
     const joinSegment = {
         type: "line",
         start: clonePoint(current.end),
@@ -908,11 +968,9 @@ function buildJoinSegment(
 function sanitizeSegments(segments) {
     return segments.filter((segment) => {
         if (!segment.start || !segment.end) return false;
-        if (distance(segment.start, segment.end) < 0.001) return false;
-        if (segment.type === "arc" && segment.arc) {
-            const radius = segment.arc.radius || segment.arc.rx || 0;
-            if (radius <= EPSILON) return false;
-        }
+        if (distance(segment.start, segment.end) < EPSILON) return false;
+        // Do not check radius <= EPSILON here. Degenerate inverted arcs 
+        // with radius = EPSILON act as vital corner joints!
         return true;
     });
 }
@@ -987,7 +1045,13 @@ function joinOffsetSegments(offsetSegments, options, offset, closed, orientation
 
         segments[nextIndex] = joinResult.next;
         result.push(joinResult.current);
-        if (joinResult.joinSegment) result.push(joinResult.joinSegment);
+        if (joinResult.joinSegment) {
+            if (Array.isArray(joinResult.joinSegment)) {
+                result.push(...joinResult.joinSegment);
+            } else {
+                result.push(joinResult.joinSegment);
+            }
+        }
     }
 
     if (!closed && segments[count - 1]) {

@@ -1201,14 +1201,42 @@ export default class OffsetTool extends BaseTool {
                     : null;
 
                 let picked = primary;
-                if (primary && mirrored && entry.center && absDist > 1e-9) {
+                if (primary && mirrored && absDist > 1e-9) {
                     const expectedSign = dist >= 0 ? 1 : -1;
-                    const pdx = num(primary.centerWorld?.x) - num(entry.center?.x);
-                    const pdy = num(primary.centerWorld?.y) - num(entry.center?.y);
-                    const mdx = num(mirrored.centerWorld?.x) - num(entry.center?.x);
-                    const mdy = num(mirrored.centerWorld?.y) - num(entry.center?.y);
-                    const pScore = (pdx * refN.x + pdy * refN.y) * expectedSign;
-                    const mScore = (mdx * refN.x + mdy * refN.y) * expectedSign;
+                    const refP = this._refPoint;
+                    
+                    const getSideScore = (candidate) => {
+                        if (!candidate?.segments || candidate.segments.length === 0) return -Infinity;
+                        // Find the point on the candidate segments that is projectively closest to _refPoint
+                        // or just the endpoint closest to it.
+                        let bestDot = -Infinity;
+                        let minD2 = Infinity;
+                        let foundPoint = null;
+                        
+                        for (const s of candidate.segments) {
+                            for (const p of [s.data?.start, s.data?.end]) {
+                                if (!p) continue;
+                                // Convert to world if needed, but segments in candidate are already transformed?
+                                // Actually OffsetTool uses transformed points in centerWorld.
+                                // Let's check candidate points relative to refPoint.
+                                const dx = num(p.x) - refP.x;
+                                const dy = num(p.y) - refP.y;
+                                const d2 = dx * dx + dy * dy;
+                                if (d2 < minD2) {
+                                    minD2 = d2;
+                                    foundPoint = p;
+                                }
+                            }
+                        }
+                        
+                        if (!foundPoint) return -Infinity;
+                        const vdx = num(foundPoint.x) - refP.x;
+                        const vdy = num(foundPoint.y) - refP.y;
+                        return (vdx * refN.x + vdy * refN.y) * expectedSign;
+                    };
+
+                    const pScore = getSideScore(primary);
+                    const mScore = getSideScore(mirrored);
                     picked = mScore > pScore ? mirrored : primary;
                 }
 
