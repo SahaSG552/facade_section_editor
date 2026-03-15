@@ -537,42 +537,68 @@ function isValidStartTrim(arc, I) {
 
 /**
  * Trim the end of a segment to a new point:
- * - LINE: simply relocates the endpoint.
- * - ARC:  projects the point onto the arc circle and adjusts endAngle.
+ * - LINE: relocates the endpoint; marks degenerate if direction flips.
+ * - ARC:  projects the point onto the arc circle, adjusts endAngle;
+ *         marks degenerate if the sweep collapses to zero or inverts.
  */
 function trimSegmentEnd(segment, point) {
     if (segment.type === "line") {
+        const odx = segment.end.x - segment.start.x;
+        const ody = segment.end.y - segment.start.y;
         segment.end = clonePoint(point);
+        const ndx = segment.end.x - segment.start.x;
+        const ndy = segment.end.y - segment.start.y;
+        if (distance(segment.start, segment.end) < EPSILON ||
+            odx * ndx + ody * ndy < -EPSILON) {
+            segment.degenerate = true;
+        }
     } else if (segment.type === "arc" && segment.arc && !segment.degenerate) {
         const { centerX, centerY } = segment.arc;
         const r = segment.arc.radius || segment.arc.rx || 0;
+        const origSweep = computeAngleDelta(segment.arc.startAngle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
         const angle = Math.atan2(point.y - centerY, point.x - centerX);
         segment.arc.endAngle = angle;
         segment.end = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
-        segment.arc.largeArcFlag =
-            Math.abs(computeAngleDelta(segment.arc.startAngle, angle, segment.arc.sweepFlag ?? 1)) > Math.PI ? 1 : 0;
+        const newSweep = computeAngleDelta(segment.arc.startAngle, angle, segment.arc.sweepFlag ?? 1);
+        segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
+        if (Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0) {
+            segment.degenerate = true;
+        }
     }
-    // Degenerate arcs are collapsed to their center point — cannot be trimmed.
+    // Degenerate arcs are collapsed to their reference point — cannot be trimmed.
 }
 
 /**
  * Trim the start of a segment to a new point.
- * - LINE: simply relocates the start-point.
- * - ARC:  projects the point onto the arc circle and adjusts startAngle.
+ * - LINE: relocates the start-point; marks degenerate if direction flips.
+ * - ARC:  projects the point onto the arc circle, adjusts startAngle;
+ *         marks degenerate if the sweep collapses to zero or inverts.
  */
 function trimSegmentStart(segment, point) {
     if (segment.type === "line") {
+        const odx = segment.end.x - segment.start.x;
+        const ody = segment.end.y - segment.start.y;
         segment.start = clonePoint(point);
+        const ndx = segment.end.x - segment.start.x;
+        const ndy = segment.end.y - segment.start.y;
+        if (distance(segment.start, segment.end) < EPSILON ||
+            odx * ndx + ody * ndy < -EPSILON) {
+            segment.degenerate = true;
+        }
     } else if (segment.type === "arc" && segment.arc && !segment.degenerate) {
         const { centerX, centerY } = segment.arc;
         const r = segment.arc.radius || segment.arc.rx || 0;
+        const origSweep = computeAngleDelta(segment.arc.startAngle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
         const angle = Math.atan2(point.y - centerY, point.x - centerX);
         segment.arc.startAngle = angle;
         segment.start = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
-        segment.arc.largeArcFlag =
-            Math.abs(computeAngleDelta(angle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1)) > Math.PI ? 1 : 0;
+        const newSweep = computeAngleDelta(angle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
+        segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
+        if (Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0) {
+            segment.degenerate = true;
+        }
     }
-    // Degenerate arcs are collapsed to their center point — cannot be trimmed.
+    // Degenerate arcs are collapsed to their reference point — cannot be trimmed.
 }
 
 /**
@@ -650,8 +676,20 @@ function applyMiterJoin(curr, next, maxMiterLen) {
     if (M) {
         const d1 = distance(p1, M), d2 = distance(p2, M);
         if (d1 <= maxMiterLen && d2 <= maxMiterLen) {
-            if (!currIsArc) trimSegmentEnd(curr, M);
+            if (!currIsArc) {
+                trimSegmentEnd(curr, M);
+            } else {
+                // Arc endpoint cannot move. If the miter falls BEHIND the arc end
+                // (the arc has already swept past the corner), mark it degenerate.
+                // The resulting gap is then closed in the second pass.
+                if (dot({ x: M.x - p1.x, y: M.y - p1.y }, t1) < -EPSILON) {
+                    curr.degenerate = true;
+                    if (!nextIsArc) trimSegmentStart(next, M);
+                    return null;
+                }
+            }
             if (!nextIsArc) trimSegmentStart(next, M);
+            // next=arc: arc start cannot move; any gap is covered by the bridge below.
             if (isNear(curr.end, next.start, 0.001)) return null;
             return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
         }
@@ -664,6 +702,8 @@ function applyMiterJoin(curr, next, maxMiterLen) {
 function sanitizeSegments(segments) {
     return segments.filter((segment) => {
         if (!segment.start || !segment.end) return false;
+        // Explicitly degenerated by trimSegmentEnd/Start or applyMiterJoin.
+        if (segment.degenerate) return false;
         if (distance(segment.start, segment.end) < EPSILON) return false;
         // Remove any residual degenerate arc markers (radius 0)
         if (segment.type === "arc" && segment.arc) {
