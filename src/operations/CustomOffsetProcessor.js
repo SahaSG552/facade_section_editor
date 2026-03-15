@@ -6,12 +6,11 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { approximatePath, segmentsToSVGPath } from "../utils/arcApproximation.js";
-import { buildFilletArc, getPathOrientation } from "../utils/fillet.js";
+import { getPathOrientation } from "../utils/fillet.js";
 import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 const EPSILON = 1e-6;
-const ARC_EXTENSION_LIMIT = 5 * Math.PI / 180; // 5 degrees tolerance for sweep growth
 
 /**
  * @typedef {Object} CustomOffsetOptions
@@ -345,69 +344,72 @@ function offsetBezierSegment(segment, offset) {
 
 function offsetArcSegment(segment, offset) {
     const arc = segment.arc;
-    if (!arc || arc.centerX === undefined || arc.centerY === undefined) {
-        return null;
-    }
+    if (!arc || arc.centerX === undefined || arc.centerY === undefined) return null;
 
     const radius = arc.radius || arc.rx || 0;
     if (radius < EPSILON) return null;
 
-    const startAngle = arc.startAngle;
-    const endAngle = arc.endAngle;
-    const sweepFlag = arc.sweepFlag ?? 1;
+    // Determine radial sign: +1 means increasing the radius offsets in the `offset` direction.
+    const delta     = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
+    const midAngle  = arc.startAngle + delta / 2;
+    const radial    = { x: Math.cos(midAngle), y: Math.sin(midAngle) };
+    const tangSign  = (arc.sweepFlag ?? 1) === 1 ? 1 : -1;
+    const tangent   = { x: -Math.sin(midAngle) * tangSign, y: Math.cos(midAngle) * tangSign };
+    const radialSign = dot(leftNormal(tangent), radial) >= 0 ? 1 : -1;
 
-    const delta = computeAngleDelta(startAngle, endAngle, sweepFlag);
-    const midAngle = startAngle + delta / 2;
-    const radial = { x: Math.cos(midAngle), y: Math.sin(midAngle) };
-
-    const tangentSign = sweepFlag === 1 ? 1 : -1;
-    const tangent = {
-        x: -Math.sin(midAngle) * tangentSign,
-        y: Math.cos(midAngle) * tangentSign,
-    };
-    const normal = leftNormal(tangent);
-    const radialSign = dot(normal, radial) >= 0 ? 1 : -1;
-
-    let newRadius = radius + offset * radialSign;
-    let finalSweepFlag = sweepFlag;
-    let finalStartAngle = startAngle;
-    let finalEndAngle = endAngle;
-
+    const newRadius = radius + offset * radialSign;
     if (newRadius < EPSILON) {
-        newRadius = Math.max(EPSILON, Math.abs(newRadius));
-        finalSweepFlag = sweepFlag === 1 ? 0 : 1;
-        finalStartAngle = startAngle + Math.PI;
-        finalEndAngle = endAngle + Math.PI;
+        // Arc degenerates.  Instead of collapsing to the center, compute the
+        // "offset tangent-line" reference point for each endpoint.  This is
+        // the position obtained by shifting the original arc endpoint along its
+        // own outward normal by `offset`.  These positions are later used in
+        // applyMiterJoin to find the correct miter corners with the neighbouring
+        // segments, even when the arc itself has vanished.
+        const origStart = {
+            x: arc.centerX + Math.cos(arc.startAngle) * radius,
+            y: arc.centerY + Math.sin(arc.startAngle) * radius,
+        };
+        const origEnd = {
+            x: arc.centerX + Math.cos(arc.endAngle) * radius,
+            y: arc.centerY + Math.sin(arc.endAngle) * radius,
+        };
+        const startTang = { x: -Math.sin(arc.startAngle) * tangSign, y: Math.cos(arc.startAngle) * tangSign };
+        const endTang   = { x: -Math.sin(arc.endAngle)   * tangSign, y: Math.cos(arc.endAngle)   * tangSign };
+        const startNorm = leftNormal(startTang);
+        const endNorm   = leftNormal(endTang);
+        return {
+            type: "arc",
+            degenerate: true,
+            start: { x: origStart.x + startNorm.x * offset, y: origStart.y + startNorm.y * offset },
+            end:   { x: origEnd.x   + endNorm.x   * offset, y: origEnd.y   + endNorm.y   * offset },
+            arc: {
+                centerX: arc.centerX, centerY: arc.centerY,
+                startAngle: arc.startAngle, endAngle: arc.endAngle,
+                sweepFlag: arc.sweepFlag ?? 1,
+                radius: 0, rx: 0, ry: 0, largeArcFlag: 0,
+                xAxisRotation: arc.xAxisRotation || 0,
+            },
+        };
     }
 
-    const center = { x: arc.centerX, y: arc.centerY };
-    const start = {
-        x: center.x + Math.cos(finalStartAngle) * newRadius,
-        y: center.y + Math.sin(finalStartAngle) * newRadius,
-    };
-    const end = {
-        x: center.x + Math.cos(finalEndAngle) * newRadius,
-        y: center.y + Math.sin(finalEndAngle) * newRadius,
-    };
-
-    const finalDelta = computeAngleDelta(finalStartAngle, finalEndAngle, finalSweepFlag);
-    const largeArcFlag = Math.abs(finalDelta) > Math.PI ? 1 : 0;
-
+    // Center and sweep angles are unchanged — only the radius grows or shrinks.
     return {
         type: "arc",
-        start,
-        end,
+        start: {
+            x: arc.centerX + Math.cos(arc.startAngle) * newRadius,
+            y: arc.centerY + Math.sin(arc.startAngle) * newRadius,
+        },
+        end: {
+            x: arc.centerX + Math.cos(arc.endAngle) * newRadius,
+            y: arc.centerY + Math.sin(arc.endAngle) * newRadius,
+        },
         arc: {
-            radius: newRadius,
-            rx: newRadius,
-            ry: newRadius,
+            radius: newRadius, rx: newRadius, ry: newRadius,
             xAxisRotation: arc.xAxisRotation || 0,
-            largeArcFlag,
-            sweepFlag: finalSweepFlag,
-            centerX: center.x,
-            centerY: center.y,
-            startAngle: finalStartAngle,
-            endAngle: finalEndAngle,
+            largeArcFlag: Math.abs(delta) > Math.PI ? 1 : 0,
+            sweepFlag: arc.sweepFlag ?? 1,
+            centerX: arc.centerX, centerY: arc.centerY,
+            startAngle: arc.startAngle, endAngle: arc.endAngle,
         },
     };
 }
@@ -479,501 +481,199 @@ function lineIntersection(p1, dir1, p2, dir2) {
     return { x: p1.x + dir1.x * t, y: p1.y + dir1.y * t };
 }
 
+/** Intersections of infinite line (through linePoint, direction lineDir) with a circle. */
 function lineCircleIntersections(linePoint, lineDir, center, radius) {
-    const dx = lineDir.x;
-    const dy = lineDir.y;
-    const fx = linePoint.x - center.x;
-    const fy = linePoint.y - center.y;
-
+    const dx = lineDir.x, dy = lineDir.y;
+    const fx = linePoint.x - center.x, fy = linePoint.y - center.y;
     const a = dx * dx + dy * dy;
     const b = 2 * (fx * dx + fy * dy);
     const c = fx * fx + fy * fy - radius * radius;
-    const discriminant = b * b - 4 * a * c;
-
-    if (discriminant < 0 || Math.abs(a) < EPSILON) {
-        return [];
-    }
-
-    const sqrtDisc = Math.sqrt(discriminant);
-    const t1 = (-b - sqrtDisc) / (2 * a);
-    const t2 = (-b + sqrtDisc) / (2 * a);
-
+    const disc = b * b - 4 * a * c;
+    if (disc < 0 || Math.abs(a) < EPSILON) return [];
+    const sq = Math.sqrt(Math.max(0, disc));
     return [
-        { x: linePoint.x + dx * t1, y: linePoint.y + dy * t1 },
-        { x: linePoint.x + dx * t2, y: linePoint.y + dy * t2 },
+        { x: linePoint.x + dx * (-b - sq) / (2 * a), y: linePoint.y + dy * (-b - sq) / (2 * a) },
+        { x: linePoint.x + dx * (-b + sq) / (2 * a), y: linePoint.y + dy * (-b + sq) / (2 * a) },
     ];
 }
 
-function circleCircleIntersections(centerA, radiusA, centerB, radiusB) {
-    const dx = centerB.x - centerA.x;
-    const dy = centerB.y - centerA.y;
+/** Intersections of two circles. Returns 0–2 points. */
+function circleCircleIntersections(cA, rA, cB, rB) {
+    const dx = cB.x - cA.x, dy = cB.y - cA.y;
     const d = Math.hypot(dx, dy);
-
-    if (d < EPSILON) return [];
-    if (d > radiusA + radiusB + EPSILON) return [];
-    if (d < Math.abs(radiusA - radiusB) - EPSILON) return [];
-
-    const a = (radiusA * radiusA - radiusB * radiusB + d * d) / (2 * d);
-    const h2 = radiusA * radiusA - a * a;
+    if (d < EPSILON || d > rA + rB + EPSILON || d < Math.abs(rA - rB) - EPSILON) return [];
+    const a = (rA * rA - rB * rB + d * d) / (2 * d);
+    const h2 = rA * rA - a * a;
     if (h2 < -EPSILON) return [];
     const h = Math.sqrt(Math.max(0, h2));
-
-    const xm = centerA.x + (a * dx) / d;
-    const ym = centerA.y + (a * dy) / d;
-
-    const rx = (-dy * h) / d;
-    const ry = (dx * h) / d;
-
-    if (h <= EPSILON) {
-        return [{ x: xm, y: ym }];
-    }
-
-    return [
-        { x: xm + rx, y: ym + ry },
-        { x: xm - rx, y: ym - ry },
-    ];
+    const mx = cA.x + a * dx / d, my = cA.y + a * dy / d;
+    if (h <= EPSILON) return [{ x: mx, y: my }];
+    const rx = -dy * h / d, ry = dx * h / d;
+    return [{ x: mx + rx, y: my + ry }, { x: mx - rx, y: my - ry }];
 }
 
-function pickClosestIntersection(candidates, targetA, targetB) {
-    let best = null;
-    let bestScore = Infinity;
-    for (const candidate of candidates) {
-        const score = distance(candidate, targetA) + distance(candidate, targetB);
-        if (score < bestScore) {
-            best = candidate;
-            bestScore = score;
-        }
-    }
-    return best;
+/**
+ * Returns true if trimming the arc's END to point I would only shorten
+ * (or leave unchanged) the arc. Extending is not allowed.
+ */
+function isValidEndTrim(arc, I) {
+    const θI = Math.atan2(I.y - arc.centerY, I.x - arc.centerX);
+    const origSweep = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
+    const sweepToI  = computeAngleDelta(arc.startAngle, θI,           arc.sweepFlag ?? 1);
+    // Same direction as original sweep AND no longer than it.
+    return sweepToI * origSweep > 0 && Math.abs(sweepToI) <= Math.abs(origSweep) + EPSILON;
 }
 
-function normalizeAngle(angle) {
-    let value = angle % (Math.PI * 2);
-    if (value < 0) value += Math.PI * 2;
-    return value;
+/**
+ * Returns true if trimming the arc's START to point I would only shorten
+ * (or leave unchanged) the arc. Extending is not allowed.
+ */
+function isValidStartTrim(arc, I) {
+    const θI = Math.atan2(I.y - arc.centerY, I.x - arc.centerX);
+    const origSweep  = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
+    const sweepFromI = computeAngleDelta(θI,              arc.endAngle, arc.sweepFlag ?? 1);
+    return sweepFromI * origSweep > 0 && Math.abs(sweepFromI) <= Math.abs(origSweep) + EPSILON;
 }
 
-function isAngleOnArcSweep(startAngle, endAngle, sweepFlag, testAngle, tolerance = 1e-3) {
-    const start = normalizeAngle(startAngle);
-    const end = normalizeAngle(endAngle);
-    const test = normalizeAngle(testAngle);
-
-    const total = computeAngleDelta(start, end, sweepFlag);
-    const part = computeAngleDelta(start, test, sweepFlag);
-
-    if (sweepFlag === 1) {
-        return part >= -tolerance && part <= total + tolerance;
-    }
-
-    return part <= tolerance && part >= total - tolerance;
-}
-
-function isPointOnArcSegment(segment, point, radialTolerance = 0.05, angularTolerance = 1e-3) {
-    if (!segment?.arc) return false;
-
-    const arc = segment.arc;
-    const center = { x: arc.centerX, y: arc.centerY };
-    const radius = arc.radius || arc.rx || 0;
-    if (radius <= EPSILON) return false;
-
-    const r = distance(center, point);
-    if (Math.abs(r - radius) > radialTolerance) return false;
-
-    const angle = Math.atan2(point.y - center.y, point.x - center.x);
-    return isAngleOnArcSweep(
-        arc.startAngle,
-        arc.endAngle,
-        arc.sweepFlag ?? 1,
-        angle,
-        angularTolerance,
-    );
-}
-
-function arcTangentAtPoint(segment, point) {
-    if (!segment?.arc) return { x: 0, y: 0 };
-    const center = { x: segment.arc.centerX, y: segment.arc.centerY };
-    const radial = normalize({ x: point.x - center.x, y: point.y - center.y });
-    const sweep = segment.arc.sweepFlag ?? 1;
-    if (sweep === 1) {
-        return normalize({ x: -radial.y, y: radial.x });
-    }
-    return normalize({ x: radial.y, y: -radial.x });
-}
-
-function pickBestArcArcIntersection(candidates, current, next) {
-    let best = null;
-    let bestScore = -Infinity;
-    const currentRadius = Math.abs(current?.arc?.radius || current?.arc?.rx || 0);
-    const nextRadius = Math.abs(next?.arc?.radius || next?.arc?.rx || 0);
-
-    for (const candidate of candidates ?? []) {
-        // Calculate scores even for points that might be outside tolerance, 
-        // but we will filter them in buildJoinSegment.
-        const tA = arcTangentAtPoint(current, candidate);
-        const tB = arcTangentAtPoint(next, candidate);
-        const tangentScore = dot(tA, tB);
-
-        const rA = distance({ x: current.arc.centerX, y: current.arc.centerY }, candidate);
-        const rB = distance({ x: next.arc.centerX, y: next.arc.centerY }, candidate);
-        const radiusDrift = Math.abs(rA - currentRadius) + Math.abs(rB - nextRadius);
-
-        const proximity = distance(candidate, current.end) + distance(candidate, next.start);
-        const score = tangentScore * 1000 - radiusDrift * 50 - proximity;
-
-        if (score > bestScore) {
-            bestScore = score;
-            best = candidate;
-        }
-    }
-
-    return best;
-}
-
-function getArcExtensionAngle(segment, point) {
-    const arc = segment.arc;
-    if (!arc) return Infinity;
-    const center = { x: arc.centerX, y: arc.centerY };
-    const angle = Math.atan2(point.y - center.y, point.x - center.x);
-    const sweep = arc.sweepFlag ?? 1;
-    
-    // Check total and part deltas
-    const total = computeAngleDelta(arc.startAngle, arc.endAngle, sweep);
-    const part = computeAngleDelta(arc.startAngle, angle, sweep);
-    
-    // If sweep = 1 (CW/increasing):
-    // Part is in [0, 2PI]. If part <= total, no extension (it's inside).
-    // Extension at start: part is near 2PI. Angle to start is 2PI - part.
-    // Extension at end: part > total. Angle to end is part - total.
-    if (sweep === 1) {
-        if (part >= 0 && part <= total) return 0;
-        return Math.min(Math.abs(2 * Math.PI - part), Math.abs(part - total));
-    } else {
-        // sweep = 0 (CCW/decreasing):
-        // total and part are in [-2PI, 0]. If part >= total, it's inside.
-        // Extension at start: part is near -2PI. Angle to start is 2PI + part.
-        // Extension at end: part < total. Angle to end is total - part.
-        if (part <= 0 && part >= total) return 0;
-        return Math.min(Math.abs(2 * Math.PI + part), Math.abs(total - part));
-    }
-}
-
-function pickBestLineArcIntersection(candidates, lineTangent, arcSegment, linePoint, arcPoint) {
-    let best = null;
-    let bestScore = -Infinity;
-    const arcRadius = Math.abs(arcSegment?.arc?.radius || arcSegment?.arc?.rx || 0);
-
-    for (const candidate of candidates ?? []) {
-        const tArc = arcTangentAtPoint(arcSegment, candidate);
-        const tangentScore = dot(lineTangent, tArc);
-
-        const r = distance({ x: arcSegment.arc.centerX, y: arcSegment.arc.centerY }, candidate);
-        const radiusDrift = Math.abs(r - arcRadius);
-        const proximity = distance(candidate, linePoint) + distance(candidate, arcPoint);
-        const score = tangentScore * 1000 - radiusDrift * 50 - proximity;
-
-        if (score > bestScore) {
-            bestScore = score;
-            best = candidate;
-        }
-    }
-
-    return best;
-}
-
-function updateArcEndpoint(segment, point, isStart) {
-    const arc = segment.arc;
-    if (!arc || arc.centerX === undefined || arc.centerY === undefined) {
-        return false;
-    }
-
-    const center = { x: arc.centerX, y: arc.centerY };
-    const radius = distance(center, point);
-    if (radius < EPSILON) return false;
-
-    const angle = Math.atan2(point.y - center.y, point.x - center.x);
-    if (isStart) {
-        segment.start = clonePoint(point);
-        arc.startAngle = angle;
-    } else {
-        segment.end = clonePoint(point);
-        arc.endAngle = angle;
-    }
-
-    arc.radius = radius;
-    arc.rx = radius;
-    arc.ry = radius;
-    arc.largeArcFlag = Math.abs(
-        computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1)
-    ) > Math.PI
-        ? 1
-        : 0;
-
-    return true;
-}
-
-function updateSegmentEndpoint(segment, point, isStart, tolerance) {
-    const currentPoint = isStart ? segment.start : segment.end;
-    const moveDistance = distance(currentPoint, point);
-    if (moveDistance < EPSILON) return true;
-
+/**
+ * Trim the end of a segment to a new point:
+ * - LINE: simply relocates the endpoint.
+ * - ARC:  projects the point onto the arc circle and adjusts endAngle.
+ */
+function trimSegmentEnd(segment, point) {
     if (segment.type === "line") {
-        if (isStart) {
-            segment.start = clonePoint(point);
-        } else {
-            segment.end = clonePoint(point);
-        }
-        return true;
+        segment.end = clonePoint(point);
+    } else if (segment.type === "arc" && segment.arc && !segment.degenerate) {
+        const { centerX, centerY } = segment.arc;
+        const r = segment.arc.radius || segment.arc.rx || 0;
+        const angle = Math.atan2(point.y - centerY, point.x - centerX);
+        segment.arc.endAngle = angle;
+        segment.end = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
+        segment.arc.largeArcFlag =
+            Math.abs(computeAngleDelta(segment.arc.startAngle, angle, segment.arc.sweepFlag ?? 1)) > Math.PI ? 1 : 0;
     }
-
-    if (segment.type === "bezier") {
-        const delta = {
-            x: point.x - currentPoint.x,
-            y: point.y - currentPoint.y,
-        };
-        if (isStart) {
-            segment.start = clonePoint(point);
-            segment.cp1 = {
-                x: segment.cp1.x + delta.x,
-                y: segment.cp1.y + delta.y,
-            };
-        } else {
-            segment.end = clonePoint(point);
-            segment.cp2 = {
-                x: segment.cp2.x + delta.x,
-                y: segment.cp2.y + delta.y,
-            };
-        }
-        return true;
-    }
-
-    if (segment.type === "arc") {
-        if (Number.isFinite(tolerance) && moveDistance > tolerance) {
-            return false;
-        }
-        return updateArcEndpoint(segment, point, isStart);
-    }
-
-    return false;
+    // Degenerate arcs are collapsed to their center point — cannot be trimmed.
 }
 
-function buildJoinSegment(
-    current,
-    next,
-    joinStyle,
-    offset,
-    limit,
-    cornerSelection,
-    orientation
-) {
-    if (isNear(current.end, next.start, 0.001)) {
-        return { current, next, joinSegment: null };
+/**
+ * Trim the start of a segment to a new point.
+ * - LINE: simply relocates the start-point.
+ * - ARC:  projects the point onto the arc circle and adjusts startAngle.
+ */
+function trimSegmentStart(segment, point) {
+    if (segment.type === "line") {
+        segment.start = clonePoint(point);
+    } else if (segment.type === "arc" && segment.arc && !segment.degenerate) {
+        const { centerX, centerY } = segment.arc;
+        const r = segment.arc.radius || segment.arc.rx || 0;
+        const angle = Math.atan2(point.y - centerY, point.x - centerX);
+        segment.arc.startAngle = angle;
+        segment.start = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
+        segment.arc.largeArcFlag =
+            Math.abs(computeAngleDelta(angle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1)) > Math.PI ? 1 : 0;
+    }
+    // Degenerate arcs are collapsed to their center point — cannot be trimmed.
+}
+
+/**
+ * Apply join between curr (end) and next (start).
+ *
+ * Phase 1 — Geometric intersection (circle–line, circle–circle, line–line):
+ *   Find the actual intersection of the two offset curves.
+ *   For arcs: the candidate is only accepted if it lies WITHIN the arc's
+ *   current angular span (i.e., it shortens the arc, never lengthens it).
+ *   Both segments are trimmed to the intersection → clean join, no bridge.
+ *
+ * Phase 2 — Miter fallback (tangent lines only):
+ *   If no valid geometric intersection is found, intersect the tangent rays.
+ *   Only LINE endpoints move; arc endpoints stay fixed.
+ *   A bridge line is emitted for any remaining gap.
+ *
+ * @param {Object} curr        - Current segment (modified in-place).
+ * @param {Object} next        - Next segment    (modified in-place).
+ * @param {number} maxMiterLen - Max distance each endpoint may move.
+ * @returns {Array<Object>|null} Bridge lines to insert, or null for a clean join.
+ */
+function applyMiterJoin(curr, next, maxMiterLen) {
+    const p1 = curr.end,   t1 = tangentAtEnd(curr);
+    const p2 = next.start, t2 = tangentAtStart(next);
+
+    if (isNear(p1, p2, 0.001)) return null;
+
+    // Treat degenerate arcs as if they were lines for join purposes —
+    // they have zero radius so circle-intersection math is meaningless.
+    const currIsArc  = curr.type === "arc" && curr.arc && !curr.degenerate
+                       && (curr.arc.radius || curr.arc.rx || 0) > EPSILON;
+    const nextIsArc  = next.type === "arc" && next.arc && !next.degenerate
+                       && (next.arc.radius || next.arc.rx || 0) > EPSILON;
+
+    // ── Phase 1: real geometric intersection ────────────────────────────────
+    let candidates = [];
+    if (currIsArc && nextIsArc) {
+        candidates = circleCircleIntersections(
+            { x: curr.arc.centerX, y: curr.arc.centerY }, curr.arc.radius || curr.arc.rx || 0,
+            { x: next.arc.centerX, y: next.arc.centerY }, next.arc.radius || next.arc.rx || 0,
+        );
+    } else if (currIsArc) {
+        candidates = lineCircleIntersections(p2, t2,
+            { x: curr.arc.centerX, y: curr.arc.centerY }, curr.arc.radius || curr.arc.rx || 0);
+    } else if (nextIsArc) {
+        candidates = lineCircleIntersections(p1, t1,
+            { x: next.arc.centerX, y: next.arc.centerY }, next.arc.radius || next.arc.rx || 0);
+    } else {
+        const I = lineIntersection(p1, t1, p2, t2);
+        candidates = I ? [I] : [];
     }
 
-    const currentTangent = tangentAtEnd(current);
-    const nextTangent = tangentAtStart(next);
-    const turnCross = cross(currentTangent, nextTangent);
-
-    if (cornerSelection && cornerSelection !== "all") {
-        const isOuter =
-            orientation === "clockwise" ? turnCross > 0 : turnCross < 0;
-        if (cornerSelection === "inner" && isOuter) {
-            joinStyle = "miter";
-        }
-        if (cornerSelection === "outer" && !isOuter) {
-            joinStyle = "miter";
-        }
+    let best = null, bestScore = Infinity;
+    for (const I of candidates) {
+        const d1 = distance(p1, I), d2 = distance(p2, I);
+        if (d1 > maxMiterLen || d2 > maxMiterLen) continue;
+        // Accept arc candidate only if it trims (shortens) the arc, never extends it.
+        if (currIsArc && !isValidEndTrim(curr.arc, I))   continue;
+        if (nextIsArc && !isValidStartTrim(next.arc, I)) continue;
+        const score = d1 + d2;
+        if (score < bestScore) { best = I; bestScore = score; }
     }
 
-    const intersection = lineIntersection(
-        current.end,
-        currentTangent,
-        next.start,
-        nextTangent
-    );
-    const radius = Math.abs(offset);
-    const arcSnapTolerance = Math.max(0.5, radius * 0.15);
-    const arcEndpointTolerance = (segment) => {
-        if (segment?.type !== "arc" || !segment.arc) return arcSnapTolerance;
-        const arcRadius = Math.abs(segment.arc.radius || segment.arc.rx || 0);
-        return Math.max(arcSnapTolerance, arcRadius * 0.35);
-    };
-
-    if (current.type === "arc" && next.type === "arc" && current.arc && next.arc) {
-        const centerA = { x: current.arc.centerX, y: current.arc.centerY };
-        const centerB = { x: next.arc.centerX, y: next.arc.centerY };
-        const radiusA = current.arc.radius || current.arc.rx || 0;
-        const radiusB = next.arc.radius || next.arc.rx || 0;
-
-        if (radiusA > EPSILON && radiusB > EPSILON) {
-            const candidates = circleCircleIntersections(centerA, radiusA, centerB, radiusB);
-            
-            // FILTER BY TOLERANCE: Only allow arcs to extend sweep up to ARC_EXTENSION_LIMIT
-            const validCandidates = candidates.filter(c => {
-                const extA = getArcExtensionAngle(current, c);
-                const extB = getArcExtensionAngle(next, c);
-                return extA <= ARC_EXTENSION_LIMIT && extB <= ARC_EXTENSION_LIMIT;
-            });
-
-            const bestPoint = validCandidates.length > 0
-                ? pickBestArcArcIntersection(validCandidates, current, next)
-                : null;
-                
-            if (bestPoint) {
-                const currentUpdated = updateArcEndpoint(current, bestPoint, false);
-                const nextUpdated = updateArcEndpoint(next, bestPoint, true);
-                if (currentUpdated && nextUpdated) {
-                    return { current, next, joinSegment: null };
-                }
-            }
+    if (best) {
+        trimSegmentEnd(curr, best);
+        trimSegmentStart(next, best);
+        if (!isNear(curr.end, next.start, 0.001)) {
+            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
         }
+        return null;
     }
 
-    if (current.type === "line" && next.type === "arc" && next.arc) {
-        const center = { x: next.arc.centerX, y: next.arc.centerY };
-        const radiusValue = next.arc.radius || next.arc.rx || 0;
-        if (radiusValue > EPSILON) {
-            const candidates = lineCircleIntersections(
-                current.end,
-                currentTangent,
-                center,
-                radiusValue
-            );
-            
-            // FILTER BY TOLERANCE: Only allow arc to extend sweep.
-            const validCandidates = candidates.filter(c => getArcExtensionAngle(next, c) <= ARC_EXTENSION_LIMIT);
-            
-            const bestPoint = validCandidates.length > 0
-                ? pickBestLineArcIntersection(validCandidates, currentTangent, next, current.end, next.start)
-                : null;
-                
-            if (bestPoint) {
-                const currentUpdated = updateSegmentEndpoint(current, bestPoint, false, arcSnapTolerance);
-                const nextUpdated = updateArcEndpoint(next, bestPoint, true);
-                if (currentUpdated && nextUpdated) {
-                    return { current, next, joinSegment: null };
-                }
-            }
-        }
-    }
-
-    if (current.type === "arc" && next.type === "line" && current.arc) {
-        const center = { x: current.arc.centerX, y: current.arc.centerY };
-        const radiusValue = current.arc.radius || current.arc.rx || 0;
-        if (radiusValue > EPSILON) {
-            const candidates = lineCircleIntersections(
-                next.start,
-                nextTangent,
-                center,
-                radiusValue
-            );
-            
-            // FILTER BY TOLERANCE: Only allow arc to extend sweep.
-            const validCandidates = candidates.filter(c => getArcExtensionAngle(current, c) <= ARC_EXTENSION_LIMIT);
-            
-            const bestPoint = validCandidates.length > 0
-                ? pickBestLineArcIntersection(validCandidates, nextTangent, current, next.start, current.end)
-                : null;
-                
-            if (bestPoint) {
-                const nextUpdated = updateSegmentEndpoint(next, bestPoint, true, arcSnapTolerance);
-                const currentUpdated = updateArcEndpoint(current, bestPoint, false);
-                if (currentUpdated && nextUpdated) {
-                    return { current, next, joinSegment: null };
-                }
-            }
+    // ── Phase 2: tangent-line miter (arc endpoints are fixed) ───────────────
+    const M = lineIntersection(p1, t1, p2, t2);
+    if (M) {
+        const d1 = distance(p1, M), d2 = distance(p2, M);
+        if (d1 <= maxMiterLen && d2 <= maxMiterLen) {
+            if (!currIsArc) trimSegmentEnd(curr, M);
+            if (!nextIsArc) trimSegmentStart(next, M);
+            if (isNear(curr.end, next.start, 0.001)) return null;
+            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
         }
     }
 
-    if (intersection) {
-        const miterLength = distance(current.end, intersection);
-        const tangentDot = dot(currentTangent, nextTangent);
-        const isNearlyParallel = Math.abs(tangentDot) > 0.9999;
-        
-        if (!isNearlyParallel && joinStyle === "miter" && miterLength <= radius * (limit || 10)) {
-            // For perfectly parallel lines or smooth continuing lines/arcs we allow miter intersection joining
-            
-            let currentUpdated = true;
-            let nextUpdated = true;
-            
-            // Only stretch endpoint if it's a Line or Bezier (arc radii explode if stretched)
-            if (current.type !== "arc") {
-                currentUpdated = updateSegmentEndpoint(current, intersection, false, arcEndpointTolerance(current));
-            }
-            if (next.type !== "arc") {
-                nextUpdated = updateSegmentEndpoint(next, intersection, true, arcEndpointTolerance(next));
-            }
-            
-            // If both were non-arcs and updated successfully, no extra join segment needed
-            if (currentUpdated && nextUpdated && current.type !== "arc" && next.type !== "arc") {
-                return { current, next, joinSegment: null };
-            }
-            
-            // If at least one is an arc, we cannot stretch it to the miter intersection.
-            // Bridge the gap with a miter corner (two lines) to the intersection.
-            return {
-                current,
-                next,
-                joinSegment: [
-                    { type: "line", start: clonePoint(current.end), end: clonePoint(intersection) },
-                    { type: "line", start: clonePoint(intersection), end: clonePoint(next.start) }
-                ]
-            };
-        }
-
-        if (joinStyle === "round" && radius > EPSILON) {
-            const fillet = buildFilletArc(
-                current.end,
-                intersection,
-                next.start,
-                radius
-            );
-            if (fillet) {
-                const currentUpdated = updateSegmentEndpoint(
-                    current,
-                    fillet.start,
-                    false,
-                    arcEndpointTolerance(current)
-                );
-                const nextUpdated = updateSegmentEndpoint(
-                    next,
-                    fillet.end,
-                    true,
-                    arcEndpointTolerance(next)
-                );
-                if (currentUpdated && nextUpdated) {
-                    return {
-                        current,
-                        next,
-                        joinSegment: {
-                            type: "arc",
-                            start: fillet.start,
-                            end: fillet.end,
-                            arc: fillet.arc,
-                        },
-                    };
-                }
-            }
-        }
-    }
-
-    const joinSegment = {
-        type: "line",
-        start: clonePoint(current.end),
-        end: clonePoint(next.start),
-    };
-
-    return { current, next, joinSegment };
+    // Fallback: direct bridge.
+    return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2) }];
 }
 
 function sanitizeSegments(segments) {
     return segments.filter((segment) => {
         if (!segment.start || !segment.end) return false;
         if (distance(segment.start, segment.end) < EPSILON) return false;
-        // Do not check radius <= EPSILON here. Degenerate inverted arcs 
-        // with radius = EPSILON act as vital corner joints!
+        // Remove any residual degenerate arc markers (radius 0)
+        if (segment.type === "arc" && segment.arc) {
+            const r = segment.arc.radius || segment.arc.rx || 0;
+            if (r <= EPSILON) return false;
+        }
         return true;
     });
 }
+
 
 function stitchSegments(segments, tolerance = 0.5) {
     if (!segments || segments.length === 0) return segments;
@@ -984,7 +684,14 @@ function stitchSegments(segments, tolerance = 0.5) {
         const current = cloneSegment(segments[i]);
 
         if (distance(prev.end, current.start) <= tolerance) {
-            updateSegmentEndpoint(current, prev.end, true, tolerance);
+            // Snap current.start to prev.end to close stitching gaps.
+            current.start = clonePoint(prev.end);
+            if (current.type === "arc" && current.arc) {
+                current.arc.startAngle = Math.atan2(
+                    current.start.y - current.arc.centerY,
+                    current.start.x - current.arc.centerX
+                );
+            }
         }
 
         stitched.push(current);
@@ -1017,48 +724,53 @@ function quantizeSegments(segments, precision = 6) {
     });
 }
 
-function joinOffsetSegments(offsetSegments, options, offset, closed, orientation) {
-    const joinStyle = options.join || "miter";
-    const limit = options.limit || 10;
-    const cornerSelection = options.cornerSelection || "all";
+function joinOffsetSegments(offsetSegments, options, offset, closed) {
+    const segs = offsetSegments.map(cloneSegment);
+    const count = segs.length;
+    if (count === 0) return [];
 
-    const segments = offsetSegments.map(cloneSegment);
+    const maxMiter = Math.abs(offset) * (options?.limit ?? 10);
+
+    // ── First pass: join all consecutive pairs (including degenerate arcs). ──
+    // Degenerate arcs have their start/end set to the offset tangent-line
+    // reference points (computed in offsetArcSegment), so applyMiterJoin
+    // builds correct miter corners to/from their neighbours.
     const result = [];
+    const pairCount = closed ? count : count - 1;
 
-    const count = segments.length;
-    const loopCount = closed ? count : count - 1;
+    for (let i = 0; i < pairCount; i++) {
+        const curr = segs[i];
+        const next = segs[(i + 1) % count];
+        const bridge = applyMiterJoin(curr, next, maxMiter);
+        result.push(curr);
+        if (bridge) result.push(...bridge);
+    }
 
-    for (let i = 0; i < loopCount; i++) {
-        const current = segments[i];
-        const nextIndex = (i + 1) % count;
-        const next = segments[nextIndex];
+    if (!closed && count > 0) {
+        result.push(segs[count - 1]);
+    }
 
-        const joinResult = buildJoinSegment(
-            current,
-            next,
-            joinStyle,
-            offset,
-            limit,
-            cornerSelection,
-            orientation
-        );
+    // sanitizeSegments removes degenerate arcs (radius 0).  When a degenerate
+    // arc sits between two bridge segments their endpoints no longer touch.
+    const clean = sanitizeSegments(result);
 
-        segments[nextIndex] = joinResult.next;
-        result.push(joinResult.current);
-        if (joinResult.joinSegment) {
-            if (Array.isArray(joinResult.joinSegment)) {
-                result.push(...joinResult.joinSegment);
-            } else {
-                result.push(joinResult.joinSegment);
+    // ── Second pass: close gaps left by degenerate arc removal. ─────────────
+    // The two bridge segments that flanked the degenerate arc now point to the
+    // correct offset tangent-line positions, so intersecting their tangent rays
+    // gives the true miter corner (e.g. the (3,−3) corner in the example).
+    const sealed = [];
+    for (let i = 0; i < clean.length; i++) {
+        sealed.push(clean[i]);
+        if (i < clean.length - 1) {
+            const curr = clean[i];
+            const next = clean[i + 1];
+            if (!isNear(curr.end, next.start, 0.001)) {
+                const gap = applyMiterJoin(curr, next, maxMiter);
+                if (gap) sealed.push(...gap);
             }
         }
     }
-
-    if (!closed && segments[count - 1]) {
-        result.push(segments[count - 1]);
-    }
-
-    return sanitizeSegments(result);
+    return sealed;
 }
 
 function offsetContour(segments, offset, options) {
@@ -1088,8 +800,7 @@ function offsetContour(segments, offset, options) {
         offsetSegments,
         options,
         offset,
-        closed,
-        orientation
+        closed
     );
 
     const forceReverse = options.forceReverseOutput === true;
