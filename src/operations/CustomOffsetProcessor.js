@@ -11,6 +11,7 @@ import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 const EPSILON = 1e-6;
+const JOIN_TOLERANCE = 0.001;
 
 /**
  * @typedef {Object} CustomOffsetOptions
@@ -113,7 +114,7 @@ function splitSegmentsIntoContours(segments) {
     for (const segment of segments) {
         if (current.length > 0) {
             const prev = current[current.length - 1];
-            if (!isNear(prev.end, segment.start, 0.001)) {
+            if (!isNear(prev.end, segment.start, JOIN_TOLERANCE)) {
                 contours.push(current);
                 current = [];
             }
@@ -610,7 +611,14 @@ function trimSegmentStart(segment, point) {
  *   current angular span (i.e., it shortens the arc, never lengthens it).
  *   Both segments are trimmed to the intersection → clean join, no bridge.
  *
- * Phase 2 — Miter fallback (tangent lines only):
+ * Phase 2 — Arc-arc micro-gap fallback (tangent bridge):
+ *   If both neighbors are arcs, geometric intersection fails, and the endpoint
+ *   gap is within JOIN_TOLERANCE, emit a direct bridge from arc end tangent
+ *   point to arc start tangent point. This closes deterministic micro-gaps
+ *   without trimming/extending either arc, so arc centers and sweeps remain
+ *   unchanged.
+ *
+ * Phase 3 — Miter fallback (tangent lines only):
  *   If no valid geometric intersection is found, intersect the tangent rays.
  *   Only LINE endpoints move; arc endpoints stay fixed.
  *   A bridge line is emitted for any remaining gap.
@@ -624,14 +632,17 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     const p1 = curr.end,   t1 = tangentAtEnd(curr);
     const p2 = next.start, t2 = tangentAtStart(next);
 
-    if (isNear(p1, p2, 0.001)) return null;
-
     // Treat degenerate arcs as if they were lines for join purposes —
     // they have zero radius so circle-intersection math is meaningless.
     const currIsArc  = curr.type === "arc" && curr.arc && !curr.degenerate
                        && (curr.arc.radius || curr.arc.rx || 0) > EPSILON;
     const nextIsArc  = next.type === "arc" && next.arc && !next.degenerate
                        && (next.arc.radius || next.arc.rx || 0) > EPSILON;
+    const endpointGap = distance(p1, p2);
+
+    // Arc-arc micro-gap handling is deferred until after geometric intersection
+    // evaluation so valid non-expanding trims still win.
+    if (endpointGap <= JOIN_TOLERANCE && !(currIsArc && nextIsArc)) return null;
 
     // ── Phase 1: real geometric intersection ────────────────────────────────
     let candidates = [];
@@ -699,13 +710,20 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     if (best) {
         trimSegmentEnd(curr, best);
         trimSegmentStart(next, best);
-        if (!isNear(curr.end, next.start, 0.001)) {
+        if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
             return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
         }
         return null;
     }
 
-    // ── Phase 2: tangent-line miter (arc endpoints are fixed) ───────────────
+    // Arc-arc fallback for non-intersecting micro-gaps: close only by bridge,
+    // never by extending arc trims or moving arc centers.
+    if (currIsArc && nextIsArc && endpointGap <= JOIN_TOLERANCE) {
+        if (endpointGap <= EPSILON) return null;
+        return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2) }];
+    }
+
+    // ── Phase 3: tangent-line miter (arc endpoints are fixed) ───────────────
     const M = lineIntersection(p1, t1, p2, t2);
     if (M) {
         const d1 = distance(p1, M), d2 = distance(p2, M);
@@ -724,7 +742,7 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
             }
             if (!nextIsArc) trimSegmentStart(next, M);
             // next=arc: arc start cannot move; any gap is covered by the bridge below.
-            if (isNear(curr.end, next.start, 0.001)) return null;
+            if (isNear(curr.end, next.start, JOIN_TOLERANCE)) return null;
             return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
         }
     }
@@ -851,7 +869,7 @@ function joinOffsetSegments(offsetSegments, options, offset, closed) {
         if (i < clean.length - 1) {
             const curr = clean[i];
             const next = clean[i + 1];
-            if (!isNear(curr.end, next.start, 0.001)) {
+            if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
                 const gap = applyMiterJoin(curr, next, maxMiter, offset);
                 if (gap) sealed.push(...gap);
             }
@@ -881,7 +899,7 @@ function offsetContour(segments, offset, options) {
 
     const points = contourToPoints(segments);
     const orientation = getPathOrientation(points);
-    const closed = isNear(points[0], points[points.length - 1], 0.001);
+    const closed = isNear(points[0], points[points.length - 1], JOIN_TOLERANCE);
 
     const joinedSegments = joinOffsetSegments(
         offsetSegments,
