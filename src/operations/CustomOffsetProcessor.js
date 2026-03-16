@@ -651,16 +651,50 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
         candidates = I ? [I] : [];
     }
 
-    let best = null, bestScore = Infinity;
+    /**
+     * Deterministic candidate ranking for geometric-intersection phase.
+     *
+     * Acceptance guards are applied first (movement limits + no arc-sweep expansion
+     * via isValidEndTrim/isValidStartTrim). Ranking is then a strict total order:
+     *   (d1+d2, max(d1,d2), |d1-d2|, qx, qy, id)
+     *
+     * This preserves closest-to-source behavior while making symmetric and
+     * near-equal candidate selection replay-stable regardless of enumeration order.
+     */
+    const rankScale = 1e9;
+    const rankIdScale = 1e12;
+    const accepted = [];
     for (const I of candidates) {
         const d1 = distance(p1, I), d2 = distance(p2, I);
         if (d1 > maxMiterLen || d2 > maxMiterLen) continue;
         // Accept arc candidate only if it trims (shortens) the arc, never extends it.
         if (currIsArc && !isValidEndTrim(curr.arc, I))   continue;
         if (nextIsArc && !isValidStartTrim(next.arc, I)) continue;
-        const score = d1 + d2;
-        if (score < bestScore) { best = I; bestScore = score; }
+
+        const qx = Math.round(I.x * rankScale) / rankScale;
+        const qy = Math.round(I.y * rankScale) / rankScale;
+        const id = `${Math.round(I.x * rankIdScale)}:${Math.round(I.y * rankIdScale)}`;
+        accepted.push({
+            point: I,
+            primary: d1 + d2,
+            secondary: Math.max(d1, d2),
+            tertiary: Math.abs(d1 - d2),
+            qx,
+            qy,
+            id,
+        });
     }
+
+    accepted.sort((a, b) => {
+        if (a.primary !== b.primary) return a.primary - b.primary;
+        if (a.secondary !== b.secondary) return a.secondary - b.secondary;
+        if (a.tertiary !== b.tertiary) return a.tertiary - b.tertiary;
+        if (a.qx !== b.qx) return a.qx - b.qx;
+        if (a.qy !== b.qy) return a.qy - b.qy;
+        return a.id.localeCompare(b.id);
+    });
+
+    const best = accepted.length > 0 ? accepted[0].point : null;
 
     if (best) {
         trimSegmentEnd(curr, best);

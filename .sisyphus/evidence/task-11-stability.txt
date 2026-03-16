@@ -1,0 +1,21 @@
+Task 11 — Deterministic candidate stability evidence
+Date: 2026-03-16
+
+Objective
+- Verify stable output across 20 runs for symmetric/near-equal candidate scenarios.
+
+Command
+- npm run test -- --reporter verbose tests/offset/neighbor-sequence.spec.js
+
+Key Output
+- Deterministic hash (20 runs): cac69ce13e342dc169a65fc0fb0d130d5ea9e168bbf84b4823adeceec346f102
+- Fixed-order chain determinism: 07ffe872a0c0ed844b846b9b8dcb330d481c207f84d955cfc8c3bba93e809de2
+- Unique hashes across 20 runs: 1 (expected: 1)
+- Test Files 1 passed (1)
+- Tests 10 passed (10)
+
+Interpretation
+- The 20-run replay assertions passed with a single unique hash in each 20-run scenario.
+- Candidate selection is replay-stable under repeated execution.
+
+Result: PASS

@@ -1,0 +1,19 @@
+Task 11 — Arc-trim / degeneracy rule guard evidence
+Date: 2026-03-16
+
+Objective
+- Confirm no regression for no-arc-expansion and degeneracy semantics after deterministic ranking change.
+
+Command
+- npm run test -- tests/offset/arc-trim.spec.js tests/offset/degeneracy.spec.js
+
+Result Summary
+- Test Files 2 passed (2)
+- Tests 9 passed (9)
+- Duration ~824ms
+
+Interpretation
+- Arc-trim validation gates remain effective (no expansion acceptance introduced).
+- Degeneracy removal behavior remains intact.
+
+Result: PASS

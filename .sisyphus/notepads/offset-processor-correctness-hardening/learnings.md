@@ -14,6 +14,28 @@
 
 ---
 
+## 2026-03-16 12:18 - Task 11: Deterministic Candidate Ranking in applyMiterJoin
+
+### Objective
+Harden geometric-intersection candidate selection with deterministic total-order ranking while preserving pre-ranking acceptance gates and fallback order.
+
+### Key Learnings
+- `applyMiterJoin` now ranks accepted geometric candidates using tuple `(d1+d2, max(d1,d2), |d1-d2|, qx, qy, id)` with fixed quantization (`1e-9` for `qx/qy`).
+- Arc no-expansion policy remains acceptance-first: `isValidEndTrim` / `isValidStartTrim` filtering is unchanged and still executed before ranking.
+- Fallback ordering remains intact and unmodified: geometric intersection → tangent miter → bridge.
+- Symmetric/near-equal candidate scenarios are now replay-stable by explicit lexicographic tie-break on quantized coordinates plus deterministic ID.
+
+### Verification
+- Baseline before change: `npm run test` → 46/46 passing.
+- Post-change regression: `npm run test` → 46/46 passing.
+- Rule guard: `npm run test -- tests/offset/arc-trim.spec.js tests/offset/degeneracy.spec.js` → 9/9 passing.
+- 20-run stability replay: `npm run test -- --reporter verbose tests/offset/neighbor-sequence.spec.js` confirms single unique hash in 20-run assertions.
+
+### Evidence
+- `.sisyphus/evidence/task-11-stability.txt`
+- `.sisyphus/evidence/task-11-rule-guard.txt`
+
+
 ## 2026-03-16 12:06 - Task 8: Degeneracy Deletion Semantics Regression Tests
 
 ### Objective
