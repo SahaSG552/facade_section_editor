@@ -1,0 +1,19 @@
+
+> facade_section_editor@1.0.0 test
+> vitest run tests/offset/bridge-persistence.spec.js --reporter=verbose
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/Работа/Programming/JavaScript/Projects/facade_section_editor[39m
+
+ [32m✓[39m tests/offset/bridge-persistence.spec.js[2m > [22mBridge Persistence Tests[2m > [22mshould preserve bridge when adjacent arc degenerates[32m 4[2mms[22m[39m
+ [32m✓[39m tests/offset/bridge-persistence.spec.js[2m > [22mBridge Persistence Tests[2m > [22mshould preserve bridge when adjacent line degenerates[32m 1[2mms[22m[39m
+ [32m✓[39m tests/offset/bridge-persistence.spec.js[2m > [22mBridge Persistence Tests[2m > [22mshould remove bridge when bridge itself degenerates[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/bridge-persistence.spec.js[2m > [22mBridge Persistence Tests[2m > [22mshould preserve non-degenerate bridge in final output[32m 1[2mms[22m[39m
+ [32m✓[39m tests/offset/bridge-persistence.spec.js[2m > [22mBridge Persistence Tests[2m > [22mshould process bridge as first-class segment in subsequent offsets[32m 1[2mms[22m[39m
+ [32m✓[39m tests/offset/bridge-persistence.spec.js[2m > [22mBridge Persistence Tests[2m > [22mshould preserve bridge in closed contour with wrap-around[32m 1[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m6 passed[39m[22m[90m (6)[39m
+[2m   Start at [22m 12:04:35
+[2m   Duration [22m 870ms[2m (transform 170ms, setup 49ms, import 227ms, tests 11ms, environment 411ms)[22m
+

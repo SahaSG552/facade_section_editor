@@ -257,3 +257,146 @@ Tests prove:
 - Final e2e validation in T15 (canonical path regression)
 
 ---
+
+---
+## 2026-03-16 12:05 - Task 9: Bridge Persistence Regression Tests
+
+### Objective
+Create automated regression tests proving bridges persist as first-class segments until self-degenerate.
+
+### Test File Created
+**Location:** `tests/offset/bridge-persistence.spec.js`
+
+**Test Coverage:**
+1. ✅ Bridge survives adjacent arc degeneracy
+2. ✅ Bridge survives adjacent line degeneracy
+3. ✅ Bridge self-degeneracy removal
+4. ✅ Non-degenerate bridge persists through sanitize
+5. ✅ Bridge as first-class segment in subsequent offsets
+6. ✅ Closed contour bridge persistence
+
+### Key Implementation Insights
+
+#### Bridge Insertion Pattern
+Bridges are emitted as explicit line segments from `applyMiterJoin` at three locations:
+- **Line 669-670:** Direct bridge when endpoints don't match after trim
+- **Line 694-695:** Tangent-line miter bridge for arc endpoints
+- **Line 707-713:** Square-cap bridge for outer convex corners
+
+#### Bridge as First-Class Segment
+- Bridges inserted via `result.push(...bridge)` (lines 797-800, 821-823)
+- No special marking or metadata distinguishes bridges from original segments
+- Bridges processed identically in subsequent offset passes
+- Multi-pass offsets treat previous bridges as normal lines
+
+#### Self-Degeneracy Semantics
+`sanitizeSegments` (lines 715-727) removes segments based on THEIR OWN state:
+- Length check: `distance(segment.start, segment.end) < EPSILON`
+- Degenerate flag: `segment.degenerate === true`
+- Arc radius check: `radius <= EPSILON` for arc segments
+- **Critical:** NO dependency on adjacent segment state
+
+### Test Infrastructure Improvements
+
+#### Paper.js Canvas Mock
+Created `tests/setup.js` with HTMLCanvasElement.getContext mock to prevent Paper.js initialization errors in happy-dom environment. This allows testing CustomOffsetProcessor without browser canvas support.
+
+**Setup Configuration:**
+```javascript
+// vitest.config.js
+test: {
+    environment: "happy-dom",
+    setupFiles: ["./tests/setup.js"],
+    // ...
+}
+```
+
+#### ExportModule Integration
+Tests use real `ExportModule` to provide `parseSVGPathSegments` functionality:
+```javascript
+const exportModule = new ExportModule();
+const result = calculateOffsetFromPathData(pathData, offset, { exportModule });
+```
+
+### Test Approach
+
+Instead of testing internal `offsetContour` function directly, tests use the public `calculateOffsetFromPathData` API:
+1. Define SVG path data as input
+2. Call `calculateOffsetFromPathData` with offset and options
+3. Parse result path to analyze segments
+4. Assert bridge presence/absence based on segment properties
+
+This approach tests the full pipeline including:
+- Path parsing via ExportModule
+- Segment offsetting
+- Join logic and bridge creation
+- Sanitization and cleanup
+- Path serialization
+
+### Evidence Generated
+
+**task-9-bridge-persist.txt:**
+- All 6 tests passing
+- Verbose test output showing bridge persistence scenarios
+- Validates bridges remain when neighbors degenerate
+
+**task-9-bridge-self-degenerate.txt:**
+- Bridge self-degeneracy semantics documented
+- Code references for bridge lifecycle
+- Proof of independent evaluation
+
+### QA Scenarios Executed
+
+#### Scenario 1: Bridge survives adjacent arc degeneracy
+- Line-Arc-Line path with small arc (radius 2)
+- Large inward offset (-5) forces arc degeneration
+- ✅ Bridge persists connecting the two lines
+- ✅ Arc removed (degenerate)
+- ✅ No gaps in result contour
+
+#### Scenario 2: Bridge self-degeneracy removal
+- Nearly-parallel lines (0.001 unit deviation)
+- Miter join creates short bridge
+- ✅ Self-degenerate bridge removed (length < EPSILON)
+- ✅ Clean offset path produced
+- ✅ No degenerate segments in output
+
+### Regression Protection
+
+These tests provide regression protection for:
+1. **Bridge insertion logic** (lines 797-800, 821-823)
+2. **Sanitization semantics** (lines 715-727)
+3. **Independent lifecycle management** (no neighbor dependency)
+4. **Multi-pass offset compatibility** (bridges as first-class segments)
+5. **Closed contour wrap-around** (bridge at closure point)
+
+### Known Issues Discovered
+
+During testing, discovered pre-existing `tests/offset/degeneracy.spec.js` (untracked, from previous task):
+- Test expects degenerate arc deletion → empty path
+- Actual result: Arc with radius 3 (expanded instead of collapsed)
+- **Not addressed in this task** (out of scope)
+- May indicate sign inversion issue or test expectation mismatch
+
+### Testing Best Practices Learned
+
+1. **Use public API for integration tests:** Testing `calculateOffsetFromPathData` exercises full pipeline
+2. **Mock external dependencies early:** Setup file prevents Paper.js canvas errors
+3. **Parse results for assertions:** SVG path parsing enables segment-level validation
+4. **Test full lifecycle:** Create → Insert → Sanitize → Serialize
+5. **Cover edge cases:** Nearly-parallel, closed contours, multi-pass
+
+### Success Metrics
+- ✅ 6/6 tests passing
+- ✅ 2 evidence files generated
+- ✅ Test file created: `tests/offset/bridge-persistence.spec.js`
+- ✅ Test infrastructure improved (setup.js)
+- ✅ Full pipeline tested via public API
+- ✅ Bridge persistence semantics proven
+
+### Next Steps (for future tasks)
+- Investigate degeneracy.spec.js arc expansion issue
+- Add property-based tests for bridge length thresholds
+- Test bridge behavior with extreme offset values
+- Verify bridge persistence in self-intersecting contours
+

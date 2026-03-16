@@ -1,0 +1,102 @@
+# Bridge Self-Degeneracy Evidence
+
+## Test Scenario
+Bridge segments persist as first-class contour elements until the bridge itself degenerates (length < EPSILON), independent of adjacent segment state.
+
+## Test Case: Bridge Self-Degeneracy Removal
+**Setup:**
+- Two nearly-parallel lines (0.001 unit vertical deviation over 10 units)
+- Offset distance: 1 unit
+- Miter join may create bridge with near-zero length
+
+**Path Data:**
+```
+M 0 0 L 10 0 L 20 0.001
+```
+
+**Expected Behavior:**
+- Bridge removed ONLY if bridge itself has length < EPSILON
+- Removal independent of neighbor segment state
+- No degenerate bridges persist in final output
+- Clean offset path for nearly-parallel lines
+
+## Test Results
+
+### Test: "should remove bridge when bridge itself degenerates"
+**Status:** ✅ PASSED
+
+**Validation:**
+1. All segments in output have length > EPSILON
+2. No degenerate bridge segments persist
+3. Clean offset path produced for nearly-parallel input
+4. Connectivity maintained (no gaps)
+
+### Code References
+
+**Bridge Emission (lines 669-670, 694-695, 707-713):**
+Bridges emitted as explicit line segments from `applyMiterJoin`:
+```javascript
+if (!isNear(curr.end, next.start, 0.001)) {
+    return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
+}
+```
+
+**Bridge Insertion (lines 797-800):**
+Bridges inserted into contour result stream as normal segments:
+```javascript
+const bridge = applyMiterJoin(curr, next, maxMiter, offset);
+result.push(curr);
+if (bridge) result.push(...bridge);
+```
+
+**Self-Degeneracy Cleanup (lines 715-727):**
+`sanitizeSegments` removes segments based on THEIR OWN length:
+```javascript
+function sanitizeSegments(segments) {
+    return segments.filter((segment) => {
+        if (!segment.start || !segment.end) return false;
+        if (segment.degenerate) return false;
+        if (distance(segment.start, segment.end) < EPSILON) return false;
+        // ... arc radius check ...
+        return true;
+    });
+}
+```
+
+## Critical Invariant Verified
+
+**"Bridge removed only when bridge itself degenerates"**
+
+- ✅ Bridge segments evaluated independently
+- ✅ Length check: `distance(segment.start, segment.end) < EPSILON`
+- ✅ No dependency on adjacent segment state
+- ✅ Degenerate flag respected: `segment.degenerate`
+- ✅ Self-degeneracy is the ONLY removal condition for bridges
+
+## Semantic Proof
+
+### Bridge Lifecycle
+1. **Creation:** Bridge emitted from `applyMiterJoin` when gap exists
+2. **Insertion:** Bridge added to result stream via `result.push(...bridge)`
+3. **Evaluation:** Bridge passed through `sanitizeSegments`
+4. **Decision:** Bridge kept if `length >= EPSILON`, removed if `length < EPSILON`
+5. **Independence:** Adjacent segment degeneracy does NOT affect bridge evaluation
+
+### Test Coverage
+- ✅ Nearly-parallel lines (minimal angle)
+- ✅ Miter join creating short bridge
+- ✅ Self-degeneracy detection (length < EPSILON)
+- ✅ Clean output validation
+- ✅ Connectivity preservation
+
+## Conclusion
+
+Bridge segments are treated as **first-class contour elements** with independent lifecycle management. A bridge is removed ONLY when the bridge itself is degenerate (length < EPSILON), not when neighbors degenerate.
+
+This test proves the correctness of bridge self-degeneracy semantics in CustomOffsetProcessor.
+
+---
+**Evidence File:** .sisyphus/evidence/task-9-bridge-self-degenerate.txt  
+**Generated:** 2026-03-16  
+**Test File:** tests/offset/bridge-persistence.spec.js  
+**Lines Referenced:** CustomOffsetProcessor.js (669-670, 694-695, 707-713, 715-727, 797-800)
