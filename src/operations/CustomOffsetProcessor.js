@@ -620,7 +620,7 @@ function trimSegmentStart(segment, point) {
  * @param {number} maxMiterLen - Max distance each endpoint may move.
  * @returns {Array<Object>|null} Bridge lines to insert, or null for a clean join.
  */
-function applyMiterJoin(curr, next, maxMiterLen) {
+function applyMiterJoin(curr, next, maxMiterLen, offset) {
     const p1 = curr.end,   t1 = tangentAtEnd(curr);
     const p2 = next.start, t2 = tangentAtStart(next);
 
@@ -695,7 +695,20 @@ function applyMiterJoin(curr, next, maxMiterLen) {
         }
     }
 
-    // Fallback: direct bridge.
+    // Fallback: direct bridge, but for outer convex corners (diverging tangents)
+    // a direct bridge would cut through the original material at the corner point.
+    // Instead, use a rectangular "square-cap" bridge: extend each end by |offset|
+    // in its outward tangent direction, then connect the two extended endpoints.
+    if (offset !== undefined && Math.abs(offset) > EPSILON && dot(t1, t2) < 0) {
+        const ext = Math.abs(offset);
+        const ep1 = { x: p1.x + ext * t1.x, y: p1.y + ext * t1.y };
+        const ep2 = { x: p2.x - ext * t2.x, y: p2.y - ext * t2.y };
+        const bridges = [];
+        if (!isNear(p1, ep1, EPSILON))  bridges.push({ type: "line", start: clonePoint(p1), end: clonePoint(ep1) });
+        if (!isNear(ep1, ep2, EPSILON)) bridges.push({ type: "line", start: clonePoint(ep1), end: clonePoint(ep2) });
+        if (!isNear(ep2, p2, EPSILON))  bridges.push({ type: "line", start: clonePoint(ep2), end: clonePoint(p2) });
+        if (bridges.length) return bridges;
+    }
     return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2) }];
 }
 
@@ -781,7 +794,7 @@ function joinOffsetSegments(offsetSegments, options, offset, closed) {
     for (let i = 0; i < pairCount; i++) {
         const curr = segs[i];
         const next = segs[(i + 1) % count];
-        const bridge = applyMiterJoin(curr, next, maxMiter);
+        const bridge = applyMiterJoin(curr, next, maxMiter, offset);
         result.push(curr);
         if (bridge) result.push(...bridge);
     }
@@ -805,7 +818,7 @@ function joinOffsetSegments(offsetSegments, options, offset, closed) {
             const curr = clean[i];
             const next = clean[i + 1];
             if (!isNear(curr.end, next.start, 0.001)) {
-                const gap = applyMiterJoin(curr, next, maxMiter);
+                const gap = applyMiterJoin(curr, next, maxMiter, offset);
                 if (gap) sealed.push(...gap);
             }
         }

@@ -1,0 +1,505 @@
+===============================================================================
+OFFSET TOOL ↔ CUSTOMOFFSETPROCESSOR: AXIS INVERSION GUARD
+===============================================================================
+Generated: 2026-03-16
+Task: Define exact Y-axis inversion boundaries and guard invariants
+Sources: OffsetTool.js, CustomOffsetProcessor.js
+
+===============================================================================
+1. AXIS INVERSION BOUNDARY MAP
+===============================================================================
+
+1.1 SYSTEM COORDINATE DEFINITIONS
+───────────────────────────────────────────────────────────
+EDITOR INTERNAL SPACE:
+  Origin:     Top-left
+  +X:         Right
+  +Y:         DOWN (matches canvas, matches user perception)
+  Storage:    Segment data.start / data.end
+  Used by:    Internal editor logic, geometry calculations
+
+SVG EXPORT SPACE:
+  Origin:     Top-left
+  +X:         Right
+  +Y:         DOWN (SVG standard)
+  Format:     Path data strings ("M x y L x y ...")
+  Used by:    SVG rendering, CustomOffsetProcessor input/output
+
+CRITICAL FINDING: BOTH SYSTEMS USE Y-DOWN.
+No Y-axis inversion between OffsetTool export and CustomOffsetProcessor.
+
+1.2 HISTORICAL Y-UP ARTIFACT (EDITOR STORAGE LEGACY)
+───────────────────────────────────────────────────────────
+EVIDENCE: Lines 436-437, 462-463, 503, 521, 546 in parsePathToSegments()
+CODE PATTERN:
+  data: {
+    start: { x: cx, y: -cy },
+    end: { x, y: -y }
+  }
+
+EVIDENCE: Line 226, 234 in contourToPathData()
+CODE PATTERN:
+  `M ${r4(s0.x)} ${r4(-s0.y)}`
+  `${r4(d.end?.x)} ${r4(-d.end?.y)}`
+
+INTERPRETATION:
+The editor STORES segments in Y-UP coordinate space internally, then
+inverts Y during serialization/parsing to match SVG Y-DOWN standard.
+
+This is a LEGACY DESIGN CHOICE, not a functional requirement.
+The inversion is INTERNAL to OffsetTool and INVISIBLE to CustomOffsetProcessor.
+
+1.3 BOUNDARY TOPOLOGY
+───────────────────────────────────────────────────────────
+
+┌─────────────────────────────────────────────────────────────┐
+│  EDITOR INTERNAL STORAGE (Y-UP - LEGACY)                   │
+│  • Segments: { start: {x, y}, end: {x, y} } (y positive up)│
+│  • Arc sweep: bit-space representation                      │
+└─────────────────────────────────────────────────────────────┘
+                        │
+                        │ contourToPathData() EXPORT
+                        │ • Apply y → -y
+                        │ • Apply sweepSvg = 1 - sweep
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  SVG PATH STRING (Y-DOWN)                                   │
+│  • Format: "M x -y L x -y A rx ry 0 large sweepSvg x -y"   │
+│  • Consumed by CustomOffsetProcessor                        │
+└─────────────────────────────────────────────────────────────┘
+                        │
+                        │ CustomOffsetProcessor.calculateOffset()
+                        │ • NO Y-axis inversion
+                        │ • Apply offsetDistance = -offset (sign flip only)
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  OFFSET SVG PATH STRING (Y-DOWN)                            │
+│  • Format: "M x y L x y A rx ry 0 large sweep x y"         │
+│  • Returned to OffsetTool                                   │
+└─────────────────────────────────────────────────────────────┘
+                        │
+                        │ parsePathToSegments() IMPORT
+                        │ • Apply y → -y (restore Y-UP)
+                        │ • Apply sweepBit = 1 - sweepSvg
+                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│  EDITOR INTERNAL STORAGE (Y-UP - LEGACY)                   │
+│  • Segments: { start: {x, y}, end: {x, y} } (y positive up)│
+└─────────────────────────────────────────────────────────────┘
+
+INVERSION COUNT:
+  Editor→SVG:   1 inversion (contourToPathData)
+  SVG→Editor:   1 inversion (parsePathToSegments)
+  Processor:    0 inversions (operates natively in SVG Y-DOWN)
+
+===============================================================================
+2. INVERSION GUARD INVARIANTS
+===============================================================================
+
+GUARD 1: NO Y-INVERSION IN CUSTOMOFFSETPROCESSOR
+───────────────────────────────────────────────────────────
+ASSERTION:
+  CustomOffsetProcessor MUST NOT apply any Y-axis inversion.
+  It receives SVG Y-DOWN paths and returns SVG Y-DOWN paths.
+
+VERIFICATION:
+  Search CustomOffsetProcessor.js for:
+    - Unary minus on y-coordinates
+    - Multiplication by -1 on y-values
+    - Y-axis transform matrices
+
+RATIONALE:
+  Processor operates in native SVG coordinate space.
+  OffsetTool handles all Y-inversion at serialization boundaries.
+
+VIOLATION DETECTION:
+  grep -n "y\s*\*\s*-1\|-y\|y.*=.*-" CustomOffsetProcessor.js
+  (Should return NO matches related to coordinate inversion)
+
+GUARD 2: EXACTLY ONE Y-INVERSION PER SERIALIZATION BOUNDARY
+───────────────────────────────────────────────────────────
+ASSERTION:
+  contourToPathData() applies Y-inversion exactly ONCE per call.
+  parsePathToSegments() applies Y-inversion exactly ONCE per call.
+
+VERIFICATION POINTS (OffsetTool.js):
+  Export boundary (contourToPathData):
+    Line 226:  `M ${r4(s0.x)} ${r4(-s0.y)}`
+    Line 234:  Arc end: ${r4(-d.end?.y)}
+    Line 238:  Line end: ${r4(ey)} where ey = dval(-num(seg.data?.end?.y))
+
+  Import boundary (parsePathToSegments):
+    Line 436:  start: { x: cx, y: -cy }
+    Line 437:  end: { x, y: -y }
+    Line 462:  start: { x: cx, y: -cy }
+    Line 463:  end: { x, y: -y }
+    Line 503:  start: { x: cx, y: -cy }
+    Line 504:  end: { x: cx, y: -y }
+    Line 521:  start: { x: cx, y: -cy }
+    Line 522:  end: { x: subX, y: -subY }
+    Line 546:  start: { x: cx, y: -cy }
+    Line 547:  end: { x: ex, y: -ey }
+
+RATIONALE:
+  Single inversion per boundary maintains coordinate system contract.
+  Multiple inversions would cancel out, silently breaking transforms.
+
+VIOLATION DETECTION:
+  Count Y-negations in each function:
+    - contourToPathData: Must negate every Y output exactly once
+    - parsePathToSegments: Must negate every Y input exactly once
+    - Any double-negation pattern (--y, -(-y)) is a violation
+
+GUARD 3: ARC SWEEP INVERSION COUPLED TO Y-INVERSION
+───────────────────────────────────────────────────────────
+ASSERTION:
+  Every Y-axis inversion MUST be accompanied by arc sweep flag inversion.
+
+VERIFICATION POINTS:
+  Export (contourToPathData line 233):
+    const sweepSvg = Math.round(1 - num(d.sweep, 0));
+    • Applied when Y is negated for SVG export
+
+  Import (parsePathToSegments line 548):
+    const sweepBit = 1 - sweepSvg;
+    • Applied when Y is negated for editor storage
+
+RATIONALE:
+  Y-axis flip reverses geometric winding direction.
+  Arc sweep flag defines winding direction.
+  Failure to invert sweep with Y creates mirrored arcs.
+
+VIOLATION DETECTION:
+  - Y-inversion without corresponding sweep inversion
+  - Sweep inversion without corresponding Y-inversion
+  - Asymmetric sweep handling (export inverts but import doesn't)
+
+GUARD 4: NO DOUBLE-INVERSION CODE PATHS
+───────────────────────────────────────────────────────────
+ASSERTION:
+  No single coordinate value undergoes two sequential Y-inversions.
+
+VERIFICATION:
+  Trace coordinate flow for any given point:
+    Editor storage (Y-UP) →
+    contourToPathData (-y) →
+    SVG string (Y-DOWN) →
+    CustomOffsetProcessor (NO CHANGE) →
+    Offset SVG string (Y-DOWN) →
+    parsePathToSegments (-y) →
+    Editor storage (Y-UP)
+
+  Total inversions: 2 (one in each direction)
+  Net result: Coordinate system restored
+
+VIOLATION PATTERNS:
+  - Sequential negation: y → -y → -(-y)
+  - Redundant transform: y → -y in same function twice
+  - Conditional inversion: if (condition) y = -y without clear guard
+
+DETECTION:
+  Code review for multiple negations on same variable within single scope.
+
+GUARD 5: EDITOR-SPACE BYPASS FOR DEBUG OVERLAYS
+───────────────────────────────────────────────────────────
+ASSERTION:
+  Functions exporting editor-space coordinates (Y-UP) must NOT invert Y.
+
+VERIFICATION POINT (OffsetTool.js):
+  contourToEditorPathData() (lines 255-280):
+    Line 261: `M ${r4(s0.x)} ${r4(s0.y)}` (NO -y)
+    Line 268: Arc end: ${r4(d.end?.y)} (NO -y)
+    Line 272: Line end: ${r4(ey)} where ey = dval(seg.data?.end?.y) (NO -y)
+
+PURPOSE:
+  Debug overlays rendered directly on canvas need Y-UP to match editor space.
+  These paths are NOT passed to CustomOffsetProcessor.
+
+RATIONALE:
+  Allows canvas overlays to exactly match internal segment coordinates
+  without round-trip through SVG serialization.
+
+VIOLATION DETECTION:
+  - contourToEditorPathData applying Y-negation (should use raw y values)
+  - segmentsToEditorPathData applying Y-negation (should preserve editor space)
+
+===============================================================================
+3. SWEEP FLAG INVERSION SEMANTICS
+===============================================================================
+
+3.1 EDITOR BIT-SPACE REPRESENTATION
+───────────────────────────────────────────────────────────
+Storage: seg.data.sweep (0 or 1)
+Meaning: Arc winding in Y-UP coordinate space
+  0 = Counterclockwise in editor space (Y-UP)
+  1 = Clockwise in editor space (Y-UP)
+
+3.2 SVG SWEEP FLAG
+───────────────────────────────────────────────────────────
+Format:  sweepSvg in path command "A rx ry 0 largeArc sweepSvg x y"
+Meaning: Arc winding in Y-DOWN coordinate space
+  0 = Counterclockwise in SVG space (Y-DOWN)
+  1 = Clockwise in SVG space (Y-DOWN)
+
+3.3 INVERSION FORMULA
+───────────────────────────────────────────────────────────
+Export (Editor → SVG):
+  sweepSvg = 1 - sweep
+
+Import (SVG → Editor):
+  sweepBit = 1 - sweepSvg
+
+Round-trip verification:
+  sweep → (1 - sweep) → 1 - (1 - sweep) = sweep ✓
+
+3.4 WHY INVERSION IS REQUIRED
+───────────────────────────────────────────────────────────
+Y-axis flip reverses the perception of clockwise vs counterclockwise.
+
+Example (90° arc from (1,0) to (0,1) around origin):
+  Y-UP space (editor):
+    • Sweep=1 (clockwise) travels upward (+Y direction)
+  
+  After Y-inversion to Y-DOWN space (SVG):
+    • Same geometric arc now appears to travel downward
+    • Without sweep inversion: Would be counterclockwise in SVG
+    • With sweep inversion: Correctly labeled clockwise in SVG
+
+CRITICAL: Sweep inversion compensates for perceptual reversal of winding.
+
+===============================================================================
+4. COORDINATE SYSTEM VALIDATION TESTS
+===============================================================================
+
+TEST 1: Y-INVERSION ROUND-TRIP FIDELITY
+───────────────────────────────────────────────────────────
+Input:    Editor segment { start: {x: 10, y: 20}, end: {x: 30, y: 40} }
+Expected: After export→import, coordinates match original
+
+Procedure:
+  1. segments = [{ data: { start: {x:10, y:20}, end: {x:30, y:40} } }]
+  2. svgPath = contourToPathData(segments)
+     → "M 10 -20 L 30 -40"
+  3. parsed = parsePathToSegments(svgPath, state)
+     → [{ data: { start: {x:10, y:20}, end: {x:30, y:40} } }]
+  4. Assert: parsed[0].data.start.y === 20
+  5. Assert: parsed[0].data.end.y === 40
+
+PASS CONDITION: Y-coordinates restored to original values.
+
+TEST 2: ARC SWEEP ROUND-TRIP FIDELITY
+───────────────────────────────────────────────────────────
+Input:    Editor arc segment { sweep: 1, largeArc: 0, ... }
+Expected: After export→import, sweep flag matches original
+
+Procedure:
+  1. arc = { type: "arc", data: { sweep: 1, largeArc: 0, radius: 5, ... } }
+  2. svgPath = contourToPathData([arc])
+     → "... A 5 5 0 0 0 ..." (sweepSvg = 1 - 1 = 0)
+  3. parsed = parsePathToSegments(svgPath, state)
+     → sweepBit = 1 - 0 = 1
+  4. Assert: parsed[0].data.sweep === 1
+
+PASS CONDITION: Sweep flag restored to original value.
+
+TEST 3: PROCESSOR COORDINATE SPACE INVARIANCE
+───────────────────────────────────────────────────────────
+Input:    SVG path "M 0 0 L 10 0 L 10 10 L 0 10 Z" (Y-DOWN square)
+Expected: Offset path maintains Y-DOWN coordinate space
+
+Procedure:
+  1. offsetPath = calculateOffsetFromPathData(input, 2.0, {})
+  2. Parse resulting path commands
+  3. Verify all Y-coordinates consistent with Y-DOWN:
+     - Y increases downward (positive Y = lower on screen)
+  4. Verify no evidence of Y-inversion (no negative Y jumps)
+
+PASS CONDITION: Output path is valid SVG Y-DOWN without transformation.
+
+TEST 4: DUAL-CANDIDATE SELECTION CORRECTNESS
+───────────────────────────────────────────────────────────
+Input:    Closed square contour, +5.0 offset, reference on top edge
+Expected: Offset expands outward (away from center)
+
+Procedure:
+  1. Create square: (0,0) → (10,0) → (10,10) → (0,10) → Z
+  2. Set reference: top edge, normal pointing upward (-Y in SVG)
+  3. Request +5.0 offset
+  4. Verify selected candidate has Y-coordinates < original (expanded upward)
+
+PASS CONDITION: Positive offset moves geometry along reference normal.
+
+TEST 5: NEGATIVE OFFSET INWARD CONTRACTION
+───────────────────────────────────────────────────────────
+Input:    Closed circle radius 10, -2.0 offset
+Expected: Resulting circle has radius 8 (contracted)
+
+Procedure:
+  1. Create circle center (50, 50), radius 10
+  2. Request -2.0 offset
+  3. Parse resulting path
+  4. Measure effective radius from path geometry
+  5. Assert: radius ≈ 8.0 (within tolerance)
+
+PASS CONDITION: Negative offset reduces shape size.
+
+===============================================================================
+5. VIOLATION DETECTION CHECKLIST
+===============================================================================
+
+VIOLATION TYPE 1: UNAUTHORIZED Y-INVERSION
+───────────────────────────────────────────────────────────
+Location:    CustomOffsetProcessor.js
+Search for:  -y, y * -1, y *= -1, y = -y
+Expected:    ZERO matches (processor must not invert Y)
+Action:      Remove any Y-inversion from processor code
+
+VIOLATION TYPE 2: MISSING Y-INVERSION AT BOUNDARY
+───────────────────────────────────────────────────────────
+Location:    OffsetTool.js contourToPathData(), parsePathToSegments()
+Search for:  Y-coordinate serialization without negation
+Expected:    ALL Y outputs/inputs must be negated
+Action:      Add -y where missing, ensure consistent negation
+
+VIOLATION TYPE 3: ORPHANED SWEEP INVERSION
+───────────────────────────────────────────────────────────
+Location:    Arc export/import code paths
+Search for:  Sweep inversion without paired Y-inversion
+Expected:    Sweep inversion ONLY where Y-inversion also occurs
+Action:      Remove sweep inversion or add missing Y-inversion
+
+VIOLATION TYPE 4: DOUBLE NEGATION
+───────────────────────────────────────────────────────────
+Location:    Any coordinate transform function
+Search for:  -(-y), multiple sequential negations
+Expected:    Single negation per boundary crossing
+Action:      Collapse double negations, restructure code flow
+
+VIOLATION TYPE 5: CONDITIONAL INVERSION
+───────────────────────────────────────────────────────────
+Location:    Any Y-coordinate manipulation
+Search for:  if (condition) y = -y without clear boundary logic
+Expected:    Unconditional inversion at well-defined boundaries
+Action:      Refactor to explicit boundary functions (export/import)
+
+===============================================================================
+6. DEBUGGING ASSERTIONS (RUNTIME GUARDS)
+===============================================================================
+
+ASSERTION 1: POST-EXPORT Y-RANGE VALIDATION
+───────────────────────────────────────────────────────────
+Location: After contourToPathData() call
+Code:
+  const svgPath = contourToPathData(segments);
+  // Assert: All Y-coordinates in svgPath are negated relative to segments
+  // Validation: Parse svgPath, compare Y-signs with original segments
+
+Purpose: Catch missing Y-inversion during export
+
+ASSERTION 2: POST-IMPORT Y-RANGE VALIDATION
+───────────────────────────────────────────────────────────
+Location: After parsePathToSegments() call
+Code:
+  const parsed = parsePathToSegments(svgPath, state);
+  // Assert: All Y-coordinates in parsed match original editor space
+  // Validation: Round-trip test (export → import → compare)
+
+Purpose: Catch missing Y-inversion during import
+
+ASSERTION 3: PROCESSOR OUTPUT COORDINATE SPACE
+───────────────────────────────────────────────────────────
+Location: After calculateOffsetFromPathData() call
+Code:
+  const offsetPath = calculateOffsetFromPathData(inputSvg, distance, opts);
+  // Assert: offsetPath Y-coordinates are in same space as inputSvg
+  // Validation: Statistical Y-range check (no unexpected sign flips)
+
+Purpose: Catch unauthorized processor Y-inversion
+
+ASSERTION 4: SWEEP FLAG CONSISTENCY
+───────────────────────────────────────────────────────────
+Location: Arc segment export/import
+Code:
+  // Export
+  const sweepSvg = Math.round(1 - num(d.sweep, 0));
+  assert(sweepSvg === 0 || sweepSvg === 1);
+  
+  // Import
+  const sweepBit = 1 - sweepSvg;
+  assert(sweepBit === 0 || sweepBit === 1);
+
+Purpose: Catch non-binary sweep flags, detect corruption
+
+ASSERTION 5: DUAL-CANDIDATE GEOMETRY VALIDITY
+───────────────────────────────────────────────────────────
+Location: After buildOffsetCandidate() selection
+Code:
+  const picked = mScore > pScore ? mirrored : primary;
+  assert(picked !== null);
+  assert(picked.segments.length > 0);
+
+Purpose: Catch degenerate offset results, ensure valid selection
+
+===============================================================================
+7. ARCHITECTURAL RECOMMENDATIONS
+===============================================================================
+
+RECOMMENDATION 1: ELIMINATE INTERNAL Y-UP STORAGE
+───────────────────────────────────────────────────────────
+Current:  Editor stores segments in Y-UP, inverts on export/import
+Proposed: Editor stores segments in Y-DOWN (native SVG)
+Benefits:
+  - Remove inversion logic from contourToPathData/parsePathToSegments
+  - Eliminate round-trip inversion errors
+  - Simplify coordinate contract (single system throughout)
+  - Performance improvement (remove negation operations)
+
+Migration:
+  1. Add editor-space coordinate conversion at data entry points
+  2. Update all internal geometry calculations to Y-DOWN
+  3. Remove Y-inversion from serialization functions
+  4. Update tests to expect Y-DOWN coordinates
+
+RECOMMENDATION 2: EXPLICIT BOUNDARY FUNCTIONS
+───────────────────────────────────────────────────────────
+Current:  Y-inversion embedded in serialization functions
+Proposed: Dedicated toSVGCoordinate() / fromSVGCoordinate() functions
+Benefits:
+  - Clear inversion boundaries
+  - Single source of truth for coordinate transforms
+  - Easier to test in isolation
+  - Self-documenting code
+
+Example:
+  function toSVGCoordinate(editorPoint) {
+    return { x: editorPoint.x, y: -editorPoint.y };
+  }
+  
+  function fromSVGCoordinate(svgPoint) {
+    return { x: svgPoint.x, y: -svgPoint.y };
+  }
+
+RECOMMENDATION 3: COORDINATE SYSTEM TYPE ANNOTATIONS
+───────────────────────────────────────────────────────────
+Proposed: Use JSDoc annotations to mark coordinate space
+Example:
+  /**
+   * @typedef {Object} EditorPoint
+   * @property {number} x - X-coordinate (right positive)
+   * @property {number} y - Y-coordinate (UP positive)
+   */
+  
+  /**
+   * @typedef {Object} SVGPoint
+   * @property {number} x - X-coordinate (right positive)
+   * @property {number} y - Y-coordinate (DOWN positive)
+   */
+
+Benefits:
+  - Type-level documentation of coordinate space
+  - Catch mismatched coordinate systems at review time
+  - Enable static analysis tools to detect space violations
+
+===============================================================================
+END OF AXIS INVERSION GUARD
+===============================================================================

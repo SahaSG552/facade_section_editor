@@ -8,6 +8,8 @@
     "host": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "cap:init": "cap init",
     "cap:add:android": "cap add android",
     "cap:add:ios": "cap add ios",
@@ -17,8 +19,7 @@
     "cap:open:android": "cap open android",
     "cap:open:ios": "cap open ios",
     "cap:build:android": "npm run build && cap sync android && cap open android",
-    "cap:build:ios": "npm run build && cap sync ios && cap open ios",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "cap:build:ios": "npm run build && cap sync ios && cap open ios"
   },
   "repository": {
     "type": "git",
@@ -50,6 +51,8 @@
     "@types/three": "^0.182.0",
     "@vitejs/plugin-basic-ssl": "^2.1.4",
     "acorn": "^8.15.0",
-    "vite": "^7.3.0"
+    "happy-dom": "^20.8.4",
+    "vite": "^7.3.0",
+    "vitest": "^4.1.0"
   }
 }

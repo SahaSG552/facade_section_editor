@@ -1,0 +1,92 @@
+Task 1 — Rule Compliance Matrix
+Scope: src/operations/CustomOffsetProcessor.js + src/editor/tools/OffsetTool.js
+Date: 2026-03-16
+
+Legend: Implemented = full observed compliance; Partial = implemented path exists but fragile/incomplete; Missing = no meaningful implementation.
+
+Rule 1
+"Geometry contains only lines and arcs; each segment offset toward cursor by distance; find intersections; if none, extend"
+Status: Partial
+Evidence:
+- Geometry is NOT limited to lines/arcs in processor: bezier path is supported (`offsetBezierSegment`) and routed in contour offset loop.
+  - src/operations/CustomOffsetProcessor.js:318-343, 833-839
+- Offset direction is cursor/reference driven at tool level by sign selection between `dist` and `-dist` candidates.
+  - src/editor/tools/OffsetTool.js:859-864, 1198-1202, 1204-1241
+- Join logic does intersection-first, then miter fallback, then bridge fallback when intersection is unavailable.
+  - src/operations/CustomOffsetProcessor.js:636-653, 654-672, 674-713
+Why Partial:
+- Strict "only lines+arcs" is violated by bezier support in processor.
+- Direction/sign path is sensitive to sign conversions (`offsetDistance = -offset`, sweep conversions in tool parser/serializer), which is a known fragility zone.
+  - src/operations/CustomOffsetProcessor.js:1004
+  - src/editor/tools/OffsetTool.js:233-234, 548-550
+
+Rule 2
+"Arcs: center invariant, no angle expansion (only trim), tangent bridges instead of extension; degenerate removal without reversal"
+Status: Partial
+Evidence:
+- Arc center is preserved during offset and trimming.
+  - src/operations/CustomOffsetProcessor.js:395-413, 556-562, 589-595
+- Arc-angle extension is explicitly blocked by trim validators; only shortening trim candidates accepted.
+  - src/operations/CustomOffsetProcessor.js:515-536, 658-661
+- If no valid geometric trim exists, arc endpoints are kept fixed and line bridges are emitted.
+  - src/operations/CustomOffsetProcessor.js:674-695, 702-713
+- Degenerate arc cleanup removes zero-radius/degenerate segments.
+  - src/operations/CustomOffsetProcessor.js:715-727
+Why Partial:
+- Global orientation correction may reverse all segments (`reverseSegments`) after join/sanitize, so behavior is not strictly "no reversal" in all output paths.
+  - src/operations/CustomOffsetProcessor.js:865-875, 879-921
+- Mutation-order in first pass → sanitize → second pass is a known fragility zone for arc-degeneracy edge cases.
+  - src/operations/CustomOffsetProcessor.js:787-827
+
+Rule 3
+"Lines: if length <= 0, remove without reversal"
+Status: Implemented
+Evidence:
+- Line trim marks segment degenerate if collapsed or direction flips (dot < 0), without reversing line orientation.
+  - src/operations/CustomOffsetProcessor.js:545-555, 578-587
+- Degenerate and near-zero-length segments are removed in sanitize.
+  - src/operations/CustomOffsetProcessor.js:715-721
+- Line offset rejects zero-length input before producing segment.
+  - src/operations/CustomOffsetProcessor.js:300-302
+
+Rule 4
+"Each segment direction vector remains local, unaffected by neighbor degeneracy"
+Status: Partial
+Evidence:
+- Initial line/arc offsets are computed from segment-local geometry.
+  - src/operations/CustomOffsetProcessor.js:297-316, 345-415
+- But join stage mutates neighboring endpoints/degeneracy in place (`curr` and `next`), and second pass depends on post-sanitize adjacency.
+  - src/operations/CustomOffsetProcessor.js:623-713, 787-827
+Why Partial:
+- Neighbor state can mark current segment degenerate and alter downstream join context (mutation-order sensitivity).
+  - src/operations/CustomOffsetProcessor.js:685-688, 806-823
+
+Rule 5
+"Bridges are first-class contour segments; persist unless degenerate"
+Status: Implemented
+Evidence:
+- Bridges are emitted as explicit line segments from join logic.
+  - src/operations/CustomOffsetProcessor.js:669-670, 694-695, 707-713
+- Bridges are inserted into contour result stream as normal segments.
+  - src/operations/CustomOffsetProcessor.js:797-800, 821-823
+- Cleanup removes only degenerate/zero-length segments; non-degenerate bridges persist through stitch/quantize/export.
+  - src/operations/CustomOffsetProcessor.js:715-727, 1014-1025
+
+Rule 6
+"Sequential reconciliation: each segment checks two neighbors"
+Status: Partial
+Evidence:
+- First pass checks all consecutive pairs (closed contours include wrap-around pair).
+  - src/operations/CustomOffsetProcessor.js:792-799
+- Second pass re-checks adjacent gaps after sanitize and inserts reconciliations.
+  - src/operations/CustomOffsetProcessor.js:810-825
+Why Partial:
+- Open contours inherently have one-neighbor endpoints (not strict two-neighbor everywhere).
+  - src/operations/CustomOffsetProcessor.js:792-804
+- After degenerate removal, adjacency is redefined by mutation order; strict "original two-neighbor" invariance is not guaranteed.
+  - src/operations/CustomOffsetProcessor.js:806-823
+
+Summary
+- Implemented: 2/6 (Rules 3, 5)
+- Partial: 4/6 (Rules 1, 2, 4, 6)
+- Missing: 0/6

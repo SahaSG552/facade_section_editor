@@ -1,0 +1,37 @@
+Task 1 — Contradiction Check
+Input Artifact: .sisyphus/evidence/task-1-rule-matrix.txt
+Date: 2026-03-16
+
+Known fragility zones to cross-check:
+1) Tolerance inconsistency (EPSILON=1e-6, 0.001, 0.5)
+2) Sign/coordinate conversions with Y-axis inversions
+3) Mutation-order sensitivity in join passes
+4) Dead import `resolveSelfIntersections` line-10 note from prior context
+
+Implemented tags in matrix: Rule 3, Rule 5
+
+Rule 3 (Implemented) contradiction scan:
+- Relies on EPSILON checks and degenerate flags in line trim/sanitize.
+- References: CustomOffsetProcessor.js:300-302, 545-555, 578-587, 715-721
+- Fragility overlap assessment:
+  - Tolerance inconsistency: low direct contradiction risk for claim itself (rule is remove-if-nonpositive via local checks), though threshold uniformity may affect edge classification.
+  - Sign conversion/mutation-order: no direct contradiction to implemented claim.
+- Result: No contradiction requiring downgrade below Implemented.
+
+Rule 5 (Implemented) contradiction scan:
+- Bridge creation/insertion is explicit and retained unless filtered as degenerate/zero-length.
+- References: CustomOffsetProcessor.js:669-670, 694-695, 707-713, 797-800, 821-823, 715-727
+- Fragility overlap assessment:
+  - Mutation-order: can change where bridges are needed, but does not negate bridge first-class persistence behavior once created.
+  - Tolerance inconsistency: can influence tiny bridge filtering, still consistent with "persist unless degenerate".
+- Result: No contradiction requiring downgrade below Implemented.
+
+Cross-check for overclaims in Partial rules:
+- Rule 1 retained Partial due to bezier support and sign-conversion sensitivity.
+- Rule 2 retained Partial due to orientation reversal path and mutation-order sensitivity.
+- Rule 4 retained Partial due to in-place neighbor mutation.
+- Rule 6 retained Partial due to open-end one-neighbor case and post-sanitize adjacency changes.
+
+Final verdict:
+- No contradictions detected between Implemented tags and stated fragility zones.
+- Matrix consistency check: PASS.

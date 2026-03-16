@@ -1,0 +1,384 @@
+===============================================================================
+OFFSET TOOL ↔ CUSTOMOFFSETPROCESSOR: SIGN AND COORDINATE CONTRACT
+===============================================================================
+Generated: 2026-03-16
+Task: Document end-to-end sign and axis conversion contract
+Sources: OffsetTool.js, CustomOffsetProcessor.js
+
+===============================================================================
+1. SIGN INVERSION CONTRACT
+===============================================================================
+
+1.1 PRIMARY SIGN FLIP: CustomOffsetProcessor.js Line 1004
+───────────────────────────────────────────────────────────
+Location: calculateOffsetFromPathData()
+Code:     const offsetDistance = -offset;
+Purpose:  Invert offset sign for internal computation
+
+This is the SINGLE sign inversion point between OffsetTool and processor.
+
+1.2 SIGN TRUTH TABLE
+───────────────────────────────────────────────────────────
+Input from OffsetTool | Internal Processor Value | Visual Result
+─────────────────────────────────────────────────────────────────
++offset (positive)    | -offset (negative)       | Outward expansion
+-offset (negative)    | +offset (positive)       | Inward contraction
+
+CRITICAL INVARIANT:
+  User positive offset → Internal negative → Outward expansion
+  User negative offset → Internal positive → Inward contraction
+
+1.3 CONTOUR ORIENTATION INTERACTION
+───────────────────────────────────────────────────────────
+Offset Sign | CW Contour  | CCW Contour | Expected Side
+────────────────────────────────────────────────────────────
++offset     | Outward     | Outward     | Expansion
+-offset     | Inward      | Inward      | Contraction
+
+Note: The sign flip at line 1004 makes the offset direction consistent
+regardless of path winding direction. The processor uses SVG Y-down
+coordinates internally, matching OffsetTool's exported path data.
+
+1.4 REFERENCE NORMAL SIGN SEMANTICS
+───────────────────────────────────────────────────────────
+OffsetTool stores _refNormal (lines 903, 917, 946, 970):
+  - Always points OUTWARD from contour center
+  - Used to disambiguate +dist vs -dist candidates (lines 1198-1241)
+  - Positive offset → choose result where centerWorld moves along refNormal
+  - Negative offset → choose result where centerWorld moves against refNormal
+
+The reference normal eliminates ambiguity when offset can produce two
+valid paths (inside or outside).
+
+===============================================================================
+2. COORDINATE SYSTEM CONTRACT
+===============================================================================
+
+2.1 AXIS ORIENTATION: SVG Y-DOWN (BOTH SYSTEMS)
+───────────────────────────────────────────────────────────
+OffsetTool Export Space:        CustomOffsetProcessor Space:
+  Origin: Top-left                Origin: Top-left
+  +X: Right                       +X: Right
+  +Y: Down                        +Y: Down
+  System: SVG standard            System: SVG standard
+
+CRITICAL FINDING: NO Y-AXIS INVERSION between systems.
+
+2.2 Y-AXIS INVERSION BOUNDARY: EDITOR ↔ SVG EXPORT
+───────────────────────────────────────────────────────────
+Location: OffsetTool.js
+
+Editor Internal Space (Y-up):
+  - Segments store data.start/data.end with Y-up
+  - Example: line 226 `M ${r4(s0.x)} ${r4(-s0.y)}`
+  - Example: line 234 `${r4(d.end?.x)} ${r4(-d.end?.y)}`
+  - Example: line 436-437, 462-463: { start: {x: cx, y: -cy}, end: {x, y: -y} }
+
+SVG Export Space (Y-down):
+  - contourToPathData() applies -y during serialization (lines 220-246)
+  - Arc sweep flags converted: sweepSvg = 1 - sweep (line 233)
+  - parsePathToSegments() applies -y during parsing (lines 436, 462, 503, 521, 546)
+
+SINGLE INVERSION BOUNDARY: Editor storage ↔ SVG path export
+
+Path Flow:
+  1. Editor segments (Y-up) →
+  2. contourToPathData() inverts Y to SVG (Y-down) →
+  3. CustomOffsetProcessor receives SVG Y-down →
+  4. Returns offset path in SVG Y-down →
+  5. parsePathToSegments() inverts Y back to editor (Y-up)
+
+INVARIANT: Exactly ONE Y-axis flip per direction (editor→SVG, SVG→editor)
+
+2.3 ARC SWEEP FLAG CONVERSION
+───────────────────────────────────────────────────────────
+Editor Arc Storage (data.sweep):
+  - Uses bit-space representation (0 or 1)
+  - Semantics tied to editor Y-up coordinate space
+
+Export to SVG (line 233):
+  sweepSvg = 1 - sweep
+  Purpose: Compensate for Y-axis inversion during export
+
+Import from SVG (lines 537-548):
+  sweepBit = 1 - sweepSvg
+  Purpose: Restore editor bit-space representation
+
+CRITICAL: Arc sweep inversion is COUPLED to Y-axis inversion.
+Double inversion (Y-axis + sweep) restores original arc direction.
+
+===============================================================================
+3. OFFSET DISTANCE SEMANTICS
+===============================================================================
+
+3.1 POSITIVE OFFSET CONVENTION
+───────────────────────────────────────────────────────────
+User Input:   +5.0
+Processor:    -5.0 (line 1004 flip)
+Result:       Outward expansion by 5 units
+Direction:    Along reference normal vector
+
+3.2 NEGATIVE OFFSET CONVENTION
+───────────────────────────────────────────────────────────
+User Input:   -3.0
+Processor:    +3.0 (line 1004 flip)
+Result:       Inward contraction by 3 units
+Direction:    Against reference normal vector
+
+3.3 ZERO OFFSET EDGE CASE
+───────────────────────────────────────────────────────────
+User Input:   0.0
+Processor:    -0.0 (mathematically equivalent)
+Result:       No geometric change (identity offset)
+Note:         Mirror candidate selection skipped (line 1199)
+
+===============================================================================
+4. DUAL-CANDIDATE DISAMBIGUATION (OFFSETTOOL LINES 1198-1241)
+===============================================================================
+
+4.1 WHY TWO CANDIDATES EXIST
+───────────────────────────────────────────────────────────
+For non-zero offset distance, the processor can produce two valid paths:
+  1. Primary candidate:  offset applied as-is
+  2. Mirrored candidate: offset applied with sign flipped
+
+OffsetTool generates both and selects the correct one based on reference normal.
+
+4.2 SELECTION ALGORITHM (buildOffsetCandidate)
+───────────────────────────────────────────────────────────
+Step 1: Build primary candidate with user distance (line 1198)
+Step 2: Build mirrored candidate with negated distance (line 1200)
+Step 3: Score both candidates using reference normal dot product (lines 1208-1236)
+Step 4: Select candidate with higher score (line 1240)
+
+Scoring Logic (getSideScore):
+  - Find closest point on candidate to _refPoint
+  - Compute vector from _refPoint to closest point
+  - Dot product with _refNormal × expectedSign
+  - Higher score = better alignment with desired offset direction
+
+expectedSign = dist >= 0 ? 1 : -1
+
+4.3 INVARIANT: DUAL-CANDIDATE CORRECTNESS
+───────────────────────────────────────────────────────────
+For positive offset:
+  - Candidate moving along refNormal wins
+  - Ensures outward expansion relative to reference
+
+For negative offset:
+  - Candidate moving against refNormal wins
+  - Ensures inward contraction relative to reference
+
+This logic is INDEPENDENT of contour winding (CW/CCW).
+
+===============================================================================
+5. COORDINATE TRANSFORM PIPELINE
+===============================================================================
+
+5.1 FORWARD PATH: EDITOR → PROCESSOR
+───────────────────────────────────────────────────────────
+1. Editor segments stored in Y-up space
+2. contourToPathData() serializes to SVG Y-down (apply -y)
+3. Arc sweep flags inverted (sweepSvg = 1 - sweep)
+4. SVG path string passed to CustomOffsetProcessor
+5. Processor operates in SVG Y-down space (NO further inversion)
+6. Offset distance negated at line 1004
+
+5.2 REVERSE PATH: PROCESSOR → EDITOR
+───────────────────────────────────────────────────────────
+1. CustomOffsetProcessor returns SVG Y-down path string
+2. parsePathToSegments() parses SVG commands
+3. During parsing, Y coordinates inverted back to Y-up (y: -cy, y: -y)
+4. Arc sweep flags restored (sweepBit = 1 - sweepSvg)
+5. Resulting segments stored in editor Y-up space
+
+5.3 TRANSFORM MATRIX SUMMARY
+───────────────────────────────────────────────────────────
+Editor Space → SVG Space:
+  [x']   [ 1   0 ] [x]
+  [y'] = [ 0  -1 ] [y]
+
+SVG Space → Editor Space:
+  [x']   [ 1   0 ] [x]
+  [y'] = [ 0  -1 ] [y]
+
+Note: Transform is self-inverse (involution).
+
+===============================================================================
+6. CRITICAL INVARIANTS FOR REGRESSION TESTING
+===============================================================================
+
+INVARIANT 1: Single Sign Flip
+───────────────────────────────────────────────────────────
+ASSERTION: offsetDistance = -offset occurs exactly ONCE per offset operation
+LOCATION:  CustomOffsetProcessor.js line 1004
+RATIONALE: Multiple sign flips would cancel out, breaking offset direction
+VIOLATION: Search for additional negations in offset calculation path
+
+INVARIANT 2: Single Y-Axis Inversion Per Direction
+───────────────────────────────────────────────────────────
+ASSERTION: Y-axis flip occurs exactly ONCE in editor→SVG and SVG→editor
+LOCATIONS:
+  - Editor→SVG: contourToPathData() applies -y (lines 226, 234, etc.)
+  - SVG→Editor: parsePathToSegments() applies -y (lines 436, 462, 503, 521, 546)
+RATIONALE: Double inversion would restore original Y, breaking coordinate contract
+VIOLATION: Search for additional -y or y-negation in transform path
+
+INVARIANT 3: Arc Sweep Coupled to Y-Inversion
+───────────────────────────────────────────────────────────
+ASSERTION: Arc sweep flag inversion occurs alongside Y-axis inversion
+LOCATIONS:
+  - Editor→SVG: sweepSvg = 1 - sweep (line 233)
+  - SVG→Editor: sweepBit = 1 - sweepSvg (line 548)
+RATIONALE: Y-flip reverses arc winding; sweep flag must compensate
+VIOLATION: Independent sweep inversion or missing sweep compensation
+
+INVARIANT 4: Positive Offset → Outward Expansion (Post-Disambiguation)
+───────────────────────────────────────────────────────────
+ASSERTION: After dual-candidate selection, positive offset always expands outward
+MECHANISM: getSideScore ensures candidate aligned with refNormal wins
+TEST CASE:
+  - Input: Closed CW rectangle, +5.0 offset, reference on top edge
+  - Expected: Expanded rectangle, center moved upward along refNormal
+VIOLATION: Offset direction inverts relative to reference normal
+
+INVARIANT 5: Negative Offset → Inward Contraction (Post-Disambiguation)
+───────────────────────────────────────────────────────────
+ASSERTION: After dual-candidate selection, negative offset always contracts inward
+MECHANISM: getSideScore ensures candidate against refNormal wins
+TEST CASE:
+  - Input: Closed CCW circle, -2.0 offset, reference at 3 o'clock
+  - Expected: Smaller concentric circle, center moved leftward
+VIOLATION: Offset direction inverts relative to reference normal
+
+INVARIANT 6: No Double Inversion Anywhere
+───────────────────────────────────────────────────────────
+ASSERTION: No code path applies two sequential inversions (sign or Y-axis)
+LOCATIONS TO MONITOR:
+  - Sign flips in offset calculation (only line 1004 allowed)
+  - Y-axis negations in coordinate transforms (only at SVG boundaries)
+RATIONALE: Double inversion = identity = silent failure mode
+DETECTION: Audit all uses of unary minus on offset/y coordinates
+
+===============================================================================
+7. BOUNDARY CONDITIONS AND EDGE CASES
+===============================================================================
+
+7.1 ZERO OFFSET
+───────────────────────────────────────────────────────────
+Expected: No geometric change, skip mirror candidate (line 1199)
+Verify:   absDist > 1e-9 check prevents dual-candidate logic
+
+7.2 OPEN VS CLOSED CONTOURS
+───────────────────────────────────────────────────────────
+Open:   allowClose=false, no Z command, end caps applied
+Closed: allowClose=true, Z command, seamless loop
+Verify: Closure state preserved through offset (line 362, 1249)
+
+7.3 ARC CENTER PRESERVATION
+───────────────────────────────────────────────────────────
+Arc-based segments (type === "arc"):
+  - Center remains fixed in local space
+  - Radius adjusted by offset distance
+  - Sweep direction preserved after double inversion
+
+7.4 DEGENERATE GEOMETRY
+───────────────────────────────────────────────────────────
+Empty result: buildOffsetCandidate returns null (line 371)
+Zero-length segments: Skipped during offset computation
+Self-intersecting paths: Optional trimming via resolveSelfIntersections
+
+===============================================================================
+8. REFERENCE NORMAL CALCULATION (OFFSETTOOL)
+===============================================================================
+
+8.1 LINE SEGMENTS (lines 892-906)
+───────────────────────────────────────────────────────────
+Reference point: Midpoint of line segment
+Normal vector:   Left normal (perpendicular CCW from line direction)
+Adjustment:      If closed contour, normalize toward center
+
+8.2 ARC SEGMENTS (lines 908-923)
+───────────────────────────────────────────────────────────
+Reference point: On arc circumference at midpoint angle
+Normal vector:   Radial outward from arc center
+
+8.3 CIRCLE SHAPES (lines 925-932)
+───────────────────────────────────────────────────────────
+Reference point: On circle circumference closest to cursor
+Normal vector:   Radial outward from circle center
+
+8.4 ELLIPSE SHAPES (lines 934-949)
+───────────────────────────────────────────────────────────
+Reference point: On ellipse boundary closest to cursor
+Normal vector:   Gradient-based outward normal (accounts for rx/ry)
+
+8.5 RECTANGLE SHAPES (lines 951-973)
+───────────────────────────────────────────────────────────
+Reference point: Center of selected edge
+Normal vector:   Perpendicular outward from selected edge
+Special handling: Role-based (x-start, x-opposite, y-start, y-opposite)
+
+===============================================================================
+9. DEBUGGING AND VALIDATION HOOKS
+===============================================================================
+
+9.1 WINDOW.OFFSETDEBUGINFO (lines 1281-1308)
+───────────────────────────────────────────────────────────
+Global object exposing:
+  - phase: Current tool phase (selecting, pickReference, dynamic, confirming)
+  - referenceSegId: Selected reference segment
+  - refPoint: Reference point coordinates
+  - refNormal: Reference normal vector
+  - sources: Array of input path data (SVG and editor space)
+  - previews: Array of offset candidates (SVG and editor space)
+
+Access in browser console: window.offsetDebugInfo
+
+9.2 DEBUG TEXTAREA (lines 1301-1307)
+───────────────────────────────────────────────────────────
+HTML element: #bit-offsetDebugLog
+Content: JSON.stringify(offsetDebugInfo, null, 2)
+Purpose: Real-time inspection of offset operation state
+
+9.3 COMPARISON TESTING APPROACH
+───────────────────────────────────────────────────────────
+For any offset operation:
+  1. Capture window.offsetDebugInfo.sources[0].inputPathDataSvg
+  2. Capture window.offsetDebugInfo.previews[0].customPathDataSvg
+  3. Compare with reference implementation or previous known-good result
+  4. Verify inputPathDataEditor ↔ inputPathDataSvg round-trip fidelity
+  5. Verify customPathDataEditor ↔ customPathDataSvg round-trip fidelity
+
+===============================================================================
+10. SUMMARY OF CONVERSION POINTS
+===============================================================================
+
+SINGLE SIGN FLIP:
+  Location:   CustomOffsetProcessor.js line 1004
+  Operation:  offsetDistance = -offset
+  Direction:  User space → Processor internal space
+
+SINGLE Y-AXIS INVERSION (FORWARD):
+  Location:   OffsetTool.js contourToPathData()
+  Operation:  y → -y during SVG serialization
+  Direction:  Editor Y-up → SVG Y-down
+
+SINGLE Y-AXIS INVERSION (REVERSE):
+  Location:   OffsetTool.js parsePathToSegments()
+  Operation:  y → -y during SVG parsing
+  Direction:  SVG Y-down → Editor Y-up
+
+ARC SWEEP INVERSION (COUPLED TO Y-AXIS):
+  Forward:    sweepSvg = 1 - sweep (line 233)
+  Reverse:    sweepBit = 1 - sweepSvg (line 548)
+  Rationale:  Compensate for Y-axis flip effect on arc winding
+
+DUAL-CANDIDATE DISAMBIGUATION:
+  Location:   OffsetTool.js buildOffsetCandidate() lines 1198-1241
+  Mechanism:  Score both +dist and -dist results against refNormal
+  Purpose:    Resolve inherent offset ambiguity (inside vs outside)
+
+===============================================================================
+END OF SIGN TRUTH TABLE
+===============================================================================
