@@ -1,0 +1,13 @@
+
+> facade_section_editor@1.0.0 test
+> vitest run tests/offset/degeneracy.spec.js
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/Работа/Programming/JavaScript/Projects/facade_section_editor[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m   Start at [22m 12:03:57
+[2m   Duration [22m 964ms[2m (transform 160ms, setup 40ms, import 229ms, tests 9ms, environment 450ms)[22m
+
