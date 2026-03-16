@@ -1,0 +1,14 @@
+Task 7 QA Evidence — Expansion Candidate Rejection
+Date: 2026-03-16
+Command:
+  npm run test -- tests/offset/arc-trim.spec.js -t "rejects expansion candidates for end trim"
+
+Result:
+  Test Files  1 passed (1)
+  Tests       1 passed | 3 skipped (4)
+
+Assertion focus:
+  - Expansion candidate angle (outside original sweep) is rejected by end-trim validator.
+  - Candidate that would increase arc sweep is not accepted for trim.
+
+Status: PASS

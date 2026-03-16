@@ -1,0 +1,14 @@
+Task 7 QA Evidence — Contraction Acceptance
+Date: 2026-03-16
+Command:
+  npm run test -- tests/offset/arc-trim.spec.js -t "accepts valid end trim that contracts sweep"
+
+Result:
+  Test Files  1 passed (1)
+  Tests       1 passed | 3 skipped (4)
+
+Assertion focus:
+  - Valid trim point inside original sweep is accepted.
+  - Sweep magnitude after trim is less than or equal to original sweep.
+
+Status: PASS

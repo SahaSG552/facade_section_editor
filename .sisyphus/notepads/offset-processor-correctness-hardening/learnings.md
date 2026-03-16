@@ -13,6 +13,32 @@
 - Tolerance values are intentionally mixed across stages (1e-6, 0.001, 0.5), which should be treated as a known precision-risk surface in future hardening.
 
 ---
+
+## 2026-03-16 12:03 - Task 7: Arc Trim No-Expansion Regression Tests
+
+### Objective
+Add regression coverage proving trim validation accepts only sweep-preserving/sweep-reducing arc trims and rejects any trim candidate that would expand sweep.
+
+### Key Learnings
+- `isValidEndTrim` / `isValidStartTrim` enforce two hard constraints simultaneously:
+  1) trimmed sweep must keep the original direction (`trimSweep * origSweep > 0`),
+  2) trimmed sweep magnitude must not exceed original (`|trimSweep| <= |origSweep| + EPSILON`).
+- Expansion rejection is a pre-ranking filter: invalid candidates are dropped before score comparison (`d1 + d2`), so proximity cannot override the no-expansion invariant.
+- Endpoint trims are intentionally allowed as stable boundary behavior (unchanged sweep should pass).
+- A deterministic test harness can model candidate ranking without invoking full offset pipeline by reproducing trim validators and candidate filtering in isolation.
+
+### Added Artifacts
+- `tests/offset/arc-trim.spec.js`
+  - valid contraction acceptance
+  - expansion candidate rejection
+  - exact endpoint boundary acceptance
+  - multi-candidate filter-before-ranking behavior
+- `.sisyphus/evidence/task-7-no-expand-reject.txt`
+- `.sisyphus/evidence/task-7-contraction-accept.txt`
+
+### Verification Notes
+- Targeted task scenarios pass.
+- Repository-wide `npm run test` is currently red due to pre-existing failures in other offset suites (bridge persistence, neighbor sequence, one degeneracy assertion), unrelated to this new test file.
 ## 2026-03-16 11:35 - Task 3: Sign and Coordinate System Contract Documentation
 
 ### Objective
