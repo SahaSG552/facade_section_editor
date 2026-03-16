@@ -1,0 +1,83 @@
+Task 4 — Deterministic Intersection Ranking Policy (applyMiterJoin)
+
+Scope
+- Function: src/operations/CustomOffsetProcessor.js :: applyMiterJoin (Phase 1/2 flow)
+- Candidate classes: line-line, line-arc, arc-arc
+- Objective: deterministic candidate selection with strict no-arc-expansion acceptance
+
+Observed current behavior (code-grounded)
+1) Candidate generation by geometry type:
+   - arc-arc: circleCircleIntersections(...)
+   - line-arc: lineCircleIntersections(...)
+   - line-line: lineIntersection(...)
+2) Acceptance filters before score:
+   - movement limits: d1 <= maxMiterLen and d2 <= maxMiterLen
+   - arc trim validity:
+     - curr arc must satisfy isValidEndTrim(curr.arc, I)
+     - next arc must satisfy isValidStartTrim(next.arc, I)
+   - These predicates enforce "shorten-only" arc trimming (no sweep expansion).
+3) Current score:
+   - score = d1 + d2, choose smallest score.
+
+Deterministic ranking policy (normative)
+
+A. Fallback path order (MUST)
+1) Geometric intersection ranking (Phase 1)
+2) Tangent miter (Phase 2)
+3) Direct/square-cap bridge fallback
+
+No stage may skip forward if a prior stage produced an accepted candidate.
+
+B. Candidate acceptance gate (MUST happen before ranking)
+For every candidate intersection I:
+1) Reject if d1 > maxMiterLen OR d2 > maxMiterLen.
+2) If curr is arc, reject unless isValidEndTrim(curr.arc, I) is true.
+3) If next is arc, reject unless isValidStartTrim(next.arc, I) is true.
+
+Arc-angle expansion prohibition (explicit):
+- Any candidate that requires increasing absolute arc sweep for either participating arc
+  MUST be rejected before any tie-break/ranking step.
+- Ranking is performed only on already valid non-expanding candidates.
+
+C. Ranking key (deterministic total ordering)
+For each accepted candidate I, compute:
+- d1 = distance(curr.end, I)
+- d2 = distance(next.start, I)
+- primary = d1 + d2
+- secondary = max(d1, d2)                 (prefer smaller worst-side movement)
+- tertiary = abs(d1 - d2)                 (prefer balanced trimming)
+- quaternary = lexicographic(pointKey(I)) (stable geometry tie-break)
+
+pointKey(I) specification:
+- Quantize x,y to fixed precision (1e-9 recommended):
+  qx = round(I.x * 1e9) / 1e9
+  qy = round(I.y * 1e9) / 1e9
+- Compare as tuple (qx, qy)
+- If candidate IDs exist, append ID as final tuple element.
+
+Sort order (ascending):
+  (primary, secondary, tertiary, qx, qy, id)
+
+Rationale:
+- primary aligns with closest-to-source/least total adjustment (CavalierContours-style intent)
+- secondary prevents extreme one-sided trims when primary ties
+- tertiary stabilizes symmetric cases
+- (qx,qy,id) guarantees replay-stable deterministic choice independent of iteration order
+
+D. Determinism guarantees
+- Do not depend on candidate enumeration order from intersection routines.
+- Deterministic key-based sort/select is required.
+- Equal-within-tolerance comparisons must use fixed quantization/tolerance policy,
+  not runtime-dependent floating-point incidental ordering.
+
+E. Policy examples
+1) Symmetric pair candidates at equal d1+d2 and equal max(d1,d2):
+   - choose smaller quantized x, then y, then id.
+2) Arc-expanding candidate with lower geometric distance than non-expanding candidate:
+   - reject expanding candidate first; non-expanding candidate wins.
+
+Conformance checklist
+- [x] Fallback order fixed: geometric -> tangent miter -> bridge
+- [x] Arc expansion prohibited before ranking
+- [x] Deterministic total-order tie-break defined
+- [x] Covers line-line, line-arc, arc-arc candidate sets

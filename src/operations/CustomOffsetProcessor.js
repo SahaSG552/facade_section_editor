@@ -10,8 +10,27 @@ import { getPathOrientation } from "../utils/fillet.js";
 import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
+
+/**
+ * GEOM_EPSILON (1e-6): Geometric validity checks
+ * - Guards against floating-point precision limits
+ * - Used in: vector normalization, length tests, intersection math
+ */
 const EPSILON = 1e-6;
+
+/**
+ * JOIN_TOLERANCE (0.001): Gap detection for miter joins
+ * - Determines bridge line insertion in applyMiterJoin()
+ * - Used in: offset segment joining, bridge insertion
+ */
 const JOIN_TOLERANCE = 0.001;
+
+/**
+ * STITCH_TOLERANCE (0.5): Final segment stitching cleanup
+ * - Snaps distant endpoints in stitchSegments()
+ * - Used in: final path assembly, gap closure
+ */
+const STITCH_TOLERANCE = 0.5;
 
 /**
  * @typedef {Object} CustomOffsetOptions
@@ -780,7 +799,7 @@ function sanitizeSegments(segments) {
 }
 
 
-function stitchSegments(segments, tolerance = 0.5) {
+function stitchSegments(segments, tolerance = STITCH_TOLERANCE) {
     if (!segments || segments.length === 0) return segments;
 
     const stitched = [cloneSegment(segments[0])];
@@ -1023,7 +1042,7 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
                 .flat();
             const stitchedSegments = stitchSegments(
                 reversedContours,
-                options.stitchTolerance || 0.5
+                options.stitchTolerance || STITCH_TOLERANCE
             );
             const quantizedSegments = quantizeSegments(
                 stitchedSegments,
@@ -1065,7 +1084,7 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
 
     const stitchedSegments = stitchSegments(
         offsetSegments,
-        options.stitchTolerance || 0.5
+        options.stitchTolerance || STITCH_TOLERANCE
     );
 
     const quantizedSegments = quantizeSegments(

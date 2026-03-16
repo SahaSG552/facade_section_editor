@@ -1,0 +1,274 @@
+
+/**
+ * GEOM_EPSILON (1e-6): Geometric validity checks
+ * - Guards against floating-point precision limits
+ * - Used in: vector normalization, length tests, intersection math
+ */
+const EPSILON = 1e-6;
+
+/**
+ * JOIN_TOLERANCE (0.001): Gap detection for miter joins
+ * - Determines bridge line insertion in applyMiterJoin()
+ * - Used in: offset segment joining, bridge insertion
+ */
+const JOIN_TOLERANCE = 0.001;
+
+/**
+ * STITCH_TOLERANCE (0.5): Final segment stitching cleanup
+ * - Snaps distant endpoints in stitchSegments()
+ * - Used in: final path assembly, gap closure
+ */
+const STITCH_TOLERANCE = 0.5;
+
+/**
+--
+}
+
+function isNear(a, b, tolerance = EPSILON) {
+    return distance(a, b) <= tolerance;
+}
+--
+function normalize(vec) {
+    const len = Math.sqrt(vec.x * vec.x + vec.y * vec.y);
+    if (len < EPSILON) return { x: 0, y: 0 };
+    return { x: vec.x / len, y: vec.y / len };
+}
+--
+        if (current.length > 0) {
+            const prev = current[current.length - 1];
+            if (!isNear(prev.end, segment.start, JOIN_TOLERANCE)) {
+                contours.push(current);
+                current = [];
+--
+        return [];
+    }
+    if (!(totalLength > EPSILON)) return [];
+
+    const count = Math.max(32, Math.floor(sampleCount));
+--
+    const trimmedBBoxArea = bboxArea(trimmedPoints);
+
+    if (originalAbsArea > EPSILON) {
+        const areaRatio = trimmedAbsArea / originalAbsArea;
+        if (areaRatio < 0.35) return false;
+    }
+
+    if (originalBBoxArea > EPSILON) {
+        const bboxRatio = trimmedBBoxArea / originalBBoxArea;
+        if (bboxRatio < 0.35) return false;
+--
+
+function onSegment(a, b, p) {
+    return p.x <= Math.max(a.x, b.x) + EPSILON
+        && p.x + EPSILON >= Math.min(a.x, b.x)
+        && p.y <= Math.max(a.y, b.y) + EPSILON
+        && p.y + EPSILON >= Math.min(a.y, b.y);
+}
+
+--
+    const o4 = orientation2d(b1, b2, a2);
+
+    if ((o1 > EPSILON && o2 < -EPSILON || o1 < -EPSILON && o2 > EPSILON)
+        && (o3 > EPSILON && o4 < -EPSILON || o3 < -EPSILON && o4 > EPSILON)) {
+        return true;
+    }
+
+    if (Math.abs(o1) <= EPSILON && onSegment(a1, a2, b1)) return true;
+    if (Math.abs(o2) <= EPSILON && onSegment(a1, a2, b2)) return true;
+    if (Math.abs(o3) <= EPSILON && onSegment(b1, b2, a1)) return true;
+    if (Math.abs(o4) <= EPSILON && onSegment(b1, b2, a2)) return true;
+
+    return false;
+--
+    const dy = segment.end.y - segment.start.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < EPSILON) return null;
+
+    const normal = { x: -dy / len, y: dx / len };
+--
+
+    let t0 = normalize({ x: p1.x - p0.x, y: p1.y - p0.y });
+    if (Math.sqrt(t0.x * t0.x + t0.y * t0.y) < EPSILON) {
+        t0 = normalize({ x: p2.x - p0.x, y: p2.y - p0.y });
+    }
+    let t1 = normalize({ x: p3.x - p2.x, y: p3.y - p2.y });
+    if (Math.sqrt(t1.x * t1.x + t1.y * t1.y) < EPSILON) {
+        t1 = normalize({ x: p3.x - p1.x, y: p3.y - p1.y });
+    }
+--
+
+    const radius = arc.radius || arc.rx || 0;
+    if (radius < EPSILON) return null;
+
+    // Determine radial sign: +1 means increasing the radius offsets in the `offset` direction.
+--
+
+    const newRadius = radius + offset * radialSign;
+    if (newRadius < EPSILON) {
+        // Arc degenerates.  Instead of collapsing to the center, compute the
+        // "offset tangent-line" reference point for each endpoint.  This is
+--
+function lineIntersection(p1, dir1, p2, dir2) {
+    const rxs = cross(dir1, dir2);
+    if (Math.abs(rxs) < EPSILON) return null;
+
+    const qmp = { x: p2.x - p1.x, y: p2.y - p1.y };
+--
+    const c = fx * fx + fy * fy - radius * radius;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0 || Math.abs(a) < EPSILON) return [];
+    const sq = Math.sqrt(Math.max(0, disc));
+    return [
+--
+    const dx = cB.x - cA.x, dy = cB.y - cA.y;
+    const d = Math.hypot(dx, dy);
+    if (d < EPSILON || d > rA + rB + EPSILON || d < Math.abs(rA - rB) - EPSILON) return [];
+    const a = (rA * rA - rB * rB + d * d) / (2 * d);
+    const h2 = rA * rA - a * a;
+    if (h2 < -EPSILON) return [];
+    const h = Math.sqrt(Math.max(0, h2));
+    const mx = cA.x + a * dx / d, my = cA.y + a * dy / d;
+    if (h <= EPSILON) return [{ x: mx, y: my }];
+    const rx = -dy * h / d, ry = dx * h / d;
+    return [{ x: mx + rx, y: my + ry }, { x: mx - rx, y: my - ry }];
+--
+    const sweepToI  = computeAngleDelta(arc.startAngle, θI,           arc.sweepFlag ?? 1);
+    // Same direction as original sweep AND no longer than it.
+    return sweepToI * origSweep > 0 && Math.abs(sweepToI) <= Math.abs(origSweep) + EPSILON;
+}
+
+--
+    const origSweep  = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
+    const sweepFromI = computeAngleDelta(θI,              arc.endAngle, arc.sweepFlag ?? 1);
+    return sweepFromI * origSweep > 0 && Math.abs(sweepFromI) <= Math.abs(origSweep) + EPSILON;
+}
+
+--
+        const ndx = segment.end.x - segment.start.x;
+        const ndy = segment.end.y - segment.start.y;
+        if (distance(segment.start, segment.end) < EPSILON ||
+            odx * ndx + ody * ndy < -EPSILON) {
+            segment.degenerate = true;
+        }
+--
+        const newSweep = computeAngleDelta(segment.arc.startAngle, angle, segment.arc.sweepFlag ?? 1);
+        segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
+        if (Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0) {
+            segment.degenerate = true;
+        }
+--
+        const ndx = segment.end.x - segment.start.x;
+        const ndy = segment.end.y - segment.start.y;
+        if (distance(segment.start, segment.end) < EPSILON ||
+            odx * ndx + ody * ndy < -EPSILON) {
+            segment.degenerate = true;
+        }
+--
+        const newSweep = computeAngleDelta(angle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
+        segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
+        if (Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0) {
+            segment.degenerate = true;
+        }
+--
+ * Phase 2 — Arc-arc micro-gap fallback (tangent bridge):
+ *   If both neighbors are arcs, geometric intersection fails, and the endpoint
+ *   gap is within JOIN_TOLERANCE, emit a direct bridge from arc end tangent
+ *   point to arc start tangent point. This closes deterministic micro-gaps
+ *   without trimming/extending either arc, so arc centers and sweeps remain
+--
+    // they have zero radius so circle-intersection math is meaningless.
+    const currIsArc  = curr.type === "arc" && curr.arc && !curr.degenerate
+                       && (curr.arc.radius || curr.arc.rx || 0) > EPSILON;
+    const nextIsArc  = next.type === "arc" && next.arc && !next.degenerate
+                       && (next.arc.radius || next.arc.rx || 0) > EPSILON;
+    const endpointGap = distance(p1, p2);
+
+    // Arc-arc micro-gap handling is deferred until after geometric intersection
+    // evaluation so valid non-expanding trims still win.
+    if (endpointGap <= JOIN_TOLERANCE && !(currIsArc && nextIsArc)) return null;
+
+    // ── Phase 1: real geometric intersection ────────────────────────────────
+--
+        trimSegmentEnd(curr, best);
+        trimSegmentStart(next, best);
+        if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
+            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
+        }
+--
+    // Arc-arc fallback for non-intersecting micro-gaps: close only by bridge,
+    // never by extending arc trims or moving arc centers.
+    if (currIsArc && nextIsArc && endpointGap <= JOIN_TOLERANCE) {
+        if (endpointGap <= EPSILON) return null;
+        return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2) }];
+    }
+--
+                // (the arc has already swept past the corner), mark it degenerate.
+                // The resulting gap is then closed in the second pass.
+                if (dot({ x: M.x - p1.x, y: M.y - p1.y }, t1) < -EPSILON) {
+                    curr.degenerate = true;
+                    if (!nextIsArc) trimSegmentStart(next, M);
+--
+            if (!nextIsArc) trimSegmentStart(next, M);
+            // next=arc: arc start cannot move; any gap is covered by the bridge below.
+            if (isNear(curr.end, next.start, JOIN_TOLERANCE)) return null;
+            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
+        }
+--
+    // Instead, use a rectangular "square-cap" bridge: extend each end by |offset|
+    // in its outward tangent direction, then connect the two extended endpoints.
+    if (offset !== undefined && Math.abs(offset) > EPSILON && dot(t1, t2) < 0) {
+        const ext = Math.abs(offset);
+        const ep1 = { x: p1.x + ext * t1.x, y: p1.y + ext * t1.y };
+        const ep2 = { x: p2.x - ext * t2.x, y: p2.y - ext * t2.y };
+        const bridges = [];
+        if (!isNear(p1, ep1, EPSILON))  bridges.push({ type: "line", start: clonePoint(p1), end: clonePoint(ep1) });
+        if (!isNear(ep1, ep2, EPSILON)) bridges.push({ type: "line", start: clonePoint(ep1), end: clonePoint(ep2) });
+        if (!isNear(ep2, p2, EPSILON))  bridges.push({ type: "line", start: clonePoint(ep2), end: clonePoint(p2) });
+        if (bridges.length) return bridges;
+    }
+--
+        // Explicitly degenerated by trimSegmentEnd/Start or applyMiterJoin.
+        if (segment.degenerate) return false;
+        if (distance(segment.start, segment.end) < EPSILON) return false;
+        // Remove any residual degenerate arc markers (radius 0)
+        if (segment.type === "arc" && segment.arc) {
+            const r = segment.arc.radius || segment.arc.rx || 0;
+            if (r <= EPSILON) return false;
+        }
+        return true;
+--
+
+
+function stitchSegments(segments, tolerance = STITCH_TOLERANCE) {
+    if (!segments || segments.length === 0) return segments;
+
+--
+            const curr = clean[i];
+            const next = clean[i + 1];
+            if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
+                const gap = applyMiterJoin(curr, next, maxMiter, offset);
+                if (gap) sealed.push(...gap);
+--
+    const points = contourToPoints(segments);
+    const orientation = getPathOrientation(points);
+    const closed = isNear(points[0], points[points.length - 1], JOIN_TOLERANCE);
+
+    const joinedSegments = joinOffsetSegments(
+--
+
+    const exportModule = options.exportModule;
+    if (Math.abs(offset) < EPSILON) {
+        if (options.forceReverseOutput && exportModule?.dxfExporter?.parseSVGPathSegments) {
+            const zeroSegments = exportModule.dxfExporter.parseSVGPathSegments(
+--
+            const stitchedSegments = stitchSegments(
+                reversedContours,
+                options.stitchTolerance || STITCH_TOLERANCE
+            );
+            const quantizedSegments = quantizeSegments(
+--
+    const stitchedSegments = stitchSegments(
+        offsetSegments,
+        options.stitchTolerance || STITCH_TOLERANCE
+    );
+

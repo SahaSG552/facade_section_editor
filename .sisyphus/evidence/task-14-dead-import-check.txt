@@ -1,0 +1,51 @@
+=== TASK 14: DEAD IMPORT ANALYSIS ===
+
+BRIEF SUMMARY:
+T1 Audit claimed line 10 import of resolveSelfIntersections was "dead/invalid"
+but actual code analysis shows it IS VALID and IN USE.
+
+=== IMPORT STATUS ===
+
+Import statement (line 10):
+  import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
+
+Function existence in PaperBooleanProcessor.js:
+  ✅ Line 124: export function resolveSelfIntersections(pathData, options = {})
+
+Usage in CustomOffsetProcessor.js:
+  ✅ Line 1098: const trimmed = resolveSelfIntersections(path, {
+  ✅ Called conditionally: if (options.trimSelfIntersections && pathHasSelfIntersections(path))
+
+Context of usage:
+  Line 1097: if (options.trimSelfIntersections && pathHasSelfIntersections(path)) {
+  Line 1098:     const trimmed = resolveSelfIntersections(path, {
+  Line 1099:         referencePathData: pathData,
+  Line 1100:     });
+  Line 1101:     if (trimmed && shouldAcceptTrimmedPath(path, trimmed)) {
+  Line 1102:         path = trimmed;
+  Line 1103:     }
+  ...
+
+VERDICT: ✅ IMPORT IS VALID (NOT DEAD)
+
+=== ALL IMPORTS AUDIT ===
+
+Import                   | Line | Usage Count | Status
+=====================================================================
+LoggerFactory            |  6   |      2      | ✅ USED
+ARC_APPROX_TOLERANCE     |  7   |      2      | ✅ USED
+approximatePath          |  8   |      2      | ✅ USED
+segmentsToSVGPath        |  8   |      3      | ✅ USED
+getPathOrientation       |  9   |      3      | ✅ USED
+resolveSelfIntersections | 10   |      2      | ✅ USED (previously flagged, NOW VALID)
+
+CONCLUSION: All 6 imports are actively used. No dead imports detected.
+
+=== RESOLUTION ===
+
+Status of T1 Audit Finding:
+  The T1 audit identified resolveSelfIntersections as missing, but it has since
+  been implemented in PaperBooleanProcessor.js (line 124). The import is now
+  properly resolved and actively used at line 1098.
+  
+NO ACTION REQUIRED: The import should NOT be removed.

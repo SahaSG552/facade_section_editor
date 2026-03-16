@@ -1,0 +1,33 @@
+Scenario: Deterministic tie-break replay
+Tool: Bash (node -e simulation)
+Date: 2026-03-16T11:34:11+03:00
+
+Policy under test:
+- Ranking key: sum(d1+d2) -> max(d1,d2) -> |d1-d2| -> lexicographic(x,y,id)
+- Deterministic selection must be invariant to input candidate order.
+
+Simulation input (symmetric):
+- Candidate A: id=A, x=-1, y=0, d1=1, d2=1
+- Candidate B: id=B, x=+1, y=0, d1=1, d2=1
+- Runs: 10
+- Input order alternates each run: A,B then B,A
+
+Execution output:
+Deterministic tie-break replay simulation
+Policy key: sum(d1+d2) -> max(d1,d2) -> imbalance|d1-d2| -> lexicographic(x,y,id)
+Runs: 10
+run=1 input=A,B selected=A key=2|1|0|-1|0|A
+run=2 input=B,A selected=A key=2|1|0|-1|0|A
+run=3 input=A,B selected=A key=2|1|0|-1|0|A
+run=4 input=B,A selected=A key=2|1|0|-1|0|A
+run=5 input=A,B selected=A key=2|1|0|-1|0|A
+run=6 input=B,A selected=A key=2|1|0|-1|0|A
+run=7 input=A,B selected=A key=2|1|0|-1|0|A
+run=8 input=B,A selected=A key=2|1|0|-1|0|A
+run=9 input=A,B selected=A key=2|1|0|-1|0|A
+run=10 input=B,A selected=A key=2|1|0|-1|0|A
+Result: PASS
+
+Conclusion:
+- Deterministic tie-break replay PASSED.
+- Same candidate selected in all 10 runs despite alternating input order.

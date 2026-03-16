@@ -1,0 +1,237 @@
+================================================================================
+TOLERANCE POLICY TABLE - CustomOffsetProcessor
+================================================================================
+Generated: 2025-03-16
+Source: src/operations/CustomOffsetProcessor.js (1089 lines analyzed)
+
+================================================================================
+TOLERANCE THRESHOLDS SUMMARY
+================================================================================
+
+The offset processor uses THREE distinct tolerance classes, with inconsistent 
+naming and strategic usage. This analysis documents each constant, its role, 
+and usage scope.
+
+================================================================================
+TABLE: NAMED TOLERANCE CONSTANTS
+================================================================================
+
+Constant Name             | Value   | Operation Scope                   | Usage Count | Rationale
+--------------------------|---------|-----------------------------------|-------------|-------------------------------------------
+GEOM_EPSILON              | 1e-6    | Geometric operations              | 34+         | Floating-point precision floor
+  • Definition location: Line 13                                              | Safe epsilon for cross products
+  • Used in: normalization, length checks, intersection tests                | IEEE 754 standard operations
+
+JOIN_TOLERANCE            | 0.001   | Join gap detection & closure      | 4           | User-facing join accuracy
+  • Definition location: Hardcoded (lines 116, 627, 668, 693)               | Slightly above visual threshold
+  • Used in: contour closure, miter join validation                         | Prevents false positives
+
+STITCH_TOLERANCE          | 0.5     | Segment bridging after offset    | 2           | User-configurable (default)
+  • Definition location: Lines 731, 974, 1016 (parameterized)               | Large gap tolerance for stitching
+  • Used in: stitchSegments() joining with user override                     | Bridges imperfect join gaps
+
+================================================================================
+DETAILED OPERATION MAPPING
+================================================================================
+
+CLASS 1: GEOM_EPSILON (1e-6)
+────────────────────────────────────────────────────────────────────────────
+
+Purpose:
+  Geometric validity checks where floating-point precision matters.
+  Threshold below which a length/component is treated as zero.
+
+Critical Operations:
+  1. Vector Normalization (line 40)
+     - if (len < EPSILON) return { x: 0, y: 0 };
+     - Guards degenerate vectors in normalize()
+  
+  2. Segment Length Validation (lines 301, 325, 329, 350, 361)
+     - Rejects zero-length line segments
+     - Detects degenerate bezier/arc tangent vectors
+     - Prevents division-by-zero in offset calculations
+  
+  3. Orientation Testing (lines 253-261)
+     - lineSegmentsIntersect() uses EPSILON thresholds
+     - Detects collinearity in point orientation tests
+     - Tolerance: abs(orientation) <= EPSILON means collinear
+  
+  4. Intersection Validation (lines 477, 492, 504, 507, 510)
+     - lineIntersection: rejects parallel/near-parallel lines
+     - lineCircleIntersections: handles degenerate discriminant
+     - circleCircleIntersections: detects touching/disjoint circles
+  
+  5. Arc Sweep Validation (lines 524, 535, 564, 597)
+     - Prevents arc collapse (sweep < EPSILON)
+     - Guards against sign inversion in sweep direction
+  
+  6. Area-based Quality Checks (lines 223, 228)
+     - Validates polygon closure via signed area
+     - Rejects paths below geometric threshold
+
+Rationale:
+  ✓ Standard IEEE 754 epsilon for double-precision floats
+  ✓ Conservative (safe) threshold avoiding numerical errors
+  ✓ Prevents accumulation of floating-point rounding errors
+  ✓ Consistent with robust computational geometry literature
+
+Usage Pattern: [DEFENSIVE] Guard against near-zero/degenerate cases
+
+
+CLASS 2: JOIN_TOLERANCE (0.001)
+────────────────────────────────────────────────────────────────────────────
+
+Purpose:
+  User-facing join validation - determines whether a segment gap is
+  "closed enough" to skip bridge insertion.
+
+Critical Operations:
+  1. Contour Splitting (line 116)
+     - Detects path discontinuities during parsing
+     - if (!isNear(prev.end, segment.start, 0.001))
+     - Decides: new contour vs. continued path
+  
+  2. Miter Join Validation (line 627)
+     - applyMiterJoin() early exit if endpoints already near
+     - if (isNear(p1, p2, 0.001)) return null;
+     - Skips expensive join calculation for "closed" gaps
+  
+  3. Post-Trim Bridge Check (lines 668, 693)
+     - After geometric intersection trimming, checks closure
+     - Inserts bridge line if gap remains > 0.001
+     - Final validation before return from applyMiterJoin()
+  
+  4. Gap Sealing Pass (line 820)
+     - Detects gaps after degenerate arc removal
+     - if (!isNear(curr.end, next.start, 0.001))
+     - Triggers second-pass miter join to close gap
+
+Rationale:
+  ✓ 0.001 = 1 thousandth of unit (visible at typical scales)
+  ✓ Balance: tight enough to ensure topology, loose enough for float errors
+  ✓ Matches typical CAD/CAM manufacturing tolerance at small scales
+  ✓ Prevents false "gap detected" due to trimming rounding
+
+Usage Pattern: [DETERMINISTIC] Bridge insertion gate
+
+
+CLASS 3: STITCH_TOLERANCE (0.5)
+────────────────────────────────────────────────────────────────────────────
+
+Purpose:
+  Final segment stitching - allows snapping distant endpoints if within
+  tolerance. User-configurable to balance precision vs. robustness.
+
+Critical Operations:
+  1. Segment Stitching (line 739)
+     - stitchSegments(segments, tolerance = 0.5)
+     - Snaps segment.start to prev.end if distance <= tolerance
+     - Updates arc startAngle if segment is arc (lines 742-746)
+  
+  2. Default Value Propagation
+     - calculateOffsetFromPathData() line 974, 1016
+     - options.stitchTolerance || 0.5
+     - User can override via CustomOffsetOptions
+
+Rationale:
+  ✓ Large tolerance (500x JOIN_TOLERANCE) for robustness
+  ✓ Stitching is final polish - topology already correct
+  ✓ Bridges gaps from multiple independent offset/join operations
+  ✓ User-configurable because acceptable gap depends on material/use case
+  ✓ Applied post-quantization, so works on rounded coordinates
+
+Usage Pattern: [OPTIONAL] Final topology cleanup
+
+
+================================================================================
+AMBIGUITY GUARD ANALYSIS
+================================================================================
+
+Potential Issues Identified:
+────────────────────────────────────────────────────────────────────────────
+
+1. POTENTIAL CONFLICT: JOIN_TOLERANCE vs. GEOM_EPSILON
+   Location: applyMiterJoin() function (lines 623-713)
+   
+   Concern: 
+   - Line 627 uses JOIN_TOLERANCE (0.001) for early endpoint check
+   - Line 685 uses GEOM_EPSILON (1e-6) for dot product test
+   - Line 707-709 use GEOM_EPSILON for bridge line acceptance
+   
+   Decision Rationale:
+   ✓ SAFE: Different semantic contexts, no conflict
+   - Line 627: "are endpoints already close enough to skip work?"
+   - Line 685: "did miter calculation fail (numerical precision)?"
+   - Line 707: "is bridge segment degenerate?"
+   
+   Precedence Rule: USE GEOM_EPSILON FOR MATH, JOIN_TOLERANCE FOR GAPS
+
+
+2. INCONSISTENT NAMING: onSegment() uses EPSILON directly (line 241-244)
+   Location: Bounding box check in lineSegmentsIntersect()
+   
+   Issue: Uses EPSILON instead of dedicated constant for segment-point tests
+   Rationale: This is floating-point guard (orientation test fallback)
+   Action: OK as-is (geometric operation, not gap tolerance)
+
+
+3. TOLERANCE COUPLING: Line 933 hardcodes arc angle threshold
+   Location: normalizeArcAngles() (line 933)
+   
+   Code: const threshold = Math.PI * 2 + 0.001;
+   
+   Issue: 0.001 matches JOIN_TOLERANCE but different purpose
+   - This checks if angles are already normalized (in radians)
+   - Not a gap tolerance, but an angle magnitude check
+   Recommendation: Extract as ARC_ANGLE_BOUND constant
+
+
+================================================================================
+USAGE POLICY & PRECEDENCE RULES
+================================================================================
+
+RULE 1: Geometric Operations (Distance, Normalization, Orientation)
+────────────────────────────────────────────────────────────────────
+Use: GEOM_EPSILON (1e-6)
+Exceptions: None - always use for math operations
+Rationale: Matches floating-point precision, prevents accumulation errors
+
+RULE 2: Gap Detection (Endpoint Closure, Contour Continuity)
+────────────────────────────────────────────────────────────────
+Use: JOIN_TOLERANCE (0.001)
+Exceptions: Only if user explicitly overrides via options
+Rationale: User-visible tolerance, deterministic bridge insertion
+
+RULE 3: Final Topology Cleanup (Segment Stitching)
+────────────────────────────────────────────────────────────
+Use: STITCH_TOLERANCE (0.5) - USER CONFIGURABLE
+Exceptions: None - always use for stitchSegments()
+Rationale: Final pass, large gap OK if topology already correct
+
+RULE 4: Conflicting Tolerances
+────────────────────────────────────────────────────────────
+Apply in order of operation execution:
+  1. GEOM_EPSILON applied during offset calculations
+  2. JOIN_TOLERANCE applied during join/miter operations  
+  3. STITCH_TOLERANCE applied in final stitching pass
+  
+No conflicts expected if operations preserve topology at each stage.
+
+
+================================================================================
+BEST PRACTICES REFERENCE
+================================================================================
+
+Aligned with:
+  ✓ CavalierContours: Operation-specific epsilon (geometry vs. join)
+  ✓ Robust Predicates (Shewchuk): Use exact arithmetic for orientation
+  ✓ OpenCASCADE: Separate tolerances for different operation classes
+  ✓ CGAL: Adaptive tolerance based on geometric scale
+
+Recommendations for Future Hardening:
+  1. Make JOIN_TOLERANCE (0.001) a named export constant
+  2. Extract ARC_ANGLE_BOUND (Math.PI * 2) constant
+  3. Consider adaptive GEOM_EPSILON based on geometric scale
+  4. Document tolerance selection in function docstrings
+
+================================================================================

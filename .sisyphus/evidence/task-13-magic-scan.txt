@@ -1,0 +1,8 @@
+ * GEOM_EPSILON (1e-6): Geometric validity checks
+const EPSILON = 1e-6;
+ * JOIN_TOLERANCE (0.001): Gap detection for miter joins
+const JOIN_TOLERANCE = 0.001;
+ * STITCH_TOLERANCE (0.5): Final segment stitching cleanup
+const STITCH_TOLERANCE = 0.5;
+    return area * 0.5;
+        const threshold = Math.PI * 2 + 0.001;

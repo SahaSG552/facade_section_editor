@@ -1,0 +1,128 @@
+================================================================================
+AMBIGUITY GUARD CHECK - CustomOffsetProcessor Tolerance Policy
+================================================================================
+Generated: 2025-03-16
+Analyzer: Task 2 - Tolerance Model Definition
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+VERDICT: ✓ SAFE - No critical ambiguity detected
+
+Analysis Result:
+  - All tolerance values are contextually distinct
+  - Three tolerance classes serve non-overlapping purposes
+  - Precedence rules are deterministic and enforced
+  - No conflicting thresholds within same operation class
+
+Risk Level: LOW
+Status: Policy is deterministic and unambiguous
+
+================================================================================
+TOLERANCE CLASSES SUMMARY
+================================================================================
+
+Three tolerance classes identified:
+
+1. GEOM_EPSILON (1e-6)
+   - Purpose: Geometric validity (vector normalization, intersection math)
+   - Usage: 34+ occurrences across math operations
+   - Semantic: Guard against floating-point precision limits
+
+2. JOIN_TOLERANCE (0.001)
+   - Purpose: Gap detection for miter joins
+   - Usage: 4 occurrences (lines 116, 627, 668, 693, 820)
+   - Semantic: User-visible bridge insertion threshold
+
+3. STITCH_TOLERANCE (0.5)
+   - Purpose: Final segment stitching after offset
+   - Usage: 2 occurrences (parameterized)
+   - Semantic: User-configurable topology cleanup
+
+================================================================================
+CONFLICT ANALYSIS
+================================================================================
+
+SCENARIO 1: applyMiterJoin() uses both GEOM_EPSILON and JOIN_TOLERANCE
+Status: ✓ SAFE - Different semantic contexts
+
+- Line 627: isNear(p1, p2, 0.001) → Gap closure check (USER-FACING)
+- Line 685: dot(..., t1) < -EPSILON → Math validity (GEOMETRIC)
+- Line 707-709: isNear(..., EPSILON) → Degenerate filter (GEOMETRIC)
+
+Decision: NO CONFLICT - Different operations at different stages
+
+
+SCENARIO 2: Hardcoded 0.001 appears in multiple contexts
+Status: ⚠ MINOR - Flagged for extraction
+
+- Lines 116, 627, 668, 693, 820: All JOIN_TOLERANCE (gap detection)
+- Line 933: Math.PI * 2 + 0.001 (angle conversion bound - different purpose)
+
+Recommendation: Extract line 933 as ARC_ANGLE_CONVERSION_BOUND constant
+
+
+SCENARIO 3: STITCH_TOLERANCE (0.5) vs others
+Status: ✓ SAFE - Applied last in sequence
+
+Execution order (DETERMINISTIC):
+  1. GEOM_EPSILON applied during offset calculations
+  2. JOIN_TOLERANCE applied during join operations
+  3. STITCH_TOLERANCE applied in final stitching
+  4. quantizeSegments() applies rounding
+
+No conflicts because each operates on different lifecycle stage.
+
+================================================================================
+DETERMINISM VERDICT
+================================================================================
+
+Question: Is tolerance policy deterministic?
+Answer: ✓ YES
+
+Evidence:
+  • All tolerances are fixed constants (not adaptive)
+  • Execution order is sequential and fixed
+  • No randomization in candidate selection
+  • Final quantization ensures output determinism
+
+Floating-point considerations:
+  ✓ Conservative GEOM_EPSILON (1e-6) is safe
+  ✓ No tolerance accumulation (reapplied each op)
+  ✓ Quantization provides platform-independent output
+
+================================================================================
+POLICY COMPLIANCE
+================================================================================
+
+Requirement                         | Status | Notes
+------------------------------------|--------|-------------------------------------------
+Clear semantic purpose per tolerance| ✓      | Three distinct classes documented
+Distinct usage contexts             | ✓      | Math vs. gap vs. stitch
+Deterministic execution order       | ✓      | Offset → Join → Stitch → Quantize
+No conflicting reuse                | ✓      | Safe exception: GEOM_EPS + JOIN_TOL
+Ambiguous values flagged            | ✓      | Line 933 flagged for constant extraction
+User override mechanisms            | ✓      | stitchTolerance parameterized
+Best practices alignment            | ✓      | CavalierContours, Shewchuk patterns
+
+OVERALL: ✓ POLICY IS SAFE AND DETERMINISTIC
+
+================================================================================
+EVIDENCE SUMMARY
+================================================================================
+
+Generated artifacts:
+  • task-2-tolerance-table.txt — Detailed policy table
+  • task-2-tolerance-guard.txt — This ambiguity analysis
+
+Findings:
+  ✓ No critical ambiguities detected
+  ✓ Three tolerance classes are well-separated
+  ✓ Execution order prevents conflicts
+  ✓ Policy supports deterministic testing
+
+Status: READY FOR CODE REFACTORING (Wave 2)
+
+================================================================================
+

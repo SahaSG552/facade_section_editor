@@ -1,0 +1,26 @@
+Scenario: No-angle-expansion filter
+Tool: Bash (node -e simulation)
+Date: 2026-03-16T11:34:11+03:00
+
+Policy under test:
+- Arc expansion prohibition is enforced before ranking/tie-break.
+- Candidate must pass arc trim gates:
+  - curr arc: isValidEndTrim
+  - next arc: isValidStartTrim
+
+Simulation setup:
+- curr arc: center=(0,0), CCW start=0, end=pi/2
+- next arc: center=(4,0), CW start=pi, end=pi/2
+- candidate inside: angle pi/4 on curr circle (expected valid)
+- candidate expand: angle 3pi/4 on curr circle (requires curr sweep expansion, expected reject)
+
+Execution output:
+No-angle-expansion filter simulation
+curr arc: CCW 0 -> pi/2 ; next arc: CW pi -> pi/2
+candidate=inside currValid=true nextValid=true
+candidate=expand currValid=false nextValid=true
+Policy check: expanding candidate rejected before ranking = PASS
+
+Conclusion:
+- Expanding candidate is rejected at acceptance gate (before tie-break).
+- No-angle-expansion constraint enforcement PASSED.
