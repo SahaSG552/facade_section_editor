@@ -14,6 +14,32 @@
 
 ---
 
+## 2026-03-16 12:32 - Task 12: Arc-Arc Micro-Gap Hardening + Tangent Bridge Integration
+
+### Objective
+Close arc-arc micro-gaps without any arc-angle expansion by inserting a fallback bridge only when arc-arc geometric intersection fails and the endpoint gap is within JOIN_TOLERANCE.
+
+### Key Learnings
+- Added explicit `JOIN_TOLERANCE` constant (`0.001`) in `CustomOffsetProcessor` and routed join-gap checks through it (split/closure checks now reference the same policy symbol).
+- `applyMiterJoin` now defers the early near-endpoint exit for arc-arc pairs until after geometric candidate validation, so valid non-expanding arc trims still win first.
+- New arc-arc fallback path is strictly constrained: if both segments are arcs, no accepted circle-circle candidate exists, and `distance(curr.end, next.start) <= JOIN_TOLERANCE`, emit a direct bridge line between those tangent endpoints.
+- Fallback bridge does **not** modify arc geometry: no center updates, no sweep changes, no angle expansion. Arc invariants from T6/T7 remain intact by construction.
+- Deterministic ranking from T11 remains unchanged: acceptance filters + tuple rank ordering still govern geometric candidates; micro-gap bridge only activates after accepted set is empty.
+
+### Verification
+- Baseline before changes: `npm run test` → 46/46 passing.
+- Targeted micro-gap proof: `tests/offset/arc-arc-microgap.spec.js` (bridge inserted when arc-arc circles are disjoint by micro-gap <= JOIN_TOLERANCE).
+- Targeted center invariance proof: same spec verifies arc centers/sweep metadata unchanged during fallback bridge insertion.
+- Post-change full suite: `npm run test` → 48/48 passing (new task-12 tests included).
+- LSP diagnostics clean:
+  - `src/operations/CustomOffsetProcessor.js`
+  - `tests/offset/arc-arc-microgap.spec.js`
+
+### Evidence
+- `.sisyphus/evidence/task-12-arc-arc-microgap.txt`
+- `.sisyphus/evidence/task-12-bridge-fallback.txt`
+
+
 ## 2026-03-16 12:18 - Task 11: Deterministic Candidate Ranking in applyMiterJoin
 
 ### Objective
@@ -555,3 +581,219 @@ All offset correctness tests MUST verify:
 - ✅ Full test suite passes (46 tests)
 
 ---
+
+## [2026-03-16T12:41:00+03:00] Task 13: Tolerance Normalization
+
+### Changes Applied
+- Extracted STITCH_TOLERANCE = 0.5 constant (line 31)
+- Added comprehensive JSDoc policy documentation for all three tolerance constants:
+  - GEOM_EPSILON (1e-6): Geometric validity checks
+  - JOIN_TOLERANCE (0.001): Gap detection for miter joins
+  - STITCH_TOLERANCE (0.5): Final segment stitching cleanup
+- Replaced hardcoded 0.5 values in 3 locations:
+  1. Function parameter default: `stitchSegments(segments, tolerance = STITCH_TOLERANCE)`
+  2. Call site at line 1044: `options.stitchTolerance || STITCH_TOLERANCE`
+  3. Call site at line 1088: `options.stitchTolerance || STITCH_TOLERANCE`
+
+### Verification Results
+- Magic number scan: 2 non-tolerance numeric values remain (correctly excluded):
+  - `area * 0.5` (mathematical division, not a tolerance)
+  - `Math.PI * 2 + 0.001` (angle normalization threshold for degree detection, not geometric tolerance)
+- Full test suite: 48/48 tests PASS
+- No behavioral changes from normalization (verified by passing test suite)
+- All three tolerance constants now have clear policy documentation
+
+### Evidence Files Generated
+- task-13-magic-scan.txt: Confirms only non-tolerance numerics remain
+- task-13-constant-extraction.txt: Shows all three tolerance constants with JSDoc
+- task-13-sanity.txt: Full test suite results (48/48 PASS)
+
+### Pattern Established
+Successfully completed tolerance normalization following T2 policy:
+1. All three tolerance classes now extracted as named constants
+2. Each constant has JSDoc mapping to policy class and scope
+3. Deterministic precedence order maintained: GEOM_EPSILON → JOIN_TOLERANCE → STITCH_TOLERANCE
+4. Zero uncategorized tolerance magic numbers remain
+5. No tolerance value changes (pure refactoring)
+
+### Notes
+- The stitchSegments function uses the tolerance parameter to snap endpoints within the specified distance
+- Option override pattern preserved: `options.stitchTolerance || STITCH_TOLERANCE` allows caller to override default
+- This completes the tolerance normalization initiative started in T2 and T12
+
+## [2026-03-16T15:52:00+03:00] Task 14: Import Audit and Optional Behavior Verification
+
+### Objective
+Audit dead/invalid integration hooks identified in T1 and clarify optional behavior interfaces.
+
+### Key Finding: T1 Audit Status RESOLVED
+
+#### The Issue (from T1)
+T1 audit flagged: "Dead Import: `resolveSelfIntersections` imported but doesn't exist (line 10)"
+
+#### The Reality (Task 14 Discovery)
+- ✅ Function **DOES exist** in PaperBooleanProcessor.js (line 124)
+- ✅ Function **IS being used** in CustomOffsetProcessor.js (line 1098)
+- ✅ Usage is **properly guarded**: `if (options.trimSelfIntersections && pathHasSelfIntersections(path))`
+
+#### Resolution
+The import is **VALID AND ACTIVE**. T1's audit finding has been resolved by subsequent implementation work.
+**NO REMOVAL** was performed.
+
+### Complete Import Audit Results
+
+All 6 imports in CustomOffsetProcessor.js verified:
+
+| Import | Line | Usage Count | Status |
+|--------|------|-------------|--------|
+| LoggerFactory | 6 | 2 | ✅ USED |
+| ARC_APPROX_TOLERANCE | 7 | 2 | ✅ USED |
+| approximatePath | 8 | 2 | ✅ USED |
+| segmentsToSVGPath | 8 | 3 | ✅ USED |
+| getPathOrientation | 9 | 3 | ✅ USED |
+| resolveSelfIntersections | 10 | 2 | ✅ USED |
+
+**Conclusion**: All 6 imports are actively used. Zero dead imports detected.
+
+### Optional Behavior Safety Audit
+
+Searched for all `options.*` accesses in CustomOffsetProcessor.js:
+
+**Optional Flags Found**:
+1. `options.forceReverseOutput` (lines 930, 1027) - ✅ properly guarded with `&&`
+2. `options.exportModule` (lines 1025, 1027, 1108, 1110) - ✅ properly guarded with `&&` and optional chaining `?.`
+3. `options.stitchTolerance` (lines 1045, 1087) - ✅ properly guarded with `||` fallback
+4. `options.outputPrecision` (lines 1049, 1092) - ✅ properly guarded with `||` fallback
+5. `options.trimSelfIntersections` (line 1097) - ✅ properly guarded with `&&`
+6. `options.useArcApproximation` (line 1108) - ✅ properly guarded with `&&`
+7. `options.arcTolerance` (line 1109) - ✅ properly guarded with `||` fallback
+
+**All optional flags are explicitly guarded. No implicit or unsafe no-op behaviors detected.**
+
+### Verification Results
+
+✅ Build integrity: `npm run build` → clean build, no unresolved imports
+✅ Optional safety: Full test suite → 48/48 tests PASS
+✅ No behavioral changes from audit (tests confirm all optional flows work)
+
+### Evidence Files Generated
+- `.sisyphus/evidence/task-14-import-integrity.txt` - Build output (clean)
+- `.sisyphus/evidence/task-14-dead-import-check.txt` - Complete import audit
+- `.sisyphus/evidence/task-14-option-safety.txt` - Full test suite results (48/48 PASS)
+
+### Conclusion
+
+Task 14 analysis reveals:
+1. **T1 audit finding is RESOLVED** - The flagged import is now properly implemented and in active use
+2. **No dead imports exist** - All 6 imports have multiple active usages
+3. **Optional behaviors are safe** - All 7 optional flags are explicitly guarded with proper fallbacks
+4. **No code changes required** - The codebase is already in correct state
+
+**Status**: ✅ VERIFIED - No invalid integration hooks remain. Optional behavior interfaces are explicit and safe.
+
+## [2026-03-16T13:19:00+03:00] Task 15: End-to-End Regression Suite
+
+### Tests Created
+- `tests/offset/e2e/canonical.spec.js` (6 tests)
+- Canonical path test: validates user-provided complex path via public API only
+- Continuity test: verifies no inter-segment gaps above `STITCH_TOLERANCE = 0.5` (per-contour)
+- Bridge behavior test: forces bridge fallback under constrained miter limit and verifies persistence across second offset pass
+- Degeneracy/no-reversal test: verifies collapsed segments are deleted and no 180° reversed fallback appears
+- Error tests: malformed input + extreme offset handling with graceful string output or descriptive error
+
+### Canonical Path Validation
+- Input: `M 0 0 A 6 6 0 0 0 -5.5 3.5 A 7 7 0 0 1 -11 8 L -11 11 H 0 H 11 L 11 8 A 7 7 0 0 1 5.5 3.5 A 6 6 0 0 0 0 0`
+- Offset: `-7`
+- Result: non-empty segment set with valid numeric structure (`line` + `arc` present)
+- Continuity: PASS (`distance(end[i], start[i+1]) <= 0.5` on all contour-local adjacencies)
+- Bridges: PASS (bridge insertion/persistence verified in dedicated E2E scenario)
+- Degeneracy: PASS (collapsed arc removed; no forbidden reversal fallback)
+
+### Test Results
+- E2E tests: 6/6 PASS
+- Full suite: 54/54 PASS (48 existing + 6 new)
+
+### Evidence Files
+- `task-15-canonical-regression.txt`
+- `task-15-error-robustness.txt`
+- `task-15-full-suite.txt`
+
+## [2026-03-16T13:30:00] Task 16: Determinism Verification
+
+### Implementation Summary
+Created `tests/offset/determinism.spec.js` with comprehensive repeatability and symmetry tests for CustomOffsetProcessor.
+
+### Test Coverage (13 tests total)
+
+**Repeatability Loop (6 tests):**
+1. Canonical path, offset -7 (30 runs)
+2. Canonical path, offset +3 (30 runs)
+3. Simple line contour, offset -2 (30 runs)
+4. Simple arc contour, offset -3 (30 runs)
+5. Mixed arc-line canonical, offset -10 (30 runs)
+6. Positive offset +5 (30 runs)
+
+**Symmetry Consistency (5 tests):**
+1. Horizontal symmetry preservation (symmetric square)
+2. Vertical symmetry preservation (symmetric square)
+3. Deterministic mirrored fixtures (30 runs each)
+4. Arc-based symmetric cases (30 runs)
+5. Complex path mirroring determinism (10 runs each)
+
+**Cross-Offset Determinism (2 tests):**
+1. Multiple offset values (30 runs each)
+2. Different offsets produce different results
+
+### Key Implementation Details
+
+**Hash Function:**
+- Simple deterministic 32-bit hash using bit-shift operations
+- Applied to JSON.stringify(result) for stable serialization
+- Detects any variation in output structure or values
+
+**Mirror Functions:**
+- `mirrorPathHorizontally()`: Flips X coordinates (Y-axis mirror)
+- `mirrorPathVertically()`: Flips Y coordinates (X-axis mirror)
+- Regex-based coordinate transformation
+
+**Test Fixtures:**
+- CANONICAL_PATH: User-provided complex mixed geometry
+- SIMPLE_LINE_PATH: Basic rectangle (4 line segments)
+- SIMPLE_ARC_PATH: Symmetric circular arcs
+- SYMMETRIC_SQUARE: 10x10 square centered at origin
+
+### Findings
+
+**100% Determinism Achieved:**
+- All 30-run repeatability tests show single hash (no variation)
+- Confirms T11 deterministic ranking implementation is stable
+- No nondeterministic behavior detected across 780+ test runs
+
+**Symmetry Preservation:**
+- Mirrored inputs produce mirrored outputs
+- No ordering instabilities in symmetric cases
+- Arc and line segments both preserve symmetry
+
+**Cross-Offset Stability:**
+- Each offset value produces consistent output across 30 runs
+- Different offset values produce different results (as expected)
+
+### Integration Notes
+
+- Requires `ExportModule` instance (same pattern as T15 E2E tests)
+- Uses `calculateOffsetFromPathData` public API
+- All tests PASS on first run (54→67 tests total)
+- LSP diagnostics clean (no type/import errors)
+
+### Evidence Files
+- `.sisyphus/evidence/task-16-repeatability.txt`: Full test output
+- `.sisyphus/evidence/task-16-symmetry.txt`: Symmetry test analysis
+
+### Validation
+- `npm run test`: 67/67 PASS (13 new determinism tests)
+- No regressions in existing test suite
+- Exit code 0 (success)
+
+## [2026-03-16T13:56:26+03:00] Task 17: Technical Write-Up Complete
+
+Final technical documentation created in docs/offset-processor-hardening-summary.md. The document summarizes the hardening effort, rule compliance status, behavioral changes, and migration guidance. All 6 strict geometry rules are now hardened and verified with 67 automated tests. Tolerance policy is normalized and documented. Deterministic ranking ensures stable output for symmetric geometries. Arc-arc micro-gaps are resolved with fallback bridges. The engine is now in a correctness-first state with 100% test pass rate.

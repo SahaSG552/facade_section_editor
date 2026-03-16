@@ -1,0 +1,5 @@
+Task 17: Migration Guidance Clarity Audit
+- Breaking Changes: Documented (none in API, behavioral shift noted)
+- Recommended Actions: Documented (precision tuning, self-intersection)
+- Resolved Edge Cases: Documented (arc-arc, symmetric tie-breaks, neighbor-degeneracy)
+- Target Audience: Developers, Reviewers, Maintainers, Users
