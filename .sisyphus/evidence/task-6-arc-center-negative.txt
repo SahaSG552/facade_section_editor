@@ -1,0 +1,24 @@
+
+> facade_section_editor@1.0.0 test
+> vitest run tests/offset/arc-center.spec.js --reporter=verbose
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/Работа/Programming/JavaScript/Projects/facade_section_editor[39m
+
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould preserve arc center for outward offset on clockwise arc[32m 1[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould preserve arc center for outward offset on counterclockwise arc[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould preserve arc center for inward offset on clockwise arc[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould preserve arc center for inward offset on counterclockwise arc[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould preserve arc center even when arc degenerates from large inward offset[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould preserve arc center through sequential offsets[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould preserve off-origin arc center[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Invariance Tests[2m > [22mshould handle zero-radius arc gracefully[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Negative Offset Edge Cases[2m > [22mshould not reverse arc angles when degenerating from negative offset[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Negative Offset Edge Cases[2m > [22mshould not accumulate floating-point drift in arc center[32m 0[2mms[22m[39m
+ [32m✓[39m tests/offset/arc-center.spec.js[2m > [22mArc Center Negative Offset Edge Cases[2m > [22mshould preserve center as independent value, not reference[32m 0[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m11 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 11:57:49
+[2m   Duration [22m 627ms[2m (transform 53ms, setup 49ms, import 29ms, tests 5ms, environment 374ms)[22m
+
