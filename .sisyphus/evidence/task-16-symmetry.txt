@@ -1,0 +1,54 @@
+TASK 16 EVIDENCE: SYMMETRY CONSISTENCY TESTING
+================================================
+
+Test File: tests/offset/determinism.spec.js
+Date: $(date -Iseconds)
+
+SYMMETRY TEST COVERAGE:
+-----------------------
+
+1. Horizontal Symmetry Preservation (SYMMETRIC_SQUARE)
+   - Input: M -5 -5 L 5 -5 L 5 5 L -5 5 Z
+   - Offset: -1
+   - Tests: Mirror input horizontally, verify output is also mirrored
+   - Status: PASS
+
+2. Vertical Symmetry Preservation (SYMMETRIC_SQUARE)
+   - Input: M -5 -5 L 5 -5 L 5 5 L -5 5 Z
+   - Offset: -1
+   - Tests: Mirror input vertically, verify output is also mirrored
+   - Status: PASS
+
+3. Deterministic Mirrored Fixtures (30-run repeatability)
+   - Input: SYMMETRIC_SQUARE
+   - Offset: -1.5
+   - Tests: 30 runs on original + 30 runs on mirrored
+   - Verification: Both sets produce single deterministic hash
+   - Status: PASS
+
+4. Arc-Based Symmetric Cases
+   - Input: SIMPLE_ARC_PATH (symmetric circular arcs)
+   - Offset: -2
+   - Tests: 30-run repeatability for symmetric arc geometry
+   - Status: PASS
+
+5. Complex Path Mirroring
+   - Input: CANONICAL_PATH (mixed arc-line geometry)
+   - Offset: -5
+   - Tests: 10 runs original + 10 runs mirrored
+   - Verification: Both produce deterministic output
+   - Status: PASS
+
+SYMMETRY STABILITY FINDINGS:
+----------------------------
+
+All symmetry tests PASSED, confirming:
+- Offset processor handles mirrored geometries deterministically
+- Symmetric inputs produce symmetric outputs
+- No unstable ordering issues in symmetric cases
+- Arc and line segments both preserve symmetry properties
+
+CONCLUSION:
+-----------
+CustomOffsetProcessor exhibits stable, deterministic behavior for symmetric
+geometry variants. No ordering instabilities detected across 30-run sequences.
