@@ -1,0 +1,160 @@
+================================================================================
+                    TASK 5: EDGE CASE TESTS + FINAL VALIDATION
+                               ACCEPTANCE SUMMARY
+================================================================================
+
+DATE: 2026-03-17 08:46 UTC
+STATUS: ✓ COMPLETE - All 6 acceptance criteria met
+
+================================================================================
+                            ACCEPTANCE CRITERIA
+================================================================================
+
+✓ CRITERION 1: Five edge case tests added to degenerate-reconnect.spec.js
+  Location: tests/offset/degenerate-reconnect.spec.js:359-528
+  Count: 5 new tests (verified grep count = 5)
+  
+  1. Edge Case 1: All segments degenerate → empty output, no crash (line 372)
+  2. Edge Case 2: Single survivor → cyclic check skipped gracefully (line 405)
+  3. Edge Case 3: Two adjacent degenerates → predecessor/successor reconnected (line 438)
+  4. Edge Case 4: Degenerate at index 0 → cyclic handling correct (line 472)
+  5. Edge Case 5: Open contour → cyclic check not applied, path remains open (line 506)
+
+✓ CRITERION 2: Guard verified
+  Location: src/operations/CustomOffsetProcessor.js:880
+  Guard: if (closed && sealed.length >= 2)
+  Status: Present and correct
+  Function: gapSealPass (lines 863-890)
+
+✓ CRITERION 3: Targeted test suite passes
+  Command: npm test -- tests/offset/degenerate-reconnect.spec.js
+  Result: 13/13 PASSED (8 existing + 5 new)
+  Duration: 1.05s
+
+✓ CRITERION 4: Full test suite passes
+  Command: npm test
+  Result: 80/80 PASSED (75 existing + 5 new)
+  Duration: 988ms
+  Test Files: 10/10 passed
+
+✓ CRITERION 5: Evidence files created
+  - .sisyphus/evidence/task-5-edge-cases.txt (targeted test output, 13/13)
+  - .sisyphus/evidence/task-5-full-suite.txt (full suite output, 80/80)
+
+✓ CRITERION 6: Learnings appended to notepad
+  File: .sisyphus/notepads/offset-processor-correctness-hardening/learnings.md
+  Section: "## 2026-03-17 - Task 5: Edge Case Tests + Final Validation"
+  Content:
+    - Objective summary
+    - Key learnings (5 points)
+    - Verification results
+    - Test specifics for all 5 edge cases
+    - Implementation notes
+
+================================================================================
+                              TEST DETAILS
+================================================================================
+
+EDGE CASE 1: All Segments Degenerate
+  Path:     "M 0 0 L 0.5 0 L 0.5 0.5 L 0 0.5 Z"
+  Offset:   -1 (extreme inward)
+  Expected: Empty or minimal output, no crash
+  Status:   ✓ PASS - segments.length >= 0
+
+EDGE CASE 2: Single Survivor
+  Path:     "M 0 0 L 0.1 0 L 10 0 L 10 0.1 L 10 10 Z"
+  Offset:   -1.5 (collapses tiny ends)
+  Expected: Cyclic check skipped gracefully
+  Status:   ✓ PASS - no self-loop crash
+
+EDGE CASE 3: Two Adjacent Degenerates
+  Path:     "M 0 0 L 0.3 0 L 0.3 0.3 L 10 0.3 L 10 10 L 0 10 Z"
+  Offset:   -0.5 (collapses short sides)
+  Expected: Proper predecessor/successor reconnection
+  Status:   ✓ PASS - all adjacent pairs connected
+
+EDGE CASE 4: Degenerate at Index 0
+  Path:     "M 0 0 L 0.1 0 L 5 0 L 5 5 L 0 5 Z"
+  Offset:   -0.5 (collapses first segment)
+  Expected: Cyclic handling correct (last ↔ second)
+  Status:   ✓ PASS - closed contour maintained
+
+EDGE CASE 5: Open Contour
+  Path:     "M 0 0 L 10 0 L 10 10 L 0 10" (no Z)
+  Offset:   -1
+  Expected: Open path (no cyclic check applied)
+  Status:   ✓ PASS - gap exists between last and first
+
+================================================================================
+                           GUARD VERIFICATION
+================================================================================
+
+Guard Location: CustomOffsetProcessor.js:880
+Code:
+    if (closed && sealed.length >= 2) {
+        const last = sealed[sealed.length - 1];
+        const first = sealed[0];
+        if (!isNear(last.end, first.start, JOIN_TOLERANCE)) {
+            const gap = applyMiterJoin(last, first, maxMiterLen, offset);
+            if (gap) sealed.push(...gap);
+        }
+    }
+
+Function: gapSealPass (lines 863-890)
+Purpose:  Seal gaps between consecutive segments after sanitize
+Role:     Prevents cyclic check on single survivors (sealed.length < 2)
+Status:   ✓ Verified present and correct
+
+================================================================================
+                            REGRESSION TESTING
+================================================================================
+
+No Regressions: All existing tests continue to pass
+- Cascaded Degeneracy test (1 test): ✓ PASS
+- Cyclic Gap Bug tests (6 tests): ✓ PASS
+- Bridge Metadata test (1 test): ✓ PASS
+- Edge Cases (5 new tests): ✓ PASS
+- All other test suites (67 tests): ✓ PASS
+
+Total: 80/80 tests pass with no failures
+
+================================================================================
+                              IMPLEMENTATION
+================================================================================
+
+Production Code Changes: NONE
+- Guard sealed.length >= 2 was already present from Task 2/4
+- Task 5 validates and exercises this guard through edge case tests
+
+Test Code Changes: ADDED
+- 5 new edge case tests in degenerate-reconnect.spec.js
+- Tests follow existing patterns (SVG path + offset + parseSegments)
+- Tests use tolerance constants: JOIN_TOLERANCE (0.001), EPSILON (1e-6)
+
+LSP Diagnostics: ✓ CLEAN (0 errors)
+
+================================================================================
+                              EVIDENCE FILES
+================================================================================
+
+task-5-edge-cases.txt       - Targeted test output (13/13 PASS)
+task-5-full-suite.txt       - Full suite output (80/80 PASS)
+task-5-acceptance-summary.txt - This summary document
+
+Notepad Update: Learnings appended with full implementation details
+
+================================================================================
+                                 SUMMARY
+================================================================================
+
+✓ All 5 edge case tests added and passing
+✓ Guard sealed.length >= 2 verified at line 880
+✓ Targeted test suite: 13/13 passing
+✓ Full test suite: 80/80 passing
+✓ No regressions
+✓ Evidence files created
+✓ Learnings documented
+
+Task 5 is COMPLETE and VERIFIED.
+
+================================================================================

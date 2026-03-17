@@ -562,7 +562,9 @@ function isValidStartTrim(arc, I) {
  *         marks degenerate if the sweep collapses to zero or inverts.
  */
 function trimSegmentEnd(segment, point) {
-    if (segment.type === "line") {
+    if (segment.type === "line" || (segment.type === "arc" && segment.degenerate)) {
+        // Degenerate arcs carry start/end reference points (the offset tangent-line
+        // positions) and behave as lines for trimming.  Treat them identically.
         const odx = segment.end.x - segment.start.x;
         const ody = segment.end.y - segment.start.y;
         segment.end = clonePoint(point);
@@ -595,7 +597,7 @@ function trimSegmentEnd(segment, point) {
  *         marks degenerate if the sweep collapses to zero or inverts.
  */
 function trimSegmentStart(segment, point) {
-    if (segment.type === "line") {
+    if (segment.type === "line" || (segment.type === "arc" && segment.degenerate)) {
         const odx = segment.end.x - segment.start.x;
         const ody = segment.end.y - segment.start.y;
         segment.start = clonePoint(point);
@@ -730,7 +732,7 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
         trimSegmentEnd(curr, best);
         trimSegmentStart(next, best);
         if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
-            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
+            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start), isBridge: true }];
         }
         return null;
     }
@@ -739,7 +741,7 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     // never by extending arc trims or moving arc centers.
     if (currIsArc && nextIsArc && endpointGap <= JOIN_TOLERANCE) {
         if (endpointGap <= EPSILON) return null;
-        return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2) }];
+        return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2), isBridge: true }];
     }
 
     // ── Phase 3: tangent-line miter (arc endpoints are fixed) ───────────────
@@ -762,7 +764,7 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
             if (!nextIsArc) trimSegmentStart(next, M);
             // next=arc: arc start cannot move; any gap is covered by the bridge below.
             if (isNear(curr.end, next.start, JOIN_TOLERANCE)) return null;
-            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start) }];
+            return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start), isBridge: true }];
         }
     }
 
@@ -775,12 +777,12 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
         const ep1 = { x: p1.x + ext * t1.x, y: p1.y + ext * t1.y };
         const ep2 = { x: p2.x - ext * t2.x, y: p2.y - ext * t2.y };
         const bridges = [];
-        if (!isNear(p1, ep1, EPSILON))  bridges.push({ type: "line", start: clonePoint(p1), end: clonePoint(ep1) });
-        if (!isNear(ep1, ep2, EPSILON)) bridges.push({ type: "line", start: clonePoint(ep1), end: clonePoint(ep2) });
-        if (!isNear(ep2, p2, EPSILON))  bridges.push({ type: "line", start: clonePoint(ep2), end: clonePoint(p2) });
+        if (!isNear(p1, ep1, EPSILON))  bridges.push({ type: "line", start: clonePoint(p1), end: clonePoint(ep1), isBridge: true });
+        if (!isNear(ep1, ep2, EPSILON)) bridges.push({ type: "line", start: clonePoint(ep1), end: clonePoint(ep2), isBridge: true });
+        if (!isNear(ep2, p2, EPSILON))  bridges.push({ type: "line", start: clonePoint(ep2), end: clonePoint(p2), isBridge: true });
         if (bridges.length) return bridges;
     }
-    return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2) }];
+    return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2), isBridge: true }];
 }
 
 function sanitizeSegments(segments) {
@@ -848,6 +850,53 @@ function quantizeSegments(segments, precision = 6) {
     });
 }
 
+/**
+ * gapSealPass - Second pass gap sealing after degenerate removal.
+ *
+ * After sanitizeSegments removes degenerate arcs, gaps appear between the
+ * bridge segments that flanked the removed arc.  This function seals every
+ * consecutive gap (including the closed-contour wrap-around) by calling
+ * applyMiterJoin on each pair, inserting bridge lines where needed.
+ *
+ * Bridges are first-class contour segments — they are never discarded here.
+ * When an arc degenerates its flanking bridges survive; the gap between them
+ * is closed with a new miter join just like any other gap.
+ *
+ * @param {Array}   segments    - Clean segments (post-sanitize)
+ * @param {boolean} closed      - Whether the contour is closed
+ * @param {number}  maxMiterLen - Maximum miter length for joins
+ * @param {number}  offset      - Offset distance (used by applyMiterJoin)
+ * @returns {Array} Segments with all gaps sealed
+ */
+function gapSealPass(segments, closed, maxMiterLen, offset) {
+    const sealed = [];
+
+    // Linear pass: check all consecutive pairs i → i+1
+    for (let i = 0; i < segments.length; i++) {
+        sealed.push(segments[i]);
+        if (i < segments.length - 1) {
+            const curr = segments[i];
+            const next = segments[i + 1];
+            if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
+                const gap = applyMiterJoin(curr, next, maxMiterLen, offset);
+                if (gap) sealed.push(...gap);
+            }
+        }
+    }
+
+    // Cyclic check: for closed contours, check last↔first gap
+    if (closed && sealed.length >= 2) {
+        const last = sealed[sealed.length - 1];
+        const first = sealed[0];
+        if (!isNear(last.end, first.start, JOIN_TOLERANCE)) {
+            const gap = applyMiterJoin(last, first, maxMiterLen, offset);
+            if (gap) sealed.push(...gap);
+        }
+    }
+
+    return sealed;
+}
+
 function joinOffsetSegments(offsetSegments, options, offset, closed) {
     const segs = offsetSegments.map(cloneSegment);
     const count = segs.length;
@@ -882,19 +931,38 @@ function joinOffsetSegments(offsetSegments, options, offset, closed) {
     // The two bridge segments that flanked the degenerate arc now point to the
     // correct offset tangent-line positions, so intersecting their tangent rays
     // gives the true miter corner (e.g. the (3,−3) corner in the example).
-    const sealed = [];
-    for (let i = 0; i < clean.length; i++) {
-        sealed.push(clean[i]);
-        if (i < clean.length - 1) {
-            const curr = clean[i];
-            const next = clean[i + 1];
-            if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
-                const gap = applyMiterJoin(curr, next, maxMiter, offset);
-                if (gap) sealed.push(...gap);
-            }
+    const sealed = gapSealPass(clean, closed, maxMiter, offset);
+
+    // ── Iterative stabilization: second-pass trims can create new degenerates ──
+    // When gapSealPass inserts a bridge to seal a gap, the bridge itself might
+    // be degenerate (chord < EPSILON) or cause adjacent segments to become
+    // degenerate. This creates cascaded degeneracy that requires another
+    // sanitize→reconnect pass.
+    //
+    // Iterative loop: sanitize → gapSealPass → check stability
+    // - Max 3 iterations to prevent infinite loops
+    // - Early exit when stable (no removals: reSanitized.length === working.length)
+    // - Log warning if max iterations reached (potential geometry issue)
+    const MAX_ITER = 3;
+    let iter = 0;
+    let working = sealed;
+    
+    while (iter < MAX_ITER) {
+        const reSanitized = sanitizeSegments(working);
+        
+        // Stability check: if no segments were removed, we're done
+        if (reSanitized.length === working.length) break;
+        
+        // Re-run gap seal pass on re-sanitized list
+        working = gapSealPass(reSanitized, closed, maxMiter, offset);
+        iter++;
+        
+        if (iter === MAX_ITER) {
+            log.warn(`Max degenerate iterations (${MAX_ITER}) reached - potential cascaded degeneracy in geometry`);
         }
     }
-    return sealed;
+
+     return working;
 }
 
 function offsetContour(segments, offset, options) {

@@ -1,0 +1,606 @@
+=== 30-Run Determinism Verification ===
+Started: Tue Mar 17 08:51:59 RTZ 2026
+
+--- Run 1 ---
+ok 1 - tests/offset/determinism.spec.js # time=36.88ms {
+    ok 1 - Determinism and repeatability verification # time=36.35ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=20.55ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.20ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.36ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.42ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.21ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.28ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.70ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=9.01ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.46ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.23ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.68ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.24ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.28ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=6.62ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.30ms
+            ok 2 - should produce different outputs for different offset values # time=0.26ms
+
+--- Run 2 ---
+ok 1 - tests/offset/determinism.spec.js # time=45.77ms {
+    ok 1 - Determinism and repeatability verification # time=45.06ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=23.26ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.82ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.53ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.85ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.26ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.37ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.95ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=11.93ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.65ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.35ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.33ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=2.11ms
+            ok 5 - should handle mirrored complex paths deterministically # time=6.32ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=9.65ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=9.20ms
+            ok 2 - should produce different outputs for different offset values # time=0.37ms
+
+--- Run 3 ---
+ok 1 - tests/offset/determinism.spec.js # time=35.35ms {
+    ok 1 - Determinism and repeatability verification # time=34.81ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=17.78ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.77ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=5.29ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.85ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.27ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.41ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.80ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=9.72ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.51ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.24ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.73ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.68ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.40ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.13ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.79ms
+            ok 2 - should produce different outputs for different offset values # time=0.29ms
+
+--- Run 4 ---
+ok 1 - tests/offset/determinism.spec.js # time=49.49ms {
+    ok 1 - Determinism and repeatability verification # time=46.86ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=26.27ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=8.78ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=8.40ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.18ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.59ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.41ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.90ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=9.83ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.55ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.33ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.78ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.70ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.35ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=10.54ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=10.06ms
+            ok 2 - should produce different outputs for different offset values # time=0.40ms
+
+--- Run 5 ---
+ok 1 - tests/offset/determinism.spec.js # time=38.94ms {
+    ok 1 - Determinism and repeatability verification # time=38.31ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=19.60ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.41ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=5.42ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.90ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.78ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.75ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.90ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=10.02ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.54ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.26ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.45ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.60ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.93ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=8.49ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.06ms
+            ok 2 - should produce different outputs for different offset values # time=0.36ms
+
+--- Run 6 ---
+ok 1 - tests/offset/determinism.spec.js # time=44.77ms {
+    ok 1 - Determinism and repeatability verification # time=44.03ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=24.80ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=8.45ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=9.26ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.10ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.47ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.91ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.10ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=10.09ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.50ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.22ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.09ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.51ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.64ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=8.93ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.53ms
+            ok 2 - should produce different outputs for different offset values # time=0.32ms
+
+--- Run 7 ---
+ok 1 - tests/offset/determinism.spec.js # time=53.83ms {
+    ok 1 - Determinism and repeatability verification # time=52.51ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=23.11ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.16ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=8.55ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.91ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.47ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.77ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.80ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=19.36ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.61ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.25ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.00ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.25ms
+            ok 5 - should handle mirrored complex paths deterministically # time=15.05ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=9.82ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=9.37ms
+            ok 2 - should produce different outputs for different offset values # time=0.37ms
+
+--- Run 8 ---
+ok 1 - tests/offset/determinism.spec.js # time=46.92ms {
+    ok 1 - Determinism and repeatability verification # time=46.18ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=25.56ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=9.17ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=8.26ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.27ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.05ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.34ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.95ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=9.10ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.59ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.25ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.95ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.64ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.53ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=11.27ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=10.78ms
+            ok 2 - should produce different outputs for different offset values # time=0.41ms
+
+--- Run 9 ---
+ok 1 - tests/offset/determinism.spec.js # time=46.81ms {
+    ok 1 - Determinism and repeatability verification # time=46.14ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=26.22ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=11.66ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=8.40ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.92ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.46ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.53ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.83ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=8.71ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.55ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.25ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.62ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.09ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.08ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=11.00ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=10.10ms
+            ok 2 - should produce different outputs for different offset values # time=0.81ms
+
+--- Run 10 ---
+ok 1 - tests/offset/determinism.spec.js # time=48.93ms {
+    ok 1 - Determinism and repeatability verification # time=48.19ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=25.62ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=9.37ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.62ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.16ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.57ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.34ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.88ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=13.04ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.97ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.32ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.17ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.78ms
+            ok 5 - should handle mirrored complex paths deterministically # time=7.52ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=9.22ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.69ms
+            ok 2 - should produce different outputs for different offset values # time=0.41ms
+
+--- Run 11 ---
+ok 1 - tests/offset/determinism.spec.js # time=38.62ms {
+    ok 1 - Determinism and repeatability verification # time=37.90ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=21.13ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=8.22ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.61ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.84ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.25ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.75ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.75ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=9.53ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.52ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.27ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.54ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.56ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.50ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.03ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.71ms
+            ok 2 - should produce different outputs for different offset values # time=0.27ms
+
+--- Run 12 ---
+ok 1 - tests/offset/determinism.spec.js # time=64.95ms {
+    ok 1 - Determinism and repeatability verification # time=63.57ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=44.98ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=22.59ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=16.68ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.92ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.30ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.38ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.65ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=11.20ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.75ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.37ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=4.21ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.66ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.08ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.11ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.67ms
+            ok 2 - should produce different outputs for different offset values # time=0.36ms
+
+--- Run 13 ---
+ok 1 - tests/offset/determinism.spec.js # time=46.68ms {
+    ok 1 - Determinism and repeatability verification # time=45.58ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=25.23ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=9.12ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=8.22ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.19ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.71ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.31ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.10ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=10.93ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.67ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.30ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.40ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.76ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.61ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=9.15ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.61ms
+            ok 2 - should produce different outputs for different offset values # time=0.45ms
+
+--- Run 14 ---
+ok 1 - tests/offset/determinism.spec.js # time=42.16ms {
+    ok 1 - Determinism and repeatability verification # time=41.45ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=21.44ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=8.31ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.09ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.91ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.26ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.29ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.13ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=11.55ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.49ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.22ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.63ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.15ms
+            ok 5 - should handle mirrored complex paths deterministically # time=7.94ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=8.25ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=7.82ms
+            ok 2 - should produce different outputs for different offset values # time=0.35ms
+
+--- Run 15 ---
+ok 1 - tests/offset/determinism.spec.js # time=42.32ms {
+    ok 1 - Determinism and repeatability verification # time=41.56ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=25.27ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=9.73ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.72ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.91ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.02ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.26ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.03ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=8.50ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.63ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.28ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.40ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.37ms
+            ok 5 - should handle mirrored complex paths deterministically # time=3.70ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.59ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=7.21ms
+            ok 2 - should produce different outputs for different offset values # time=0.31ms
+
+--- Run 16 ---
+ok 1 - tests/offset/determinism.spec.js # time=42.66ms {
+    ok 1 - Determinism and repeatability verification # time=42.03ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=22.68ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.92ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.02ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.28ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.43ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.31ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.21ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=10.36ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.58ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.39ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.04ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.23ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.95ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=8.77ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.39ms
+            ok 2 - should produce different outputs for different offset values # time=0.29ms
+
+--- Run 17 ---
+ok 1 - tests/offset/determinism.spec.js # time=38.28ms {
+    ok 1 - Determinism and repeatability verification # time=37.60ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=20.64ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.51ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.01ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.88ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.48ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.52ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.80ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=9.21ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.51ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.32ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.81ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.34ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.10ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.53ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=7.12ms
+            ok 2 - should produce different outputs for different offset values # time=0.35ms
+
+--- Run 18 ---
+ok 1 - tests/offset/determinism.spec.js # time=40.69ms {
+    ok 1 - Determinism and repeatability verification # time=40.11ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=22.62ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.78ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.05ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=2.41ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.07ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.92ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.89ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=9.87ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.85ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.31ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.70ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.30ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.59ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.42ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.96ms
+            ok 2 - should produce different outputs for different offset values # time=0.37ms
+
+--- Run 19 ---
+ok 1 - tests/offset/determinism.spec.js # time=35.85ms {
+    ok 1 - Determinism and repeatability verification # time=35.21ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=19.97ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.52ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.14ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.85ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.25ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.15ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.67ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=7.46ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.43ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.21ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.62ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.09ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.01ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.61ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=7.22ms
+            ok 2 - should produce different outputs for different offset values # time=0.32ms
+
+--- Run 20 ---
+ok 1 - tests/offset/determinism.spec.js # time=37.56ms {
+    ok 1 - Determinism and repeatability verification # time=36.90ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=20.87ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.55ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=2.87ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=5.48ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.44ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.39ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.71ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=8.18ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.46ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.21ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.61ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.09ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.71ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.66ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=7.20ms
+            ok 2 - should produce different outputs for different offset values # time=0.37ms
+
+--- Run 21 ---
+ok 1 - tests/offset/determinism.spec.js # time=33.83ms {
+    ok 1 - Determinism and repeatability verification # time=33.25ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=18.98ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.68ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.50ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.99ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.34ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.39ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.70ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=7.18ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.47ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.21ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.62ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.12ms
+            ok 5 - should handle mirrored complex paths deterministically # time=3.66ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=6.91ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.56ms
+            ok 2 - should produce different outputs for different offset values # time=0.29ms
+
+--- Run 22 ---
+ok 1 - tests/offset/determinism.spec.js # time=36.34ms {
+    ok 1 - Determinism and repeatability verification # time=35.78ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=19.46ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.25ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=7.05ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.83ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.23ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.58ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.12ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=8.37ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.54ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.26ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.90ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.20ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.34ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.77ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=7.42ms
+            ok 2 - should produce different outputs for different offset values # time=0.28ms
+
+--- Run 23 ---
+ok 1 - tests/offset/determinism.spec.js # time=37.12ms {
+    ok 1 - Determinism and repeatability verification # time=36.51ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=20.83ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.11ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.47ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.07ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.50ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.24ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.00ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=8.22ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.50ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.25ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=2.00ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.29ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.05ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.28ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.87ms
+            ok 2 - should produce different outputs for different offset values # time=0.34ms
+
+--- Run 24 ---
+ok 1 - tests/offset/determinism.spec.js # time=36.91ms {
+    ok 1 - Determinism and repeatability verification # time=36.10ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=18.09ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.65ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=5.80ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.85ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.43ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.30ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.67ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=7.42ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.42ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.25ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.55ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.11ms
+            ok 5 - should handle mirrored complex paths deterministically # time=3.92ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=10.40ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=10.02ms
+            ok 2 - should produce different outputs for different offset values # time=0.30ms
+
+--- Run 25 ---
+ok 1 - tests/offset/determinism.spec.js # time=33.81ms {
+    ok 1 - Determinism and repeatability verification # time=33.24ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=17.86ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.71ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=5.32ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.85ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.64ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.28ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.67ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=7.51ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.41ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.21ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.54ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.41ms
+            ok 5 - should handle mirrored complex paths deterministically # time=3.85ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=7.70ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=7.32ms
+            ok 2 - should produce different outputs for different offset values # time=0.32ms
+
+--- Run 26 ---
+ok 1 - tests/offset/determinism.spec.js # time=43.32ms {
+    ok 1 - Determinism and repeatability verification # time=42.70ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=21.34ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.60ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.98ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.85ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.39ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.50ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.17ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=11.68ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.96ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.54ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=3.57ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.29ms
+            ok 5 - should handle mirrored complex paths deterministically # time=5.14ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=9.44ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=9.05ms
+            ok 2 - should produce different outputs for different offset values # time=0.32ms
+
+--- Run 27 ---
+ok 1 - tests/offset/determinism.spec.js # time=48.01ms {
+    ok 1 - Determinism and repeatability verification # time=47.13ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=26.05ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=9.36ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=9.54ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.88ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.37ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=3.10ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=1.18ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=11.85ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.70ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.28ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.80ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.22ms
+            ok 5 - should handle mirrored complex paths deterministically # time=7.72ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=8.96ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.42ms
+            ok 2 - should produce different outputs for different offset values # time=0.44ms
+
+--- Run 28 ---
+ok 1 - tests/offset/determinism.spec.js # time=39.18ms {
+    ok 1 - Determinism and repeatability verification # time=38.53ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=20.56ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=7.80ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.53ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=0.83ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.51ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.58ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.90ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=8.63ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.67ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.25ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.87ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.24ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.48ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=9.16ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.77ms
+            ok 2 - should produce different outputs for different offset values # time=0.32ms
+
+--- Run 29 ---
+ok 1 - tests/offset/determinism.spec.js # time=47.04ms {
+    ok 1 - Determinism and repeatability verification # time=46.33ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=21.70ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.95ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.82ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.29ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=2.17ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.95ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.95ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=15.22ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.59ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.27ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=3.22ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=3.73ms
+            ok 5 - should handle mirrored complex paths deterministically # time=7.25ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=9.14ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=8.64ms
+            ok 2 - should produce different outputs for different offset values # time=0.41ms
+
+--- Run 30 ---
+ok 1 - tests/offset/determinism.spec.js # time=35.85ms {
+    ok 1 - Determinism and repeatability verification # time=35.28ms {
+        ok 1 - Repeatability loop (30-run hash stability) # time=19.89ms {
+            ok 1 - should produce identical output across 30 runs (canonical path, offset -7) # time=6.80ms
+            ok 2 - should produce identical output across 30 runs (canonical path, offset +3) # time=6.40ms
+            ok 3 - should produce identical output across 30 runs (simple line contour, offset -2) # time=1.27ms
+            ok 4 - should produce identical output across 30 runs (simple arc contour, offset -3) # time=1.74ms
+            ok 5 - should produce identical output across 30 runs (mixed arc-line canonical, offset -10) # time=2.48ms
+            ok 6 - should produce identical output across 30 runs (positive offset +5) # time=0.76ms
+        ok 2 - Symmetry consistency (mirrored fixture tests) # time=8.50ms {
+            ok 1 - should preserve horizontal symmetry for symmetric square # time=0.47ms
+            ok 2 - should preserve vertical symmetry for symmetric square # time=0.28ms
+            ok 3 - should produce deterministic output for symmetric mirrored fixtures (30 runs) # time=1.66ms
+            ok 4 - should detect unstable ordering in symmetric cases (arc-based) # time=1.15ms
+            ok 5 - should handle mirrored complex paths deterministically # time=4.84ms
+        ok 3 - Cross-offset determinism (multiple offsets) # time=6.70ms {
+            ok 1 - should produce stable output across different offset values (30 runs each) # time=6.34ms
+            ok 2 - should produce different outputs for different offset values # time=0.29ms
+
+Completed: Tue Mar 17 08:53:16 RTZ 2026
+
+=== Hash Analysis ===

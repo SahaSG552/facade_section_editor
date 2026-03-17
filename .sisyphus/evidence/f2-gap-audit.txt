@@ -1,0 +1,107 @@
+F2 Gap Assertion Audit
+JOIN_TOLERANCE=0.001
+STITCH_TOLERANCE=0.5
+
+CASE: PLACEHOLDER: iterative sanitize→reconnect loop implementation
+offset=-1
+segmentCount=4
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
+
+CASE: RED: tiny arc degeneration breaks last↔first connection
+offset=-0.6
+segmentCount=4
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
+
+CASE: RED: arc at end position degenerates leaving wrap-around gap
+offset=-0.5
+segmentCount=4
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
+
+CASE: RED: tiny arc degeneration leaves all gaps including wrap-around unsealed
+offset=-0.4
+segmentCount=4
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
+
+CASE: RED: multiple tiny degenerate arcs break closure
+offset=-0.4
+segmentCount=6
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->4]=0.000000000000 (join_ok=true)
+  gap[4->5]=0.000000000000 (join_ok=true)
+  gap[5->0]=0.000000000000 (join_ok=true)
+
+CASE: RED: arc near end position degenerates creating wrap-around gap
+offset=-0.6
+segmentCount=4
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
+
+CASE: RED: minimal closed contour with degenerate has unsealed wrap-around
+offset=-0.3
+segmentCount=6
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->4]=0.000000000000 (join_ok=true)
+  gap[4->5]=0.000000000000 (join_ok=true)
+  gap[5->0]=0.000000000000 (join_ok=true)
+
+CASE: should mark all bridge segments with isBridge: true
+offset=-0.3
+segmentCount=6
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->4]=0.000000000000 (join_ok=true)
+  gap[4->5]=0.000000000000 (join_ok=true)
+  gap[5->0]=0.000000000000 (join_ok=true)
+
+CASE: Edge Case 1: All segments degenerate → empty output, no crash
+offset=-1
+segmentCount=0
+  no cyclic pair checks (segmentCount < 2)
+
+CASE: Edge Case 2: Single survivor → cyclic check skipped gracefully
+offset=-1.5
+segmentCount=3
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->0]=0.000000000000 (join_ok=true)
+
+CASE: Edge Case 3: Two adjacent degenerates → predecessor/successor reconnected
+offset=-0.5
+segmentCount=4
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
+
+CASE: Edge Case 4: Degenerate at index 0 → cyclic handling correct
+offset=-0.5
+segmentCount=4
+  gap[0->1]=0.000000000000 (join_ok=true)
+  gap[1->2]=0.000000000000 (join_ok=true)
+  gap[2->3]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
+
+SUMMARY
+closedContoursTested=12
+maxGap=0.000000000000
+gapViolations=0
+potentialStitchMaskGaps=0

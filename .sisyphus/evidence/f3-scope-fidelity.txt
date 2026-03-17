@@ -1,0 +1,16 @@
+F3 Scope Fidelity Audit
+
+Target file: src/operations/CustomOffsetProcessor.js
+
+Allowed changes verified:
+- Bridge metadata only in applyMiterJoin: isBridge: true added on 7 bridge-return locations.
+- Second-pass extraction present via helper gapSealPass.
+- Closed-contour cyclic check present in gapSealPass.
+- Iterative stabilization loop present after second pass.
+
+Forbidden change audit:
+1) Additional export added outside approved scope:
+   - `export { joinOffsetSegments };` near end of file.
+   - This is not part of allowed second-pass block or bridge metadata insertion points.
+
+Result: REJECT (1 forbidden change detected)
