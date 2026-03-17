@@ -729,6 +729,11 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     const best = accepted.length > 0 ? accepted[0].point : null;
 
     if (best) {
+        // When either side is a degenerate arc, do not trim either endpoint and
+        // do not produce a bridge here.  The degenerate arc will be removed by
+        // sanitizeSegments; gapSealPass will re-join the real surviving neighbours
+        // cleanly without any position corruption from an early trim.
+        if (curr.degenerate || next.degenerate) return null;
         trimSegmentEnd(curr, best);
         trimSegmentStart(next, best);
         if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
@@ -745,7 +750,12 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     }
 
     // ── Phase 3: tangent-line miter (arc endpoints are fixed) ───────────────
-    const M = lineIntersection(p1, t1, p2, t2);
+    // Skip Phase 3 when either segment is a degenerate arc — the degenerate
+    // arc will be removed later, and Phase 4 (bridge) will correctly handle
+    // the gap without moving the surviving segment's endpoints.
+    const M = (!curr.degenerate && !next.degenerate)
+        ? lineIntersection(p1, t1, p2, t2)
+        : null;
     if (M) {
         const d1 = distance(p1, M), d2 = distance(p2, M);
         if (d1 <= maxMiterLen && d2 <= maxMiterLen) {
@@ -904,10 +914,15 @@ function joinOffsetSegments(offsetSegments, options, offset, closed) {
 
     const maxMiter = Math.abs(offset) * (options?.limit ?? 10);
 
+    const DEBUG_TRACE = true; // set true to trace
+
     // ── First pass: join all consecutive pairs (including degenerate arcs). ──
     // Degenerate arcs have their start/end set to the offset tangent-line
     // reference points (computed in offsetArcSegment), so applyMiterJoin
     // builds correct miter corners to/from their neighbours.
+    // Real segments are never trimmed when the other side is a degenerate arc
+    // (see applyMiterJoin Phase 1 and Phase 3 guards), so their endpoints stay
+    // correct after the degenerate arc is removed by sanitizeSegments.
     const result = [];
     const pairCount = closed ? count : count - 1;
 
@@ -916,22 +931,40 @@ function joinOffsetSegments(offsetSegments, options, offset, closed) {
         const next = segs[(i + 1) % count];
         const bridge = applyMiterJoin(curr, next, maxMiter, offset);
         result.push(curr);
-        if (bridge) result.push(...bridge);
+        if (bridge) {
+            result.push(...bridge);
+        }
     }
 
     if (!closed && count > 0) {
         result.push(segs[count - 1]);
     }
 
-    // sanitizeSegments removes degenerate arcs (radius 0).  When a degenerate
-    // arc sits between two bridge segments their endpoints no longer touch.
+    if (DEBUG_TRACE) {
+        console.log("--- After first pass ---");
+        result.forEach((s,i) => console.log(`  [${i}] ${s.type} degen=${s.degenerate} bridge=${s.isBridge} (${s.start?.x?.toFixed(3)},${s.start?.y?.toFixed(3)})→(${s.end?.x?.toFixed(3)},${s.end?.y?.toFixed(3)})`));
+    }
+
+    // sanitizeSegments removes degenerate arcs (radius 0).  Because real
+    // segments were not trimmed against degenerate arcs in the first pass,
+    // their endpoints remain at the correct pre-degeneration positions.
     const clean = sanitizeSegments(result);
+
+    if (DEBUG_TRACE) {
+        console.log("--- After sanitize ---");
+        clean.forEach((s,i) => console.log(`  [${i}] ${s.type} degen=${s.degenerate} bridge=${s.isBridge} (${s.start?.x?.toFixed(3)},${s.start?.y?.toFixed(3)})→(${s.end?.x?.toFixed(3)},${s.end?.y?.toFixed(3)})`));
+    }
 
     // ── Second pass: close gaps left by degenerate arc removal. ─────────────
     // The two bridge segments that flanked the degenerate arc now point to the
     // correct offset tangent-line positions, so intersecting their tangent rays
     // gives the true miter corner (e.g. the (3,−3) corner in the example).
     const sealed = gapSealPass(clean, closed, maxMiter, offset);
+
+    if (DEBUG_TRACE) {
+        console.log("--- After gapSealPass ---");
+        sealed.forEach((s,i) => console.log(`  [${i}] ${s.type} degen=${s.degenerate} bridge=${s.isBridge} (${s.start?.x?.toFixed(3)},${s.start?.y?.toFixed(3)})→(${s.end?.x?.toFixed(3)},${s.end?.y?.toFixed(3)})`));
+    }
 
     // ── Iterative stabilization: second-pass trims can create new degenerates ──
     // When gapSealPass inserts a bridge to seal a gap, the bridge itself might
