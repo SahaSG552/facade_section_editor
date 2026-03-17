@@ -556,6 +556,27 @@ function isValidStartTrim(arc, I) {
 }
 
 /**
+ * Arc-arc variant: accepts any point on the circle reachable within a full
+ * rotation from startAngle (trim OR expand). Direction sign is not checked —
+ * the arc may grow beyond its current endAngle as long as |sweep| ≤ 2π.
+ */
+function isValidEndTrimOrExpand(arc, I) {
+    const θI = Math.atan2(I.y - arc.centerY, I.x - arc.centerX);
+    const sweepToI = computeAngleDelta(arc.startAngle, θI, arc.sweepFlag ?? 1);
+    return Math.abs(sweepToI) <= 2 * Math.PI + EPSILON;
+}
+
+/**
+ * Arc-arc variant for start: accepts any point on the circle reachable within
+ * a full rotation ending at endAngle (trim OR expand).
+ */
+function isValidStartTrimOrExpand(arc, I) {
+    const θI = Math.atan2(I.y - arc.centerY, I.x - arc.centerX);
+    const sweepFromI = computeAngleDelta(θI, arc.endAngle, arc.sweepFlag ?? 1);
+    return Math.abs(sweepFromI) <= 2 * Math.PI + EPSILON;
+}
+
+/**
  * Trim the end of a segment to a new point:
  * - LINE: relocates the endpoint; marks degenerate if direction flips.
  * - ARC:  projects the point onto the arc circle, adjusts endAngle;
@@ -624,6 +645,44 @@ function trimSegmentStart(segment, point) {
 }
 
 /**
+ * Arc-arc variant of trimSegmentEnd: relocates the arc's endAngle to point I,
+ * allowing expansion (sweep may grow) as well as trimming.
+ * Marks degenerate only if the resulting sweep exceeds a full circle or is ~zero.
+ */
+function expandSegmentEnd(segment, point) {
+    if (segment.type !== "arc" || !segment.arc || segment.degenerate) return;
+    const { centerX, centerY } = segment.arc;
+    const r = segment.arc.radius || segment.arc.rx || 0;
+    const angle = Math.atan2(point.y - centerY, point.x - centerX);
+    segment.arc.endAngle = angle;
+    segment.end = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
+    const newSweep = computeAngleDelta(segment.arc.startAngle, angle, segment.arc.sweepFlag ?? 1);
+    segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
+    if (Math.abs(newSweep) < EPSILON || Math.abs(newSweep) > 2 * Math.PI + EPSILON) {
+        segment.degenerate = true;
+    }
+}
+
+/**
+ * Arc-arc variant of trimSegmentStart: relocates the arc's startAngle to point I,
+ * allowing expansion (sweep may grow) as well as trimming.
+ * Marks degenerate only if the resulting sweep exceeds a full circle or is ~zero.
+ */
+function expandSegmentStart(segment, point) {
+    if (segment.type !== "arc" || !segment.arc || segment.degenerate) return;
+    const { centerX, centerY } = segment.arc;
+    const r = segment.arc.radius || segment.arc.rx || 0;
+    const angle = Math.atan2(point.y - centerY, point.x - centerX);
+    segment.arc.startAngle = angle;
+    segment.start = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
+    const newSweep = computeAngleDelta(angle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
+    segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
+    if (Math.abs(newSweep) < EPSILON || Math.abs(newSweep) > 2 * Math.PI + EPSILON) {
+        segment.degenerate = true;
+    }
+}
+
+/**
  * Apply join between curr (end) and next (start).
  *
  * Phase 1 — Geometric intersection (circle–line, circle–circle, line–line):
@@ -686,22 +745,30 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     /**
      * Deterministic candidate ranking for geometric-intersection phase.
      *
-     * Acceptance guards are applied first (movement limits + no arc-sweep expansion
-     * via isValidEndTrim/isValidStartTrim). Ranking is then a strict total order:
-     *   (d1+d2, max(d1,d2), |d1-d2|, qx, qy, id)
+     * For arc-arc: candidates are accepted if reachable within a full circle
+     * rotation (expand allowed). No maxMiterLen guard — the intersection point
+     * is on the circle by construction; distance is irrelevant here.
+     * For all other cases: standard trim-only guards + maxMiterLen apply.
      *
-     * This preserves closest-to-source behavior while making symmetric and
-     * near-equal candidate selection replay-stable regardless of enumeration order.
+     * Ranking is a strict total order:
+     *   (d1+d2, max(d1,d2), |d1-d2|, qx, qy, id)
      */
+    const bothArcs = currIsArc && nextIsArc;
     const rankScale = 1e9;
     const rankIdScale = 1e12;
     const accepted = [];
     for (const I of candidates) {
         const d1 = distance(p1, I), d2 = distance(p2, I);
-        if (d1 > maxMiterLen || d2 > maxMiterLen) continue;
-        // Accept arc candidate only if it trims (shortens) the arc, never extends it.
-        if (currIsArc && !isValidEndTrim(curr.arc, I))   continue;
-        if (nextIsArc && !isValidStartTrim(next.arc, I)) continue;
+        if (bothArcs) {
+            // Arc-arc: allow expansion up to a full circle — no distance limit.
+            if (currIsArc && !isValidEndTrimOrExpand(curr.arc, I))   continue;
+            if (nextIsArc && !isValidStartTrimOrExpand(next.arc, I)) continue;
+        } else {
+            if (d1 > maxMiterLen || d2 > maxMiterLen) continue;
+            // Accept arc candidate only if it trims (shortens) the arc, never extends it.
+            if (currIsArc && !isValidEndTrim(curr.arc, I))   continue;
+            if (nextIsArc && !isValidStartTrim(next.arc, I)) continue;
+        }
 
         const qx = Math.round(I.x * rankScale) / rankScale;
         const qy = Math.round(I.y * rankScale) / rankScale;
@@ -734,18 +801,36 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
         // sanitizeSegments; gapSealPass will re-join the real surviving neighbours
         // cleanly without any position corruption from an early trim.
         if (curr.degenerate || next.degenerate) return null;
-        trimSegmentEnd(curr, best);
-        trimSegmentStart(next, best);
+        if (bothArcs) {
+            // Arc-arc: use expand-aware adjustment (allows growing the arc sweep).
+            expandSegmentEnd(curr, best);
+            expandSegmentStart(next, best);
+        } else {
+            trimSegmentEnd(curr, best);
+            trimSegmentStart(next, best);
+        }
         if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
             return [{ type: "line", start: clonePoint(curr.end), end: clonePoint(next.start), isBridge: true }];
         }
         return null;
     }
 
-    // Arc-arc fallback for non-intersecting micro-gaps: close only by bridge,
-    // never by extending arc trims or moving arc centers.
-    if (currIsArc && nextIsArc && endpointGap <= JOIN_TOLERANCE) {
+    // ── Phase 2: Arc-arc tangential bridge ──────────────────────────────────
+    // Circles do not intersect (or intersection was outside full-circle range).
+    // Build an equal-distance tangential bridge: extend each arc by |offset|
+    // along its outward tangent, then connect the two extended points.
+    if (bothArcs) {
         if (endpointGap <= EPSILON) return null;
+        if (offset !== undefined && Math.abs(offset) > EPSILON && dot(t1, t2) < 0) {
+            const ext = Math.abs(offset);
+            const ep1 = { x: p1.x + ext * t1.x, y: p1.y + ext * t1.y };
+            const ep2 = { x: p2.x - ext * t2.x, y: p2.y - ext * t2.y };
+            const bridges = [];
+            if (!isNear(p1,  ep1, EPSILON)) bridges.push({ type: "line", start: clonePoint(p1),  end: clonePoint(ep1), isBridge: true });
+            if (!isNear(ep1, ep2, EPSILON)) bridges.push({ type: "line", start: clonePoint(ep1), end: clonePoint(ep2), isBridge: true });
+            if (!isNear(ep2, p2,  EPSILON)) bridges.push({ type: "line", start: clonePoint(ep2), end: clonePoint(p2),  isBridge: true });
+            if (bridges.length) return bridges;
+        }
         return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2), isBridge: true }];
     }
 

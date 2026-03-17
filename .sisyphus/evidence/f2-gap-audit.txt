@@ -12,15 +12,11 @@ segmentCount=4
 
 CASE: RED: tiny arc degeneration breaks last↔first connection
 offset=-0.6
-segmentCount=8
+segmentCount=4
   gap[0->1]=0.000000000000 (join_ok=true)
   gap[1->2]=0.000000000000 (join_ok=true)
   gap[2->3]=0.000000000000 (join_ok=true)
-  gap[3->4]=0.000000000000 (join_ok=true)
-  gap[4->5]=0.000000000000 (join_ok=true)
-  gap[5->6]=0.000000000000 (join_ok=true)
-  gap[6->7]=0.000000000000 (join_ok=true)
-  gap[7->0]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
 
 CASE: RED: arc at end position degenerates leaving wrap-around gap
 offset=-0.5
@@ -50,15 +46,11 @@ segmentCount=6
 
 CASE: RED: arc near end position degenerates creating wrap-around gap
 offset=-0.6
-segmentCount=8
+segmentCount=4
   gap[0->1]=0.000000000000 (join_ok=true)
   gap[1->2]=0.000000000000 (join_ok=true)
   gap[2->3]=0.000000000000 (join_ok=true)
-  gap[3->4]=0.000000000000 (join_ok=true)
-  gap[4->5]=0.000000000000 (join_ok=true)
-  gap[5->6]=0.000000000000 (join_ok=true)
-  gap[6->7]=0.000000000000 (join_ok=true)
-  gap[7->0]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
 
 CASE: RED: minimal closed contour with degenerate has unsealed wrap-around
 offset=-0.3
@@ -82,10 +74,8 @@ segmentCount=6
 
 CASE: Edge Case 1: All segments degenerate → empty output, no crash
 offset=-1
-segmentCount=3
-  gap[0->1]=0.000000000000 (join_ok=true)
-  gap[1->2]=0.000000000000 (join_ok=true)
-  gap[2->0]=0.000000000000 (join_ok=true)
+segmentCount=0
+  no cyclic pair checks (segmentCount < 2)
 
 CASE: Edge Case 2: Single survivor → cyclic check skipped gracefully
 offset=-1.5
@@ -96,13 +86,11 @@ segmentCount=3
 
 CASE: Edge Case 3: Two adjacent degenerates → predecessor/successor reconnected
 offset=-0.5
-segmentCount=6
+segmentCount=4
   gap[0->1]=0.000000000000 (join_ok=true)
   gap[1->2]=0.000000000000 (join_ok=true)
   gap[2->3]=0.000000000000 (join_ok=true)
-  gap[3->4]=0.000000000000 (join_ok=true)
-  gap[4->5]=0.000000000000 (join_ok=true)
-  gap[5->0]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
 
 CASE: Edge Case 4: Degenerate at index 0 → cyclic handling correct
 offset=-0.5
