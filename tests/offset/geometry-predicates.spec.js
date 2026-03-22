@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { orientation2d, onSegment, lineSegmentsIntersect, EPSILON } from "../../src/utils/geometry-predicates.js";
+import { orientation2d, orient2d, onSegment, lineSegmentsIntersect, EPSILON } from "../../src/utils/geometry-predicates.js";
 
 /**
  * Geometry Predicates Tests
@@ -267,6 +267,113 @@ describe("geometry-predicates", () => {
             expect(o2).toBeGreaterThan(0);
             expect(o3).toBeGreaterThan(0);
             expect(o4).toBeGreaterThan(0);
+        });
+    });
+
+    describe("orient2d vs orientation2d equivalence", () => {
+        it("should give same sign for CCW turn", () => {
+            const a = { x: 0, y: 0 };
+            const b = { x: 1, y: 0 };
+            const c = { x: 0, y: 1 };
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            expect(oldResult).toBeGreaterThan(0);
+            expect(newResult).toBeGreaterThan(0);
+        });
+
+        it("should give same sign for CW turn", () => {
+            const a = { x: 0, y: 0 };
+            const b = { x: 1, y: 0 };
+            const c = { x: 0, y: -1 };
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            expect(oldResult).toBeLessThan(0);
+            expect(newResult).toBeLessThan(0);
+        });
+
+        it("should give zero (or near-zero) for collinear points", () => {
+            const a = { x: 0, y: 0 };
+            const b = { x: 1, y: 0 };
+            const c = { x: 2, y: 0 };
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            expect(Math.abs(oldResult)).toBeLessThan(EPSILON);
+            expect(Math.abs(newResult)).toBe(0); // robust-predicates returns exact zero for collinear
+        });
+
+        it("should give same sign for diagonal line test", () => {
+            const a = { x: 0, y: 0 };
+            const b = { x: 1, y: 1 };
+            const c = { x: 0, y: 1 };
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            expect(oldResult).toBeGreaterThan(0);
+            expect(newResult).toBeGreaterThan(0);
+        });
+
+        it("should give same sign for vertical line test", () => {
+            const a = { x: 0, y: 0 };
+            const b = { x: 0, y: 1 };
+            const c = { x: 1, y: 0.5 };
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            expect(oldResult).toBeLessThan(0);
+            expect(newResult).toBeLessThan(0);
+        });
+
+        it("should handle large coordinate values consistently", () => {
+            const a = { x: 1000000, y: 2000000 };
+            const b = { x: 1000001, y: 2000000 };
+            const c = { x: 1000000, y: 2000001 };
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            // Both should detect CCW
+            expect(oldResult).toBeGreaterThan(0);
+            expect(newResult).toBeGreaterThan(0);
+        });
+
+        it("should handle small differences consistently", () => {
+            const a = { x: 0, y: 0 };
+            const b = { x: 0.0001, y: 0 };
+            const c = { x: 0, y: 0.0001 };
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            // Both should detect CCW
+            expect(oldResult).toBeGreaterThan(0);
+            expect(newResult).toBeGreaterThan(0);
+        });
+
+        it("should handle nearly collinear points (within EPSILON)", () => {
+            const a = { x: 0, y: 0 };
+            const b = { x: 10, y: 0 };
+            const c = { x: 5, y: 0.0000001 }; // Nearly collinear, tiny deviation
+            
+            const oldResult = orientation2d(a, b, c);
+            const newResult = orient2d(a, b, c);
+            
+            // Old may round to ~0, robust should give exact answer
+            // Both should at least agree on sign (positive for above line)
+            if (Math.abs(oldResult) > EPSILON) {
+                expect(oldResult).toBeGreaterThan(0);
+                expect(newResult).toBeGreaterThan(0);
+            } else {
+                // If old result is ~0, robust might still detect the tiny deviation
+                expect(newResult).toBeGreaterThanOrEqual(0);
+            }
         });
     });
 });

@@ -5,6 +5,8 @@
  * and line segment intersection detection.
  */
 
+import { orient2d as robustOrient2d } from 'robust-predicates';
+
 /**
  * EPSILON (1e-6): Geometric validity checks
  * - Guards against floating-point precision limits
@@ -22,6 +24,25 @@ export const EPSILON = 1e-6;
  */
 export function orientation2d(a, b, c) {
     return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+/**
+ * Robust orientation test using robust-predicates library.
+ * Determines if point c is to the left (CCW), right (CW), or collinear with line ab.
+ * 
+ * Uses exact arithmetic to avoid floating-point precision errors that can cause
+ * incorrect orientation determination in degenerate cases.
+ * 
+ * Note: robust-predicates uses opposite sign convention, so we negate the result
+ * to match our orientation2d convention (positive = CCW, negative = CW).
+ * 
+ * @param {Object} a - First point of line segment {x, y}
+ * @param {Object} b - Second point of line segment {x, y}
+ * @param {Object} c - Test point {x, y}
+ * @returns {number} - Positive (CCW), negative (CW), or zero (collinear)
+ */
+export function orient2d(a, b, c) {
+    return -robustOrient2d(a.x, a.y, b.x, b.y, c.x, c.y);
 }
 
 /**
