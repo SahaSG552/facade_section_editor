@@ -1,0 +1,58 @@
+
+> facade_section_editor@1.0.0 test
+> vitest run
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/Работа/Programming/JavaScript/Projects/facade_section_editor[39m
+
+[90mstdout[2m | tests/offset/contour13-arc-degenerate.spec.js[2m > [22m[2mContour arc degeneration at offset=7[2m > [22m[2mproduces exactly 2 line segments when arc degenerates
+[22m[39m--- After first pass ---
+  [0] line degen=undefined bridge=undefined (-6.261,6.870)→(-3.261,0.870)
+  [1] arc degen=true bridge=undefined (-3.596,1.655)→(0.404,6.988)
+  [2] line degen=undefined bridge=true (0.404,6.988)→(-6.584,7.393)
+  [3] line degen=undefined bridge=true (-6.584,7.393)→(-7.000,-7.000)
+  [4] line degen=undefined bridge=true (-7.000,-7.000)→(0.000,-7.000)
+  [5] line degen=undefined bridge=undefined (0.000,-7.000)→(10.000,-7.000)
+--- After sanitize ---
+  [0] line degen=undefined bridge=undefined (-6.261,6.870)→(-3.261,0.870)
+  [1] line degen=undefined bridge=true (0.404,6.988)→(-6.584,7.393)
+  [2] line degen=undefined bridge=true (-6.584,7.393)→(-7.000,-7.000)
+  [3] line degen=undefined bridge=true (-7.000,-7.000)→(0.000,-7.000)
+  [4] line degen=undefined bridge=undefined (0.000,-7.000)→(10.000,-7.000)
+--- After gapSealPass ---
+  [0] line degen=true bridge=undefined (-6.261,6.870)→(-6.521,7.389)
+  [1] line degen=undefined bridge=true (-6.521,7.389)→(-6.584,7.393)
+  [2] line degen=undefined bridge=true (-6.584,7.393)→(-7.000,-7.000)
+  [3] line degen=undefined bridge=true (-7.000,-7.000)→(0.000,-7.000)
+  [4] line degen=undefined bridge=undefined (0.000,-7.000)→(10.000,-7.000)
+
+ [31m❯[39m tests/offset/contour13-arc-degenerate.spec.js [2m([22m[2m2 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 12[2mms[22m[39m
+[31m     [31m×[31m produces exactly 2 line segments when arc degenerates[39m[32m 10[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m tests/offset/contour13-arc-degenerate.spec.js[2m > [22mContour arc degeneration at offset=7[2m > [22mproduces exactly 2 line segments when arc degenerates
+[31m[1mAssertionError[22m: expected 4 to be 2 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 2[39m
+[31m+ 4[39m
+
+[36m [2m❯[22m tests/offset/contour13-arc-degenerate.spec.js:[2m40:29[22m[39m
+    [90m 38|[39m
+    [90m 39|[39m         [90m// Exactly 2 line segments[39m
+    [90m 40|[39m         [34mexpect[39m(segs[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m   |[39m                             [31m^[39m
+    [90m 41|[39m     })[33m;[39m
+    [90m 42|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m13 passed[39m[22m[90m (14)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m94 passed[39m[22m[90m (95)[39m
+[2m   Start at [22m 14:46:25
+[2m   Duration [22m 1.10s[2m (transform 941ms, setup 258ms, import 2.07s, tests 213ms, environment 7.17s)[22m
+
