@@ -8,6 +8,7 @@ import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { approximatePath, segmentsToSVGPath } from "../utils/arcApproximation.js";
 import { getPathOrientation } from "../utils/fillet.js";
 import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
+import { orient2d } from "../utils/geometry-predicates.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 
@@ -253,10 +254,6 @@ function shouldAcceptTrimmedPath(originalPath, trimmedPath) {
     return true;
 }
 
-function orientation2d(a, b, c) {
-    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-}
-
 function onSegment(a, b, p) {
     return p.x <= Math.max(a.x, b.x) + EPSILON
         && p.x + EPSILON >= Math.min(a.x, b.x)
@@ -265,10 +262,10 @@ function onSegment(a, b, p) {
 }
 
 function lineSegmentsIntersect(a1, a2, b1, b2) {
-    const o1 = orientation2d(a1, a2, b1);
-    const o2 = orientation2d(a1, a2, b2);
-    const o3 = orientation2d(b1, b2, a1);
-    const o4 = orientation2d(b1, b2, a2);
+    const o1 = orient2d(a1, a2, b1);
+    const o2 = orient2d(a1, a2, b2);
+    const o3 = orient2d(b1, b2, a1);
+    const o4 = orient2d(b1, b2, a2);
 
     if ((o1 > EPSILON && o2 < -EPSILON || o1 < -EPSILON && o2 > EPSILON)
         && (o3 > EPSILON && o4 < -EPSILON || o3 < -EPSILON && o4 > EPSILON)) {
