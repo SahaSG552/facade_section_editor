@@ -1204,31 +1204,42 @@ export default class OffsetTool extends BaseTool {
                 if (primary && mirrored && absDist > 1e-9) {
                     const expectedSign = dist >= 0 ? 1 : -1;
                     const refP = this._refPoint;
-                    
+
                     const getSideScore = (candidate) => {
-                        if (!candidate?.segments || candidate.segments.length === 0) return -Infinity;
-                        // Find the point on the candidate segments that is projectively closest to _refPoint
-                        // or just the endpoint closest to it.
-                        let bestDot = -Infinity;
+                        if (!candidate || !refP) return -Infinity;
+
+                        // Closed contours are robustly oriented by centroid.
+                        // Open contours can cross the centroid side near degeneracy,
+                        // so they must use nearest-point scoring for stability.
+                        if (entry.closed && candidate.centerWorld) {
+                            const vdx = num(candidate.centerWorld.x) - refP.x;
+                            const vdy = num(candidate.centerWorld.y) - refP.y;
+                            return (vdx * refN.x + vdy * refN.y) * expectedSign;
+                        }
+
+                        // Fallback: use closest transformed endpoint if center is unavailable.
+                        if (!candidate.segments || candidate.segments.length === 0) return -Infinity;
                         let minD2 = Infinity;
                         let foundPoint = null;
-                        
+
                         for (const s of candidate.segments) {
                             for (const p of [s.data?.start, s.data?.end]) {
                                 if (!p) continue;
-                                // Convert to world if needed, but segments in candidate are already transformed?
-                                // Actually OffsetTool uses transformed points in centerWorld.
-                                // Let's check candidate points relative to refPoint.
-                                const dx = num(p.x) - refP.x;
-                                const dy = num(p.y) - refP.y;
+                                const wp = pointWithTransforms(
+                                    p,
+                                    Array.isArray(entry.transforms) ? entry.transforms : [],
+                                    vars,
+                                );
+                                const dx = num(wp.x) - refP.x;
+                                const dy = num(wp.y) - refP.y;
                                 const d2 = dx * dx + dy * dy;
                                 if (d2 < minD2) {
                                     minD2 = d2;
-                                    foundPoint = p;
+                                    foundPoint = wp;
                                 }
                             }
                         }
-                        
+
                         if (!foundPoint) return -Infinity;
                         const vdx = num(foundPoint.x) - refP.x;
                         const vdy = num(foundPoint.y) - refP.y;
@@ -1237,7 +1248,9 @@ export default class OffsetTool extends BaseTool {
 
                     const pScore = getSideScore(primary);
                     const mScore = getSideScore(mirrored);
-                    picked = mScore > pScore ? mirrored : primary;
+                    // Keep primary on ties/near-ties to prevent sign flapping at degeneracy boundary.
+                    const SCORE_EPS = 1e-9;
+                    picked = mScore > pScore + SCORE_EPS ? mirrored : primary;
                 }
 
                 if (picked) {
