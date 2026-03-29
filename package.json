@@ -34,6 +34,7 @@
   },
   "homepage": "https://github.com/SahaSG552/facade_section_editor#readme",
   "dependencies": {
+    "clipper2-lib-js": "^0.0.6",
     "earcut": "^3.0.2",
     "jsdom": "^27.3.0",
     "manifold-3d": "^3.3.2",

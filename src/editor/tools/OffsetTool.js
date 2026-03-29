@@ -4,6 +4,7 @@ import { app } from "../../app/main.js";
 import { ARC_APPROX_TOLERANCE } from "../../config/constants.js";
 import { buildOffsetDistanceSeries } from "../../utils/offsetSeries.js";
 import { calculateOffsetFromPathData } from "../../operations/CustomOffsetProcessor.js";
+import { calculateClipperOffsetFromPathData } from "../../operations/ClipperOffsetProcessor.js";
 import { arcCenterFromEndpoints, arcFlagsViaPoint } from "./ArcTool.js";
 import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 import { getRectGeomLocal, getRectClampedRx } from "../geometry/rectGeometry.js";
@@ -358,13 +359,14 @@ function segmentsCenter(segments) {
  * @param {Object} [vars={}]   - Variable values for transform evaluation.
  * @returns {{ pathData: string, allowClose: boolean, segments: Array, centerWorld: {x,y}|null } | null}
  */
-function buildOffsetCandidate(entry, offsetDist, exportModule, vars = {}) {
+function buildOffsetCandidate(entry, offsetDist, exportModule, vars = {}, offsetCalculator = calculateOffsetFromPathData) {
     const allowClose = !!entry.closed;
     const useArcApproximation = /[CcSsQqTt]/.test(entry.pathData);
-    const path = calculateOffsetFromPathData(entry.pathData, offsetDist, {
+    const path = offsetCalculator(entry.pathData, offsetDist, {
+        offsetSignMode: "direct",
         useArcApproximation,
         arcTolerance: ARC_APPROX_TOLERANCE,
-        exportModule,
+            exportModule,
         trimSelfIntersections: allowClose,
         forceReverseOutput: false,
     });
@@ -610,6 +612,11 @@ export default class OffsetTool extends BaseTool {
         super();
         this.id = mode;
         this._modeType = mode;
+        const isClipper = mode.startsWith("clipperOffset");
+        this._offsetCalculator = isClipper
+            ? calculateClipperOffsetFromPathData
+            : calculateOffsetFromPathData;
+        this._offsetDirection = isClipper ? 1 : -1;
         this._phase = "selecting"; // selecting | pickReference | dynamic | confirming
         this._downClient = null;
         this._downSvgPos = null;
@@ -1176,7 +1183,6 @@ export default class OffsetTool extends BaseTool {
         const distances = buildOffsetDistanceSeries(parsed.distance, parsed.count);
         this._previewPaths = [];
         const vars = this.ctx.state?.variableValues ?? {};
-        const refN = normalizeVec(this._refNormal ?? { x: 1, y: 0 });
 
         for (const entry of this._sourceEntries) {
             for (const dist of distances) {
@@ -1194,73 +1200,22 @@ export default class OffsetTool extends BaseTool {
                     continue;
                 }
 
-                const absDist = Math.abs(dist);
-                const primary = buildOffsetCandidate(entry, dist, this._exportModule, vars);
-                const mirrored = absDist > 1e-9
-                    ? buildOffsetCandidate(entry, -dist, this._exportModule, vars)
-                    : null;
+                const candidate = buildOffsetCandidate(
+                    entry,
+                    dist * this._offsetDirection,
+                    this._exportModule,
+                    vars,
+                    this._offsetCalculator,
+                );
 
-                let picked = primary;
-                if (primary && mirrored && absDist > 1e-9) {
-                    const expectedSign = dist >= 0 ? 1 : -1;
-                    const refP = this._refPoint;
-
-                    const getSideScore = (candidate) => {
-                        if (!candidate || !refP) return -Infinity;
-
-                        // Closed contours are robustly oriented by centroid.
-                        // Open contours can cross the centroid side near degeneracy,
-                        // so they must use nearest-point scoring for stability.
-                        if (entry.closed && candidate.centerWorld) {
-                            const vdx = num(candidate.centerWorld.x) - refP.x;
-                            const vdy = num(candidate.centerWorld.y) - refP.y;
-                            return (vdx * refN.x + vdy * refN.y) * expectedSign;
-                        }
-
-                        // Fallback: use closest transformed endpoint if center is unavailable.
-                        if (!candidate.segments || candidate.segments.length === 0) return -Infinity;
-                        let minD2 = Infinity;
-                        let foundPoint = null;
-
-                        for (const s of candidate.segments) {
-                            for (const p of [s.data?.start, s.data?.end]) {
-                                if (!p) continue;
-                                const wp = pointWithTransforms(
-                                    p,
-                                    Array.isArray(entry.transforms) ? entry.transforms : [],
-                                    vars,
-                                );
-                                const dx = num(wp.x) - refP.x;
-                                const dy = num(wp.y) - refP.y;
-                                const d2 = dx * dx + dy * dy;
-                                if (d2 < minD2) {
-                                    minD2 = d2;
-                                    foundPoint = wp;
-                                }
-                            }
-                        }
-
-                        if (!foundPoint) return -Infinity;
-                        const vdx = num(foundPoint.x) - refP.x;
-                        const vdy = num(foundPoint.y) - refP.y;
-                        return (vdx * refN.x + vdy * refN.y) * expectedSign;
-                    };
-
-                    const pScore = getSideScore(primary);
-                    const mScore = getSideScore(mirrored);
-                    // Keep primary on ties/near-ties to prevent sign flapping at degeneracy boundary.
-                    const SCORE_EPS = 1e-9;
-                    picked = mScore > pScore + SCORE_EPS ? mirrored : primary;
-                }
-
-                if (picked) {
+                if (candidate) {
                     this._previewPaths.push({
                         sourceId: entry.sourceId,
                         distance: dist,
-                        pathData: picked.pathData,
-                        editorPathData: segmentsToEditorPathData(picked.segments, picked.allowClose),
-                        allowClose: picked.allowClose,
-                        segments: picked.segments,
+                        pathData: candidate.pathData,
+                        editorPathData: segmentsToEditorPathData(candidate.segments, candidate.allowClose),
+                        allowClose: candidate.allowClose,
+                        segments: candidate.segments,
                         entryKind: "contour",
                         transforms: Array.isArray(entry.transforms) ? entry.transforms : [],
                     });
@@ -1433,7 +1388,10 @@ export default class OffsetTool extends BaseTool {
         if (appended.length > 0 || appendedShapes.length > 0) {
             state.segments = [...state.segments, ...appended, ...appendedShapes];
             state._syncSymmetryContours();
-            state._pushHistory(this._modeType === "offsetMultiple" ? "Offset multiple" : "Offset");
+            const isClipper = this._modeType.startsWith("clipperOffset");
+            const isMultiple = this._modeType.endsWith("Multiple");
+            const base = isClipper ? "Clipper offset" : "Offset";
+            state._pushHistory(isMultiple ? `${base} multiple` : base);
             state._notifySegments();
             state.setSelection([...appended.map((s) => s.id), ...appendedShapes.map((s) => s.id)]);
             log.debug(`Offset commit: added ${appended.length} path segments and ${appendedShapes.length} shapes`);

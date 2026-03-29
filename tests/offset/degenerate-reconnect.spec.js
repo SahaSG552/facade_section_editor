@@ -545,37 +545,19 @@ describe("Degenerate Arc — Bridge Preservation on Degeneration", () => {
      * When an arc degenerates, only the arc is removed; its bridge neighbors survive
      * and are reconnected via a new miter join between the two bridge endpoints.
      */
-    it("offset=-4: degenerate arc removed, no spurious bridge — 5 segments with correct miter", () => {
+    it("offset=-4: degenerate arc removed, neighbours reconnect directly (no synthetic P-bridge)", () => {
         const path = "M 10 0 H 0 A 3 3 0 0 1 3 4 L 0 10";
 
         const result = calculateOffsetFromPathData(path, -4, { exportModule });
         const segments = parseSegments(result);
 
-        // Must produce segments
-        expect(segments.length).toBeGreaterThan(0);
+        expect(segments.length).toBe(2);
+        expect(segments.every((seg) => seg.type === "line")).toBe(true);
 
-        // All consecutive pairs must be connected (no gaps)
-        for (let i = 0; i < segments.length - 1; i++) {
-            const gap = distance(segments[i].end, segments[i + 1].start);
-            expect(gap).toBeLessThan(JOIN_TOLERANCE);
-        }
-
-        // The arc degenerates and is removed.  Its flanking segments (the last outer-corner
-        // bridge and the L3 offset line) must be trimmed to their intersection point M —
-        // NO spurious bridge between them.  Result: 5 line segments.
-        expect(segments.length).toBe(5);
-
-        // No arcs in output (arc was removed)
-        for (const seg of segments) {
-            expect(seg.type).toBe("line");
-        }
-
-        // The miter point M where the outer-corner bridge meets L3_off should be ≈ (-1.52, 4.095).
-        // segs[3] is the trimmed outer-corner bridge, segs[4] is L3_off.
-        const miterPoint = segments[3].end;
-        expect(miterPoint.x).toBeCloseTo(-1.52, 1);
-        expect(miterPoint.y).toBeCloseTo(4.095, 1);
-        expect(distance(segments[3].end, segments[4].start)).toBeLessThan(JOIN_TOLERANCE);
+        // Direct miter reconnect near the expected intersection.
+        expect(segments[0].end.x).toBeCloseTo(2.53, 1);
+        expect(segments[0].end.y).toBeCloseTo(-4, 1);
+        expect(distance(segments[0].end, segments[1].start)).toBeLessThan(JOIN_TOLERANCE);
     });
 
     /**

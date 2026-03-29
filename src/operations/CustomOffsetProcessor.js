@@ -1,4 +1,4 @@
-﻿/**
+/**
  * CustomOffsetProcessor - custom SVG offset with line/arc/bezier output.
  * Provides a compatible API with PaperOffsetProcessor while allowing extensions.
  */
@@ -8,6 +8,32 @@ import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { approximatePath, segmentsToSVGPath } from "../utils/arcApproximation.js";
 import { getPathOrientation } from "../utils/fillet.js";
 import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
+import {
+    stitchSegments,
+    quantizeSegments,
+    joinOffsetSegments,
+    reverseSegments,
+    normalizeArcAngles,
+} from "./offset/OffsetContourStages.js";
+import { computePrimitiveOffsets } from "./offset/OffsetPrimitiveKernel.js";
+import { normalizeInputContours } from "./offset/OffsetNormalizationStage.js";
+import { applyHybridFallbackStage } from "./offset/OffsetFallbackStage.js";
+import {
+    buildContourResultFromSegments,
+    finalizeContourCollection,
+} from "./offset/OffsetContourMetadataStage.js";
+import {
+    signedArea,
+    samplePathPoints,
+    shouldAcceptTrimmedPath,
+} from "./offset/OffsetTrimAcceptanceStage.js";
+import { pathHasSelfIntersections } from "./offset/OffsetSelfIntersectionStage.js";
+import {
+    createContourMetadataStageDeps,
+    createContourResultBuilder,
+    createSelfIntersectionStageDeps,
+    createFallbackStageDeps,
+} from "./offset/OffsetStageDepsFactory.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 
@@ -46,7 +72,28 @@ const STITCH_TOLERANCE = 0.5;
  * @property {number} [outputPrecision]
  * @property {boolean} [trimSelfIntersections]
  * @property {boolean} [debugTrace]
+ * @property {"legacy-inverted"|"direct"} [offsetSignMode]
+ * @property {boolean} [enableHybridFallback]
+ * @property {boolean} [fallbackDiagnostics]
  */
+
+/**
+ * @typedef {Object} OffsetContourResult
+ * @property {string} pathData
+ * @property {Array} segments
+ * @property {boolean} closed
+ * @property {"cw"|"ccw"|"open"} orientation
+ * @property {number} signedArea
+ * @property {number} absoluteArea
+ * @property {{ minX: number, minY: number, maxX: number, maxY: number }} bbox
+ * @property {number} containmentDepth
+ * @property {boolean} fallbackApplied
+ * @property {string|null} fallbackReason
+ */
+
+function resolveOffsetDistance(offset, options = {}) {
+    return options.offsetSignMode === "direct" ? offset : -offset;
+}
 
 function distance(a, b) {
     return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
@@ -160,158 +207,6 @@ function contourToPoints(segments) {
     return points;
 }
 
-function samplePathPoints(pathData, sampleCount = 128) {
-    if (!pathData || typeof document === "undefined") return [];
-
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", pathData);
-
-    let totalLength = 0;
-    try {
-        totalLength = path.getTotalLength();
-    } catch {
-        return [];
-    }
-    if (!(totalLength > EPSILON)) return [];
-
-    const count = Math.max(32, Math.floor(sampleCount));
-    const points = [];
-    for (let i = 0; i < count; i++) {
-        const point = path.getPointAtLength((totalLength * i) / count);
-        points.push({ x: point.x, y: point.y });
-    }
-
-    const endPoint = path.getPointAtLength(totalLength);
-    points.push({ x: endPoint.x, y: endPoint.y });
-    return points;
-}
-
-function signedArea(points) {
-    if (!Array.isArray(points) || points.length < 3) return 0;
-    let area = 0;
-    const n = points.length;
-    for (let i = 0; i < n; i++) {
-        const a = points[i];
-        const b = points[(i + 1) % n];
-        area += a.x * b.y - b.x * a.y;
-    }
-    return area * 0.5;
-}
-
-function bboxArea(points) {
-    if (!Array.isArray(points) || points.length === 0) return 0;
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-    for (const p of points) {
-        if (!p) continue;
-        minX = Math.min(minX, p.x);
-        minY = Math.min(minY, p.y);
-        maxX = Math.max(maxX, p.x);
-        maxY = Math.max(maxY, p.y);
-    }
-    if (!Number.isFinite(minX)) return 0;
-    return Math.max(0, maxX - minX) * Math.max(0, maxY - minY);
-}
-
-function shouldAcceptTrimmedPath(originalPath, trimmedPath) {
-    if (!trimmedPath || !String(trimmedPath).trim()) return false;
-
-    const originalStr = String(originalPath || "");
-    const trimmedStr = String(trimmedPath || "");
-    const originalHasBezier = /[CcSsQqTt]/.test(originalStr);
-    const trimmedHasBezier = /[CcSsQqTt]/.test(trimmedStr);
-    if (!originalHasBezier && trimmedHasBezier) {
-        return false;
-    }
-
-    const originalMoveCount = (originalStr.match(/[Mm]/g) || []).length;
-    const trimmedMoveCount = (trimmedStr.match(/[Mm]/g) || []).length;
-    if (trimmedMoveCount > Math.max(1, originalMoveCount + 1)) {
-        return false;
-    }
-
-    const originalPoints = samplePathPoints(originalPath, 256);
-    const trimmedPoints = samplePathPoints(trimmedPath, 256);
-    if (trimmedPoints.length < 4) return false;
-
-    const originalAbsArea = Math.abs(signedArea(originalPoints));
-    const trimmedAbsArea = Math.abs(signedArea(trimmedPoints));
-    const originalBBoxArea = bboxArea(originalPoints);
-    const trimmedBBoxArea = bboxArea(trimmedPoints);
-
-    if (originalAbsArea > EPSILON) {
-        const areaRatio = trimmedAbsArea / originalAbsArea;
-        if (areaRatio < 0.35) return false;
-    }
-
-    if (originalBBoxArea > EPSILON) {
-        const bboxRatio = trimmedBBoxArea / originalBBoxArea;
-        if (bboxRatio < 0.35) return false;
-    }
-
-    return true;
-}
-
-/**
- * Signed orientation value for triangle (a, b, c).
- * Positive: counter-clockwise, negative: clockwise, zero: collinear.
- */
-function orientation2d(a, b, c) {
-    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-}
-
-function onSegment(a, b, p) {
-    return p.x <= Math.max(a.x, b.x) + EPSILON
-        && p.x + EPSILON >= Math.min(a.x, b.x)
-        && p.y <= Math.max(a.y, b.y) + EPSILON
-        && p.y + EPSILON >= Math.min(a.y, b.y);
-}
-
-function lineSegmentsIntersect(a1, a2, b1, b2) {
-    const o1 = orientation2d(a1, a2, b1);
-    const o2 = orientation2d(a1, a2, b2);
-    const o3 = orientation2d(b1, b2, a1);
-    const o4 = orientation2d(b1, b2, a2);
-
-    if ((o1 > EPSILON && o2 < -EPSILON || o1 < -EPSILON && o2 > EPSILON)
-        && (o3 > EPSILON && o4 < -EPSILON || o3 < -EPSILON && o4 > EPSILON)) {
-        return true;
-    }
-
-    if (Math.abs(o1) <= EPSILON && onSegment(a1, a2, b1)) return true;
-    if (Math.abs(o2) <= EPSILON && onSegment(a1, a2, b2)) return true;
-    if (Math.abs(o3) <= EPSILON && onSegment(b1, b2, a1)) return true;
-    if (Math.abs(o4) <= EPSILON && onSegment(b1, b2, a2)) return true;
-
-    return false;
-}
-
-function pathHasSelfIntersections(pathData) {
-    const points = samplePathPoints(pathData);
-    if (points.length < 5) return false;
-
-    const isClosed = isNear(points[0], points[points.length - 1], 0.01);
-    const segmentCount = points.length - 1;
-
-    for (let i = 0; i < segmentCount; i++) {
-        const a1 = points[i];
-        const a2 = points[i + 1];
-        for (let j = i + 1; j < segmentCount; j++) {
-            const shareEndpoint = Math.abs(i - j) <= 1 || (isClosed && i === 0 && j === segmentCount - 1);
-            if (shareEndpoint) continue;
-            const b1 = points[j];
-            const b2 = points[j + 1];
-            if (lineSegmentsIntersect(a1, a2, b1, b2)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
 function computeAngleDelta(startAngle, endAngle, sweepFlag) {
     let delta = endAngle - startAngle;
     if (sweepFlag === 1 && delta < 0) delta += Math.PI * 2;
@@ -367,7 +262,7 @@ function offsetBezierSegment(segment, offset) {
     };
 }
 
-function offsetArcSegment(segment, offset) {
+function offsetArcSegment(segment, offset, options = {}) {
     const arc = segment.arc;
     if (!arc || arc.centerX === undefined || arc.centerY === undefined) return null;
 
@@ -383,7 +278,10 @@ function offsetArcSegment(segment, offset) {
     const radialSign = dot(leftNormal(tangent), radial) >= 0 ? 1 : -1;
 
     const newRadius = radius + offset * radialSign;
-    if (newRadius < EPSILON) {
+    const sweepAbs = Math.abs(delta);
+    const newArcLength = newRadius * sweepAbs;
+    const branchCollapsedByDiameter = offset * radialSign > 0 && Math.abs(offset) > radius * 2 + EPSILON;
+    if (newRadius <= EPSILON || sweepAbs <= EPSILON || newArcLength <= EPSILON || branchCollapsedByDiameter) {
         // Arc degenerates.  Instead of collapsing to the center, compute the
         // "offset tangent-line" reference point for each endpoint.  This is
         // the position obtained by shifting the original arc endpoint along its
@@ -542,9 +440,18 @@ function circleCircleIntersections(cA, rA, cB, rB) {
  * (or leave unchanged) the arc. Extending is not allowed.
  */
 function isValidEndTrim(arc, I) {
+    const r = arc.radius || arc.rx || 0;
+    const startPoint = {
+        x: arc.centerX + Math.cos(arc.startAngle) * r,
+        y: arc.centerY + Math.sin(arc.startAngle) * r,
+    };
+    const endpointTolerance = Math.max(1e-4, r * 8e-4);
+    if (distance(I, startPoint) <= endpointTolerance) return true;
+
     const θI = Math.atan2(I.y - arc.centerY, I.x - arc.centerX);
+
     const origSweep = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
-    const sweepToI  = computeAngleDelta(arc.startAngle, θI,           arc.sweepFlag ?? 1);
+    const sweepToI  = computeAngleDelta(arc.startAngle, θI, arc.sweepFlag ?? 1);
     // Same direction as original sweep AND no longer than it.
     return sweepToI * origSweep > 0 && Math.abs(sweepToI) <= Math.abs(origSweep) + EPSILON;
 }
@@ -554,10 +461,50 @@ function isValidEndTrim(arc, I) {
  * (or leave unchanged) the arc. Extending is not allowed.
  */
 function isValidStartTrim(arc, I) {
+    const r = arc.radius || arc.rx || 0;
+    const endPoint = {
+        x: arc.centerX + Math.cos(arc.endAngle) * r,
+        y: arc.centerY + Math.sin(arc.endAngle) * r,
+    };
+    const endpointTolerance = Math.max(1e-4, r * 8e-4);
+    if (distance(I, endPoint) <= endpointTolerance) return true;
+
     const θI = Math.atan2(I.y - arc.centerY, I.x - arc.centerX);
-    const origSweep  = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
-    const sweepFromI = computeAngleDelta(θI,              arc.endAngle, arc.sweepFlag ?? 1);
-    return sweepFromI * origSweep > 0 && Math.abs(sweepFromI) <= Math.abs(origSweep) + EPSILON;
+
+    const origSweep = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
+    const sweepToI = computeAngleDelta(arc.startAngle, θI, arc.sweepFlag ?? 1);
+    // Point must lie on original directed arc span. New sweep is orig - sweepToI.
+    return sweepToI * origSweep > 0 && Math.abs(sweepToI) <= Math.abs(origSweep) + EPSILON;
+}
+
+function trimmedEndSweepAbs(arc, point) {
+    const r = arc.radius || arc.rx || 0;
+    const startPoint = {
+        x: arc.centerX + Math.cos(arc.startAngle) * r,
+        y: arc.centerY + Math.sin(arc.startAngle) * r,
+    };
+    const endpointTolerance = Math.max(1e-4, r * 8e-4);
+    if (distance(point, startPoint) <= endpointTolerance) return 0;
+
+    const theta = Math.atan2(point.y - arc.centerY, point.x - arc.centerX);
+
+    return Math.abs(computeAngleDelta(arc.startAngle, theta, arc.sweepFlag ?? 1));
+}
+
+function trimmedStartSweepAbs(arc, point) {
+    const r = arc.radius || arc.rx || 0;
+    const endPoint = {
+        x: arc.centerX + Math.cos(arc.endAngle) * r,
+        y: arc.centerY + Math.sin(arc.endAngle) * r,
+    };
+    const endpointTolerance = Math.max(1e-4, r * 8e-4);
+    if (distance(point, endPoint) <= endpointTolerance) return 0;
+
+    const theta = Math.atan2(point.y - arc.centerY, point.x - arc.centerX);
+
+    const origSweep = computeAngleDelta(arc.startAngle, arc.endAngle, arc.sweepFlag ?? 1);
+    const sweepToI = computeAngleDelta(arc.startAngle, theta, arc.sweepFlag ?? 1);
+    return Math.abs(origSweep - sweepToI);
 }
 
 /**
@@ -583,12 +530,21 @@ function trimSegmentEnd(segment, point) {
         const { centerX, centerY } = segment.arc;
         const r = segment.arc.radius || segment.arc.rx || 0;
         const origSweep = computeAngleDelta(segment.arc.startAngle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
+        const origSweepAbs = Math.abs(origSweep);
         const angle = Math.atan2(point.y - centerY, point.x - centerX);
+        const startPoint = {
+            x: centerX + Math.cos(segment.arc.startAngle) * r,
+            y: centerY + Math.sin(segment.arc.startAngle) * r,
+        };
+        const endpointTolerance = Math.max(1e-4, r * 8e-4);
+        const sweepToI = computeAngleDelta(segment.arc.startAngle, angle, segment.arc.sweepFlag ?? 1);
         segment.arc.endAngle = angle;
         segment.end = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
-        const newSweep = computeAngleDelta(segment.arc.startAngle, angle, segment.arc.sweepFlag ?? 1);
+        const newSweep = distance(point, startPoint) <= endpointTolerance ? 0 : sweepToI;
         segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
-        if (Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0) {
+        // Degenerate not only on zero/flip sweep, but also on sweep extension.
+        // When near-zero arcs cross the branch cut, sweep can wrap to ~2PI and "flip".
+        if (origSweepAbs <= EPSILON || Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0 || Math.abs(newSweep) > origSweepAbs + EPSILON) {
             segment.degenerate = true;
         }
     }
@@ -616,12 +572,20 @@ function trimSegmentStart(segment, point) {
         const { centerX, centerY } = segment.arc;
         const r = segment.arc.radius || segment.arc.rx || 0;
         const origSweep = computeAngleDelta(segment.arc.startAngle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
+        const origSweepAbs = Math.abs(origSweep);
+        const oldStartAngle = segment.arc.startAngle;
         const angle = Math.atan2(point.y - centerY, point.x - centerX);
+        const endPoint = {
+            x: centerX + Math.cos(segment.arc.endAngle) * r,
+            y: centerY + Math.sin(segment.arc.endAngle) * r,
+        };
+        const endpointTolerance = Math.max(1e-4, r * 8e-4);
+        const sweepToI = computeAngleDelta(oldStartAngle, angle, segment.arc.sweepFlag ?? 1);
         segment.arc.startAngle = angle;
         segment.start = { x: centerX + r * Math.cos(angle), y: centerY + r * Math.sin(angle) };
-        const newSweep = computeAngleDelta(angle, segment.arc.endAngle, segment.arc.sweepFlag ?? 1);
+        const newSweep = distance(point, endPoint) <= endpointTolerance ? 0 : origSweep - sweepToI;
         segment.arc.largeArcFlag = Math.abs(newSweep) > Math.PI ? 1 : 0;
-        if (Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0) {
+        if (origSweepAbs <= EPSILON || Math.abs(newSweep) < EPSILON || newSweep * origSweep <= 0 || Math.abs(newSweep) > origSweepAbs + EPSILON) {
             segment.degenerate = true;
         }
     }
@@ -654,6 +618,14 @@ function trimSegmentStart(segment, point) {
  * @returns {Array<Object>|null} Bridge lines to insert, or null for a clean join.
  */
 function applyMiterJoin(curr, next, maxMiterLen, offset) {
+    // When either neighbour is a degenerate arc, skip all join logic here.
+    // The degenerate arc is removed by sanitizeSegments, and gapSealPass then
+    // directly reconnects the two surviving live neighbours at their correct
+    // geometric intersection — without any intermediate П-bridge arms.
+    if (curr.degenerate || next.degenerate) {
+        return null;
+    }
+
     const p1 = curr.end,   t1 = tangentAtEnd(curr);
     const p2 = next.start, t2 = tangentAtStart(next);
 
@@ -710,11 +682,23 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
         if (currIsArc && !isValidEndTrim(curr.arc, I))   continue;
         if (nextIsArc && !isValidStartTrim(next.arc, I)) continue;
 
+        // For line-arc (or arc-line) joins, prefer candidate that leaves the
+        // smaller residual arc sweep. This prevents branch jumps near collapse.
+        let sweepScore = Number.POSITIVE_INFINITY;
+        if (currIsArc && !nextIsArc) {
+            sweepScore = trimmedEndSweepAbs(curr.arc, I);
+        } else if (!currIsArc && nextIsArc) {
+            sweepScore = trimmedStartSweepAbs(next.arc, I);
+        } else if (currIsArc && nextIsArc) {
+            sweepScore = trimmedEndSweepAbs(curr.arc, I) + trimmedStartSweepAbs(next.arc, I);
+        }
+
         const qx = Math.round(I.x * rankScale) / rankScale;
         const qy = Math.round(I.y * rankScale) / rankScale;
         const id = `${Math.round(I.x * rankIdScale)}:${Math.round(I.y * rankIdScale)}`;
         accepted.push({
             point: I,
+            sweepScore,
             primary: d1 + d2,
             secondary: Math.max(d1, d2),
             tertiary: Math.abs(d1 - d2),
@@ -725,6 +709,7 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     }
 
     accepted.sort((a, b) => {
+        if (a.sweepScore !== b.sweepScore) return a.sweepScore - b.sweepScore;
         if (a.primary !== b.primary) return a.primary - b.primary;
         if (a.secondary !== b.secondary) return a.secondary - b.secondary;
         if (a.tertiary !== b.tertiary) return a.tertiary - b.tertiary;
@@ -736,33 +721,6 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     const best = accepted.length > 0 ? accepted[0].point : null;
 
     if (best) {
-        // For degenerate-arc pairs there may be no surviving neighbours after
-        // sanitizeSegments, so preserve a stable result immediately by emitting
-        // tangential bridge lines via the miter point.
-        if (curr.degenerate && next.degenerate) {
-            const bridges = [];
-            if (!isNear(p1, best, EPSILON)) {
-                bridges.push({
-                    type: "line",
-                    start: clonePoint(p1),
-                    end: clonePoint(best),
-                    isBridge: true,
-                });
-            }
-            if (!isNear(best, p2, EPSILON)) {
-                bridges.push({
-                    type: "line",
-                    start: clonePoint(best),
-                    end: clonePoint(p2),
-                    isBridge: true,
-                });
-            }
-            return bridges.length > 0 ? bridges : null;
-        }
-
-        // For mixed (degenerate + non-degenerate), let sanitize/gap-seal reconnect
-        // the surviving real neighbours without trimming against degenerate refs.
-        if (curr.degenerate || next.degenerate) return null;
         // Always use trim (no arc expansion allowed)
         trimSegmentEnd(curr, best);
         trimSegmentStart(next, best);
@@ -800,12 +758,7 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     }
 
     // ── Phase 3: tangent-line miter (arc endpoints are fixed) ───────────────
-    // Skip Phase 3 when either segment is a degenerate arc — the degenerate
-    // arc will be removed later, and Phase 4 (bridge) will correctly handle
-    // the gap without moving the surviving segment's endpoints.
-    const M = (!curr.degenerate && !next.degenerate)
-        ? lineIntersection(p1, t1, p2, t2)
-        : null;
+    const M = lineIntersection(p1, t1, p2, t2);
     if (M) {
         const d1 = distance(p1, M), d2 = distance(p2, M);
         if (d1 <= maxMiterLen && d2 <= maxMiterLen) {
@@ -845,225 +798,12 @@ function applyMiterJoin(curr, next, maxMiterLen, offset) {
     return [{ type: "line", start: clonePoint(p1), end: clonePoint(p2), isBridge: true }];
 }
 
-function sanitizeSegments(segments) {
-    return segments.filter((segment) => {
-        if (!segment.start || !segment.end) return false;
-        // Explicitly degenerated by trimSegmentEnd/Start or applyMiterJoin.
-        if (segment.degenerate) return false;
-        if (distance(segment.start, segment.end) < EPSILON) return false;
-        // Remove any residual degenerate arc markers (radius 0)
-        if (segment.type === "arc" && segment.arc) {
-            const r = segment.arc.radius || segment.arc.rx || 0;
-            if (r <= EPSILON) return false;
-        }
-        return true;
-    });
-}
-
-
-function stitchSegments(segments, tolerance = STITCH_TOLERANCE) {
-    if (!segments || segments.length === 0) return segments;
-
-    const stitched = [cloneSegment(segments[0])];
-    for (let i = 1; i < segments.length; i++) {
-        const prev = stitched[stitched.length - 1];
-        const current = cloneSegment(segments[i]);
-
-        if (distance(prev.end, current.start) <= tolerance) {
-            // Snap current.start to prev.end to close stitching gaps.
-            current.start = clonePoint(prev.end);
-            if (current.type === "arc" && current.arc) {
-                current.arc.startAngle = Math.atan2(
-                    current.start.y - current.arc.centerY,
-                    current.start.x - current.arc.centerX
-                );
-            }
-        }
-
-        stitched.push(current);
-    }
-
-    return stitched;
-}
-
-function roundPoint(point, precision = 6) {
-    const factor = 10 ** precision;
-    return {
-        x: Math.round(point.x * factor) / factor,
-        y: Math.round(point.y * factor) / factor,
-    };
-}
-
-function quantizeSegments(segments, precision = 6) {
-    return segments.map((segment) => {
-        const quantized = {
-            ...segment,
-            start: roundPoint(segment.start, precision),
-            end: roundPoint(segment.end, precision),
-        };
-
-        if (segment.cp1) quantized.cp1 = roundPoint(segment.cp1, precision);
-        if (segment.cp2) quantized.cp2 = roundPoint(segment.cp2, precision);
-        if (segment.arc) quantized.arc = { ...segment.arc };
-
-        return quantized;
-    });
-}
-
-/**
- * gapSealPass - Second pass gap sealing after degenerate removal.
- *
- * After sanitizeSegments removes degenerate arcs, gaps appear between the
- * bridge segments that flanked the removed arc.  This function seals every
- * consecutive gap (including the closed-contour wrap-around) by calling
- * applyMiterJoin on each pair, inserting bridge lines where needed.
- *
- * Bridges are first-class contour segments — they are never discarded here.
- * When an arc degenerates its flanking bridges survive; the gap between them
- * is closed with a new miter join just like any other gap.
- *
- * @param {Array}   segments    - Clean segments (post-sanitize)
- * @param {boolean} closed      - Whether the contour is closed
- * @param {number}  maxMiterLen - Maximum miter length for joins
- * @param {number}  offset      - Offset distance (used by applyMiterJoin)
- * @returns {Array} Segments with all gaps sealed
- */
-function gapSealPass(segments, closed, maxMiterLen, offset) {
-    const sealed = [];
-
-    // Linear pass: check all consecutive pairs i → i+1
-    for (let i = 0; i < segments.length; i++) {
-        sealed.push(segments[i]);
-        if (i < segments.length - 1) {
-            const curr = segments[i];
-            const next = segments[i + 1];
-            if (!isNear(curr.end, next.start, JOIN_TOLERANCE)) {
-                const gap = applyMiterJoin(curr, next, maxMiterLen, offset);
-                if (gap) sealed.push(...gap);
-            }
-        }
-    }
-
-    // Cyclic check: for closed contours, check last↔first gap
-    if (closed && sealed.length >= 2) {
-        const last = sealed[sealed.length - 1];
-        const first = sealed[0];
-        if (!isNear(last.end, first.start, JOIN_TOLERANCE)) {
-            const gap = applyMiterJoin(last, first, maxMiterLen, offset);
-            if (gap) sealed.push(...gap);
-        }
-    }
-
-    return sealed;
-}
-
-function joinOffsetSegments(offsetSegments, options, offset, closed) {
-    const segs = offsetSegments.map(cloneSegment);
-    const count = segs.length;
-    if (count === 0) return [];
-
-    const maxMiter = Math.abs(offset) * (options?.limit ?? 10);
-
-    const debugTrace = options?.debugTrace === true;
-
-    // ── First pass: join all consecutive pairs (including degenerate arcs). ──
-    // Degenerate arcs have their start/end set to the offset tangent-line
-    // reference points (computed in offsetArcSegment), so applyMiterJoin
-    // builds correct miter corners to/from their neighbours.
-    // Real segments are never trimmed when the other side is a degenerate arc
-    // (see applyMiterJoin Phase 1 and Phase 3 guards), so their endpoints stay
-    // correct after the degenerate arc is removed by sanitizeSegments.
-    const result = [];
-    const pairCount = closed ? count : count - 1;
-
-    for (let i = 0; i < pairCount; i++) {
-        const curr = segs[i];
-        const next = segs[(i + 1) % count];
-        const bridge = applyMiterJoin(curr, next, maxMiter, offset);
-        result.push(curr);
-        if (bridge) {
-            result.push(...bridge);
-        }
-    }
-
-    if (!closed && count > 0) {
-        result.push(segs[count - 1]);
-    }
-
-    if (debugTrace) {
-        console.log("--- After first pass ---");
-        result.forEach((s,i) => console.log(`  [${i}] ${s.type} degen=${s.degenerate} bridge=${s.isBridge} (${s.start?.x?.toFixed(3)},${s.start?.y?.toFixed(3)})→(${s.end?.x?.toFixed(3)},${s.end?.y?.toFixed(3)})`));
-    }
-
-    // sanitizeSegments removes degenerate arcs (radius 0).  Because real
-    // segments were not trimmed against degenerate arcs in the first pass,
-    // their endpoints remain at the correct pre-degeneration positions.
-    const clean = sanitizeSegments(result);
-
-    if (debugTrace) {
-        console.log("--- After sanitize ---");
-        clean.forEach((s,i) => console.log(`  [${i}] ${s.type} degen=${s.degenerate} bridge=${s.isBridge} (${s.start?.x?.toFixed(3)},${s.start?.y?.toFixed(3)})→(${s.end?.x?.toFixed(3)},${s.end?.y?.toFixed(3)})`));
-    }
-
-    // ── Second pass: close gaps left by degenerate arc removal. ─────────────
-    // The two bridge segments that flanked the degenerate arc now point to the
-    // correct offset tangent-line positions, so intersecting their tangent rays
-    // gives the true miter corner (e.g. the (3,−3) corner in the example).
-    const sealed = gapSealPass(clean, closed, maxMiter, offset);
-
-    if (debugTrace) {
-        console.log("--- After gapSealPass ---");
-        sealed.forEach((s,i) => console.log(`  [${i}] ${s.type} degen=${s.degenerate} bridge=${s.isBridge} (${s.start?.x?.toFixed(3)},${s.start?.y?.toFixed(3)})→(${s.end?.x?.toFixed(3)},${s.end?.y?.toFixed(3)})`));
-    }
-
-    // ── Iterative stabilization: second-pass trims can create new degenerates ──
-    // When gapSealPass inserts a bridge to seal a gap, the bridge itself might
-    // be degenerate (chord < EPSILON) or cause adjacent segments to become
-    // degenerate. This creates cascaded degeneracy that requires another
-    // sanitize→reconnect pass.
-    //
-    // Iterative loop: sanitize → gapSealPass → check stability
-    // - Max 3 iterations to prevent infinite loops
-    // - Early exit when stable (no removals: reSanitized.length === working.length)
-    // - Log warning if max iterations reached (potential geometry issue)
-    const MAX_ITER = 3;
-    let iter = 0;
-    let working = sealed;
-    
-    while (iter < MAX_ITER) {
-        const reSanitized = sanitizeSegments(working);
-        
-        // Stability check: if no segments were removed, we're done
-        if (reSanitized.length === working.length) break;
-        
-        // Re-run gap seal pass on re-sanitized list
-        working = gapSealPass(reSanitized, closed, maxMiter, offset);
-        iter++;
-        
-        if (iter === MAX_ITER) {
-            log.warn(`Max degenerate iterations (${MAX_ITER}) reached - potential cascaded degeneracy in geometry`);
-        }
-    }
-
-     return working;
-}
-
 function offsetContour(segments, offset, options) {
-    const offsetSegments = [];
-    for (const segment of segments) {
-        let offsetSegment = null;
-        if (segment.type === "line") {
-            offsetSegment = offsetLineSegment(segment, offset);
-        } else if (segment.type === "bezier") {
-            offsetSegment = offsetBezierSegment(segment, offset);
-        } else if (segment.type === "arc") {
-            offsetSegment = offsetArcSegment(segment, offset);
-        }
-
-        if (offsetSegment) {
-            offsetSegments.push(offsetSegment);
-        }
-    }
+    const offsetSegments = computePrimitiveOffsets(segments, offset, {
+        offsetLineSegment,
+        offsetBezierSegment,
+        offsetArcSegment: (segment, dist) => offsetArcSegment(segment, dist, options),
+    });
 
     if (offsetSegments.length === 0) return [];
 
@@ -1071,96 +811,79 @@ function offsetContour(segments, offset, options) {
     const orientation = getPathOrientation(points);
     const closed = isNear(points[0], points[points.length - 1], JOIN_TOLERANCE);
 
-    const joinedSegments = joinOffsetSegments(
-        offsetSegments,
-        options,
-        offset,
-        closed
-    );
+    const joinedSegments = joinOffsetSegments(offsetSegments, options, offset, closed, {
+        cloneSegment,
+        applyMiterJoin,
+        distance,
+        EPSILON,
+        isNear,
+        joinTolerance: JOIN_TOLERANCE,
+        log,
+    });
 
     const forceReverse = options.forceReverseOutput === true;
 
     if (!closed || joinedSegments.length === 0) {
-        return forceReverse ? reverseSegments(joinedSegments) : joinedSegments;
+        return forceReverse
+            ? reverseSegments(joinedSegments, { clonePoint, computeAngleDelta })
+            : joinedSegments;
     }
 
     const offsetPoints = contourToPoints(joinedSegments);
     const offsetOrientation = getPathOrientation(offsetPoints);
     let finalSegments = joinedSegments;
     if (offsetOrientation !== orientation) {
-        finalSegments = reverseSegments(joinedSegments);
+        finalSegments = reverseSegments(joinedSegments, { clonePoint, computeAngleDelta });
     }
 
     if (forceReverse) {
-        return reverseSegments(finalSegments);
+        return reverseSegments(finalSegments, { clonePoint, computeAngleDelta });
     }
 
     return finalSegments;
 }
 
-function reverseSegments(segments) {
-    const reversed = [];
-    for (let i = segments.length - 1; i >= 0; i--) {
-        const segment = segments[i];
-        if (segment.type === "line") {
-            reversed.push({
-                type: "line",
-                start: clonePoint(segment.end),
-                end: clonePoint(segment.start),
-            });
-        } else if (segment.type === "bezier") {
-            reversed.push({
-                type: "bezier",
-                start: clonePoint(segment.end),
-                cp1: clonePoint(segment.cp2),
-                cp2: clonePoint(segment.cp1),
-                end: clonePoint(segment.start),
-            });
-        } else if (segment.type === "arc") {
-            const arc = { ...segment.arc };
-            const sweep = arc.sweepFlag ?? 1;
-            arc.sweepFlag = sweep === 1 ? 0 : 1;
-            const startAngle = arc.startAngle;
-            arc.startAngle = arc.endAngle;
-            arc.endAngle = startAngle;
-            const delta = computeAngleDelta(
-                arc.startAngle,
-                arc.endAngle,
-                arc.sweepFlag
-            );
-            arc.largeArcFlag = Math.abs(delta) > Math.PI ? 1 : 0;
+function buildOffsetContourSegments(pathData, offset, options = {}) {
+    const inputContours = normalizeInputContours(pathData, options, {
+        normalizeArcAngles,
+        splitSegmentsIntoContours,
+        log,
+    });
 
-            reversed.push({
-                type: "arc",
-                start: clonePoint(segment.end),
-                end: clonePoint(segment.start),
-                arc,
-            });
+    if (inputContours.length === 0) {
+        return [];
+    }
+
+    if (Math.abs(offset) < EPSILON) {
+        if (options.forceReverseOutput) {
+            return inputContours.map((contour) => reverseSegments(contour, { clonePoint, computeAngleDelta }));
+        }
+        return inputContours;
+    }
+
+    const offsetDistance = resolveOffsetDistance(offset, options);
+    const contours = [];
+    for (const contour of inputContours) {
+        const contourOffset = offsetContour(contour, offsetDistance, options);
+        if (contourOffset.length > 0) {
+            contours.push(contourOffset);
         }
     }
 
-    return reversed;
+    return contours;
 }
 
-function normalizeArcAngles(segment) {
-    if (segment.type !== "arc" || !segment.arc) {
-        return segment;
-    }
+function stitchAndQuantizeContourSegments(segments, options = {}) {
+    const stitchedSegments = stitchSegments(
+        segments,
+        { cloneSegment, distance, clonePoint, defaultTolerance: STITCH_TOLERANCE },
+        options.stitchTolerance || STITCH_TOLERANCE,
+    );
 
-    const arc = { ...segment.arc };
-    const start = arc.startAngle;
-    const end = arc.endAngle;
-
-    if (start !== undefined && end !== undefined) {
-        const threshold = Math.PI * 2 + 0.001;
-        if (Math.abs(start) > threshold || Math.abs(end) > threshold) {
-            const degToRad = Math.PI / 180;
-            arc.startAngle = start * degToRad;
-            arc.endAngle = end * degToRad;
-        }
-    }
-
-    return { ...segment, arc };
+    return quantizeSegments(
+        stitchedSegments,
+        options.outputPrecision || 6,
+    );
 }
 
 /**
@@ -1173,79 +896,26 @@ function normalizeArcAngles(segment) {
 export function calculateOffsetFromPathData(pathData, offset, options = {}) {
     if (!pathData) return "";
 
-    const exportModule = options.exportModule;
-    if (Math.abs(offset) < EPSILON) {
-        if (options.forceReverseOutput && exportModule?.dxfExporter?.parseSVGPathSegments) {
-            const zeroSegments = exportModule.dxfExporter.parseSVGPathSegments(
-                pathData,
-                0,
-                0,
-                (y) => y,
-                false
-            );
-            if (!zeroSegments || zeroSegments.length === 0) {
-                return pathData;
-            }
-            const normalizedZero = zeroSegments.map(normalizeArcAngles);
-            const contours = splitSegmentsIntoContours(normalizedZero);
-            const reversedContours = contours
-                .map((contour) => reverseSegments(contour))
-                .flat();
-            const stitchedSegments = stitchSegments(
-                reversedContours,
-                options.stitchTolerance || STITCH_TOLERANCE
-            );
-            const quantizedSegments = quantizeSegments(
-                stitchedSegments,
-                options.outputPrecision || 6
-            );
-            return segmentsToSVGPath(quantizedSegments);
-        }
-
+    if (Math.abs(offset) < EPSILON && !options.forceReverseOutput) {
         return pathData;
     }
-    if (!exportModule?.dxfExporter?.parseSVGPathSegments) {
-        log.warn("Custom offset requires exportModule with parseSVGPathSegments");
-        return "";
+
+    const contourSegments = buildOffsetContourSegments(pathData, offset, options);
+    if (contourSegments.length === 0) {
+        return Math.abs(offset) < EPSILON ? pathData : "";
     }
 
-    const parseSegments = exportModule.dxfExporter.parseSVGPathSegments(
-        pathData,
-        0,
-        0,
-        (y) => y,
-        false
-    );
-
-    if (!parseSegments || parseSegments.length === 0) {
-        return "";
-    }
-
-    const normalizedSegments = parseSegments.map(normalizeArcAngles);
-    const contours = splitSegmentsIntoContours(normalizedSegments);
-    const offsetDistance = -offset;
-
-    const offsetSegments = [];
-    for (const contour of contours) {
-        const contourOffset = offsetContour(contour, offsetDistance, options);
-        offsetSegments.push(...contourOffset);
-    }
-
-    if (offsetSegments.length === 0) return "";
-
-    const stitchedSegments = stitchSegments(
-        offsetSegments,
-        options.stitchTolerance || STITCH_TOLERANCE
-    );
-
-    const quantizedSegments = quantizeSegments(
-        stitchedSegments,
-        options.outputPrecision || 6
-    );
-
+    const mergedSegments = contourSegments.flat();
+    const quantizedSegments = stitchAndQuantizeContourSegments(mergedSegments, options);
     let path = segmentsToSVGPath(quantizedSegments);
 
-    if (options.trimSelfIntersections && pathHasSelfIntersections(path)) {
+    const selfIntersectionDeps = createSelfIntersectionStageDeps({
+        samplePathPoints,
+        isNear,
+        epsilon: EPSILON,
+    });
+
+    if (options.trimSelfIntersections && pathHasSelfIntersections(path, selfIntersectionDeps)) {
         const trimmed = resolveSelfIntersections(path, {
             referencePathData: pathData,
         });
@@ -1287,6 +957,70 @@ export function calculateOffsetFromSVG(svgElement, offset, options = {}) {
 }
 
 /**
+ * Calculate offset contours and return all valid contour results.
+ *
+ * This is a structured alternative to `calculateOffsetFromPathData` that
+ * preserves all resulting contours instead of exposing only a merged path string.
+ *
+ * @param {string} pathData - SVG path data
+ * @param {number} offset - Offset distance
+ * @param {CustomOffsetOptions} options - Offset options
+ * @returns {OffsetContourResult[]}
+ */
+export function calculateOffsetContoursFromPathData(pathData, offset, options = {}) {
+    const contourSegments = buildOffsetContourSegments(pathData, offset, options);
+    if (contourSegments.length === 0) {
+        return [];
+    }
+
+    const contourMetadataDeps = createContourMetadataStageDeps({
+        stitchAndQuantizeContourSegments,
+        segmentsToSVGPath,
+        isNear,
+        joinTolerance: JOIN_TOLERANCE,
+        contourToPoints,
+        clonePoint,
+        signedArea,
+    });
+
+    const buildContourResult = createContourResultBuilder(
+        buildContourResultFromSegments,
+        contourMetadataDeps,
+        options,
+    );
+
+    const selfIntersectionDeps = createSelfIntersectionStageDeps({
+        samplePathPoints,
+        isNear,
+        epsilon: EPSILON,
+    });
+
+    const fallbackStageDeps = createFallbackStageDeps({
+        pathHasSelfIntersections,
+        selfIntersectionDeps,
+        resolveSelfIntersections,
+        shouldAcceptTrimmedPath,
+        normalizeInputContours,
+        normalizeArcAngles,
+        splitSegmentsIntoContours,
+        buildContourResult,
+        epsilon: EPSILON,
+        log,
+    });
+
+    const contours = contourSegments
+        .map((contour) => buildContourResult(contour, options))
+        .filter((contour) => contour && contour.pathData)
+        .flatMap((contour) => applyHybridFallbackStage(
+            contour,
+            { referencePathData: pathData, options },
+            fallbackStageDeps,
+        ))
+
+    return finalizeContourCollection(contours, { epsilon: EPSILON });
+}
+
+/**
  * Custom offset calculator with a PaperOffset-compatible API.
  */
 export class CustomOffsetCalculator {
@@ -1305,6 +1039,16 @@ export class CustomOffsetCalculator {
      */
     calculateOffsetFromSVG(svgElement, offset) {
         return calculateOffsetFromSVG(svgElement, offset, this.options);
+    }
+
+    /**
+     * Calculate structured offset contours for SVG path data.
+     * @param {string} pathData - SVG path data
+     * @param {number} offset - Offset distance
+     * @returns {OffsetContourResult[]}
+     */
+    calculateOffsetContoursFromPathData(pathData, offset) {
+        return calculateOffsetContoursFromPathData(pathData, offset, this.options);
     }
 }
 

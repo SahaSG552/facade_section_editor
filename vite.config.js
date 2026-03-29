@@ -40,6 +40,7 @@ export default defineConfig({
         },
     },
     optimizeDeps: {
+        include: ["clipper2-lib-js"],
         exclude: ["manifold-3d"],
         esbuildOptions: {
             // Allow manifold-3d to be bundled even with Node.js imports

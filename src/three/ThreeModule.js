@@ -2432,8 +2432,9 @@ export default class ThreeModule extends BaseModule {
 
             const outerSVG = calculateOffsetFromPathData(
                 mainPathData,
-                -mainOffsetDist,
+                mainOffsetDist,
                 {
+                    offsetSignMode: "direct",
                     join: "miter",
                     cap: "butt",
                     limit: 10,
@@ -2452,8 +2453,9 @@ export default class ThreeModule extends BaseModule {
             const innerSVG = phantomPathData
                 ? calculateOffsetFromPathData(
                     phantomPathData,
-                    phantomOffsetDist,
+                                        -phantomOffsetDist,
                     {
+                                            offsetSignMode: "direct",
                       join: "miter",
                       cap: "butt",
                       limit: 10,

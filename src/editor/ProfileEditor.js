@@ -2658,6 +2658,8 @@ export default class ProfileEditor {
             case "ellipse3pt": return new EllipseTool("ellipse3pt");
             case "offset": return new OffsetTool("offset");
             case "offsetMultiple": return new OffsetTool("offsetMultiple");
+            case "clipperOffset": return new OffsetTool("clipperOffset");
+            case "clipperOffsetMultiple": return new OffsetTool("clipperOffsetMultiple");
             default:
                 log.debug("_createTool: tool not implemented:", toolId);
                 return null;

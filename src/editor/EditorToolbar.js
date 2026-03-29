@@ -43,6 +43,7 @@ const TOOL_DEFINITIONS = [
     { id: "trim", label: "Trim", icon: "✂", group: "edit", key: "t" },
     { id: "extend", label: "Extend", icon: "↔", group: "edit" },
     { id: "offset", label: "Offset (LMB) / Offset multiple (RMB)", icon: "⊙", group: "edit", key: "o", lmbTool: "offset", rmbTool: "offsetMultiple" },
+    { id: "clipperOffset", label: "Clipper Offset (LMB) / Clipper Offset multiple (RMB)", icon: "◉", group: "edit", key: "k", lmbTool: "clipperOffset", rmbTool: "clipperOffsetMultiple" },
     { id: "join", label: "Join", icon: "⊕", group: "edit", key: "j" },
     { id: "explode", label: "Explode", icon: "⊗", group: "edit" },
     { id: "close", label: "Close", icon: "⬡", group: "edit" },

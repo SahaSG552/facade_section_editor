@@ -31,4 +31,5 @@ describe("DIAGNOSTIC", () => {
         console.log("Count:", segs.length);
         segs.forEach((s, i) => console.log(`  [${i}] ${fmt(s)}`));
     });
+
 });

@@ -1752,6 +1752,7 @@ export default class ExtrusionBuilder {
 
             const basePath = String(svgPathString ?? "").trim();
             const offsetOptions = {
+                offsetSignMode: "direct",
                 join: cornerStyle === "round" ? "round" : cornerStyle,
                 cap: "butt",
                 limit: 10,
