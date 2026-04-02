@@ -1,0 +1,28 @@
+{
+  "scenario": "arc-ccw-positive",
+  "expectedRadius": 13,
+  "centerUnchanged": true,
+  "anglesUnchanged": true,
+  "result": {
+    "type": "arc",
+    "start": {
+      "x": 13,
+      "y": 0
+    },
+    "end": {
+      "x": 7.960204194457795e-16,
+      "y": 13
+    },
+    "arc": {
+      "center": {
+        "x": 0,
+        "y": 0
+      },
+      "radius": 13,
+      "startAngle": 0,
+      "endAngle": 1.5707963267948966,
+      "sweepFlag": 1
+    }
+  },
+  "pass": true
+}

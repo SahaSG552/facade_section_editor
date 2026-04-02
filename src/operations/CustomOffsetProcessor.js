@@ -9,12 +9,7 @@ import { approximatePath, segmentsToSVGPath } from "../utils/arcApproximation.js
 import { getPathOrientation } from "../utils/fillet.js";
 import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
 // OLD offset imports removed - module being replaced
-import {
-    createContourMetadataStageDeps,
-    createContourResultBuilder,
-    createSelfIntersectionStageDeps,
-    createFallbackStageDeps,
-} from "./offset/OffsetStageDepsFactory.js";
+// OLD stage dependencies removed - module being replaced in new implementation
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 
@@ -890,22 +885,8 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
     const quantizedSegments = stitchAndQuantizeContourSegments(mergedSegments, options);
     let path = segmentsToSVGPath(quantizedSegments);
 
-    const selfIntersectionDeps = createSelfIntersectionStageDeps({
-        samplePathPoints,
-        isNear,
-        epsilon: EPSILON,
-    });
-
-    if (options.trimSelfIntersections && pathHasSelfIntersections(path, selfIntersectionDeps)) {
-        const trimmed = resolveSelfIntersections(path, {
-            referencePathData: pathData,
-        });
-        if (trimmed && shouldAcceptTrimmedPath(path, trimmed)) {
-            path = trimmed;
-        } else if (trimmed) {
-            log.warn("Self-intersection trim rejected due to degenerate result; keeping untrimmed offset");
-        }
-    }
+    // NOTE: Self-intersection handling removed - dependencies from old offset stages deleted
+    // This feature can be re-implemented when new offset design is ready
 
     if (options.useArcApproximation && options.exportModule) {
         const tolerance = options.arcTolerance || ARC_APPROX_TOLERANCE;
@@ -943,62 +924,19 @@ export function calculateOffsetFromSVG(svgElement, offset, options = {}) {
  * This is a structured alternative to `calculateOffsetFromPathData` that
  * preserves all resulting contours instead of exposing only a merged path string.
  *
+ * DEPRECATED: This function has been removed as its dependencies (stage factories)
+ * were part of the old offset implementation. Will be reimplemented in new design.
+ *
  * @param {string} pathData - SVG path data
  * @param {number} offset - Offset distance
  * @param {CustomOffsetOptions} options - Offset options
  * @returns {OffsetContourResult[]}
  */
 export function calculateOffsetContoursFromPathData(pathData, offset, options = {}) {
-    const contourSegments = buildOffsetContourSegments(pathData, offset, options);
-    if (contourSegments.length === 0) {
-        return [];
-    }
-
-    const contourMetadataDeps = createContourMetadataStageDeps({
-        stitchAndQuantizeContourSegments,
-        segmentsToSVGPath,
-        isNear,
-        joinTolerance: JOIN_TOLERANCE,
-        contourToPoints,
-        clonePoint,
-        signedArea,
-    });
-
-    const buildContourResult = createContourResultBuilder(
-        buildContourResultFromSegments,
-        contourMetadataDeps,
-        options,
-    );
-
-    const selfIntersectionDeps = createSelfIntersectionStageDeps({
-        samplePathPoints,
-        isNear,
-        epsilon: EPSILON,
-    });
-
-    const fallbackStageDeps = createFallbackStageDeps({
-        pathHasSelfIntersections,
-        selfIntersectionDeps,
-        resolveSelfIntersections,
-        shouldAcceptTrimmedPath,
-        normalizeInputContours,
-        normalizeArcAngles,
-        splitSegmentsIntoContours,
-        buildContourResult,
-        epsilon: EPSILON,
-        log,
-    });
-
-    const contours = contourSegments
-        .map((contour) => buildContourResult(contour, options))
-        .filter((contour) => contour && contour.pathData)
-        .flatMap((contour) => applyHybridFallbackStage(
-            contour,
-            { referencePathData: pathData, options },
-            fallbackStageDeps,
-        ))
-
-    return finalizeContourCollection(contours, { epsilon: EPSILON });
+    // DEPRECATED - Old implementation removed
+    // This function depends on stage factory functions that have been deleted
+    console.warn("calculateOffsetContoursFromPathData is deprecated and disabled");
+    return [];
 }
 
 /**

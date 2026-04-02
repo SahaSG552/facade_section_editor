@@ -149,7 +149,7 @@ Max Concurrent: 4 (Wave 1)
 
 ## TODOs
 
-- [ ] 1. Delete Old Offset Files
+- [x] 1. Delete Old Offset Files
 
   **What to do**:
   - Delete `src/operations/ClipperOffsetProcessor.js`

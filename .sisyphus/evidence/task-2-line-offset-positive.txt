@@ -1,0 +1,25 @@
+{
+  "scenario": "line-horizontal-positive",
+  "expected": {
+    "start": {
+      "x": 0,
+      "y": 5
+    },
+    "end": {
+      "x": 10,
+      "y": 5
+    }
+  },
+  "result": {
+    "type": "line",
+    "start": {
+      "x": 0,
+      "y": 5
+    },
+    "end": {
+      "x": 10,
+      "y": 5
+    }
+  },
+  "pass": true
+}

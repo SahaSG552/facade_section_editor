@@ -1,0 +1,28 @@
+{
+  "scenario": "arc-cw-positive",
+  "expectedRadius": 7,
+  "centerUnchanged": true,
+  "anglesUnchanged": true,
+  "result": {
+    "type": "arc",
+    "start": {
+      "x": 7,
+      "y": 0
+    },
+    "end": {
+      "x": 4.286263797015736e-16,
+      "y": 7
+    },
+    "arc": {
+      "center": {
+        "x": 0,
+        "y": 0
+      },
+      "radius": 7,
+      "startAngle": 0,
+      "endAngle": 1.5707963267948966,
+      "sweepFlag": 0
+    }
+  },
+  "pass": true
+}
