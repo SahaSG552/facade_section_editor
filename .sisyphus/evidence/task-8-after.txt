@@ -1,0 +1,59 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m5 passed[39m[22m[2m | [22m[33m27 skipped[39m[90m (32)[39m
+[2m   Start at [22m 21:46:21
+[2m   Duration [22m 655ms[2m (transform 112ms, setup 47ms, import 108ms, tests 8ms, environment 305ms)[22m
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m   Start at [22m 21:46:23
+[2m   Duration [22m 675ms[2m (transform 132ms, setup 29ms, import 153ms, tests 17ms, environment 316ms)[22m
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m   Start at [22m 21:46:25
+[2m   Duration [22m 891ms[2m (transform 189ms, setup 45ms, import 201ms, tests 8ms, environment 433ms)[22m
+
+
+> facade_section_editor@1.0.0 build
+> vite build
+
+[36mvite v7.3.1 [32mbuilding client environment for production...[36m[39m
+transforming...
+[32mтЬУ[39m 208 modules transformed.
+rendering chunks...
+[plugin vite:reporter] 
+(!) E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/data/bitsStore.js is dynamically imported by E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/script.js, E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/script.js but also statically imported by E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/panel/BitsManager.js, E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/script.js, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/node_modules/three/build/three.webgpu.js is dynamically imported by E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/three/SceneManager.js but also statically imported by E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/node_modules/three/examples/jsm/lines/webgpu/Wireframe.js, E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/three/MaterialManager.js, dynamic import will not move module into another chunk.
+
+[plugin vite:reporter] 
+(!) E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/three/FaceIDGenerator.js is dynamically imported by E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/three/ManifoldCSG.js, E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/three/ManifoldCSG.js but also statically imported by E:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor/src/three/CSGEngine.js, dynamic import will not move module into another chunk.
+
+computing gzip size...
+[2mdist/[22m[32mindex.html                       [39m[1m[2m   10.55 kB[22m[1m[22m[2m тФВ gzip:   2.33 kB[22m
+[2mdist/[22m[32massets/manifold-B8h_vZ5O.js      [39m[1m[2m   77.40 kB[22m[1m[22m
+[2mdist/[22m[32massets/manifold-D9yvTBHx.wasm    [39m[1m[2m  476.30 kB[22m[1m[22m[2m тФВ gzip: 192.31 kB[22m
+[2mdist/[22m[35massets/index-CcGNnTzH.css        [39m[1m[2m   40.46 kB[22m[1m[22m[2m тФВ gzip:   7.17 kB[22m
+[2mdist/[22m[36massets/empty-shim-DiexiX0c.js    [39m[1m[2m    0.07 kB[22m[1m[22m[2m тФВ gzip:   0.08 kB[22m
+[2mdist/[22m[36massets/manifold-ZxaR-aJD.js      [39m[1m[2m   44.16 kB[22m[1m[22m[2m тФВ gzip:  15.56 kB[22m
+[2mdist/[22m[36massets/three-vendor-B47Wdlma.js  [39m[1m[2m  664.13 kB[22m[1m[22m[2m тФВ gzip: 175.73 kB[22m
+[2mdist/[22m[36massets/index-DN5P3eNL.js         [39m[1m[33m1,817.50 kB[39m[22m[2m тФВ gzip: 513.17 kB[22m
+
+(!) Some chunks are larger than 1000 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+[32mтЬУ built in 4.83s[39m

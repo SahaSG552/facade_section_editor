@@ -9,7 +9,8 @@
     "ses_2b0cf5aecffea9QgWtwvUyAvdx",
     "ses_2b0cf3a9effeAuR1uZRWCJ4oEj",
     "ses_2b0cf71a4ffeJvsPgdw1sA480K",
-    "ses_2b0c2a198ffeTFrhP7gBQWtCbo"
+    "ses_2b0c2a198ffeTFrhP7gBQWtCbo",
+    "ses_2b0b387cdffezXx7I9JQHS9AS0"
   ],
   "plan_name": "offset-open-curve-modes-fix",
   "agent": "atlas",
@@ -49,6 +50,15 @@
       "agent": "Sisyphus-Junior",
       "category": "ultrabrain",
       "updated_at": "2026-04-02T17:41:19.963Z"
+    },
+    "todo:8": {
+      "task_key": "todo:8",
+      "task_label": "8",
+      "task_title": "Harden capBothSides semantics",
+      "session_id": "ses_2b0b387cdffezXx7I9JQHS9AS0",
+      "agent": "Sisyphus-Junior",
+      "category": "deep",
+      "updated_at": "2026-04-02T17:47:28.308Z"
     }
   }
 }

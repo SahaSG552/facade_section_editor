@@ -350,3 +350,42 @@ The offset engine's segment generation is SOLID. The problem is purely at the CO
 ### Safety Checks
 - `lsp_diagnostics` on `src/operations/OffsetEngine.js` → no diagnostics
 - `npm run build` → passed
+
+---
+
+## Wave 8 - capBothSides Assembly Hardening (2026-04-02 21:47)
+
+### Scope
+- Hardened `OffsetCapper.capBothSides()` for stable two-side assembly and reversal semantics.
+- Added defensive filtering to prevent invalid/degenerate connector segments from entering final topology.
+- Preserved existing assembly order contract: `positive → endCap → reversedNegative → startCap`.
+
+### Changes Implemented
+1. **Stable reverse semantics extracted to helper**
+   - Added `reverseSegment(segment)`.
+   - Reversal now always swaps endpoints and (for arcs) swaps `startAngle/endAngle`, flips `sweepFlag`, and preserves center by value.
+
+2. **Degenerate/invalid segment guardrail**
+   - Added `isFinitePoint`, `pointDistance`, `isDegenerateSegment`, and `filterDegenerateSegments` helpers.
+   - `capBothSides()` now returns `filterDegenerateSegments(assembled)` to drop:
+     - non-finite coordinates (`NaN`/`Infinity`)
+     - zero-length segments (`<= 1e-6`)
+     - malformed arc segments (missing/invalid arc metadata)
+
+3. **No pipeline rewrite**
+   - Kept cap creation logic and cap type behavior (`flat`/`round`) intact.
+   - Kept contour stitching responsibility outside capper (no overlap with Task 7 `_stitchSegments` fixes).
+
+### Verification Evidence
+- Baseline cap tests: `.sisyphus/evidence/task-8-before.txt`
+- Post-change tests + build: `.sisyphus/evidence/task-8-after.txt`
+- Consolidated evidence: `.sisyphus/evidence/task-8-capper-fix.txt`
+
+### Required Test Outcomes
+- `npx vitest run tests/f3-functional-qa.spec.js -t "capBothSides|round cap|flat cap"` → **5 passed**
+- `npx vitest run tests/offset-topology.spec.js` → **7 passed**
+- `npx vitest run tests/task-6-offsetengine-qa.spec.js` → **5 passed**
+
+### Safety Checks
+- `lsp_diagnostics` on `src/operations/OffsetCapper.js` → no diagnostics
+- `npm run build` → passed

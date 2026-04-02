@@ -287,7 +287,7 @@ Wave FINAL:
     - Expected Result: PASS
     - Evidence: `.sisyphus/evidence/task-7-engine-stitch-fix.txt`
 
-- [ ] 8. Harden capBothSides semantics
+- [x] 8. Harden capBothSides semantics
 
   **What to do**:
   - Ensure assembly order and reversed side semantics produce stable topology.

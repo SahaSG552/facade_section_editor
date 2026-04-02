@@ -9,6 +9,7 @@
  */
 
 const EPSILON = 1e-9;
+const SEGMENT_EPSILON = 1e-6;
 
 /**
  * @typedef {Object} Point2D
@@ -45,6 +46,94 @@ const EPSILON = 1e-9;
  */
 function pointsEqual(p1, p2) {
     return Math.abs(p1.x - p2.x) < EPSILON && Math.abs(p1.y - p2.y) < EPSILON;
+}
+
+/**
+ * @param {Point2D} point - Point candidate.
+ * @returns {boolean} True when point coordinates are finite numbers.
+ */
+function isFinitePoint(point) {
+    return (
+        point &&
+        Number.isFinite(point.x) &&
+        Number.isFinite(point.y)
+    );
+}
+
+/**
+ * @param {Point2D} a - First point.
+ * @param {Point2D} b - Second point.
+ * @returns {number} Euclidean distance.
+ */
+function pointDistance(a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    return Math.hypot(dx, dy);
+}
+
+/**
+ * @param {LineSegment|ArcSegment} seg - Segment candidate.
+ * @returns {boolean} True if segment is degenerate or has invalid coordinates.
+ */
+function isDegenerateSegment(seg) {
+    if (!seg || !isFinitePoint(seg.start) || !isFinitePoint(seg.end)) {
+        return true;
+    }
+
+    if (pointDistance(seg.start, seg.end) <= SEGMENT_EPSILON) {
+        return true;
+    }
+
+    if (seg.type === "arc") {
+        const arc = seg.arc;
+        if (!arc) {
+            return true;
+        }
+        if (!isFinitePoint(arc.center) || !Number.isFinite(arc.radius) || arc.radius <= SEGMENT_EPSILON) {
+            return true;
+        }
+        if (!Number.isFinite(arc.startAngle) || !Number.isFinite(arc.endAngle)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * @param {LineSegment|ArcSegment} segment - Segment to reverse.
+ * @returns {LineSegment|ArcSegment} Reversed segment preserving arc metadata semantics.
+ */
+function reverseSegment(segment) {
+    const reversed = {
+        ...segment,
+        start: { x: segment.end.x, y: segment.end.y },
+        end: { x: segment.start.x, y: segment.start.y },
+    };
+
+    if (segment.type !== "arc" || !segment.arc) {
+        return reversed;
+    }
+
+    reversed.arc = {
+        ...segment.arc,
+        center: segment.arc.center
+            ? { x: segment.arc.center.x, y: segment.arc.center.y }
+            : segment.arc.center,
+        startAngle: segment.arc.endAngle,
+        endAngle: segment.arc.startAngle,
+        sweepFlag: segment.arc.sweepFlag === 1 ? 0 : 1,
+    };
+
+    return reversed;
+}
+
+/**
+ * @param {Array<LineSegment|ArcSegment>} segments - Segment array to sanitize.
+ * @returns {Array<LineSegment|ArcSegment>} Filtered segment array.
+ */
+function filterDegenerateSegments(segments) {
+    return segments.filter((segment) => !isDegenerateSegment(segment));
 }
 
 /**
@@ -179,26 +268,11 @@ export function capBothSides(positiveSegments, negativeSegments, offsetDistance,
     }
 
     // Reverse the negative segments so they flow from negLast.end → negFirst.start
-    const negReversed = negativeSegments
-        .slice()
-        .reverse()
-        .map((seg) => ({
-            ...seg,
-            start: { x: seg.end.x, y: seg.end.y },
-            end: { x: seg.start.x, y: seg.start.y },
-            arc: seg.arc
-                ? {
-                      ...seg.arc,
-                      // Swap start/end angles for reversed arc
-                      startAngle: seg.arc.endAngle,
-                      endAngle: seg.arc.startAngle,
-                      sweepFlag: seg.arc.sweepFlag === 1 ? 0 : 1,
-                  }
-                : undefined,
-        }));
+    const negReversed = negativeSegments.slice().reverse().map(reverseSegment);
 
     // Full closed contour: posSegs → endCap → negSegsReversed → startCap → (back to posFirst.start)
-    return [...positiveSegments, endCap, ...negReversed, startCap];
+    const assembled = [...positiveSegments, endCap, ...negReversed, startCap];
+    return filterDegenerateSegments(assembled);
 }
 
 /**
