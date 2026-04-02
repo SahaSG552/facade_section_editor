@@ -1,6 +1,7 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { buildOffsetContour } from "./OffsetContourBuilder.js";
 import { trimSelfIntersections } from "./OffsetTrimmer.js";
+import { capBothSides } from "./OffsetCapper.js";
 import { segmentsToSVGPath } from "../utils/arcApproximation.js";
 
 const log = LoggerFactory.createLogger("OffsetEngine");
@@ -126,16 +127,47 @@ export class OffsetEngine {
                     continue;
                 }
 
-                const offsetSegments = buildOffsetContour(sourceContour, distance, {
-                    joinType: resolvedOptions.joinType,
-                    capType: resolvedOptions.capType,
-                });
+                const sourceClosed = this._isClosedContour(sourceContour);
+
+                let offsetSegments;
+                if (!sourceClosed) {
+                    // Open contour: compute both +d and -d offset sides, then cap both sides
+                    const positiveSegments = buildOffsetContour(sourceContour, distance, {
+                        joinType: resolvedOptions.joinType,
+                        capType: resolvedOptions.capType,
+                        skipCap: true,
+                    });
+                    const negativeSegments = buildOffsetContour(sourceContour, -distance, {
+                        joinType: resolvedOptions.joinType,
+                        capType: resolvedOptions.capType,
+                        skipCap: true,
+                    });
+
+                    if (
+                        !Array.isArray(positiveSegments) || positiveSegments.length === 0 ||
+                        !Array.isArray(negativeSegments) || negativeSegments.length === 0
+                    ) {
+                        continue;
+                    }
+
+                    offsetSegments = capBothSides(
+                        positiveSegments,
+                        negativeSegments,
+                        distance,
+                        resolvedOptions.capType
+                    );
+                } else {
+                    // Closed contour: single-sided offset with join processing
+                    offsetSegments = buildOffsetContour(sourceContour, distance, {
+                        joinType: resolvedOptions.joinType,
+                        capType: resolvedOptions.capType,
+                    });
+                }
 
                 if (!Array.isArray(offsetSegments) || offsetSegments.length === 0) {
                     continue;
                 }
 
-                const sourceClosed = this._isClosedContour(sourceContour);
                 const stitchedSegments = this._stitchSegments(offsetSegments, sourceClosed);
 
                 const trimmedSegments = trimSelfIntersections(stitchedSegments);

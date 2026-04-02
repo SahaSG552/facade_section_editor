@@ -238,6 +238,89 @@ export function segmentsToPathString(segments) {
 }
 
 /**
+ * Convert SVG arc endpoint parameterization to center parameterization.
+ *
+ * Implements the W3C SVG spec Appendix F.6 algorithm:
+ * https://www.w3.org/TR/SVG/implnote.html#ArcConversionEndpointToCenter
+ *
+ * @param {number} x1 - Arc start X.
+ * @param {number} y1 - Arc start Y.
+ * @param {number} rx - X-axis radius.
+ * @param {number} ry - Y-axis radius.
+ * @param {number} xAxisRotation - X-axis rotation in radians.
+ * @param {number} largeArcFlag - Large arc flag (0 or 1).
+ * @param {number} sweepFlag - Sweep flag (0 = CW, 1 = CCW).
+ * @param {number} x2 - Arc end X.
+ * @param {number} y2 - Arc end Y.
+ * @returns {{cx:number, cy:number, rx:number, ry:number, startAngle:number, endAngle:number}}
+ */
+function svgArcToCenter(x1, y1, rx, ry, xAxisRotation, largeArcFlag, sweepFlag, x2, y2) {
+  // Handle degenerate case: start and end are the same point
+  if (Math.abs(x1 - x2) < 1e-10 && Math.abs(y1 - y2) < 1e-10) {
+    return { cx: x1, cy: y1, rx: Math.abs(rx), ry: Math.abs(ry), startAngle: 0, endAngle: 0 };
+  }
+
+  // Use absolute values for radii
+  let rxAbs = Math.abs(rx);
+  let ryAbs = Math.abs(ry);
+
+  // If either radius is zero, treat as line (degenerate arc)
+  if (rxAbs < 1e-10 || ryAbs < 1e-10) {
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    return { cx: midX, cy: midY, rx: rxAbs, ry: ryAbs, startAngle: 0, endAngle: 0 };
+  }
+
+  const cosAngle = Math.cos(xAxisRotation);
+  const sinAngle = Math.sin(xAxisRotation);
+
+  // Step 1: Compute (x1′, y1′)
+  const dx = (x1 - x2) / 2;
+  const dy = (y1 - y2) / 2;
+  const x1p = cosAngle * dx + sinAngle * dy;
+  const y1p = -sinAngle * dx + cosAngle * dy;
+
+  const x1pSq = x1p * x1p;
+  const y1pSq = y1p * y1p;
+  let rxSq = rxAbs * rxAbs;
+  let rySq = ryAbs * ryAbs;
+
+  // Step 2: Check if radii are large enough; scale up if needed
+  const lambda = x1pSq / rxSq + y1pSq / rySq;
+  if (lambda > 1) {
+    const sqrtLambda = Math.sqrt(lambda);
+    rxAbs *= sqrtLambda;
+    ryAbs *= sqrtLambda;
+    rxSq = rxAbs * rxAbs;
+    rySq = ryAbs * ryAbs;
+  }
+
+  // Step 3: Compute (cx′, cy′)
+  const num = Math.max(0, rxSq * rySq - rxSq * y1pSq - rySq * x1pSq);
+  const den = rxSq * y1pSq + rySq * x1pSq;
+  const sq = den > 1e-20 ? Math.sqrt(num / den) : 0;
+  const sign = largeArcFlag === sweepFlag ? -1 : 1;
+
+  const cxp = sign * sq * (rxAbs * y1p) / ryAbs;
+  const cyp = -sign * sq * (ryAbs * x1p) / rxAbs;
+
+  // Step 4: Compute (cx, cy) in original coordinate system
+  const cx = cosAngle * cxp - sinAngle * cyp + (x1 + x2) / 2;
+  const cy = sinAngle * cxp + cosAngle * cyp + (y1 + y2) / 2;
+
+  // Step 5: Compute startAngle and endAngle
+  const ux = (x1p - cxp) / rxAbs;
+  const uy = (y1p - cyp) / ryAbs;
+  const vx = (-x1p - cxp) / rxAbs;
+  const vy = (-y1p - cyp) / ryAbs;
+
+  const startAngle = Math.atan2(uy, ux);
+  const endAngle = Math.atan2(vy, vx);
+
+  return { cx, cy, rx: rxAbs, ry: ryAbs, startAngle, endAngle };
+}
+
+/**
  * Parse SVG path string back to segment array.
  *
  * This is a specialized parser for contours that were previously converted TO SVG paths.
@@ -337,20 +420,26 @@ export function pathStringToSegments(pathString) {
             const endX = params[5];
             const endY = params[6];
 
-            // Reconstruct arc center from SVG arc parameters
-            // This is approximate - for precise reconstruction, need full SVG arc math
-            // For now, store params and let consumer reconstruct if needed
+            // Reconstruct arc center, startAngle, endAngle from SVG endpoint parameterization
+            // Algorithm: W3C SVG spec Appendix F.6 (Endpoint to Center conversion)
+            const arcCenter = svgArcToCenter(
+              currentX, currentY, rx, ry, rotation, largeArc, sweep, endX, endY
+            );
+
             segments.push({
               type: "arc",
               start: { x: currentX, y: currentY },
               end: { x: endX, y: endY },
               arc: {
-                radius: (rx + ry) / 2, // Average for now
-                rx,
-                ry,
+                center: { x: arcCenter.cx, y: arcCenter.cy },
+                radius: (arcCenter.rx + arcCenter.ry) / 2,
+                rx: arcCenter.rx,
+                ry: arcCenter.ry,
                 xAxisRotation: rotation,
                 largeArcFlag: largeArc,
                 sweepFlag: sweep,
+                startAngle: arcCenter.startAngle,
+                endAngle: arcCenter.endAngle,
               },
             });
             currentX = endX;

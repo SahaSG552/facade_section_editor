@@ -1,0 +1,99 @@
+Fix F1 Blockers — Evidence Report
+===================================
+Date: 2026-04-02
+Task: Fix 4 specific bugs blocking Final Verification Wave for Offset Tool Rewrite
+
+## Bug 1 — OffsetTool.js: Undefined `calculateClipperOffsetFromPathData`
+File: src/editor/tools/OffsetTool.js (constructor, lines 614-615)
+
+BEFORE:
+    const isClipper = mode.startsWith("clipperOffset");
+    this._offsetCalculator = isClipper
+        ? calculateClipperOffsetFromPathData   // UNDEFINED — NOT imported
+        : calculateOffsetFromPathData;
+    this._offsetDirection = isClipper ? 1 : -1;
+
+AFTER:
+    this._offsetCalculator = calculateOffsetFromPathData;
+    this._offsetDirection = -1;
+
+VERIFICATION:
+    Select-String -Path "src/editor/tools/OffsetTool.js" -Pattern "calculateClipper"
+    → 0 matches (confirmed)
+
+---
+
+## Bug 2 — OffsetContourBuilder.js: Sharp join gap (next.start not stitched)
+File: src/operations/OffsetContourBuilder.js (lines 243-246)
+
+BEFORE:
+    if (sharpJoin && sharpJoin.canApply) {
+        current.end = clonePoint(sharpJoin.intersection);
+        // BUG: next.start never updated → gap between segments
+    }
+
+AFTER:
+    if (sharpJoin && sharpJoin.canApply) {
+        current.end = clonePoint(sharpJoin.intersection);
+        next.start = clonePoint(sharpJoin.intersection); // FIX: stitch next segment
+    }
+
+NOTES:
+    - `next` is offsetSegments[nextIdx] — the original array element (not a clone)
+    - Mutating next.start propagates correctly to next iteration's cloneSegment()
+
+---
+
+## Bug 3 — OffsetCapper.js + OffsetEngine.js: Degenerate caps (start=end)
+Files:
+    - src/operations/OffsetCapper.js — added capBothSides() function
+    - src/operations/OffsetContourBuilder.js — added skipCap option
+    - src/operations/OffsetEngine.js — imports capBothSides, uses two-sided capping for open contours
+
+APPROACH (Option B):
+    - OffsetEngine._processSegmentsSync detects open source contours
+    - Computes positiveSegments = buildOffsetContour(+d, skipCap=true)
+    - Computes negativeSegments = buildOffsetContour(-d, skipCap=true)
+    - Calls capBothSides(positiveSegments, negativeSegments, distance, capType)
+    - capBothSides creates non-degenerate caps:
+        * Flat cap: line from posStart → negStart (at original curve start)
+        * Round cap: arc centered at midpoint of offset endpoints with proper radius
+    - Full contour: posSegs → endCap → negSegsReversed → startCap
+
+BEFORE (degenerate):
+    startCap = capFlat(firstSeg.start, firstSeg.start);  // start=end → zero-length
+    endCap = capFlat(lastSeg.end, lastSeg.end);            // start=end → zero-length
+
+AFTER (correct):
+    startCap = capFlat(negFirst.start, posFirst.start);   // connects two offset sides
+    endCap = capFlat(posLast.end, negLast.end);            // connects two offset sides
+
+---
+
+## Bug 4 — OffsetTrimmer.js: Arc round-trip missing center/startAngle/endAngle
+File: src/operations/OffsetTrimmer.js (pathStringToSegments, case "A")
+
+BEFORE:
+    arc: {
+        radius: (rx + ry) / 2, // Average only
+        rx, ry, xAxisRotation, largeArcFlag, sweepFlag,
+        // MISSING: center, startAngle, endAngle
+    }
+
+AFTER:
+    // Added svgArcToCenter() implementing W3C SVG spec Appendix F.6
+    const arcCenter = svgArcToCenter(currentX, currentY, rx, ry, rotation, largeArc, sweep, endX, endY);
+    arc: {
+        center: { x: arcCenter.cx, y: arcCenter.cy },  // FIXED: center restored
+        radius: (arcCenter.rx + arcCenter.ry) / 2,
+        rx: arcCenter.rx, ry: arcCenter.ry,
+        xAxisRotation: rotation, largeArcFlag, sweepFlag,
+        startAngle: arcCenter.startAngle,               // FIXED: startAngle restored
+        endAngle: arcCenter.endAngle,                   // FIXED: endAngle restored
+    }
+
+---
+
+## Build Verification
+    npm run build → ✓ built in 6.30s (exit 0)
+    npm run test  → 14 passed (2 test files, exit 0)

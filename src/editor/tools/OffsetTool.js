@@ -611,11 +611,8 @@ export default class OffsetTool extends BaseTool {
         super();
         this.id = mode;
         this._modeType = mode;
-        const isClipper = mode.startsWith("clipperOffset");
-        this._offsetCalculator = isClipper
-            ? calculateClipperOffsetFromPathData
-            : calculateOffsetFromPathData;
-        this._offsetDirection = isClipper ? 1 : -1;
+        this._offsetCalculator = calculateOffsetFromPathData;
+        this._offsetDirection = -1;
         this._phase = "selecting"; // selecting | pickReference | dynamic | confirming
         this._downClient = null;
         this._downSvgPos = null;

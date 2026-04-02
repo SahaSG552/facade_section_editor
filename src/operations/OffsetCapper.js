@@ -120,20 +120,97 @@ export function capRound(centerPoint, offsetDistance, startPoint, endPoint, swee
 }
 
 /**
+ * Add caps to an open contour given BOTH offset sides (+d and -d).
+ *
+ * The start cap connects the start of the positive-side to the start of the negative-side
+ * (both offset from the same original curve start point).
+ * The end cap connects the end of the positive-side to the end of the negative-side
+ * (both offset from the same original curve end point).
+ *
+ * The negative-side segments are reversed so that the combined contour traces:
+ *   startCap → positiveSegs → endCap → negativeSegsReversed → (back to start)
+ *
+ * @param {Array<LineSegment|ArcSegment>} positiveSegments - Segments offset by +d.
+ * @param {Array<LineSegment|ArcSegment>} negativeSegments - Segments offset by -d.
+ * @param {number} offsetDistance - Signed offset distance (for round cap radius).
+ * @param {string} [capType="flat"] - Cap type: "flat" or "round".
+ * @returns {Array<LineSegment|ArcSegment>} Full closed contour with caps.
+ *
+ * @throws {Error} Thrown when positiveSegments or negativeSegments is empty.
+ */
+export function capBothSides(positiveSegments, negativeSegments, offsetDistance, capType = "flat") {
+    if (!positiveSegments || positiveSegments.length === 0) {
+        throw new Error("positiveSegments cannot be empty");
+    }
+    if (!negativeSegments || negativeSegments.length === 0) {
+        throw new Error("negativeSegments cannot be empty");
+    }
+
+    const posFirst = positiveSegments[0];
+    const posLast = positiveSegments[positiveSegments.length - 1];
+    const negFirst = negativeSegments[0];
+    const negLast = negativeSegments[negativeSegments.length - 1];
+
+    // Start cap: connects posFirst.start → negFirst.start (both at original curve start)
+    // End cap: connects posLast.end → negLast.end (both at original curve end)
+    let startCap;
+    let endCap;
+
+    if (capType === "round") {
+        // Round cap: arc centered at the original endpoint (midpoint of the two offset endpoints)
+        const startCenter = {
+            x: (posFirst.start.x + negFirst.start.x) / 2,
+            y: (posFirst.start.y + negFirst.start.y) / 2,
+        };
+        const endCenter = {
+            x: (posLast.end.x + negLast.end.x) / 2,
+            y: (posLast.end.y + negLast.end.y) / 2,
+        };
+        // Start cap: arc from negFirst.start → posFirst.start (going around the start)
+        startCap = capRound(startCenter, offsetDistance, negFirst.start, posFirst.start);
+        // End cap: arc from posLast.end → negLast.end (going around the end)
+        endCap = capRound(endCenter, offsetDistance, posLast.end, negLast.end);
+    } else {
+        // Flat caps: straight line connecting the two offset curve endpoints
+        // Start cap: from negFirst.start back to posFirst.start
+        startCap = capFlat(negFirst.start, posFirst.start);
+        // End cap: from posLast.end to negLast.end
+        endCap = capFlat(posLast.end, negLast.end);
+    }
+
+    // Reverse the negative segments so they flow from negLast.end → negFirst.start
+    const negReversed = negativeSegments
+        .slice()
+        .reverse()
+        .map((seg) => ({
+            ...seg,
+            start: { x: seg.end.x, y: seg.end.y },
+            end: { x: seg.start.x, y: seg.start.y },
+            arc: seg.arc
+                ? {
+                      ...seg.arc,
+                      // Swap start/end angles for reversed arc
+                      startAngle: seg.arc.endAngle,
+                      endAngle: seg.arc.startAngle,
+                      sweepFlag: seg.arc.sweepFlag === 1 ? 0 : 1,
+                  }
+                : undefined,
+        }));
+
+    // Full closed contour: posSegs → endCap → negSegsReversed → startCap → (back to posFirst.start)
+    return [...positiveSegments, endCap, ...negReversed, startCap];
+}
+
+/**
  * Add caps to an open contour of offset segments.
  *
  * If the contour is already closed (last segment endpoint ≈ first segment start point),
  * returns the contour unchanged without adding caps.
  *
- * For open contours, adds a cap at the start (connecting the two offset curve endpoints
- * that came from offsetting the same original starting point) and a cap at the end
- * (connecting the two offset curve endpoints that came from offsetting the same original
- * ending point).
- *
- * NOTE: The offset curve was computed on TWO SIDES of the original curve (±distance).
- * This function receives one side (positive or negative offset). To properly cap, it
- * needs both sides. For now, caps are deferred to ContourBuilder which handles the
- * full offset construction workflow (both sides + capping).
+ * NOTE: This legacy function only receives one side of the offset.
+ * For proper two-sided capping of open curves, use capBothSides() instead.
+ * This function is kept for backward compatibility with closed-contour code paths
+ * that may call it even though the contour is already closed.
  *
  * @param {Array<LineSegment|ArcSegment>} offsetSegments - Array of offset segments (single side).
  * @param {number} offsetDistance - Signed offset distance used for round caps.
@@ -150,69 +227,21 @@ export function capOpenContour(offsetSegments, offsetDistance, capType = "flat")
     const firstSeg = offsetSegments[0];
     const lastSeg = offsetSegments[offsetSegments.length - 1];
 
-    // Check if contour is closed (last end ≈ first start)
+    // Check if contour is closed (last end ≈ first start) — return as-is
     if (pointsEqual(lastSeg.end, firstSeg.start)) {
         return offsetSegments;
     }
 
-    // Contour is open. Caps connect back to form a closed loop.
-    // Since we only have a single-side offset here, we create simple geometric caps.
-    // For proper round caps in a full workflow, both offset sides would be available.
-
-    let startCap;
-    let endCap;
-
-    if (capType === "round") {
-        // Round cap: arc centered at original endpoint with radius = |offsetDistance|
-        // The arc connects the two offset endpoints that came from the same original point.
-        //
-        // At start: both sides of the offset meet. We approximate as arc from
-        // firstSeg.start back to itself (creating semi-circular cap).
-        // This assumes the "other side" would be diametrically opposite.
-        //
-        // For a proper implementation, ContourBuilder should handle both sides + capping together.
-        // Here we create a degenerate arc that closes the loop minimally.
-        const startRadius = Math.abs(offsetDistance);
-        const startCenterAngle = Math.atan2(-offsetDistance, 0);
-        startCap = {
-            type: "arc",
-            start: firstSeg.start,
-            end: firstSeg.start,
-            arc: {
-                center: firstSeg.start,
-                radius: startRadius,
-                startAngle: startCenterAngle,
-                endAngle: startCenterAngle + Math.PI,
-                sweepFlag: offsetDistance >= 0 ? 1 : 0,
-            },
-        };
-
-        const endRadius = Math.abs(offsetDistance);
-        const endCenterAngle = Math.atan2(offsetDistance, 0);
-        endCap = {
-            type: "arc",
-            start: lastSeg.end,
-            end: lastSeg.end,
-            arc: {
-                center: lastSeg.end,
-                radius: endRadius,
-                startAngle: endCenterAngle,
-                endAngle: endCenterAngle + Math.PI,
-                sweepFlag: offsetDistance >= 0 ? 1 : 0,
-            },
-        };
-    } else {
-        // Flat caps: simple lines from start to itself and end to itself (degenerate).
-        // In a proper workflow, these would connect the two offset sides.
-        startCap = capFlat(firstSeg.start, firstSeg.start);
-        endCap = capFlat(lastSeg.end, lastSeg.end);
-    }
-
-    return [startCap, ...offsetSegments, endCap];
+    // Single-side fallback: this should not normally be called for open contours.
+    // OffsetEngine now uses capBothSides() for open curves. This path is a safety
+    // fallback that creates minimal (non-degenerate) flat caps.
+    const startCap = capFlat(lastSeg.end, firstSeg.start);
+    return [...offsetSegments, startCap];
 }
 
 export default {
     capFlat,
     capRound,
     capOpenContour,
+    capBothSides,
 };

@@ -165,6 +165,7 @@ function isClosedContour(segments) {
  * @param {Object} options - Configuration
  * @param {string} [options.joinType="round"] - "sharp" or "round"
  * @param {string} [options.capType="round"] - "flat" or "round"
+ * @param {boolean} [options.skipCap=false] - Skip automatic capping of open contours (for two-sided capping in OffsetEngine)
  * @returns {Array} Offset segments (may have self-intersections)
  */
 export function buildOffsetContour(segments, distance, options = {}) {
@@ -178,6 +179,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
   const joinType = options.joinType || "round";
   const capType = options.capType || "round";
+  const skipCap = options.skipCap === true;
 
   log.debug(
     `buildOffsetContour: processing ${segments.length} segments, distance=${distance}, join=${joinType}, cap=${capType}`
@@ -241,8 +243,9 @@ export function buildOffsetContour(segments, distance, options = {}) {
           );
 
           if (sharpJoin && sharpJoin.canApply) {
-            // Sharp join is valid: trim current at intersection
+            // Sharp join is valid: trim current at intersection and stitch next segment
             current.end = clonePoint(sharpJoin.intersection);
+            next.start = clonePoint(sharpJoin.intersection); // FIX: stitch next segment to close gap
           } else {
             // Use round join instead
             const arcJoin = createArcJoin(
@@ -269,7 +272,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
   // Step 3: Cap open curves
   let finalSegments = result;
-  if (!closed) {
+  if (!closed && !skipCap) {
     log.debug(
       `buildOffsetContour: applying ${capType} cap to open contour`
     );
