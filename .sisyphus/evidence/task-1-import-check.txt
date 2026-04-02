@@ -1,0 +1,40 @@
+# Task 1 Stale Import Verification Evidence
+
+## Scenario 2: Verify No Stale Imports Remain
+
+### Preconditions
+- All old files deleted
+- Import statements in OffsetTool.js and CustomOffsetProcessor.js cleaned
+
+### Grep Patterns Searched
+
+#### Pattern 1: ClipperOffsetProcessor imports
+```bash
+grep -rn "ClipperOffsetProcessor\|from.*ClipperOffset" src/
+```
+Result: No matches found ✓
+
+#### Pattern 2: Old stage file imports
+```bash
+grep -rn "OffsetPrimitiveKernel\|OffsetContourStages\|OffsetNormalizationStage\|OffsetTrimAcceptanceStage\|OffsetFallbackStage\|OffsetContourMetadataStage\|OffsetSelfIntersectionStage\|OffsetStageDepsFactory" src/
+```
+Result: No matches found ✓
+
+### Files Modified to Remove Stale Imports
+1. src/editor/tools/OffsetTool.js
+   - Removed: `import { calculateClipperOffsetFromPathData } from "../../operations/ClipperOffsetProcessor.js";`
+
+2. src/operations/CustomOffsetProcessor.js
+   - Removed all imports from deleted offset/ stage files:
+     - OffsetContourStages.js
+     - OffsetPrimitiveKernel.js
+     - OffsetNormalizationStage.js
+     - OffsetFallbackStage.js
+     - OffsetContourMetadataStage.js
+     - OffsetTrimAcceptanceStage.js
+     - OffsetSelfIntersectionStage.js
+   - Replaced with comment: `// OLD offset imports removed - module being replaced`
+
+### Conclusion
+All stale imports successfully removed. Source tree is clean.
+No lingering references to deleted modules remain in active code.

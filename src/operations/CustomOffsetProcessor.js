@@ -8,26 +8,7 @@ import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { approximatePath, segmentsToSVGPath } from "../utils/arcApproximation.js";
 import { getPathOrientation } from "../utils/fillet.js";
 import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
-import {
-    stitchSegments,
-    quantizeSegments,
-    joinOffsetSegments,
-    reverseSegments,
-    normalizeArcAngles,
-} from "./offset/OffsetContourStages.js";
-import { computePrimitiveOffsets } from "./offset/OffsetPrimitiveKernel.js";
-import { normalizeInputContours } from "./offset/OffsetNormalizationStage.js";
-import { applyHybridFallbackStage } from "./offset/OffsetFallbackStage.js";
-import {
-    buildContourResultFromSegments,
-    finalizeContourCollection,
-} from "./offset/OffsetContourMetadataStage.js";
-import {
-    signedArea,
-    samplePathPoints,
-    shouldAcceptTrimmedPath,
-} from "./offset/OffsetTrimAcceptanceStage.js";
-import { pathHasSelfIntersections } from "./offset/OffsetSelfIntersectionStage.js";
+// OLD offset imports removed - module being replaced
 import {
     createContourMetadataStageDeps,
     createContourResultBuilder,

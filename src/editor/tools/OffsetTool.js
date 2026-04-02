@@ -4,7 +4,6 @@ import { app } from "../../app/main.js";
 import { ARC_APPROX_TOLERANCE } from "../../config/constants.js";
 import { buildOffsetDistanceSeries } from "../../utils/offsetSeries.js";
 import { calculateOffsetFromPathData } from "../../operations/CustomOffsetProcessor.js";
-import { calculateClipperOffsetFromPathData } from "../../operations/ClipperOffsetProcessor.js";
 import { arcCenterFromEndpoints, arcFlagsViaPoint } from "./ArcTool.js";
 import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 import { getRectGeomLocal, getRectClampedRx } from "../geometry/rectGeometry.js";
@@ -641,6 +640,7 @@ export default class OffsetTool extends BaseTool {
         this._lastNonEmptyDebugPayload = null;
 
         this._exportModule = null;
+        this._snapshots = { positive: [], negative: [] };
     }
 
     activate(ctx) {
@@ -656,11 +656,55 @@ export default class OffsetTool extends BaseTool {
         this._referenceRectRole = null;
         this._lastNonEmptyDebugPayload = null;
         this._exportModule = app.getModule("export");
+        this._snapshots = { positive: [], negative: [] };
+    }
+
+    /**
+     * Find the snapshot with maximum |offset| <= |d| from appropriate array
+     * @param {number} d - Target signed distance
+     * @returns {Object|null} Snapshot object or null if none found
+     */
+    getSnapshotForOffset(d) {
+        const array = d >= 0 ? this._snapshots.positive : this._snapshots.negative;
+        const absDist = Math.abs(d);
+        
+        let bestSnapshot = null;
+        for (const snap of array) {
+            if (Math.abs(snap.offset) <= absDist) {
+                if (!bestSnapshot || Math.abs(snap.offset) > Math.abs(bestSnapshot.offset)) {
+                    bestSnapshot = snap;
+                }
+            }
+        }
+        
+        return bestSnapshot;
+    }
+
+    /**
+     * Capture and store snapshot at given offset
+     * @param {number} offset - Signed distance of snapshot
+     * @param {string} pathData - SVG path string
+     * @param {Array} segments - Parsed segment array
+     * @param {Object} topology - Topology information {bridgeCount, degenerateCount, removedBySanitize}
+     */
+    captureSnapshot(offset, pathData, segments, topology) {
+        const sign = offset >= 0 ? 'positive' : 'negative';
+        const snapshot = { offset, pathData, segments, topology };
+        this._snapshots[sign].push(snapshot);
+    }
+
+    /**
+     * Clear all snapshots (both positive and negative)
+     */
+    clearSnapshots() {
+        this._snapshots.positive = [];
+        this._snapshots.negative = [];
     }
 
     deactivate() {
         this._clearHover();
         this._removePopup();
+        this.clearSnapshots();
         super.deactivate();
     }
 
