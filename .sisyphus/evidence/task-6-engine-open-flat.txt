@@ -1,0 +1,17 @@
+## Task 6 QA — Scenario 4 (Open curve with Flat cap)
+
+- Input: `M 0 0 L 100 0`, distance `5`
+- Engine: `new OffsetEngine({ joinType: "sharp", capType: "flat", exportModule })`
+- Execution: `vitest tests/task-6-offsetengine-qa.spec.js`
+
+Result snapshot:
+
+```json
+{
+  "pathData": "M 0.000000 5.000000 L 0.000000 5.000000 L 100.000000 5.000000 L 100.000000 5.000000 L 0.000000 5.000000 Z",
+  "contourCount": 1,
+  "closed": true
+}
+```
+
+Status: PASS (closed loop emitted with flat-cap pipeline)

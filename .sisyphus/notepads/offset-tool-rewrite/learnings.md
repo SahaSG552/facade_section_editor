@@ -292,3 +292,13 @@ OffsetEngine will wrap buildOffsetContour and coordinate:
 4. Self-intersection trimming via OffsetTrimmer
 5. SVG path reassembly
 6. Return result to OffsetTool
+
+## Task 6: OffsetEngine
+
+- Implemented new facade module src/operations/OffsetEngine.js with async processPath/processSegments and compatibility export calculateOffsetFromPathData(pathData, offset, options).
+- Parsing uses ExportModule.dxfExporter.parseSVGPathSegments via bound exporter call to preserve internal this context.
+- Orchestration pipeline: parse -> split contours by continuity -> buildOffsetContour(joinType/capType) -> trimSelfIntersections -> stitch/close output -> segmentsToSVGPath.
+- Added minimal metadata aggregation (contour counts, bbox, signed area sum).
+- Implemented graceful failure policy: invalid input or exceptions return { pathData: '', contours: [], metadata: {} } with warnings/errors logged.
+- QA scenarios were executed with Vitest harness (PaperBooleanProcessor mocked to identity for deterministic Node execution), evidence saved in task-6-engine-*.txt.
+

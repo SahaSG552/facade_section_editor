@@ -1,0 +1,17 @@
+## Task 6 QA — Scenario 1 (Closed rectangle, Sharp joins)
+
+- Input: `M 0 0 L 100 0 L 100 100 L 0 100 Z`, distance `10`
+- Engine: `new OffsetEngine({ joinType: "sharp", exportModule })`
+- Execution: `vitest tests/task-6-offsetengine-qa.spec.js`
+
+Result snapshot:
+
+```json
+{
+  "pathData": "M 0.000000 10.000000 L 110.000000 10.000000 L 90.000000 110.000000 L -10.000000 90.000000 L 0.000000 10.000000 Z",
+  "contourCount": 1,
+  "bbox": { "minX": -10, "minY": 10, "maxX": 110, "maxY": 110 }
+}
+```
+
+Status: PASS (valid SVG output, contours populated)

@@ -368,7 +368,7 @@ Max Concurrent: 4 (Wave 1)
   - Files: `src/operations/OffsetCurveEvaluator.js`
   - Pre-commit: `npm run test`
 
-- [ ] 3. OffsetCapper — Open Curve Caps
+- [x] 3. OffsetCapper — Open Curve Caps
 
   **What to do**:
   Create `src/operations/OffsetCapper.js` — добавляет caps к open curves.
@@ -660,7 +660,7 @@ Max Concurrent: 4 (Wave 1)
   - Files: `src/operations/OffsetContourBuilder.js`
   - Pre-commit: `npm run test`
 
-- [ ] 6. OffsetEngine — Facade/Orchestrator
+- [x] 6. OffsetEngine — Facade/Orchestrator
 
   **What to do**:
   Create `src/operations/OffsetEngine.js` — главный facade, заменяющий CustomOffsetProcessor.js.

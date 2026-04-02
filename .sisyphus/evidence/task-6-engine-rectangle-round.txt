@@ -1,0 +1,17 @@
+## Task 6 QA — Scenario 2 (Closed rectangle, Round joins)
+
+- Input: `M 0 0 L 100 0 L 100 100 L 0 100 Z`, distance `10`
+- Engine: `new OffsetEngine({ joinType: "round", exportModule })`
+- Execution: `vitest tests/task-6-offsetengine-qa.spec.js`
+
+Result snapshot:
+
+```json
+{
+  "hasArcCommand": true,
+  "pathData": "M 0.000000 10.000000 L 100.000000 10.000000 A 10.000000 10.000000 0 0 1 90.000000 0.000000 L 90.000000 100.000000 A 10.000000 10.000000 0 0 1 100.000000 90.000000 L 0.000000 90.000000 A 10.000000 10.000000 0 0 1 10.000000 100.000000 L 10.000000 0.000000 A 10.000000 10.000000 0 0 1 0.000000 10.000000 Z",
+  "contourCount": 1
+}
+```
+
+Status: PASS (arc commands present, rounded corners generated)
