@@ -3,7 +3,9 @@
   "started_at": "2026-04-02T10:35:50.663Z",
   "session_ids": [
     "ses_2b295330bffeKPEFPBbUOZpGSz",
-    "ses_2b2394451ffewI4PqAMY1tVp2B"
+    "ses_2b2394451ffewI4PqAMY1tVp2B",
+    "ses_2b227cb71ffea1cpVBKPZmjf66",
+    "ses_2b221e73bffeXyVlL3SV1MTnZM"
   ],
   "plan_name": "offset-tool-rewrite",
   "agent": "atlas",
@@ -25,6 +27,15 @@
       "agent": "Sisyphus-Junior",
       "category": "ultrabrain",
       "updated_at": "2026-04-02T10:52:52.954Z"
+    },
+    "todo:3": {
+      "task_key": "todo:3",
+      "task_label": "3",
+      "task_title": "OffsetCapper — Open Curve Caps",
+      "session_id": "ses_2b221e73bffeXyVlL3SV1MTnZM",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-02T11:17:21.544Z"
     }
   }
 }

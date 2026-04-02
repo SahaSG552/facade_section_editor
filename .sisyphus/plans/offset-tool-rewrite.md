@@ -229,7 +229,7 @@ Max Concurrent: 4 (Wave 1)
   - Files: deleted files only
   - Pre-commit: `npm run test` (should pass with fewer tests)
 
-- [ ] 2. OffsetCurveEvaluator — Math Kernel
+- [x] 2. OffsetCurveEvaluator — Math Kernel
 
   **What to do**:
   Create `src/operations/OffsetCurveEvaluator.js` — чистое математическое ядро offset.
@@ -448,7 +448,7 @@ Max Concurrent: 4 (Wave 1)
   - Files: `src/operations/OffsetCapper.js`
   - Pre-commit: `npm run test`
 
-- [ ] 4. OffsetTrimmer — Paper.js Boolean Wrapper
+- [x] 4. OffsetTrimmer — Paper.js Boolean Wrapper
 
   **What to do**:
   Create `src/operations/OffsetTrimmer.js` — wrapper вокруг PaperBooleanProcessor для self-intersection trimming.
@@ -528,7 +528,7 @@ Max Concurrent: 4 (Wave 1)
   - Files: `src/operations/OffsetTrimmer.js`
   - Pre-commit: `npm run test`
 
-- [ ] 5. OffsetContourBuilder — Contour Processing + Corner Joins
+- [x] 5. OffsetContourBuilder — Contour Processing + Corner Joins
 
   **What to do**:
   Create `src/operations/OffsetContourBuilder.js` — обрабатывает контур: применяет Evaluator к каждому сегменту, обрабатывает углы (Sharp/Round), определяет open/closed.

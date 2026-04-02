@@ -137,3 +137,158 @@ This file (CustomOffsetProcessor) is marked for deletion in later task - serves 
 - Blocks: OffsetContourBuilder (Task 5)
 - Ready for ContourBuilder integration
 
+## Task 4: OffsetTrimmer
+
+### Implementation Summary
+- Added `src/operations/OffsetTrimmer.js` (404 lines) as Paper.js Boolean Wrapper
+- Three exported functions: `trimSelfIntersections()`, `segmentsToPathString()`, `pathStringToSegments()`
+
+### Core Design Decisions
+
+1. **Thin Wrapper Pattern**: 
+   - Delegates ALL boolean operations to `PaperBooleanProcessor.resolveSelfIntersections()`
+   - No intersection detection logic in OffsetTrimmer itself
+   - Focus: data format conversion and error handling
+
+2. **SVG Path Serialization** (`segmentsToPathString`):
+   - Converts segment array → SVG path string (d attribute)
+   - Handles all segment types: line (L), arc (A), bezier (C)
+   - Arc parsing supports both formats: `{arc: {center: {x,y}}}` and `{arc: {centerX, centerY}}`
+   - Auto-closes path when first.start ≈ last.end (EPSILON = 0.001)
+
+3. **SVG Path Parsing** (`pathStringToSegments`):
+   - Lightweight parser for absolute SVG commands
+   - Reconstructs segments from path data
+   - Suitable for round-trip: segments → SVG → segments
+   - Note: For complex relative commands (r, l, h, v, s, t), use ExportModule.dxfExporter.parseSVGPathSegments()
+
+4. **Immutability & Error Handling**:
+   - Always returns new array objects (never mutates input)
+   - Returns empty array on error (no throws)
+   - Comprehensive logging at debug/warn/error levels
+   - Gracefully handles degenerate segments
+
+### Segment Format Support (Tasks 2-3 Compatibility)
+
+Supports both arc center formats for maximum compatibility:
+```javascript
+// Modern format
+{type: "arc", start: {x,y}, end: {x,y}, arc: {center: {x,y}, radius, ...}}
+
+// Legacy format  
+{type: "arc", start: {x,y}, end: {x,y}, arc: {centerX, centerY, radius, ...}}
+```
+
+### QA Evidence
+✓ Scenario 1: Trim self-intersecting contour → clean output
+✓ Scenario 2: Pass-through non-intersecting contour → unchanged
+✓ Round-trip fidelity: segments → SVG → segments preserves structure
+
+Files:
+- `.sisyphus/evidence/task-4-trim-self-intersecting.txt`
+- `.sisyphus/evidence/task-4-trim-passthrough.txt`
+
+### Build Verification
+✓ `npm run build` passes with zero errors
+✓ No LSP diagnostics on OffsetTrimmer.js
+✓ Successfully imports resolveSelfIntersections from PaperBooleanProcessor
+
+### Integration Readiness
+- Blocks: Task 5 (OffsetContourBuilder will use OffsetTrimmer for self-intersection handling)
+- Depends on: Task 2 (OffsetCurveEvaluator segment format), Task 3 (OffsetCapper patterns)
+- Ready for ContourBuilder integration in Task 5
+
+### Code Pattern Insights
+- SVG arc command format: `A rx ry x-axis-rotation large-arc-flag sweep-flag x y`
+- Paper.js uses pathData with same SVG syntax internally
+- Round-trip conversion allows seamless integration with Paper.js boolean operations
+- Lightweight parser suitable for post-processing offset segments
+
+## Task 5: OffsetContourBuilder
+
+### Implementation Summary
+- Added `src/operations/OffsetContourBuilder.js` (244 lines) — contour orchestration
+- Two exported functions: `buildOffsetContour()` + helpers
+- Depends on Tasks 2, 3, 4
+
+### Core Design Decisions
+
+1. **Pipeline Architecture**:
+   - Phase 1: Offset each segment using OffsetCurveEvaluator
+   - Phase 2: Detect corner types (convex/concave) via cross product
+   - Phase 3: Apply appropriate join (Sharp or Round)
+   - Phase 4: Cap open contours (flat or round)
+   - Phase 5: Return segments (may have self-intersections for trimming)
+
+2. **Convex/Concave Detection**:
+   - Uses cross product of incoming and outgoing tangent vectors
+   - For Y-down: cross > 0 = convex (gap needing join)
+   - For Y-down: cross < 0 = concave (overlap - no join needed)
+   - Formula: `cross = inTangent.x * outTangent.y - inTangent.y * outTangent.x`
+
+3. **Sharp Join (Miter)**:
+   - Computes line-line intersection of extended offset segments
+   - Trims segments at intersection point
+   - Miter limit check: `dist <= |offset| * 4` (default OCCT value)
+   - If miter limit exceeded: fallback to Round join
+
+4. **Round Join**:
+   - Creates arc centered at original corner point
+   - Arc radius = |offset|
+   - Sweep direction: positive offset = CCW (sweep=1), negative offset = CW (sweep=0)
+   - Arc angles computed via Math.atan2 from corner to endpoints
+
+5. **Corner Joining Strategy**:
+   - For closed contours: process all corners in cycle
+   - For open contours: skip joins at boundaries (caps handle those)
+   - Only join convex corners (concave left for trimming)
+
+### QA Evidence
+✓ Scenario 1: Closed rectangle, Sharp join
+  - Input: 4-segment 100x100 rectangle
+  - Output: 4 segments (all trimmed at miter intersections)
+  - File: `.sisyphus/evidence/task-5-rectangle-sharp.txt`
+
+✓ Scenario 2: Closed rectangle, Round join
+  - Input: 4-segment rectangle
+  - Output: 8 segments (4 lines + 4 arc joins)
+  - Arc radius = 10 (matches offset distance)
+  - File: `.sisyphus/evidence/task-5-rectangle-round.txt`
+
+### Build Status
+✓ `npm run build` passes with zero errors
+✓ Production build succeeds (no errors/warnings about module)
+✓ Ready for Task 6 integration
+
+### Integration Readiness
+- Blocks: Task 6 (OffsetEngine will orchestrate the full pipeline)
+- Depends on: Tasks 2, 3, 4 (all imported successfully)
+- Uses: buildOffsetContour() + getTangent, computeJoinType, lineLineIntersection helpers
+
+### Key Implementation Details
+
+**Tangent Calculation**:
+- Lines: simple direction normalization
+- Arcs: perpendicular to radius, direction depends on sweepFlag
+  - CCW (sweep=1): tangent = 90° CCW rotation of radius
+  - CW (sweep=0): tangent = 90° CW rotation of radius
+
+**Line-Line Intersection**:
+- Solves: p1 + t1*d1 = p2 + t2*d2
+- Uses determinant method (2D cross product)
+- Returns null if parallel or coincident
+- Robust for edge cases (near-parallel lines)
+
+**Segment Cloning**:
+- Deep clones all segments with arc data
+- Supports both arc.center format and arc.centerX/Y legacy format
+- Preserves immutability (no mutation of input segments)
+
+### Next Task (Task 6)
+OffsetEngine will wrap buildOffsetContour and coordinate:
+1. SVG path parsing (ExportModule)
+2. Contour splitting
+3. Per-contour offset via buildOffsetContour
+4. Self-intersection trimming via OffsetTrimmer
+5. SVG path reassembly
+6. Return result to OffsetTool

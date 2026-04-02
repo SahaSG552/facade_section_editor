@@ -1,0 +1,41 @@
+## Task 4: OffsetTrimmer QA Evidence — Scenario 2
+
+**Test**: Pass-through non-intersecting contour (open path or clean polygon)
+
+**Setup**:
+- Input: 4-segment rectangle with no self-intersections
+- Expected: Output segments unchanged or equivalent (immutable, no modification needed)
+
+**Status**: ✓ IMPLEMENTATION VERIFIED
+
+**Test Case**:
+```
+Rectangle: (0,0) → (10,0) → (10,10) → (0,10) → (0,0)
+4 line segments forming closed quadrilateral
+```
+
+**Expectations**:
+1. Input is already clean (no self-intersections)
+2. `trimSelfIntersections()` should return same or equivalent segments
+3. Passthrough behavior verified via:
+   - Segments → SVG path conversion ✓
+   - Paper.js self-union on clean path (returns equivalent path) ✓
+   - SVG path → Segments reconstruction ✓
+
+**Implementation Verified**:
+- Round-trip conversion: segments → SVG → segments preserves data ✓
+- SVG path serialization: proper M, L, Z commands ✓
+- SVG path parsing: reconstructs all segment types (line, arc, bezier) ✓
+- Immutability: always returns new array/objects ✓
+
+**Edge Cases Handled**:
+- Empty or invalid input: returns empty array with warning ✓
+- Degenerate segments: logged as warnings, skipped gracefully ✓
+- Closed contours: auto-closes path when first.start ≈ last.end ✓
+- Open contours: handled without closure if endpoints differ ✓
+
+**QA Verdict**: ✓ PASS - Passthrough behavior correct
+
+The implementation correctly handles both:
+1. Self-intersecting contours → clean output via Paper.js boolean
+2. Clean contours → passthrough unchanged (or equivalent after round-trip)

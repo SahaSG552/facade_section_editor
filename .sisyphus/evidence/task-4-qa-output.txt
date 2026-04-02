@@ -1,0 +1,18 @@
+Not implemented: HTMLCanvasElement's getContext() method: without installing the canvas npm package
+E:\╨а╨░╨▒╨╛╤В╨░\Programming\JavaScript\Projects\facade_section_editor\node_modules\paper\dist\paper-full.js:14368
+			throw new Error('Canvas ' + canvas +
+			      ^
+
+Error: Canvas [object HTMLCanvasElement] is unable to provide a 2D context.
+    at Object.getCanvas (E:\╨а╨░╨▒╨╛╤В╨░\Programming\JavaScript\Projects\facade_section_editor\node_modules\paper\dist\paper-full.js:14368:10)
+    at Object.getContext (E:\╨а╨░╨▒╨╛╤В╨░\Programming\JavaScript\Projects\facade_section_editor\node_modules\paper\dist\paper-full.js:14383:21)
+    at new <anonymous> (E:\╨а╨░╨▒╨╛╤В╨░\Programming\JavaScript\Projects\facade_section_editor\node_modules\paper\dist\paper-full.js:14582:27)
+    at Object.<anonymous> (E:\╨а╨░╨▒╨╛╤В╨░\Programming\JavaScript\Projects\facade_section_editor\node_modules\paper\dist\paper-full.js:14396:17)
+    at Object.<anonymous> (E:\╨а╨░╨▒╨╛╤В╨░\Programming\JavaScript\Projects\facade_section_editor\node_modules\paper\dist\paper-full.js:17480:3)
+    at Module._compile (node:internal/modules/cjs/loader:1804:14)
+    at Object..js (node:internal/modules/cjs/loader:1936:10)
+    at Module.load (node:internal/modules/cjs/loader:1525:32)
+    at Module._load (node:internal/modules/cjs/loader:1327:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+
+Node.js v24.13.1

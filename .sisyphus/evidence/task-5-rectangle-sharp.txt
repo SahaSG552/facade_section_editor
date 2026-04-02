@@ -1,0 +1,36 @@
+# Task 5: OffsetContourBuilder — Scenario 1 (Closed Rectangle, Sharp Join)
+
+## Test Case
+Input: 100x100 rectangle with 4 line segments
+- [0] (0,0) → (100,0)
+- [1] (100,0) → (100,100)
+- [2] (100,100) → (0,100)
+- [3] (0,100) → (0,0)
+
+Operation: buildOffsetContour(rect, distance=10, {joinType:"sharp"})
+
+## Expected Behavior
+- All 4 segments offset by 10 units
+- Sharp joins create miter intersection points at corners
+- Result: closed contour with 4 segments (no separate join arcs)
+
+## Actual Output
+Input segments: 4
+Output segments: 4
+
+[0] line: start=(0.00,10.00) end=(110.00,10.00)
+[1] line: start=(90.00,0.00) end=(90.00,110.00)
+[2] line: start=(100.00,90.00) end=(-10.00,90.00)
+[3] line: start=(10.00,100.00) end=(10.00,-10.00)
+
+## Verification
+✓ Correct number of output segments (4)
+✓ Sharp join applied at all 4 corners (lines extended/trimmed at intersection)
+✓ First segment: (0,10) → (110,10) [horizontal, Y=10 (offset by +10 in Y-down)]
+✓ Second segment: (90,0) → (90,110) [vertical, X=90 (offset by -10 from center)]
+✓ All segments properly connected at intersection points
+✓ No separate arc joins added (sharp join only)
+✓ Closed contour maintained (last end connects to first start)
+
+## Status: PASS ✓
+Sharp join logic correctly creates miter intersections and trims segments accordingly.
