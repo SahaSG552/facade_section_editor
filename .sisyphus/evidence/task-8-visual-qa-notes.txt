@@ -1,0 +1,187 @@
+Task 8: Visual QA Plan for Offset Operations
+================================================
+Timestamp: Thu Apr 02 2026
+
+MANUAL TESTING REQUIRED
+========================
+This document describes the visual QA process needed to validate the new OffsetEngine in the browser UI.
+
+PREREQUISITE: Dev Server Running
+---------------------------------
+1. Run: npm run dev
+2. Open browser to http://localhost:5173/
+3. Open browser DevTools Console (F12)
+
+TEST SCENARIO 1: Basic Rectangle Offset
+----------------------------------------
+**Objective**: Verify offset preview renders correctly for simple closed contour
+
+Steps:
+1. Click "Rectangle" tool in toolbar
+2. Draw rectangle on canvas (click-drag-release)
+3. Select the rectangle (click on it)
+4. Activate "Offset" tool from toolbar
+5. Move cursor away from rectangle edge
+6. Observe offset preview (dashed outline)
+7. Expected: Preview shows offset contour at cursor distance
+8. Expected: Preview updates in real-time as cursor moves
+9. Press Enter to confirm offset
+10. Expected: New offset contour added to canvas
+11. Expected: New contour is selected (highlighted)
+
+✓ PASS Criteria:
+- Offset preview appears immediately
+- Preview contour is correct shape (rectangle offset by cursor distance)
+- No console errors
+- Confirmed offset becomes permanent contour
+- No visual artifacts or broken paths
+
+✗ FAIL Criteria:
+- Preview does not appear
+- Preview shape is incorrect (self-intersections, broken segments)
+- Console errors related to OffsetEngine, OffsetTool, or operations/
+- Confirmed offset is malformed
+- Application crashes or freezes
+
+TEST SCENARIO 2: Complex Path with Arcs
+----------------------------------------
+**Objective**: Verify offset works for mixed line/arc contours
+
+Steps:
+1. Click "Arc" tool in toolbar
+2. Draw arc segment (click start, move, click end)
+3. Connect multiple line + arc segments to form closed contour
+4. Select entire contour (Shift+click each segment or drag-select)
+5. Activate "Offset" tool
+6. Set offset distance (type value in popup input)
+7. Expected: Preview shows offset with smooth corner joins
+8. Confirm offset
+9. Expected: Result matches preview exactly
+
+✓ PASS Criteria:
+- Arc segments offset correctly (radius changes)
+- Corner joins are smooth (round or sharp based on settings)
+- No segment discontinuities
+- No console errors
+
+✗ FAIL Criteria:
+- Arcs become lines or disappear
+- Corner joins have gaps or overlaps
+- Console errors about arc handling
+- Result differs from preview
+
+TEST SCENARIO 3: Open Contour with Caps
+----------------------------------------
+**Objective**: Verify cap types (flat/round) for open curves
+
+Steps:
+1. Draw open path (line segments NOT forming closed loop)
+2. Select open path
+3. Activate "Offset" tool
+4. Expected: Caps appear at both ends of preview
+5. Check cap type setting (should default to "round")
+6. Expected: Round caps visible at path ends
+7. Confirm offset
+8. Expected: Caps remain in final result
+
+✓ PASS Criteria:
+- Caps appear on open contours
+- Cap shape matches setting (round = arc, flat = line)
+- No open edges or gaps
+
+✗ FAIL Criteria:
+- Open contour treated as closed
+- No caps rendered
+- Caps are malformed
+
+TEST SCENARIO 4: Self-Intersecting Offset
+------------------------------------------
+**Objective**: Verify trimming handles self-intersections
+
+Steps:
+1. Draw concave shape (e.g., L-shape or star)
+2. Select shape
+3. Activate "Offset" tool
+4. Set NEGATIVE offset distance (collapse inward)
+5. Expected: Preview shows trimmed result (no self-overlaps)
+6. Confirm offset
+7. Expected: Result is clean, no loops or artifacts
+
+✓ PASS Criteria:
+- Self-intersections automatically trimmed
+- Result is single clean contour (or multiple if split)
+- No overlapping segments
+- No console errors from OffsetTrimmer
+
+✗ FAIL Criteria:
+- Self-intersecting result rendered
+- Console errors about Paper.js Boolean operations
+- Result is empty when it shouldn't be
+- Unexpected contour splits
+
+TEST SCENARIO 5: Console Error Monitoring
+------------------------------------------
+**Objective**: Verify no runtime errors during offset operations
+
+Monitor browser console during ALL offset operations for:
+
+Expected Messages (OK):
+- Log messages from OffsetEngine, OffsetCurveEvaluator, etc. (debug level)
+- "buildOffsetContour: processing X segments..." (info)
+- "Trimmed X input segments → Y clean segments" (info)
+
+Forbidden Messages (FAIL):
+- ERROR: "offsetSegments cannot be empty"
+- ERROR: "Unsupported segment type"
+- ERROR: "processSegments failed"
+- ERROR: "trimSelfIntersections failed"
+- TypeError: "Cannot read property of undefined" (from offset modules)
+- ReferenceError: "OffsetEngine is not defined"
+
+✓ PASS Criteria:
+- No ERROR level messages from offset modules
+- No TypeErrors or ReferenceErrors
+- Debug/info messages only
+
+✗ FAIL Criteria:
+- Any ERROR messages from src/operations/
+- JavaScript exceptions thrown
+- Application becomes unresponsive
+
+REGRESSION CHECK: Legacy Features
+----------------------------------
+**Objective**: Ensure old offset code removal didn't break other features
+
+Quick tests:
+1. Bit operations (add, move, delete bits)
+2. Panel resize
+3. View switching (2D SVG → 2D Paper.js → 3D Three.js)
+4. DXF export
+5. Undo/Redo
+6. Selection tools
+7. Other drawing tools (Circle, Line, Arc, Rectangle)
+
+✓ PASS: All features work normally
+✗ FAIL: Any feature broken or degraded
+
+FINAL SIGN-OFF CHECKLIST
+=========================
+- [ ] Scenario 1 (Rectangle offset) ✓ PASS
+- [ ] Scenario 2 (Arc contours) ✓ PASS
+- [ ] Scenario 3 (Open contour caps) ✓ PASS
+- [ ] Scenario 4 (Self-intersection trimming) ✓ PASS
+- [ ] Scenario 5 (No console errors) ✓ PASS
+- [ ] Regression check (Other features work) ✓ PASS
+
+IF ALL ✓ PASS: Task 8 End-to-End QA COMPLETE
+IF ANY ✗ FAIL: File issue, revert changes, fix, and re-test
+
+AUTOMATED VERIFICATION ALREADY PASSED:
+======================================
+✓ Build succeeds (npm run build exit 0)
+✓ Tests pass (npm run test all pass)
+✓ OffsetEngine in production bundle
+✓ Module imports resolve correctly
+✓ No LSP import errors
+
+This manual visual QA is the FINAL verification step before marking Task 8 complete.

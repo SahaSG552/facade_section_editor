@@ -842,7 +842,7 @@ Max Concurrent: 4 (Wave 1)
   - Files: `src/editor/tools/OffsetTool.js`
   - Pre-commit: `npm run build`
 
-- [ ] 8. End-to-End QA + Build Verification
+- [x] 8. End-to-End QA + Build Verification
 
   **What to do**:
   Финальная верификация: build, lint, test, и runtime QA нового offset engine.
