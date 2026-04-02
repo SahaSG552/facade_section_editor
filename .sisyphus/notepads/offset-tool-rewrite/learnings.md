@@ -75,3 +75,65 @@ The old implementation had these concerns scattered across 8 files:
 
 ### Important Observation
 - For a vertical line `(0,0) -> (0,10)`, CCW normal is `(-1,0)`. With distance `-3`, result is `(+3,0) -> (+3,10)` (right side). This is consistent with the implemented formula `P' = P + d*N`.
+
+## Critical Fix After Task 1
+
+### Stale Imports in CustomOffsetProcessor.js
+**Issue**: CustomOffsetProcessor.js still imported deleted OffsetStageDepsFactory functions after Task 1 deletion:
+- Lines 12-17: Import block referencing deleted module
+- Lines 893-908: calculateOffsetFromPathData used createSelfIntersectionStageDeps
+- Lines 951-1002: calculateOffsetContoursFromPathData used all 4 factory functions
+
+**Fix Applied**:
+1. Removed stale import block completely
+2. Removed self-intersection handling from calculateOffsetFromPathData (dependencies deleted)
+3. Deprecated calculateOffsetContoursFromPathData - now returns empty array with warning
+4. **Build verified clean** - `npm run build` succeeds with no errors
+
+**Commit**: `d7e9b92 fix(offset): remove stale OffsetStageDepsFactory imports from CustomOffsetProcessor`
+
+This file (CustomOffsetProcessor) is marked for deletion in later task - serves as transition point between old and new offset implementations.
+
+## Task 3: OffsetCapper
+
+### Implementation Summary
+- Added `src/operations/OffsetCapper.js` with 4 exported functions
+- Functions: `capFlat()`, `capRound()`, `capOpenContour()`, `pointsEqual()` (helper)
+
+### Key Design Decisions
+
+1. **Capping Strategy**: 
+   - Only processes one-side offset (positive or negative distance)
+   - Full capping workflow happens in ContourBuilder (which has access to both sides)
+   - Here we add geometric caps at endpoints to close the loop
+
+2. **Flat Cap**: 
+   - Simple line segment between endpoints
+   - Format: `{type: "line", start: p1, end: p2}`
+
+3. **Round Cap**:
+   - Arc centered at endpoint with radius = |offsetDistance|
+   - Sweep direction determined by offset sign (positive = CCW, negative = CW)
+   - Arc angles computed via Math.atan2 and +/-π adjustments
+   - Format: `{type: "arc", start: p1, end: p2, arc: {center, radius, startAngle, endAngle, sweepFlag}}`
+
+4. **Closed Contour Detection**:
+   - Uses `pointsEqual()` helper with EPSILON = 1e-9 tolerance
+   - If last segment end ≈ first segment start: already closed, return unchanged
+   - Immutable: always returns new array
+
+### QA Evidence (.sisyphus/evidence/task-3-flat-cap.txt)
+✓ Scenario 1: Flat cap on open contour — 3 segments created, structure correct
+✓ Scenario 2: Round cap on open contour — arcs with radius=5, sweepFlag set properly
+✓ Scenario 3: Closed contour not capped — 4 segments returned unchanged
+
+### Build Status
+- `npm run build` passes ✓
+- No new dependencies
+- Module standalone and testable
+
+### Integration Notes
+- Depends on: OffsetCurveEvaluator segment format (Task 2) ✓
+- Blocks: OffsetContourBuilder (Task 5)
+- Ready for ContourBuilder integration
+

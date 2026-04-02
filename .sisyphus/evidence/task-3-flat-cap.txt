@@ -1,0 +1,29 @@
+=== TASK 3 QA SCENARIOS ===
+
+Scenario 1: Flat cap on open contour
+---
+Input: 1 segment (open line)
+Output segments: 3
+Expected: 3 (startCap + original + endCap)
+Status: PASS тЬУ
+
+Scenario 2: Round cap on open contour
+---
+Input: 1 segment (open line)
+Output segments: 3
+Cap types: [arc, line, arc]
+Expected: [arc, line, arc]
+Status: PASS тЬУ
+Start cap radius: 5
+Expected: 5
+Status: PASS тЬУ
+
+Scenario 3: Closed contour (should NOT be capped)
+---
+Input: 4 segments (closed square)
+Output segments: 4
+Expected: 4 (unchanged, not capped)
+Status: PASS тЬУ
+Contour unchanged: YES
+
+Summary: 3/3 scenarios passed тЬУ
