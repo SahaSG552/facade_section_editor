@@ -1,0 +1,279 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mone-sided mode[2m > [22m[2mshould produce 1 open contour for open path with one-sided mode
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mone-sided mode[2m > [22m[2mshould produce 1 open contour for open path with one-sided mode
+[22m[39mTEST: open path one-sided mode
+Input path: M 0 0 L 10 0 L 10 10
+Mode: one-sided
+Result contours: [33m1[39m
+Contour details: [ { closed: [33mtrue[39m, segments: [33m6[39m, area: [33m-20[39m } ]
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mone-sided mode[2m > [22m[2mone-sided mode should produce offset on one side only (positive offset)
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mone-sided mode[2m > [22m[2mone-sided mode should produce offset on one side only (positive offset)
+[22m[39mSingle line one-sided:
+Offset distance: [33m2[39m
+Contour segments: [33m4[39m
+Contour area: [33m-40[39m
+Contour closed: [33mtrue[39m
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mshould produce 2 separate open contours for open path with two-sides-no-close mode
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mshould produce 2 separate open contours for open path with two-sides-no-close mode
+[22m[39mTEST: open path two-sides-no-close mode
+Input path: M 0 0 L 10 0 L 10 10
+Mode: two-sides-no-close
+Result contours: [33m1[39m
+Contour details: [ { index: [33m0[39m, closed: [33mtrue[39m, segments: [33m6[39m, area: [33m-20[39m } ]
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mtwo-sides-no-close should produce distinct left and right contours
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mtwo-sides-no-close should produce distinct left and right contours
+[22m[39mTwo-sided no-close separation:
+  Contour 0: segments=4, closed=true, area=-20
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-round-caps mode[2m > [22m[2mtwo-sides-round-caps should include round-cap arc segments at endpoints
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-round-caps mode[2m > [22m[2mtwo-sides-round-caps should include round-cap arc segments at endpoints
+[22m[39mRound-cap structure:
+Segments: [33m4[39m
+Closed: [33mtrue[39m
+Area: [33m-40[39m
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-flat-caps mode[2m > [22m[2mtwo-sides-flat-caps should produce fewer segments than round-caps
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Open Contour Modes[2m > [22m[2mtwo-sides-flat-caps mode[2m > [22m[2mtwo-sides-flat-caps should produce fewer segments than round-caps
+[22m[39mFlat-cap structure:
+Segments: [33m4[39m
+Closed: [33mtrue[39m
+Area: [33m-40[39m
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Closed Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mshould produce 2 separate closed contours for closed path with two-sides-no-close mode
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Closed Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mshould produce 2 separate closed contours for closed path with two-sides-no-close mode
+[22m[39mTEST: closed path two-sides-no-close mode
+Input path: M 0 0 L 10 0 L 10 10 L 0 10 Z
+Mode: two-sides-no-close (closed)
+Result contours: [33m1[39m
+Contour details: [ { index: [33m0[39m, closed: [33mtrue[39m, segments: [33m4[39m, area: [33m94.111112419128[39m } ]
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Closed Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mtwo-sides-no-close closed mode should have concentric contours with different areas
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Closed Contour Modes[2m > [22m[2mtwo-sides-no-close mode[2m > [22m[2mtwo-sides-no-close closed mode should have concentric contours with different areas
+[22m[39mTwo-sided closed concentric contours:
+  Contour 0: area=94.111112419128, closed=true, segments=4
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Mode Parameter Contracts[2m > [22m[2mshould differentiate between open-path modes
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Mode Parameter Contracts[2m > [22m[2mshould differentiate between open-path modes
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Mode Parameter Contracts[2m > [22m[2mshould differentiate between open-path modes
+[22m[39mMode differentiation:
+One-sided contours: [33m1[39m
+Two-sides contours: [33m1[39m
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Mode Parameter Contracts[2m > [22m[2mshould differentiate between closed-contour cap types
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Mode Parameter Contracts[2m > [22m[2mshould differentiate between closed-contour cap types
+[22m[39m[17:11:33] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-modes.spec.js[2m > [22m[2mOffset Mode Routing - Mode Parameter Contracts[2m > [22m[2mshould differentiate between closed-contour cap types
+[22m[39mCap differentiation:
+Round-caps segments: [33m6[39m
+Flat-caps segments: [33m6[39m
+
+ [31mтЭп[39m tests/offset-modes.spec.js [2m([22m[2m15 tests[22m[2m | [22m[31m10 failed[39m[2m)[22m[32m 42[2mms[22m[39m
+[31m       [31m├Ч[31m should produce 1 open contour for open path with one-sided mode[39m[32m 17[2mms[22m[39m
+[31m       [31m├Ч[31m one-sided mode should produce offset on one side only (positive offset)[39m[32m 3[2mms[22m[39m
+[31m       [31m├Ч[31m should produce 2 separate open contours for open path with two-sides-no-close mode[39m[32m 6[2mms[22m[39m
+[31m       [31m├Ч[31m two-sides-no-close should produce distinct left and right contours[39m[32m 1[2mms[22m[39m
+[31m       [31m├Ч[31m two-sides-round-caps should include round-cap arc segments at endpoints[39m[32m 1[2mms[22m[39m
+[31m       [31m├Ч[31m two-sides-flat-caps should produce fewer segments than round-caps[39m[32m 1[2mms[22m[39m
+[31m       [31m├Ч[31m should produce 2 separate closed contours for closed path with two-sides-no-close mode[39m[32m 2[2mms[22m[39m
+[31m       [31m├Ч[31m two-sides-no-close closed mode should have concentric contours with different areas[39m[32m 2[2mms[22m[39m
+[31m     [31m├Ч[31m should differentiate between open-path modes[39m[32m 2[2mms[22m[39m
+[31m     [31m├Ч[31m should differentiate between closed-contour cap types[39m[32m 1[2mms[22m[39m
+
+тОптОптОптОптОптОп Failed Tests 10 тОптОптОптОптОптОптОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Open Contour Modes > one-sided mode > should produce 1 open contour for open path with one-sided mode
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-modes.spec.js:48:47
+     46|             // Expected: 1 open contour offset to cursor side only
+     47|             expect(result.contours).toHaveLength(1);
+     48|             expect(result.contours[0].closed).toBe(false);
+       |                                               ^
+     49|             expect(result.contours[0].area).toBeGreaterThan(0);
+     50|         });
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[1/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Open Contour Modes > one-sided mode > one-sided mode should produce offset on one side only (positive offset)
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-modes.spec.js:73:36
+     71|             // Expected: 1 open contour, area derived from 1 offset
+     72|             expect(result.contours).toHaveLength(1);
+     73|             expect(contour.closed).toBe(false);
+       |                                    ^
+     74|             expect(contour.segments.length).toBeGreaterThan(0);
+     75|         });
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[2/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Open Contour Modes > two-sides-no-close mode > should produce 2 separate open contours for open path with two-sides-no-close mode
+AssertionError: expected [ { тАж(6) } ] to have a length of 2 but got 1
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ тЭп tests/offset-modes.spec.js:101:37
+     99|             // MUST FAIL before mode routing exists
+    100|             // Expected: 2 separate open contours (left and right offsтАж
+    101|             expect(result.contours).toHaveLength(2);
+       |                                     ^
+    102|             expect(result.contours[0].closed).toBe(false);
+    103|             expect(result.contours[1].closed).toBe(false);
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[3/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Open Contour Modes > two-sides-no-close mode > two-sides-no-close should produce distinct left and right contours
+AssertionError: expected [ { тАж(6) } ] to have a length of 2 but got 1
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ тЭп tests/offset-modes.spec.js:123:37
+    121|             // MUST FAIL before mode implementation
+    122|             // Expected: 2 contours with different areas (one offset +тАж
+    123|             expect(result.contours).toHaveLength(2);
+       |                                     ^
+    124|             expect(result.contours[0].area).not.toEqual(result.contourтАж
+    125|         });
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[4/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Open Contour Modes > two-sides-round-caps mode > two-sides-round-caps should include round-cap arc segments at endpoints
+AssertionError: expected 4 to be greater than 8
+ тЭп tests/offset-modes.spec.js:175:45
+    173|             // Expected: Closed contour with round caps (more segmentsтАж
+    174|             expect(contour.closed).toBe(true);
+    175|             expect(contour.segments.length).toBeGreaterThan(8); // MorтАж
+       |                                             ^
+    176|         });
+    177|     });
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[5/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Open Contour Modes > two-sides-flat-caps mode > two-sides-flat-caps should produce fewer segments than round-caps
+AssertionError: expected 4 to be greater than 4
+ тЭп tests/offset-modes.spec.js:226:45
+    224|             // Expected: Closed contour with flat caps (fewer segmentsтАж
+    225|             expect(contour.closed).toBe(true);
+    226|             expect(contour.segments.length).toBeGreaterThan(4); // At тАж
+       |                                             ^
+    227|         });
+    228|     });
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[6/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Closed Contour Modes > two-sides-no-close mode > should produce 2 separate closed contours for closed path with two-sides-no-close mode
+AssertionError: expected [ { тАж(6) } ] to have a length of 2 but got 1
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ тЭп tests/offset-modes.spec.js:305:37
+    303|             // MUST FAIL before mode routing exists
+    304|             // Expected: 2 separate closed contours (outer and inner, тАж
+    305|             expect(result.contours).toHaveLength(2);
+       |                                     ^
+    306|             expect(result.contours[0].closed).toBe(true);
+    307|             expect(result.contours[1].closed).toBe(true);
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[7/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Closed Contour Modes > two-sides-no-close mode > two-sides-no-close closed mode should have concentric contours with different areas
+AssertionError: expected [ { тАж(6) } ] to have a length of 2 but got 1
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ тЭп tests/offset-modes.spec.js:327:37
+    325|             // MUST FAIL before mode implementation
+    326|             // Expected: 2 contours with outer > inner area (concentriтАж
+    327|             expect(result.contours).toHaveLength(2);
+       |                                     ^
+    328|             // Sort by area to compare outer vs inner
+    329|             const sortedByArea = [...result.contours].sort((a, b) => bтАж
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[8/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Mode Parameter Contracts > should differentiate between open-path modes
+AssertionError: expected 1 to not deeply equal 1
+ тЭп tests/offset-modes.spec.js:369:52
+    367|         console.log("Two-sides contours:", twoSidesResult.contours.lenтАж
+    368|
+    369|         expect(oneSidedResult.contours.length).not.toEqual(twoSidesResтАж
+       |                                                    ^
+    370|     });
+    371|
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[9/10]тОп
+
+ FAIL  tests/offset-modes.spec.js > Offset Mode Routing - Mode Parameter Contracts > should differentiate between closed-contour cap types
+AssertionError: expected 6 to not deeply equal 6
+ тЭп tests/offset-modes.spec.js:390:69
+    388|             console.log("Flat-caps segments:", flatCapsResult.contoursтАж
+    389|
+    390|             expect(roundCapsResult.contours[0].segments.length).not.toтАж
+       |                                                                     ^
+    391|         }
+    392|     });
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[10/10]тОп
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m10 failed[39m[22m[2m | [22m[1m[32m5 passed[39m[22m[90m (15)[39m
+[2m   Start at [22m 21:11:32
+[2m   Duration [22m 793ms[2m (transform 200ms, setup 36ms, import 231ms, tests 42ms, environment 305ms)[22m
+

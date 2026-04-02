@@ -1,0 +1,51 @@
+
+> facade_section_editor@1.0.0 test
+> vitest run tests/offset-invariants.spec.js
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+[90mstdout[2m | tests/offset-invariants.spec.js[2m > [22m[2mOffset Continuity & Degenerate Invariants[2m > [22m[2mNo Zero-Length Segments[2m > [22m[2msingle-line offset should have no zero-length segments
+[22m[39m[17:22:21] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-invariants.spec.js[2m > [22m[2mOffset Continuity & Degenerate Invariants[2m > [22m[2mNo Zero-Length Segments[2m > [22m[2msingle-line offset should have no zero-length segments
+[22m[39mTEST: zero-length segments in single-line offset
+Input path: M 0 0 V 10
+Offset distance: 1
+Contour segments count: [33m4[39m
+Contour closed (SHOULD BE FALSE for open path): [33mtrue[39m
+  Segment 0: start={"x":-1,"y":0}, end={"x":-1,"y":10}, isZero=false
+  Segment 1: start={"x":-1,"y":10}, end={"x":1,"y":10}, isZero=false
+  Segment 2: start={"x":1,"y":10}, end={"x":1,"y":0}, isZero=false
+  Segment 3: start={"x":1,"y":0}, end={"x":-1,"y":0}, isZero=false
+
+ [31mтЭп[39m tests/offset-invariants.spec.js [2m([22m[2m10 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 30[2mms[22m[39m
+[31m       [31m├Ч[31m single-line offset should have no zero-length segments[39m[32m 14[2mms[22m[39m
+
+тОптОптОптОптОптОптОп Failed Tests 1 тОптОптОптОптОптОптОп
+
+ FAIL  tests/offset-invariants.spec.js > Offset Continuity & Degenerate Invariants > No Zero-Length Segments > single-line offset should have no zero-length segments
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-invariants.spec.js:85:36
+     83|             // ALSO VERIFY: open path should not be marked closed
+     84|             // (This is the KNOWN BUG from Task 1)
+     85|             expect(contour.closed).toBe(false);
+       |                                    ^
+     86|         });
+     87|
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[1/1]тОп
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m9 passed[39m[22m[90m (10)[39m
+[2m   Start at [22m 21:22:20
+[2m   Duration [22m 860ms[2m (transform 205ms, setup 47ms, import 227ms, tests 30ms, environment 369ms)[22m
+

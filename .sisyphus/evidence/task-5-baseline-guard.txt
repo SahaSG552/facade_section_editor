@@ -1,0 +1,18 @@
+BASELINE REGRESSION GUARD
+Date: 2026-04-02 21:14:46
+Task: task-5-baseline-guard
+
+TEST RUN OUTPUT:
+================
+
+Test Files: 2 passed (2)
+      Tests: 36 passed (36)
+   Start at: 21:14:46
+    Duration: 640ms (transform 222ms, setup 56ms, import 254ms, tests 18ms, environment 588ms)
+
+SUITES:
+- tests/task-6-offsetengine-qa.spec.js ✓
+- tests/f3-functional-qa.spec.js ✓
+
+RESULT: ALL TESTS PASSING
+Status: GATE_CLEARED

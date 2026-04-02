@@ -1,0 +1,61 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+[90mstdout[2m | tests/offset-cursor-side.spec.js[2m > [22m[2mOffset cursor-side contract (RED)[2m > [22m[2mopen vertical line: cursor on left should choose negative side
+[22m[39m[17:12:47] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-cursor-side.spec.js[2m > [22m[2mOffset cursor-side contract (RED)[2m > [22m[2mopen vertical line: cursor on right should choose positive side
+[22m[39m[17:12:47] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-cursor-side.spec.js[2m > [22m[2mOffset cursor-side contract (RED)[2m > [22m[2mclosed rectangle: inside cursor should choose inward one-sided offset
+[22m[39m[17:12:47] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+ [31mтЭп[39m tests/offset-cursor-side.spec.js [2m([22m[2m3 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[32m 21[2mms[22m[39m
+[31m     [31m├Ч[31m open vertical line: cursor on left should choose negative side[39m[32m 16[2mms[22m[39m
+[31m     [31m├Ч[31m open vertical line: cursor on right should choose positive side[39m[32m 1[2mms[22m[39m
+[31m     [31m├Ч[31m closed rectangle: inside cursor should choose inward one-sided offset[39m[32m 1[2mms[22m[39m
+
+тОптОптОптОптОптОптОп Failed Tests 3 тОптОптОптОптОптОптОп
+
+ FAIL  tests/offset-cursor-side.spec.js > Offset cursor-side contract (RED) > open vertical line: cursor on left should choose negative side
+AssertionError: expected 1 to be less than or equal to 0
+ тЭп tests/offset-cursor-side.spec.js:40:27
+     38|         expect(result.contours).toHaveLength(1);
+     39|         expect(bbox).not.toBeNull();
+     40|         expect(bbox.maxX).toBeLessThanOrEqual(0);
+       |                           ^
+     41|     });
+     42|
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[1/3]тОп
+
+ FAIL  tests/offset-cursor-side.spec.js > Offset cursor-side contract (RED) > open vertical line: cursor on right should choose positive side
+AssertionError: expected -1 to be greater than or equal to 0
+ тЭп tests/offset-cursor-side.spec.js:57:27
+     55|         expect(result.contours).toHaveLength(1);
+     56|         expect(bbox).not.toBeNull();
+     57|         expect(bbox.minX).toBeGreaterThanOrEqual(0);
+       |                           ^
+     58|     });
+     59|
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[2/3]тОп
+
+ FAIL  tests/offset-cursor-side.spec.js > Offset cursor-side contract (RED) > closed rectangle: inside cursor should choose inward one-sided offset
+AssertionError: expected -1 to be greater than 0
+ тЭп tests/offset-cursor-side.spec.js:74:27
+     72|         expect(result.contours).toHaveLength(1);
+     73|         expect(bbox).not.toBeNull();
+     74|         expect(bbox.minX).toBeGreaterThan(0);
+       |                           ^
+     75|         expect(bbox.minY).toBeGreaterThan(0);
+     76|         expect(bbox.maxX).toBeLessThan(10);
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[3/3]тОп
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[90m (3)[39m
+[2m   Start at [22m 21:12:46
+[2m   Duration [22m 847ms[2m (transform 214ms, setup 47ms, import 246ms, tests 21ms, environment 353ms)[22m
+

@@ -1,0 +1,92 @@
+Task 6: Test Helper Utilities for Topology Checks
+================================================
+
+DELIVERABLES COMPLETED:
+✓ File created: tests/helpers/topology-helpers.js
+✓ EPS constant defined: export const EPS = 1e-6
+✓ assertContinuity helper: Validates segment continuity within EPS tolerance
+✓ assertNoZeroLength helper: Checks all segments have length >= EPS
+✓ assertContourCount helper: Verifies expected number of contours
+✓ Helpers imported into tests/offset-topology.spec.js
+✓ Helpers imported into tests/task-6-offsetengine-qa.spec.js
+
+TEST RESULTS:
+=============
+
+1. offset-topology.spec.js - 7 TESTS
+   - 4 passed
+   - 3 failed (expected - RED tests for current broken behavior)
+   - New test added: "single-line offset should have continuous segments"
+   - Uses: assertContinuity, assertNoZeroLength, assertContourCount
+
+2. task-6-offsetengine-qa.spec.js - 5 TESTS (ALL PASSED)
+   - 5 passed
+   - New test added: "Scenario 4b: open curve topology validation"
+   - Uses: assertContourCount, assertContinuity, assertNoZeroLength
+
+TOPOLOGY HELPERS USAGE:
+=======================
+
+File: tests/helpers/topology-helpers.js
+
+1. EPS = 1e-6
+   - Floating-point tolerance for distance comparisons
+   - Used by all assertion helpers
+
+2. assertContinuity(segments)
+   - Validates that segment[i].end connects to segment[i+1].start
+   - Throws error if gap >= EPS
+   - Provides detailed error messages with point coordinates and gap distance
+
+3. assertNoZeroLength(segments)
+   - Validates all segments have distance(start, end) >= EPS
+   - Throws error if any segment has length < EPS
+   - Prevents degenerate/parasitic segments
+
+4. assertContourCount(result, expected)
+   - Simple assertion for exact contour count match
+   - Throws error with actual count if mismatch
+
+INTEGRATION EXAMPLES:
+=====================
+
+tests/offset-topology.spec.js (NEW TEST):
+    it("single-line offset should have continuous segments", async () => {
+        const engine = new OffsetEngine({ joinType: "sharp", capType: "flat", exportModule });
+        const pathData = "M 0 0 V 10";
+        const result = await engine.processPath(pathData, 1);
+
+        assertContourCount(result, 1);
+        const contour = result.contours[0];
+
+        // Verify continuity
+        assertContinuity(contour.segments);
+
+        // Verify no zero-length segments
+        assertNoZeroLength(contour.segments);
+    });
+
+tests/task-6-offsetengine-qa.spec.js (NEW TEST):
+    it("Scenario 4b: open curve topology validation", async () => {
+        const engine = new OffsetEngine({ joinType: "sharp", capType: "flat", exportModule });
+        const result = await engine.processPath("M 0 0 L 100 0", 5);
+
+        // Validate contour count and topology
+        assertContourCount(result, 1);
+        const contour = result.contours[0];
+
+        // Verify segment continuity
+        assertContinuity(contour.segments);
+
+        // Verify no zero-length segments
+        assertNoZeroLength(contour.segments);
+    });
+
+VERIFICATION:
+==============
+✓ Helper file created and properly exported
+✓ Helpers imported successfully into 2 test spec files
+✓ Tests execute without import errors
+✓ Helper assertions validate topology correctly
+✓ RED tests properly fail with existing broken behavior
+✓ NEW tests properly execute helper functions

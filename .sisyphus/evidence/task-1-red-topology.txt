@@ -1,0 +1,100 @@
+
+> facade_section_editor@1.0.0 test
+> vitest run tests/offset-topology.spec.js
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line offset should produce open contour, not closed
+[22m[39m[17:06:38] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line offset should produce open contour, not closed
+[22m[39mContour closed status: [33mtrue[39m
+Contour segments count: [33m4[39m
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line round-cap offset should produce proper topology
+[22m[39m[17:06:38] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line round-cap offset should produce proper topology
+[22m[39mRound cap test:
+Contours: [33m1[39m
+  Contour 0: segments=4, closed=true
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2mmulti-segment open path should maintain proper topology
+[22m[39m[17:06:38] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2mmulti-segment open path should maintain proper topology
+[22m[39mMulti-segment open path test:
+Contours: [33m1[39m
+  Contour 0: segments=6, closed=true
+
+ [31mтЭп[39m tests/offset-topology.spec.js [2m([22m[2m6 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[32m 19[2mms[22m[39m
+[31m     [31m├Ч[31m single-line offset should produce open contour, not closed[39m[32m 5[2mms[22m[39m
+[31m     [31m├Ч[31m single-line round-cap offset should produce proper topology[39m[32m 2[2mms[22m[39m
+[31m     [31m├Ч[31m multi-segment open path should maintain proper topology[39m[32m 2[2mms[22m[39m
+
+тОптОптОптОптОптОптОп Failed Tests 3 тОптОптОптОптОптОптОп
+
+ FAIL  tests/offset-topology.spec.js > Offset Topology - Single Line Invariants > single-line offset should produce open contour, not closed
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-topology.spec.js:47:32
+     45|
+     46|         // MUST FAIL if contour is incorrectly marked as closed
+     47|         expect(contour.closed).toBe(false);
+       |                                ^
+     48|     });
+     49|
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[1/3]тОп
+
+ FAIL  tests/offset-topology.spec.js > Offset Topology - Single Line Invariants > single-line round-cap offset should produce proper topology
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-topology.spec.js:99:43
+     97|
+     98|         // Should be open
+     99|         expect(result.contours[0].closed).toBe(false);
+       |                                           ^
+    100|
+    101|         // Should not have parasitic loop
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[2/3]тОп
+
+ FAIL  tests/offset-topology.spec.js > Offset Topology - Single Line Invariants > multi-segment open path should maintain proper topology
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-topology.spec.js:120:43
+    118|
+    119|         // Should be open
+    120|         expect(result.contours[0].closed).toBe(false);
+       |                                           ^
+    121|     });
+    122| });
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[3/3]тОп
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (6)[39m
+[2m   Start at [22m 21:06:37
+[2m   Duration [22m 832ms[2m (transform 138ms, setup 34ms, import 157ms, tests 19ms, environment 418ms)[22m
+

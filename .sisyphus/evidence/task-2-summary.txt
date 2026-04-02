@@ -1,0 +1,71 @@
+TASK 2: RED Tests for Mode Routing Contracts
+==============================================
+
+DELIVERABLES COMPLETED:
+✓ File created: tests/offset-modes.spec.js (392 lines)
+✓ Test cases for open contour modes (4 modes, 8 test cases)
+✓ Test cases for closed contour modes (2 modes, 4 test cases)
+✓ Mode routing contract tests (3 tests)
+✓ Tests FAIL (RED) as expected - 10 failures, 5 passes
+✓ Evidence file: .sisyphus/evidence/task-2-red-modes.txt (17.4 KB)
+✓ Findings appended to: .sisyphus/notepads/offset-open-curve-modes-fix/learnings.md
+
+TEST SUMMARY:
+Total: 15 tests
+- FAILED (RED): 10 ✓
+- PASSED: 5
+
+RED FAILURES OVERVIEW:
+1. Open contours incorrectly marked as closed=true
+2. Mode parameter ignored - all modes produce identical 1-contour output
+3. two-sides-no-close produces 1 contour instead of 2 separate contours
+4. Round-caps and flat-caps modes produce identical output (no cap differentiation)
+5. Segment counts don't increase with round caps
+6. No differentiation between one-sided and two-sides modes
+
+MODE TEST COVERAGE:
+
+Open Contour Modes:
+- one-sided: 2 tests (expected 1 open contour, cursor-side offset)
+- two-sides-no-close: 2 tests (expected 2 separate open contours)
+- two-sides-round-caps: 2 tests (expected 1 closed with round arcs >8 segments)
+- two-sides-flat-caps: 2 tests (expected 1 closed with flat caps >4 segments)
+
+Closed Contour Modes:
+- one-sided: 2 tests (expected 1 closed contour, inward offset)
+- two-sides-no-close: 2 tests (expected 2 concentric closed contours)
+
+Mode Routing Contracts:
+- Parameter acceptance: mode parameter in processPath options
+- Open-path differentiation: one-sided vs two-sides should differ
+- Cap-type differentiation: round-caps vs flat-caps should differ
+
+CURRENT BEHAVIOR (Before Wave 2 Implementation):
+- Mode parameter is silently ignored
+- All offsets behave identically regardless of mode
+- Open paths incorrectly marked as closed (Wave 1 bug carries forward)
+- No cap generation differentiation
+
+WAVE 2 IMPLEMENTATION REQUIREMENTS:
+1. Accept mode parameter in OffsetEngine.processPath(pathData, distance, options)
+2. Route to different offset algorithms based on mode
+3. For two-sides-no-close: Return 2 separate contours (not stitched)
+4. For two-sides-*-caps: Generate proper cap arcs (round or flat)
+5. For one-sided: Return single offset contour
+6. Fix underlying closed flag bug from Wave 1
+
+TEST FILE ARCHITECTURE:
+- Uses vi.mock() to isolate PaperBooleanProcessor dependency
+- Imports ExportModule for engine initialization
+- Follows Vitest patterns from existing tests
+- Organized into describe blocks by mode category
+- Each mode has multiple assertion types:
+  - Contour count verification
+  - Closed/open status verification
+  - Segment count validation
+  - Area calculations for concentric contours
+
+EVIDENCE ARTIFACTS:
+- tests/offset-modes.spec.js: Complete test suite (392 lines)
+- .sisyphus/evidence/task-2-red-modes.txt: Full test output (17.4 KB)
+- .sisyphus/notepads/offset-open-curve-modes-fix/learnings.md: Documented findings

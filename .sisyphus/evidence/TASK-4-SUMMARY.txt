@@ -1,0 +1,68 @@
+TASK 4: RED TESTS - CONTINUITY & DEGENERATE INVARIANTS
+=======================================================
+
+OBJECTIVE:
+Create RED (failing) tests for segment-level invariants in offset operations.
+Specifically: no zero-length segments, stitched continuity, no implicit extra closure.
+
+DELIVERABLES COMPLETED:
+✓ File created: tests/offset-invariants.spec.js (404 lines)
+✓ Test for no zero-length segments (3 tests)
+✓ Test for stitched continuity (3 tests)
+✓ Test for no implicit extra closure (3 tests)
+✓ Tests FAIL (RED) as expected
+✓ Evidence file: .sisyphus/evidence/task-4-red-invariants.txt
+
+TEST RESULTS:
+- Total: 10 tests
+- FAILED: 1 test (RED ✓)
+- PASSED: 9 tests
+
+RED FAILURE CAPTURED:
+Test: "single-line offset should have no zero-length segments"
+Input: M 0 0 V 10 (open vertical line)
+Expected: contour.closed === false
+Actual: contour.closed === true
+Line: tests/offset-invariants.spec.js:85:36
+
+KEY FINDINGS:
+
+1. SEGMENT VALIDITY ✓ WORKS
+   - No zero-length segments detected
+   - Segments properly stitched end-to-start
+   - Continuity preserved across segments
+   - Result: 4 valid segments for single-line offset
+
+2. TOPOLOGY BUG ✗ CONFIRMED
+   - The contour.closed flag is INCORRECTLY set to true
+   - For an OPEN path input (M 0 0 V 10), should be false
+   - This matches the KNOWN BUG from Tasks 1 & 2
+   - Root cause: Capping logic closes path, flag not corrected
+
+3. IMPLEMENTATION PATTERN
+   Invariant checkers use epsilon-safe comparisons:
+   - pointsEqual(p1, p2, EPS=1e-6)
+   - isZeroLengthSegment(segment, epsilon)
+   - areSegmentsStitched(seg1, seg2, epsilon)
+
+SEGMENTS ANALYZED (Single-line offset):
+  [0] (-1,0)   → (-1,10)  ✓ valid, length=10
+  [1] (-1,10)  → (1,10)   ✓ stitched, length=2
+  [2] (1,10)   → (1,0)    ✓ stitched, length=10
+  [3] (1,0)    → (-1,0)   ✓ stitched & closes loop, length=2
+
+IMPLICATIONS:
+- Segment generation is CORRECT
+- Issue is purely at TOPOLOGY CLASSIFICATION level
+- Fix needed: Detect open input, mark contour.closed = false
+- Once fixed: Mode routing in Wave 2 will work correctly
+
+NEXT STEPS (Wave 2.5):
+1. Search for closed-flag assignments in OffsetEngine
+2. Add open-path detection logic
+3. Fix contour.closed for capped-but-open paths
+4. Re-run test—should go GREEN
+
+EVIDENCE:
+File: .sisyphus/evidence/task-4-red-invariants.txt
+Shows: 1 failed test, 9 passing tests, with RED assertion on closed flag
