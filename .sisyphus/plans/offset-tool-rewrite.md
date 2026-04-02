@@ -774,7 +774,7 @@ Max Concurrent: 4 (Wave 1)
   - Files: `src/operations/OffsetEngine.js`
   - Pre-commit: `npm run test`
 
-- [ ] 7. OffsetTool Adaptation
+- [x] 7. OffsetTool Adaptation
 
   **What to do**:
   Modify `src/editor/tools/OffsetTool.js` — минимальная адаптация для использования нового OffsetEngine.

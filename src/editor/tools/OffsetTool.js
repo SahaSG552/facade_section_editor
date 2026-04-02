@@ -3,7 +3,7 @@ import BaseTool from "./BaseTool.js";
 import { app } from "../../app/main.js";
 import { ARC_APPROX_TOLERANCE } from "../../config/constants.js";
 import { buildOffsetDistanceSeries } from "../../utils/offsetSeries.js";
-import { calculateOffsetFromPathData } from "../../operations/CustomOffsetProcessor.js";
+import { calculateOffsetFromPathData } from "../../operations/OffsetEngine.js";
 import { arcCenterFromEndpoints, arcFlagsViaPoint } from "./ArcTool.js";
 import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 import { getRectGeomLocal, getRectClampedRx } from "../geometry/rectGeometry.js";
