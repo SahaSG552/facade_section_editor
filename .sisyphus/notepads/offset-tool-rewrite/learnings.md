@@ -4,6 +4,42 @@
 
 (Subagents will append discoveries here)
 
+---
+
+## F3 — Functional QA Learnings (2026-04-02)
+
+### Import Pattern for OffsetCurveEvaluator
+`OffsetCurveEvaluator.js` uses a **default export object** (not named exports):
+```js
+// Correct:
+import OffsetCurveEvaluator from './OffsetCurveEvaluator.js';
+const { offsetSegment } = OffsetCurveEvaluator;
+// Wrong (will fail):
+import { offsetSegment } from './OffsetCurveEvaluator.js';
+```
+`OffsetContourBuilder.js` correctly uses named destructure from default internally.
+
+### Running Tests in Node Context
+Direct `node _qa_test.mjs` fails because `OffsetTrimmer → PaperBooleanProcessor → paper`
+requires a browser canvas. Must use Vitest (happy-dom env + setup.js canvas mock) OR mock
+`PaperBooleanProcessor` with `vi.mock()` before import.
+
+### Scenario G — Empty Input Behavior
+`buildOffsetContour([], 5, {})` returns `[]` and emits a WARN log
+("buildOffsetContour: empty or invalid segments input []"). This is correct behavior —
+graceful degradation, not a crash.
+
+### Arc Round-Trip Fidelity
+`svgArcToCenter()` (W3C F.6 implementation in OffsetTrimmer) correctly reconstructs
+center coordinates from SVG arc parameters. Round-trip error < 0.01 for a radius-10 quarter
+circle arc with center at origin.
+
+### capBothSides Signature
+`capBothSides(positiveSegments, negativeSegments, offsetDistance, capType = 'flat')`
+- Throws `Error` if either segment array is empty (defensive, correct)
+- Returns connected segments bridging the +d and -d offset sides
+- Flat cap: straight line; Round cap: arc at each end
+
 ## Task 1: Clean Foundation
 
 ### Deletions Completed

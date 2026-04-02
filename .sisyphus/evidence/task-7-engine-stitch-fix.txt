@@ -1,0 +1,123 @@
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line offset should produce open contour, not closed
+[22m[39m[17:30:37] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line offset should produce open contour, not closed
+[22m[39mContour closed status: [33mtrue[39m
+Contour segments count: [33m4[39m
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line round-cap offset should produce proper topology
+[22m[39m[17:30:37] [OffsetTrimmer:INFO] Trimmed 4 input segments тЖТ 4 clean segments
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2msingle-line round-cap offset should produce proper topology
+[22m[39mRound cap test:
+Contours: [33m1[39m
+  Contour 0: segments=4, closed=true
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2mmulti-segment open path should maintain proper topology
+[22m[39m[17:30:37] [OffsetTrimmer:INFO] Trimmed 6 input segments тЖТ 6 clean segments
+
+[90mstdout[2m | tests/offset-topology.spec.js[2m > [22m[2mOffset Topology - Single Line Invariants[2m > [22m[2mmulti-segment open path should maintain proper topology
+[22m[39mMulti-segment open path test:
+Contours: [33m1[39m
+  Contour 0: segments=6, closed=true
+
+ [31mтЭп[39m tests/offset-topology.spec.js [2m([22m[2m7 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[32m 27[2mms[22m[39m
+[31m     [31m├Ч[31m single-line offset should produce open contour, not closed[39m[32m 9[2mms[22m[39m
+[31m     [31m├Ч[31m single-line round-cap offset should produce proper topology[39m[32m 2[2mms[22m[39m
+[31m     [31m├Ч[31m multi-segment open path should maintain proper topology[39m[32m 1[2mms[22m[39m
+
+тОптОптОптОптОптОптОп Failed Tests 3 тОптОптОптОптОптОптОп
+
+ FAIL  tests/offset-topology.spec.js > Offset Topology - Single Line Invariants > single-line offset should produce open contour, not closed
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-topology.spec.js:52:32
+     50|
+     51|         // MUST FAIL if contour is incorrectly marked as closed
+     52|         expect(contour.closed).toBe(false);
+       |                                ^
+     53|     });
+     54|
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[1/3]тОп
+
+ FAIL  tests/offset-topology.spec.js > Offset Topology - Single Line Invariants > single-line round-cap offset should produce proper topology
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-topology.spec.js:104:43
+    102|
+    103|         // Should be open
+    104|         expect(result.contours[0].closed).toBe(false);
+       |                                           ^
+    105|
+    106|         // Should not have parasitic loop
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[2/3]тОп
+
+ FAIL  tests/offset-topology.spec.js > Offset Topology - Single Line Invariants > multi-segment open path should maintain proper topology
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ тЭп tests/offset-topology.spec.js:125:43
+    123|
+    124|         // Should be open
+    125|         expect(result.contours[0].closed).toBe(false);
+       |                                           ^
+    126|     });
+    127|
+
+тОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОптОп[3/3]тОп
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m4 passed[39m[22m[90m (7)[39m
+[2m   Start at [22m 21:30:36
+[2m   Duration [22m 839ms[2m (transform 218ms, setup 42ms, import 257ms, tests 27ms, environment 335ms)[22m
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m   Start at [22m 21:37:29
+[2m   Duration [22m 878ms[2m (transform 218ms, setup 50ms, import 247ms, tests 25ms, environment 353ms)[22m
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m2 passed[39m[22m[2m | [22m[33m8 skipped[39m[90m (10)[39m
+[2m   Start at [22m 21:37:31
+[2m   Duration [22m 668ms[2m (transform 160ms, setup 42ms, import 171ms, tests 8ms, environment 313ms)[22m
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m5 passed[39m[22m[90m (5)[39m
+[2m   Start at [22m 21:37:33
+[2m   Duration [22m 851ms[2m (transform 193ms, setup 32ms, import 226ms, tests 10ms, environment 407ms)[22m
+
