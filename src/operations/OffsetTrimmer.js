@@ -17,6 +17,36 @@ import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("OffsetTrimmer");
 
+const BEZIER_TOLERANCE = 1e-4;
+
+/**
+ * Evaluate one coordinate at parameter t on a cubic bezier.
+ */
+function cubicBezierPoint(p0, p1, p2, p3, t) {
+  const mt = 1 - t;
+  return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3;
+}
+
+/**
+ * Compute how many line segments are needed to approximate a cubic bezier
+ * within BEZIER_TOLERANCE. Uses the convex-hull bound: error <= 3/4 * max
+ * distance of control points from the chord.
+ */
+function computeBezierSteps(x0, y0, x1, y1, x2, y2, x3, y3) {
+  // Rough bound based on control polygon
+  const dx1 = x1 - x0, dy1 = y1 - y0;
+  const dx2 = x2 - x1, dy2 = y2 - y1;
+  const dx3 = x3 - x2, dy3 = y3 - y2;
+  const maxDeviation = Math.max(
+    Math.abs(dx1 * dy2 - dy1 * dx2),
+    Math.abs(dx2 * dy3 - dy2 * dx3),
+  );
+  if (maxDeviation < BEZIER_TOLERANCE) return 1;
+  // More segments for larger curves
+  const steps = Math.max(1, Math.ceil(Math.sqrt(maxDeviation / BEZIER_TOLERANCE)));
+  return Math.min(steps, 32); // cap to avoid over-segmentation
+}
+
 /**
  * Trim self-intersections from offset contour using Paper.js Boolean operations.
  *
@@ -447,19 +477,40 @@ export function pathStringToSegments(pathString) {
           }
           break;
 
-        case "C": // Cubic Bezier: x1 y1 x2 y2 x y
+        case "C": { // Cubic Bezier: x1 y1 x2 y2 x y
           if (params.length >= 6) {
-            segments.push({
-              type: "bezier",
-              start: { x: currentX, y: currentY },
-              cp1: { x: params[0], y: params[1] },
-              cp2: { x: params[2], y: params[3] },
-              end: { x: params[4], y: params[5] },
-            });
-            currentX = params[4];
-            currentY = params[5];
+            const cp1x = params[0];
+            const cp1y = params[1];
+            const cp2x = params[2];
+            const cp2y = params[3];
+            const endX = params[4];
+            const endY = params[5];
+
+            // Approximate cubic bezier as line segments for downstream consumers
+            // that only support line/arc (OffsetTool, parsePathToSegments, etc.)
+            const steps = computeBezierSteps(currentX, currentY, cp1x, cp1y, cp2x, cp2y, endX, endY);
+            let prevX = currentX;
+            let prevY = currentY;
+            for (let i = 1; i <= steps; i++) {
+              const t = i / steps;
+              const px = cubicBezierPoint(currentX, cp1x, cp2x, endX, t);
+              const py = cubicBezierPoint(currentY, cp1y, cp2y, endY, t);
+
+              segments.push({
+                type: "line",
+                start: { x: prevX, y: prevY },
+                end: { x: px, y: py },
+              });
+
+              prevX = px;
+              prevY = py;
+            }
+
+            currentX = endX;
+            currentY = endY;
           }
           break;
+        }
 
         case "Z": // Close path
           if (currentX !== startX || currentY !== startY) {

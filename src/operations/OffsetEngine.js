@@ -181,11 +181,18 @@ export class OffsetEngine {
 
                 const stitchedSegments = this._stitchSegments(offsetSegments, sourceClosed);
 
-                const trimmedSegments = trimSelfIntersections(stitchedSegments);
-                const finalSegments =
-                    Array.isArray(trimmedSegments) && trimmedSegments.length > 0
-                        ? trimmedSegments
-                        : stitchedSegments;
+                // Only trim self-intersections for closed contours.
+                // Paper.js boolean operations produce garbage for open/capped paths.
+                let finalSegments;
+                if (sourceClosed) {
+                    const trimmedSegments = trimSelfIntersections(stitchedSegments);
+                    finalSegments =
+                        Array.isArray(trimmedSegments) && trimmedSegments.length > 0
+                            ? trimmedSegments
+                            : stitchedSegments;
+                } else {
+                    finalSegments = stitchedSegments;
+                }
 
                 const normalizedFinalSegments = this._ensureClosedWhenNeeded(
                     finalSegments,
