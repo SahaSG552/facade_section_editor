@@ -97,9 +97,10 @@ describe("Scenario B: Arc offset (CCW)", () => {
         expect(result.arc).toBeDefined();
     });
 
-    it("B3 — radius = 13 (outer offset of CCW arc)", () => {
+    it("B3 — radius = 7 (outer offset of CCW arc shrinks)", () => {
         const result = offsetSegment(arc, 3);
-        expect(approx(result.arc.radius, 13, TOLERANCE)).toBe(true);
+        // CCW arc (sweepFlag=1) shrinks on outward offset: 10 - 3 = 7
+        expect(approx(result.arc.radius, 7, TOLERANCE)).toBe(true);
     });
 
     it("B4 — center unchanged (0, 0)", () => {
