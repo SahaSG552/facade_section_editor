@@ -61,6 +61,19 @@ export function rotate90CCW(vec) {
 }
 
 /**
+ * Rotate a 2D vector by 90° clockwise.
+ *
+ * @param {Vector2D} vec - Input vector.
+ * @returns {Vector2D} Rotated vector (y, -x).
+ */
+export function rotate90CW(vec) {
+    return {
+        x: vec.y,
+        y: -vec.x,
+    };
+}
+
+/**
  * Normalize a 2D vector.
  *
  * @param {Vector2D} vec - Input vector.
@@ -118,7 +131,7 @@ export function offsetLine(segment, distance) {
         return null;
     }
 
-    const normal = rotate90CCW(tangent);
+    const normal = rotate90CW(tangent);
 
     return {
         ...segment,
@@ -174,7 +187,7 @@ export function offsetArc(segment, distance) {
         return null;
     }
 
-    const newRadius = radius + distance * (sweepFlag === 1 ? 1 : -1);
+    const newRadius = radius + distance;
     if (newRadius <= EPSILON) {
         return null;
     }
