@@ -612,7 +612,7 @@ export default class OffsetTool extends BaseTool {
         this.id = mode;
         this._modeType = mode;
         this._offsetCalculator = calculateOffsetFromPathData;
-        this._offsetDirection = 1;
+        this._offsetDirection = -1;
         this._phase = "selecting"; // selecting | pickReference | dynamic | confirming
         this._downClient = null;
         this._downSvgPos = null;

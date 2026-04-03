@@ -174,7 +174,7 @@ export function offsetArc(segment, distance) {
         return null;
     }
 
-    const newRadius = radius + distance;
+    const newRadius = radius + distance * (sweepFlag === 1 ? 1 : -1);
     if (newRadius <= EPSILON) {
         return null;
     }
