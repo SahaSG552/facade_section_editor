@@ -1482,13 +1482,17 @@ export default class OffsetTool extends BaseTool {
                     nearestY = nearest.y;
                     unsignedDist = nearest.dist;
 
-                    // Normal: direction from center to nearest point
+                    // Normal: for CW contours (sweep=0), outward = away from center.
+                    // For CCW arcs (sweep=1) in a CW contour, outward = toward center.
                     const ndx = nearestX - cx;
                     const ndy = nearestY - cy;
                     const nLen = Math.hypot(ndx, ndy);
                     if (nLen > 1e-9) {
-                        nx = ndx / nLen;
-                        ny = ndy / nLen;
+                        // sweep=0 (CW): normal points away from center (outward)
+                        // sweep=1 (CCW): normal points toward center (outward for CW contour)
+                        const dir = sweep === 1 ? -1 : 1;
+                        nx = dir * ndx / nLen;
+                        ny = dir * ndy / nLen;
                     } else {
                         nx = 0; ny = 1;
                     }
