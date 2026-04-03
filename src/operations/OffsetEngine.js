@@ -57,7 +57,7 @@ export class OffsetEngine {
      */
     constructor(options = {}) {
         this.defaultOptions = {
-            joinType: "round",
+            joinType: "sharp",
             capType: "round",
             ...options,
         };

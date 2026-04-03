@@ -105,6 +105,12 @@ function lineLineIntersection(p1, d1, p2, d2) {
 
   const dp = { x: p1.x - p2.x, y: p1.y - p2.y };
   const t1 = (dp.x * d2.y - dp.y * d2.x) / det;
+  const t2 = (dp.x * d1.y - dp.y * d1.x) / det;
+
+  // Only accept intersection that lies forward along both rays
+  if (t1 < 0 || t2 < 0) {
+    return null;
+  }
 
   return {
     x: p1.x + t1 * d1.x,
@@ -275,6 +281,21 @@ export function buildOffsetContour(segments, distance, options = {}) {
           );
           result.push(arcJoin);
         }
+      } else if (cornerType === "concave" && joinType === "sharp") {
+        // Concave corner with sharp join: trim both segments at their intersection point
+        const trimJoin = computeSharpJoin(
+          current.end,
+          inTangent,
+          next.start,
+          outTangent,
+          distance
+        );
+
+        if (trimJoin && trimJoin.canApply) {
+          current.end = clonePoint(trimJoin.intersection);
+          next.start = clonePoint(trimJoin.intersection);
+        }
+        // If trim can't apply, leave segments as-is (they'll be handled by downstream logic)
       }
     }
   }
