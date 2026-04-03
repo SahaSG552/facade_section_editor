@@ -1490,7 +1490,7 @@ export default class OffsetTool extends BaseTool {
                     if (nLen > 1e-9) {
                         // sweep=0 (CW): normal points away from center (outward)
                         // sweep=1 (CCW): normal points toward center (outward for CW contour)
-                        const dir = sweep === 1 ? -1 : 1;
+                        const dir = sweep === 1 ? 1 : -1;
                         nx = dir * ndx / nLen;
                         ny = dir * ndy / nLen;
                     } else {
