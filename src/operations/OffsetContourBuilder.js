@@ -248,10 +248,13 @@ export function buildOffsetContour(segments, distance, options = {}) {
       const outTangent = getTangent(next, "start");
       const cornerType = computeJoinType(inTangent, outTangent);
 
+      const currentIsArc = current.type === "arc";
+      const nextIsArc = next.type === "arc";
+
       if (cornerType === "convex") {
         const originalVertex = original.end;
 
-        if (joinType === "sharp") {
+        if (joinType === "sharp" && !currentIsArc && !nextIsArc) {
           const sharpJoin = computeSharpJoin(
             current.end,
             inTangent,
@@ -275,7 +278,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
             result.push(arcJoin);
           }
         } else {
-          // Round join
+          // Round join for: round joinType, or any corner involving an arc
           const arcJoin = createArcJoin(
             current.end,
             next.start,
@@ -284,8 +287,9 @@ export function buildOffsetContour(segments, distance, options = {}) {
           );
           result.push(arcJoin);
         }
-      } else if (cornerType === "concave" && joinType === "sharp") {
+      } else if (cornerType === "concave" && joinType === "sharp" && !currentIsArc && !nextIsArc) {
         // Concave corner with sharp join: trim both segments at their intersection point
+        // Only for line-to-line corners — arc corners need different handling
         const trimJoin = computeSharpJoin(
           current.end,
           inTangent,
