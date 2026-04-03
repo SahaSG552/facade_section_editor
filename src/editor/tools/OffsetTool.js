@@ -612,7 +612,7 @@ export default class OffsetTool extends BaseTool {
         this.id = mode;
         this._modeType = mode;
         this._offsetCalculator = calculateOffsetFromPathData;
-        this._offsetDirection = -1;
+        this._offsetDirection = 1;
         this._phase = "selecting"; // selecting | pickReference | dynamic | confirming
         this._downClient = null;
         this._downSvgPos = null;
@@ -1317,6 +1317,89 @@ export default class OffsetTool extends BaseTool {
     }
 
     /**
+     * Compute the center of an SVG arc from its geometry.
+     * Uses the standard SVG arc center calculation (F.6.5.1).
+     *
+     * @param {number} ax - Start X
+     * @param {number} ay - Start Y
+     * @param {number} bx - End X
+     * @param {number} by - End Y
+     * @param {number} rx - X radius
+     * @param {number} ry - Y radius
+     * @param {number} largeArc - Large arc flag (0 or 1)
+     * @param {number} sweep - Sweep flag (0 or 1)
+     * @returns {{x:number, y:number}|null}
+     */
+    _computeArcCenter(ax, ay, bx, by, rx, ry, largeArc, sweep) {
+        rx = Math.abs(rx);
+        ry = Math.abs(ry);
+        if (rx < 1e-9 || ry < 1e-9) return null;
+
+        // Midpoint of chord
+        const mx = (ax + bx) / 2;
+        const my = (ay + by) / 2;
+
+        // Vector from midpoint to start
+        const dx = (ax - bx) / 2;
+        const dy = (ay - by) / 2;
+
+        // Check if radii are large enough
+        const lambda = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+        let scaleX = rx, scaleY = ry;
+        if (lambda > 1) {
+            const scale = Math.sqrt(lambda);
+            scaleX *= scale;
+            scaleY *= scale;
+        }
+
+        // Compute center offset from midpoint
+        const sq = (scaleX * scaleX * scaleY * scaleY - scaleX * scaleX * dy * dy - scaleY * scaleY * dx * dx);
+        const denom = scaleX * scaleX * dy * dy + scaleY * scaleY * dx * dx;
+        const factor = Math.sqrt(Math.max(0, sq / denom));
+        const sign = largeArc === sweep ? -1 : 1;
+
+        const cx = mx + sign * factor * scaleX * dy / scaleY;
+        const cy = my - sign * factor * scaleY * dx / scaleX;
+
+        return { x: cx, y: cy };
+    }
+
+    /**
+     * Sample points along an SVG arc for distance computation.
+     *
+     * @param {number} cx - Arc center X
+     * @param {number} cy - Arc center Y
+     * @param {number} rx - X radius
+     * @param {number} ry - Y radius
+     * @param {number} ax - Start X
+     * @param {number} ay - Start Y
+     * @param {number} bx - End X
+     * @param {number} by - End Y
+     * @param {number} sweep - Sweep flag
+     * @param {number} numSamples - Number of sample points
+     * @returns {Array<{x:number, y:number}>}
+     */
+    _sampleArcPoints(cx, cy, rx, ry, ax, ay, bx, by, sweep, numSamples = 24) {
+        const startAngle = Math.atan2((ay - cy) / ry, (ax - cx) / rx);
+        let endAngle = Math.atan2((by - cy) / ry, (bx - cx) / rx);
+
+        let delta = endAngle - startAngle;
+        if (sweep === 1 && delta < 0) delta += 2 * Math.PI;
+        if (sweep === 0 && delta > 0) delta -= 2 * Math.PI;
+
+        const points = [];
+        for (let i = 0; i <= numSamples; i++) {
+            const t = i / numSamples;
+            const angle = startAngle + delta * t;
+            points.push({
+                x: cx + rx * Math.cos(angle),
+                y: cy + ry * Math.sin(angle),
+            });
+        }
+        return points;
+    }
+
+    /**
      * Compute signed perpendicular distance from pointer to the nearest segment
      * of the captured source contours. Positive = outside (normal direction),
      * negative = inside. Also stores the nearest point for ghost line drawing.
@@ -1331,6 +1414,8 @@ export default class OffsetTool extends BaseTool {
         let bestDist = Infinity;
         let bestSignedDist = 0;
         let bestNearest = null;
+        let bestSegType = null;
+        let bestNormal = { x: 0, y: 0 };
 
         for (const entry of this._sourceEntries) {
             if (entry.kind !== "contour") continue;
@@ -1342,22 +1427,75 @@ export default class OffsetTool extends BaseTool {
                 const ax = num(d.start.x), ay = num(d.start.y);
                 const bx = num(d.end.x), by = num(d.end.y);
 
-                let nearestX, nearestY, unsignedDist;
+                let nearestX, nearestY, unsignedDist, nx, ny;
 
-                if (seg.type === "arc" && d.radius) {
-                    // For arcs: distance from point to arc circle, projected onto arc
-                    const cx = num(d._expr?.cx ?? d._expr?.centerX ?? (ax + bx) / 2);
-                    const cy = num(d._expr?.cy ?? d._expr?.centerY ?? (ay + by) / 2);
-                    const r = Math.abs(num(d.radius));
-                    const dx = px - cx, dy = py - cy;
-                    const distToCenter = Math.hypot(dx, dy);
-                    unsignedDist = Math.abs(distToCenter - r);
-                    if (distToCenter > 1e-9) {
-                        nearestX = cx + (dx / distToCenter) * r;
-                        nearestY = cy + (dy / distToCenter) * r;
+                if (seg.type === "arc") {
+                    // Compute arc center from SVG arc parameters
+                    const rx = Math.abs(num(d.radius ?? d.rx ?? 0));
+                    const ry = Math.abs(num(d.ry ?? d.radius ?? 0));
+                    const largeArc = num(d.largeArc ?? d._expr?.largeArc ?? 0);
+                    const sweep = num(d.sweep ?? d._expr?.sweep ?? 0);
+
+                    // Try to get center from pre-computed data first
+                    let cx = null, cy = null;
+                    if (d._expr?.center) {
+                        cx = num(d._expr.center.x);
+                        cy = num(d._expr.center.y);
+                    } else if (d._expr?.cx !== undefined) {
+                        cx = num(d._expr.cx);
+                        cy = num(d._expr.cy);
+                    } else if (d._expr?.centerX !== undefined) {
+                        cx = num(d._expr.centerX);
+                        cy = num(d._expr.centerY);
+                    }
+
+                    // Fallback: compute center from SVG arc parameters
+                    if (cx === null || cy === null || !Number.isFinite(cx) || !Number.isFinite(cy)) {
+                        const center = this._computeArcCenter(ax, ay, bx, by, rx, ry, largeArc, sweep);
+                        if (center) {
+                            cx = center.x;
+                            cy = center.y;
+                        } else {
+                            continue; // Can't compute arc center
+                        }
+                    }
+
+                    // Sample points along the arc and find the nearest one
+                    const arcPoints = this._sampleArcPoints(cx, cy, rx, ry, ax, ay, bx, by, sweep, 32);
+                    let minSegDist = Infinity;
+                    let minSegNearest = null;
+
+                    for (let i = 0; i < arcPoints.length - 1; i++) {
+                        const p1 = arcPoints[i];
+                        const p2 = arcPoints[i + 1];
+                        const sdx = p2.x - p1.x;
+                        const sdy = p2.y - p1.y;
+                        const lenSq = sdx * sdx + sdy * sdy;
+                        let t = lenSq > 1e-9 ? ((px - p1.x) * sdx + (py - p1.y) * sdy) / lenSq : 0;
+                        t = Math.max(0, Math.min(1, t));
+                        const projX = p1.x + t * sdx;
+                        const projY = p1.y + t * sdy;
+                        const segDist = Math.hypot(px - projX, py - projY);
+                        if (segDist < minSegDist) {
+                            minSegDist = segDist;
+                            minSegNearest = { x: projX, y: projY };
+                        }
+                    }
+
+                    nearestX = minSegNearest?.x ?? cx;
+                    nearestY = minSegNearest?.y ?? cy;
+                    unsignedDist = minSegDist;
+
+                    // Normal: direction from center to nearest point (outward for arc)
+                    const ndx = nearestX - cx;
+                    const ndy = nearestY - cy;
+                    const nLen = Math.hypot(ndx, ndy);
+                    if (nLen > 1e-9) {
+                        nx = ndx / nLen;
+                        ny = ndy / nLen;
                     } else {
-                        nearestX = cx + r;
-                        nearestY = cy;
+                        nx = 0;
+                        ny = 1;
                     }
                 } else {
                     // For lines: perpendicular projection onto segment
@@ -1368,26 +1506,36 @@ export default class OffsetTool extends BaseTool {
                     nearestX = ax + t * dx;
                     nearestY = ay + t * dy;
                     unsignedDist = Math.hypot(px - nearestX, py - nearestY);
+
+                    // Normal: perpendicular to segment direction
+                    nx = -(by - ay);
+                    ny = (bx - ax);
+                    const nLen = Math.hypot(nx, ny);
+                    if (nLen > 1e-9) {
+                        nx /= nLen;
+                        ny /= nLen;
+                    } else {
+                        nx = 0;
+                        ny = 1;
+                    }
                 }
 
                 if (unsignedDist < bestDist) {
                     bestDist = unsignedDist;
                     bestNearest = { x: nearestX, y: nearestY };
+                    bestSegType = seg.type;
+                    bestNormal = { x: nx, y: ny };
 
-                    // Signed distance: positive if cursor is on the "outside" (normal side)
-                    const nx = -(by - ay), ny = (bx - ax);
-                    const nLen = Math.hypot(nx, ny);
-                    if (nLen > 1e-9) {
-                        const nnx = nx / nLen, nny = ny / nLen;
-                        // Dot product of (cursor - nearest) with outward normal
-                        bestSignedDist = (px - nearestX) * nnx + (py - nearestY) * nny;
-                    }
+                    // Signed distance: dot product of (cursor - nearest) with outward normal
+                    bestSignedDist = (px - nearestX) * nx + (py - nearestY) * ny;
                 }
             }
         }
 
         this._nearestPoint = bestNearest;
         this._cursorPoint = { x: px, y: py };
+        this._nearestSegType = bestSegType;
+        this._nearestNormal = bestNormal;
         return bestSignedDist;
     }
 
