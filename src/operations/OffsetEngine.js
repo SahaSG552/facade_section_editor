@@ -525,22 +525,12 @@ export class OffsetEngine {
 
         const startAngle = Math.atan2(segment.start.y - center.y, segment.start.x - center.x);
         const endAngle = Math.atan2(segment.end.y - center.y, segment.end.x - center.x);
-        const startRadius = Math.hypot(segment.start.x - center.x, segment.start.y - center.y);
-        const endRadius = Math.hypot(segment.end.x - center.x, segment.end.y - center.y);
-        const averagedRadius = (startRadius + endRadius) / 2;
 
+        // Update angles to match the (possibly stitched) endpoints.
+        // Do NOT overwrite radius — it was correctly computed by offsetArc
+        // and must not be corrupted by stitching adjustments.
         segment.arc.startAngle = startAngle;
         segment.arc.endAngle = endAngle;
-
-        if (Number.isFinite(averagedRadius)) {
-            segment.arc.radius = averagedRadius;
-            if ("rx" in segment.arc) {
-                segment.arc.rx = averagedRadius;
-            }
-            if ("ry" in segment.arc) {
-                segment.arc.ry = averagedRadius;
-            }
-        }
 
         if (segment.arc.center) {
             segment.arc.center = { ...center };
