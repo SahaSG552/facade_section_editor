@@ -140,33 +140,45 @@ export class OffsetEngine {
                         ? sourceClosedHint
                         : this._isClosedContour(sourceContour);
 
+                const offsetMode = resolvedOptions.offsetMode || "one-sided";
+
                 let offsetSegments;
                 if (!sourceClosed) {
-                    // Open contour: compute both +d and -d offset sides, then cap both sides
-                    const positiveSegments = buildOffsetContour(sourceContour, distance, {
-                        joinType: resolvedOptions.joinType,
-                        capType: resolvedOptions.capType,
-                        skipCap: true,
-                    });
-                    const negativeSegments = buildOffsetContour(sourceContour, -distance, {
-                        joinType: resolvedOptions.joinType,
-                        capType: resolvedOptions.capType,
-                        skipCap: true,
-                    });
+                    // Open contour: behavior depends on mode
+                    if (offsetMode === "one-sided") {
+                        // Default: single-sided offset (follows sign of distance)
+                        offsetSegments = buildOffsetContour(sourceContour, distance, {
+                            joinType: resolvedOptions.joinType,
+                            capType: resolvedOptions.capType,
+                            skipCap: true,
+                        });
+                    } else {
+                        // Two-sided modes: compute both +d and -d offset sides, then cap
+                        const positiveSegments = buildOffsetContour(sourceContour, distance, {
+                            joinType: resolvedOptions.joinType,
+                            capType: resolvedOptions.capType,
+                            skipCap: true,
+                        });
+                        const negativeSegments = buildOffsetContour(sourceContour, -distance, {
+                            joinType: resolvedOptions.joinType,
+                            capType: resolvedOptions.capType,
+                            skipCap: true,
+                        });
 
-                    if (
-                        !Array.isArray(positiveSegments) || positiveSegments.length === 0 ||
-                        !Array.isArray(negativeSegments) || negativeSegments.length === 0
-                    ) {
-                        continue;
+                        if (
+                            !Array.isArray(positiveSegments) || positiveSegments.length === 0 ||
+                            !Array.isArray(negativeSegments) || negativeSegments.length === 0
+                        ) {
+                            continue;
+                        }
+
+                        offsetSegments = capBothSides(
+                            positiveSegments,
+                            negativeSegments,
+                            distance,
+                            resolvedOptions.capType
+                        );
                     }
-
-                    offsetSegments = capBothSides(
-                        positiveSegments,
-                        negativeSegments,
-                        distance,
-                        resolvedOptions.capType
-                    );
                 } else {
                     // Closed contour: single-sided offset with join processing
                     offsetSegments = buildOffsetContour(sourceContour, distance, {

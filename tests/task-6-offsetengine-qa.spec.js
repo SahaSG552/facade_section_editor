@@ -50,14 +50,17 @@ describe("Task 6 OffsetEngine QA scenarios", () => {
         console.log("SCENARIO3", JSON.stringify(result));
     });
 
-    it("Scenario 4: open curve flat cap", async () => {
+    it("Scenario 4: open curve one-sided (default)", async () => {
         const engine = new OffsetEngine({ joinType: "sharp", capType: "flat", exportModule });
         const result = await engine.processPath("M 0 0 L 100 0", 5);
 
         expect(typeof result.pathData).toBe("string");
         expect(result.pathData.length).toBeGreaterThan(0);
         expect(result.contours.length).toBeGreaterThan(0);
-        expect(result.pathData.endsWith("Z")).toBe(true);
+        // Default mode is one-sided: single offset line, no caps, no Z
+        expect(result.pathData.endsWith("Z")).toBe(false);
+        expect(result.contours[0].closed).toBe(false);
+        expect(result.contours[0].segments.length).toBe(1);
 
         console.log("SCENARIO4", JSON.stringify(result));
     });

@@ -256,9 +256,9 @@ export function capBothSides(positiveSegments, negativeSegments, offsetDistance,
             y: (posLast.end.y + negLast.end.y) / 2,
         };
         // Start cap: arc from negFirst.start → posFirst.start (going around the start)
-        startCap = capRound(startCenter, offsetDistance, negFirst.start, posFirst.start);
+        startCap = capRound(startCenter, offsetDistance, negFirst.start, posFirst.start, 1);
         // End cap: arc from posLast.end → negLast.end (going around the end)
-        endCap = capRound(endCenter, offsetDistance, posLast.end, negLast.end);
+        endCap = capRound(endCenter, offsetDistance, posLast.end, negLast.end, 1);
     } else {
         // Flat caps: straight line connecting the two offset curve endpoints
         // Start cap: from negFirst.start back to posFirst.start
