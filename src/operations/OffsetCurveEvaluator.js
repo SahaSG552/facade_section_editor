@@ -162,15 +162,19 @@ export function offsetArc(segment, distance) {
     }
 
     const radius = Number(arc.radius);
-    const startAngle = Number(arc.startAngle);
-    const endAngle = Number(arc.endAngle);
+    // DXF exporter returns angles in degrees — convert to radians if needed.
+    // Heuristic: if |angle| > 2*PI, it's in degrees.
+    const toRad = (deg) => deg * Math.PI / 180;
+    const isDegrees = (v) => Number.isFinite(v) && Math.abs(v) > 2 * Math.PI + 0.01;
+    const startAngle = isDegrees(arc.startAngle) ? toRad(arc.startAngle) : Number(arc.startAngle);
+    const endAngle = isDegrees(arc.endAngle) ? toRad(arc.endAngle) : Number(arc.endAngle);
     const sweepFlag = arc.sweepFlag === 1 ? 1 : 0;
 
     if (!Number.isFinite(radius) || !Number.isFinite(startAngle) || !Number.isFinite(endAngle)) {
         return null;
     }
 
-    const newRadius = radius + distance * (sweepFlag === 1 ? 1 : -1);
+    const newRadius = radius + distance;
     if (newRadius <= EPSILON) {
         return null;
     }
