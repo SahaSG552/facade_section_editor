@@ -1317,6 +1317,39 @@ export default class OffsetTool extends BaseTool {
     }
 
     /**
+     * Compute the center of an SVG arc from its geometry.
+     * Uses the standard SVG arc center calculation (F.6.5.1).
+     */
+    _computeArcCenter(ax, ay, bx, by, rx, ry, largeArc, sweep) {
+        rx = Math.abs(rx);
+        ry = Math.abs(ry);
+        if (rx < 1e-9 || ry < 1e-9) return null;
+
+        const mx = (ax + bx) / 2;
+        const my = (ay + by) / 2;
+        const dx = (ax - bx) / 2;
+        const dy = (ay - by) / 2;
+
+        const lambda = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
+        let scaleX = rx, scaleY = ry;
+        if (lambda > 1) {
+            const scale = Math.sqrt(lambda);
+            scaleX *= scale;
+            scaleY *= scale;
+        }
+
+        const sq = scaleX * scaleX * scaleY * scaleY - scaleX * scaleX * dy * dy - scaleY * scaleY * dx * dx;
+        const denom = scaleX * scaleX * dy * dy + scaleY * scaleY * dx * dx;
+        const factor = Math.sqrt(Math.max(0, sq / denom));
+        const sign = largeArc === sweep ? -1 : 1;
+
+        return {
+            x: mx + sign * factor * scaleX * dy / scaleY,
+            y: my - sign * factor * scaleY * dx / scaleX,
+        };
+    }
+
+    /**
      * Find the nearest point on an SVG arc to a given point.
      * Returns {x, y, dist} where dist is the Euclidean distance.
      *
