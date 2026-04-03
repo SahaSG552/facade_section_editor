@@ -1316,8 +1316,109 @@ export default class OffsetTool extends BaseTool {
         }
     }
 
+    /**
+     * Compute signed perpendicular distance from pointer to the nearest segment
+     * of the captured source contours. Positive = outside (normal direction),
+     * negative = inside. Also stores the nearest point for ghost line drawing.
+     *
+     * @param {{x:number, y:number}} pos - SVG-space cursor position.
+     * @returns {number}
+     */
+    _distanceFromPointer(pos) {
+        const px = num(pos?.x), py = num(pos?.y);
+        if (!Number.isFinite(px) || !Number.isFinite(py)) return 0;
+
+        let bestDist = Infinity;
+        let bestSignedDist = 0;
+        let bestNearest = null;
+
+        for (const entry of this._sourceEntries) {
+            if (entry.kind !== "contour") continue;
+            const chain = entry.chain || [];
+            for (const seg of chain) {
+                const d = seg?.data;
+                if (!d?.start || !d?.end) continue;
+
+                const ax = num(d.start.x), ay = num(d.start.y);
+                const bx = num(d.end.x), by = num(d.end.y);
+
+                let nearestX, nearestY, unsignedDist;
+
+                if (seg.type === "arc" && d.radius) {
+                    // For arcs: distance from point to arc circle, projected onto arc
+                    const cx = num(d._expr?.cx ?? d._expr?.centerX ?? (ax + bx) / 2);
+                    const cy = num(d._expr?.cy ?? d._expr?.centerY ?? (ay + by) / 2);
+                    const r = Math.abs(num(d.radius));
+                    const dx = px - cx, dy = py - cy;
+                    const distToCenter = Math.hypot(dx, dy);
+                    unsignedDist = Math.abs(distToCenter - r);
+                    if (distToCenter > 1e-9) {
+                        nearestX = cx + (dx / distToCenter) * r;
+                        nearestY = cy + (dy / distToCenter) * r;
+                    } else {
+                        nearestX = cx + r;
+                        nearestY = cy;
+                    }
+                } else {
+                    // For lines: perpendicular projection onto segment
+                    const dx = bx - ax, dy = by - ay;
+                    const lenSq = dx * dx + dy * dy;
+                    let t = lenSq > 1e-9 ? ((px - ax) * dx + (py - ay) * dy) / lenSq : 0;
+                    t = Math.max(0, Math.min(1, t));
+                    nearestX = ax + t * dx;
+                    nearestY = ay + t * dy;
+                    unsignedDist = Math.hypot(px - nearestX, py - nearestY);
+                }
+
+                if (unsignedDist < bestDist) {
+                    bestDist = unsignedDist;
+                    bestNearest = { x: nearestX, y: nearestY };
+
+                    // Signed distance: positive if cursor is on the "outside" (normal side)
+                    const nx = -(by - ay), ny = (bx - ax);
+                    const nLen = Math.hypot(nx, ny);
+                    if (nLen > 1e-9) {
+                        const nnx = nx / nLen, nny = ny / nLen;
+                        // Dot product of (cursor - nearest) with outward normal
+                        bestSignedDist = (px - nearestX) * nnx + (py - nearestY) * nny;
+                    }
+                }
+            }
+        }
+
+        this._nearestPoint = bestNearest;
+        this._cursorPoint = { x: px, y: py };
+        return bestSignedDist;
+    }
+
     _renderGhost() {
         const g = document.createElementNS(SVG_NS, "g");
+
+        // Draw perpendicular distance line from cursor to nearest contour point
+        if (this._nearestPoint && this._cursorPoint && (this._phase === "dynamic" || this._phase === "confirming")) {
+            const distLine = document.createElementNS(SVG_NS, "line");
+            distLine.setAttribute("x1", this._cursorPoint.x);
+            distLine.setAttribute("y1", this._cursorPoint.y);
+            distLine.setAttribute("x2", this._nearestPoint.x);
+            distLine.setAttribute("y2", this._nearestPoint.y);
+            distLine.setAttribute("stroke", "#ff6600");
+            distLine.setAttribute("stroke-width", "1");
+            distLine.setAttribute("stroke-dasharray", "3,3");
+            distLine.setAttribute("opacity", "0.7");
+            distLine.setAttribute("pointer-events", "none");
+            g.appendChild(distLine);
+
+            // Small dot at nearest point
+            const dot = document.createElementNS(SVG_NS, "circle");
+            dot.setAttribute("cx", this._nearestPoint.x);
+            dot.setAttribute("cy", this._nearestPoint.y);
+            dot.setAttribute("r", "3");
+            dot.setAttribute("fill", "#ff6600");
+            dot.setAttribute("opacity", "0.8");
+            dot.setAttribute("pointer-events", "none");
+            g.appendChild(dot);
+        }
+
         let idx = 0;
         const vars = this.ctx.state?.variableValues ?? {};
         for (const p of this._previewPaths) {
