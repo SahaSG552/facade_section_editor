@@ -109,10 +109,11 @@ function lineLineIntersection(p1, d1, p2, d2) {
   const t1 = -(dp.x * d2.y - dp.y * d2.x) / det;
   const t2 = -(dp.x * d1.y - dp.y * d1.x) / det;
 
-  // Only accept intersection that lies forward along both rays
-  if (t1 < 0 || t2 < 0) {
-    return null;
-  }
+  // NOTE: Do NOT reject t < 0 here.
+  // For miter joins on convex outward corners, offset rays diverge and
+  // their intersection lies "behind" one ray start — that's exactly the
+  // miter corner we need. The miter limit check in computeSharpJoin
+  // validates whether the intersection is within acceptable distance.
 
   return {
     x: p1.x + t1 * d1.x,
