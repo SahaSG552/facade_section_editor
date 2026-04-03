@@ -104,8 +104,10 @@ function lineLineIntersection(p1, d1, p2, d2) {
   }
 
   const dp = { x: p1.x - p2.x, y: p1.y - p2.y };
-  const t1 = (dp.x * d2.y - dp.y * d2.x) / det;
-  const t2 = (dp.x * d1.y - dp.y * d1.x) / det;
+  // Solve p1 + t1*d1 = p2 + t2*d2.
+  // With dp = p1 - p2, both parameters require the negated cross term.
+  const t1 = -(dp.x * d2.y - dp.y * d2.x) / det;
+  const t2 = -(dp.x * d1.y - dp.y * d1.x) / det;
 
   // Only accept intersection that lies forward along both rays
   if (t1 < 0 || t2 < 0) {
