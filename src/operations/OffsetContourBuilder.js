@@ -134,7 +134,16 @@ function createArcJoin(p1, p2, vertex, offsetDistance) {
   const angle1 = Math.atan2(p1.y - vertex.y, p1.x - vertex.x);
   const angle2 = Math.atan2(p2.y - vertex.y, p2.x - vertex.x);
 
-  const sweepFlag = offsetDistance > 0 ? 1 : 0;
+  // Determine sweep direction by checking which arc (CW or CCW) is the shorter one.
+  // For a convex corner with outward offset, the arc should go the "short way" around the vertex.
+  // For a concave corner with inward offset, the arc should also go the "short way".
+  // The correct sweep is the one that keeps the arc on the same side of the contour as the offset.
+  let delta = angle2 - angle1;
+  // Normalize to [-PI, PI]
+  while (delta > Math.PI) delta -= 2 * Math.PI;
+  while (delta < -Math.PI) delta += 2 * Math.PI;
+  // sweepFlag=1 means CCW (increasing angle), sweepFlag=0 means CW (decreasing angle)
+  const sweepFlag = delta > 0 ? 1 : 0;
 
   return {
     type: "arc",
