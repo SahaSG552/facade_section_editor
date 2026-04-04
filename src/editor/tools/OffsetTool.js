@@ -401,9 +401,9 @@ function parsePathToSegments(pathStr, state, { allowClose = true } = {}) {
     let subX = 0;
     let subY = 0;
     let contourId = state._nextContourId++;
-    let m;
+    let m = commandRe.exec(String(pathStr));
 
-    while ((m = commandRe.exec(String(pathStr))) !== null) {
+    while (m !== null) {
         const cmd = m[1];
         const rel = cmd === cmd.toLowerCase() && cmd.toLowerCase() !== "z";
         const upper = cmd.toUpperCase();
@@ -569,6 +569,7 @@ function parsePathToSegments(pathStr, state, { allowClose = true } = {}) {
                 cy = ey;
             }
         }
+        m = commandRe.exec(String(pathStr));
     }
 
     return out;
@@ -738,19 +739,17 @@ export default class OffsetTool extends BaseTool {
 
     onPointerMove(pos, e) {
         if (this._phase === "dynamic") {
-            this._positionPopup(e);
             const livePos = e ? this.ctx.canvas.screenToSVG(e) : pos;
             this._cursorSignedDistance = this._distanceFromPointer(livePos);
             if (!this._inputFocused && this._manualValue.trim() === "") {
                 this._signedDistance = this._cursorSignedDistance;
-                this._syncInputValue();
-                this._refreshPreview();
+                if (typeof this._syncInputValue === "function") this._syncInputValue();
+                if (typeof this._refreshPreview === "function") this._refreshPreview();
             }
             return;
         }
 
         if (this._phase === "confirming") {
-            this._positionPopup(e);
             const livePos = e ? this.ctx.canvas.screenToSVG(e) : pos;
             this._cursorSignedDistance = this._distanceFromPointer(livePos);
             return;
@@ -1442,19 +1441,6 @@ export default class OffsetTool extends BaseTool {
         for (const entry of this._sourceEntries) {
             if (entry.kind !== "contour") continue;
             const chain = entry.chain || [];
-            if (chain.length === 0) continue;
-
-            // Compute contour orientation (signed area) once per contour.
-            // signedArea > 0 → CCW contour, signedArea < 0 → CW contour.
-            // Outward direction: CW contours → right of direction, CCW → left.
-            let signedArea = 0;
-            for (const seg of chain) {
-                const d = seg?.data;
-                if (!d?.start || !d?.end) continue;
-                signedArea += (num(d.end.x) - num(d.start.x)) * (num(d.end.y) + num(d.start.y));
-            }
-            const isCCW = signedArea > 0;
-
             for (const seg of chain) {
                 const d = seg?.data;
                 if (!d?.start || !d?.end) continue;
@@ -1495,17 +1481,16 @@ export default class OffsetTool extends BaseTool {
                     nearestY = nearest.y;
                     unsignedDist = nearest.dist;
 
-                    // Outward normal depends on contour orientation AND arc sweep.
-                    // For CW contour (isCCW=false):
-                    //   CW arc (sweep=0): outward = away from center
-                    //   CCW arc (sweep=1): outward = toward center
-                    // For CCW contour (isCCW=true): flip both.
+                    // Use a consistent left-hand convention for signed distance:
+                    // positive is the segment-left side for BOTH lines and arcs.
+                    // Arc radial direction depends on sweep:
+                    // - CCW (sweep=1): left side is toward center
+                    // - CW  (sweep=0): left side is away from center
                     const ndx = nearestX - cx;
                     const ndy = nearestY - cy;
                     const nLen = Math.hypot(ndx, ndy);
                     if (nLen > 1e-9) {
-                        const baseDir = sweep === 1 ? -1 : 1;
-                        const dir = isCCW ? -baseDir : baseDir;
+                        const dir = sweep === 1 ? -1 : 1;
                         nx = dir * ndx / nLen;
                         ny = dir * ndy / nLen;
                     } else {
@@ -1521,14 +1506,11 @@ export default class OffsetTool extends BaseTool {
                     nearestY = ay + t * dy;
                     unsignedDist = Math.hypot(px - nearestX, py - nearestY);
 
-                    // CCW normal (left of direction). For CW contour, outward = right = flip.
                     nx = -(by - ay);
                     ny = (bx - ax);
                     const nLen = Math.hypot(nx, ny);
                     if (nLen > 1e-9) { nx /= nLen; ny /= nLen; }
                     else { nx = 0; ny = 1; }
-
-                    if (!isCCW) { nx = -nx; ny = -ny; }
                 }
 
                 if (unsignedDist < bestDist) {
