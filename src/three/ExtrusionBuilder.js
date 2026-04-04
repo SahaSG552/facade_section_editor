@@ -2240,7 +2240,6 @@ export default class ExtrusionBuilder {
 
                 geometry.computeVertexNormals();
                 geometry.normalizeNormals();
-                this._invertGeometryNormals(geometry);
 
                 const material = new THREE.MeshStandardMaterial({
                     color: new THREE.Color(color || "#cccccc"),
@@ -2398,9 +2397,6 @@ export default class ExtrusionBuilder {
                     if (innerGeometry) {
                         innerGeometry.computeVertexNormals();
                         innerGeometry.normalizeNormals();
-                        if (!isExtension) {
-                            this._invertGeometryNormals(innerGeometry);
-                        }
 
                         const innerMaterial = new THREE.MeshStandardMaterial({
                             color: new THREE.Color(color || "#cccccc"),
@@ -2451,37 +2447,32 @@ export default class ExtrusionBuilder {
             }
 
             // Merge all OUTSIDE half parts, then merge with INSIDE
-            const outsideSweepMeshes = allMeshes.filter(
+            const outsideMeshes = allMeshes.filter(
                 (m) =>
                     m &&
-                    m.userData.halfProfile === outsideHalf &&
-                    !m.userData.isLatheCorner,
-            );
-            const outsideLatheMeshes = allMeshes.filter(
-                (m) => m && m.userData.isLatheCorner,
+                    (m.userData.halfProfile === outsideHalf ||
+                        m.userData.isLatheCorner),
             );
             const insideMeshes = allMeshes.filter(
                 (m) => m && m.userData.isMergedInnerHalf,
             );
 
-            const mergedOutsideSweep = this.mergeExtrudeMeshes(
-                outsideSweepMeshes,
-                color,
-            );
-            const mergedOutsideLathe = this.mergeExtrudeMeshes(
-                outsideLatheMeshes,
-                color,
-            );
-
-            if (mergedOutsideSweep && !isExtension && mergedOutsideSweep.geometry) {
-                this._invertGeometryNormals(mergedOutsideSweep.geometry);
-            }
-
-            const mergedOutside = this.mergeExtrudeMeshes(
-                [mergedOutsideSweep, mergedOutsideLathe].filter(Boolean),
-                color,
-            );
+            const mergedOutside = this.mergeExtrudeMeshes(outsideMeshes, color);
             const mergedInside = this.mergeExtrudeMeshes(insideMeshes, color);
+
+            if (mergedOutside?.geometry) {
+                this._ensureOutwardNormals(
+                    mergedOutside.geometry,
+                    "round-outside",
+                );
+            }
+            if (mergedInside?.geometry) {
+                // Inner cutter half historically needs opposite winding from the
+                // raw merged result for correct outward-facing shading.
+                if (!isExtension) {
+                    this._invertGeometryNormals(mergedInside.geometry);
+                }
+            }
 
             if (mergedOutside && mergedInside) {
                 const mergedFinal = this.mergeExtrudeMeshes(
@@ -2489,6 +2480,12 @@ export default class ExtrusionBuilder {
                     color,
                 );
                 if (mergedFinal) {
+                    if (mergedFinal.geometry) {
+                        this._ensureOutwardNormals(
+                            mergedFinal.geometry,
+                            "round-final",
+                        );
+                    }
                     return [mergedFinal];
                 }
             }
@@ -2553,6 +2550,104 @@ export default class ExtrusionBuilder {
         } catch (e) {
             this.log.warn("Failed to invert geometry normals", e);
         }
+    }
+
+    /**
+     * Compute signed volume for a triangle mesh.
+     * Positive value usually means outward winding (RH rule).
+     * @private
+     */
+    _computeSignedVolume(geometry) {
+        if (!geometry?.attributes?.position) return 0;
+
+        const pos = geometry.attributes.position;
+        const idx = geometry.index?.array;
+        let volume = 0;
+
+        const triAt = (i0, i1, i2) => {
+            const ax = pos.getX(i0), ay = pos.getY(i0), az = pos.getZ(i0);
+            const bx = pos.getX(i1), by = pos.getY(i1), bz = pos.getZ(i1);
+            const cx = pos.getX(i2), cy = pos.getY(i2), cz = pos.getZ(i2);
+
+            volume +=
+                (ax * (by * cz - bz * cy) +
+                    ay * (bz * cx - bx * cz) +
+                    az * (bx * cy - by * cx)) /
+                6;
+        };
+
+        if (idx && idx.length >= 3) {
+            for (let i = 0; i + 2 < idx.length; i += 3) {
+                triAt(idx[i], idx[i + 1], idx[i + 2]);
+            }
+        } else {
+            for (let i = 0; i + 2 < pos.count; i += 3) {
+                triAt(i, i + 1, i + 2);
+            }
+        }
+
+        return volume;
+    }
+
+    /**
+     * Ensure normals point outward regardless of contour/profile winding.
+     * Strategy: signed-volume first, then centroid/radial-dot fallback.
+     * @private
+     */
+    _ensureOutwardNormals(geometry, label = "") {
+        if (!geometry?.attributes?.position) return false;
+
+        if (!geometry.attributes.normal) {
+            geometry.computeVertexNormals();
+            geometry.normalizeNormals();
+        }
+
+        const volume = this._computeSignedVolume(geometry);
+        if (Number.isFinite(volume) && Math.abs(volume) > 1e-6) {
+            if (volume < 0) {
+                this._invertGeometryNormals(geometry);
+                this.log.debug(`Flipped normals by signed volume (${label})`, {
+                    volume,
+                });
+                return true;
+            }
+            return false;
+        }
+
+        const pos = geometry.attributes.position;
+        const normal = geometry.attributes.normal;
+
+        let cx = 0, cy = 0, cz = 0;
+        for (let i = 0; i < pos.count; i++) {
+            cx += pos.getX(i);
+            cy += pos.getY(i);
+            cz += pos.getZ(i);
+        }
+        const invCount = pos.count > 0 ? 1 / pos.count : 0;
+        cx *= invCount;
+        cy *= invCount;
+        cz *= invCount;
+
+        let dotSum = 0;
+        for (let i = 0; i < pos.count; i++) {
+            const rx = pos.getX(i) - cx;
+            const ry = pos.getY(i) - cy;
+            const rz = pos.getZ(i) - cz;
+            dotSum +=
+                normal.getX(i) * rx +
+                normal.getY(i) * ry +
+                normal.getZ(i) * rz;
+        }
+
+        if (dotSum < 0) {
+            this._invertGeometryNormals(geometry);
+            this.log.debug(`Flipped normals by radial fallback (${label})`, {
+                dotSum,
+            });
+            return true;
+        }
+
+        return false;
     }
 
     /**
