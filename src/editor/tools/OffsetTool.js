@@ -905,13 +905,6 @@ export default class OffsetTool extends BaseTool {
         this.ctx.state.setSelection([...set]);
     }
 
-    _distanceFromPointer(pos) {
-        if (!this._refPoint) return 0;
-        const dx = num(pos?.x) - this._refPoint.x;
-        const dy = num(pos?.y) - this._refPoint.y;
-        return dx * this._refNormal.x + dy * this._refNormal.y;
-    }
-
     _startDynamicPhase(pos, e) {
         this._phase = "dynamic";
         this._signedDistance = this._distanceFromPointer(pos ?? { x: 0, y: 0 });
@@ -1118,6 +1111,38 @@ export default class OffsetTool extends BaseTool {
     _syncInputValue() {
         if (!this._input || this._inputFocused) return;
         this._input.value = r4(this._signedDistance);
+    }
+
+    _refreshPreview() {
+        const dist = this._signedDistance;
+        const count = this._count;
+        const previewPaths = [];
+
+        for (const entry of this._sourceEntries) {
+            if (entry.kind === "contour") {
+                const result = calculateOffsetFromPathData(entry.pathData, dist, {
+                    offsetSignMode: "direct",
+                    useArcApproximation: false,
+                    exportModule: this.ctx.export,
+                    trimSelfIntersections: false,
+                });
+                if (result) {
+                    for (let i = 0; i < count; i++) {
+                        const scaledDist = dist * (i + 1);
+                        const r = calculateOffsetFromPathData(entry.pathData, scaledDist, {
+                            offsetSignMode: "direct",
+                            useArcApproximation: false,
+                            exportModule: this.ctx.export,
+                            trimSelfIntersections: false,
+                        });
+                        if (r) previewPaths.push(r);
+                    }
+                }
+            }
+        }
+
+        this._previewPaths = previewPaths;
+        this._renderGhost();
     }
 
     _cancelManualInput() {
