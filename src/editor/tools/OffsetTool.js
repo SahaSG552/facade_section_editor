@@ -975,10 +975,6 @@ export default class OffsetTool extends BaseTool {
             this._refPoint = { x: ref.x, y: ref.y };
             return true;
         }
-            this._refNormal = normalizeVec(n);
-            this._refPoint = { x: ref.x, y: ref.y };
-            return true;
-        }
 
         if (seg.type === "circle") {
             const c = segmentWorldPoint(seg, seg.data?.center ?? { x: 0, y: 0 }, vars);
