@@ -1222,60 +1222,15 @@ export default class OffsetTool extends BaseTool {
     }
 
     _refreshPreview() {
-        // Debounce heavy preview computation via requestAnimationFrame
-        if (this._previewRAF) return;
-        this._previewRAF = requestAnimationFrame(() => {
-            this._previewRAF = null;
-            this._doRefreshPreview();
-        });
+        // Only render the lightweight ghost (distance line + dot).
+        // Full offset preview via Paper.js blocks the main thread and causes hangs.
+        this._previewPaths = [];
+        this._renderGhost();
     }
 
     _doRefreshPreview() {
-        const parsed = this._parseInput();
-        const distances = buildOffsetDistanceSeries(parsed.distance, parsed.count);
+        // Disabled — Paper.js offset computation blocks main thread
         this._previewPaths = [];
-        const vars = this.ctx.state?.variableValues ?? {};
-
-        for (const entry of this._sourceEntries) {
-            for (const dist of distances) {
-                if (entry.kind === "shape") {
-                    const shapeSegment = this._offsetShapeEntry(entry.seg, dist);
-                    if (shapeSegment) {
-                        this._previewPaths.push({
-                            sourceId: entry.sourceId,
-                            distance: dist,
-                            shapeSegment,
-                            entryKind: "shape",
-                            transforms: Array.isArray(entry.transforms) ? entry.transforms : [],
-                        });
-                    }
-                    continue;
-                }
-
-                const candidate = buildOffsetCandidate(
-                    entry,
-                    dist * this._offsetDirection,
-                    this._exportModule,
-                    vars,
-                    this._offsetCalculator,
-                );
-
-                if (candidate) {
-                    this._previewPaths.push({
-                        sourceId: entry.sourceId,
-                        distance: dist,
-                        pathData: candidate.pathData,
-                        editorPathData: segmentsToEditorPathData(candidate.segments, candidate.allowClose),
-                        allowClose: candidate.allowClose,
-                        segments: candidate.segments,
-                        entryKind: "contour",
-                        transforms: Array.isArray(entry.transforms) ? entry.transforms : [],
-                    });
-                }
-            }
-        }
-
-        this._publishOffsetDebugInfo();
         this._renderGhost();
     }
 
@@ -1641,26 +1596,38 @@ export default class OffsetTool extends BaseTool {
     }
 
     _commitOffset() {
-        if (this._previewPaths.length === 0) {
-            this._rollbackToSelection();
-            return;
-        }
-
+        const parsed = this._parseInput();
+        const dist = parsed.distance * this._offsetDirection;
+        const vars = this.ctx.state?.variableValues ?? {};
         const state = this.ctx.state;
         const appended = [];
         const appendedShapes = [];
-        for (const preview of this._previewPaths) {
-            if (preview.shapeSegment) {
-                appendedShapes.push({
-                    ...preview.shapeSegment,
-                    id: `seg-${state._nextSegmentId++}`,
-                    selected: false,
-                    data: JSON.parse(JSON.stringify(preview.shapeSegment.data)),
-                });
+
+        for (const entry of this._sourceEntries) {
+            if (entry.kind === "shape") {
+                const shapeSegment = this._offsetShapeEntry(entry.seg, parsed.distance);
+                if (shapeSegment) {
+                    appendedShapes.push({
+                        ...shapeSegment,
+                        id: `seg-${state._nextSegmentId++}`,
+                        selected: false,
+                        data: JSON.parse(JSON.stringify(shapeSegment.data)),
+                    });
+                }
                 continue;
             }
-            const sourceEntry = this._sourceEntries.find((e) => e.sourceId === preview.sourceId);
-            const commitSegments = preview.segments ?? [];
+
+            const candidate = buildOffsetCandidate(
+                entry,
+                dist,
+                this._exportModule,
+                vars,
+                this._offsetCalculator,
+            );
+
+            if (!candidate) continue;
+            const sourceEntry = entry;
+            const commitSegments = candidate.segments ?? [];
             const groups = splitByContour(commitSegments);
             for (const group of groups) {
                 if (group.length === 0) continue;
