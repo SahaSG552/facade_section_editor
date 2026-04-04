@@ -636,6 +636,7 @@ export default class OffsetTool extends BaseTool {
         this._input = null;
         this._inputFocused = false;
         this._lastNonEmptyDebugPayload = null;
+        this._previewRAF = null;
 
         this._exportModule = null;
         this._snapshots = { positive: [], negative: [] };
@@ -1114,34 +1115,9 @@ export default class OffsetTool extends BaseTool {
     }
 
     _refreshPreview() {
-        const dist = this._signedDistance;
-        const count = this._count;
-        const previewPaths = [];
-
-        for (const entry of this._sourceEntries) {
-            if (entry.kind === "contour") {
-                const result = calculateOffsetFromPathData(entry.pathData, dist, {
-                    offsetSignMode: "direct",
-                    useArcApproximation: false,
-                    exportModule: this.ctx.export,
-                    trimSelfIntersections: false,
-                });
-                if (result) {
-                    for (let i = 0; i < count; i++) {
-                        const scaledDist = dist * (i + 1);
-                        const r = calculateOffsetFromPathData(entry.pathData, scaledDist, {
-                            offsetSignMode: "direct",
-                            useArcApproximation: false,
-                            exportModule: this.ctx.export,
-                            trimSelfIntersections: false,
-                        });
-                        if (r) previewPaths.push(r);
-                    }
-                }
-            }
-        }
-
-        this._previewPaths = previewPaths;
+        // Minimal preview: just render ghost with distance line, no offset computation
+        // Full offset preview is too heavy and causes hangs
+        this._previewPaths = [];
         this._renderGhost();
     }
 
@@ -1246,6 +1222,15 @@ export default class OffsetTool extends BaseTool {
     }
 
     _refreshPreview() {
+        // Debounce heavy preview computation via requestAnimationFrame
+        if (this._previewRAF) return;
+        this._previewRAF = requestAnimationFrame(() => {
+            this._previewRAF = null;
+            this._doRefreshPreview();
+        });
+    }
+
+    _doRefreshPreview() {
         const parsed = this._parseInput();
         const distances = buildOffsetDistanceSeries(parsed.distance, parsed.count);
         this._previewPaths = [];
