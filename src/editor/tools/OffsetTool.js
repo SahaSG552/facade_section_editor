@@ -957,15 +957,14 @@ export default class OffsetTool extends BaseTool {
             const c = segmentWorldPoint(seg, seg.data?.center, vars);
             const a = segmentWorldPoint(seg, seg.data?.start, vars);
             const b = segmentWorldPoint(seg, seg.data?.end, vars);
-            const m = {
+            // Use leftNormal of the chord direction to match the line convention.
+            // This ensures consistent offset direction across all segment types.
+            const chordDir = { x: num(b?.x) - num(a?.x), y: num(b?.y) - num(a?.y) };
+            const n = leftNormal({ x: num(a?.x), y: num(a?.y) }, { x: num(b?.x), y: num(b?.y) });
+            this._refNormal = normalizeVec(n);
+            this._refPoint = {
                 x: (num(a?.x) + num(b?.x)) / 2,
                 y: (num(a?.y) + num(b?.y)) / 2,
-            };
-            const radial = normalizeVec({ x: m.x - num(c?.x), y: m.y - num(c?.y) });
-            this._refNormal = radial;
-            this._refPoint = {
-                x: num(c?.x) + radial.x * Math.abs(num(seg.data?.radius)),
-                y: num(c?.y) + radial.y * Math.abs(num(seg.data?.radius)),
             };
             return true;
         }
@@ -1482,14 +1481,17 @@ export default class OffsetTool extends BaseTool {
                     nearestY = nearest.y;
                     unsignedDist = nearest.dist;
 
-                    // Normal: for CW contours (sweep=0), outward = away from center.
-                    // For CCW arcs (sweep=1) in a CW contour, outward = toward center.
+                    // Normal: CW normal of the tangent at the nearest point.
+                    // This matches the line convention (rotate90CW of direction).
+                    // CW arc (sweep=0): CW normal = toward center
+                    // CCW arc (sweep=1): CW normal = away from center
+                    // For a CW contour, outward = right side = CW normal.
                     const ndx = nearestX - cx;
                     const ndy = nearestY - cy;
                     const nLen = Math.hypot(ndx, ndy);
                     if (nLen > 1e-9) {
-                        // sweep=0 (CW): normal points away from center (outward)
-                        // sweep=1 (CCW): normal points toward center (outward for CW contour)
+                        // CW arc: tangent = rotate90CW(radius), CW normal = -radius (toward center)
+                        // CCW arc: tangent = rotate90CCW(radius), CW normal = +radius (away from center)
                         const dir = sweep === 1 ? 1 : -1;
                         nx = dir * ndx / nLen;
                         ny = dir * ndy / nLen;
