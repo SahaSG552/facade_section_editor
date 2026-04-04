@@ -131,7 +131,7 @@ export function offsetLine(segment, distance) {
         return null;
     }
 
-    const normal = rotate90CW(tangent);
+    const normal = rotate90CCW(tangent);
 
     return {
         ...segment,

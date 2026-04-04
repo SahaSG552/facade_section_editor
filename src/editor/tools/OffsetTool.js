@@ -739,17 +739,19 @@ export default class OffsetTool extends BaseTool {
 
     onPointerMove(pos, e) {
         if (this._phase === "dynamic") {
+            this._positionPopup(e);
             const livePos = e ? this.ctx.canvas.screenToSVG(e) : pos;
             this._cursorSignedDistance = this._distanceFromPointer(livePos);
             if (!this._inputFocused && this._manualValue.trim() === "") {
                 this._signedDistance = this._cursorSignedDistance;
-                if (typeof this._syncInputValue === "function") this._syncInputValue();
-                if (typeof this._refreshPreview === "function") this._refreshPreview();
+                this._syncInputValue();
+                this._refreshPreview();
             }
             return;
         }
 
         if (this._phase === "confirming") {
+            this._positionPopup(e);
             const livePos = e ? this.ctx.canvas.screenToSVG(e) : pos;
             this._cursorSignedDistance = this._distanceFromPointer(livePos);
             return;
