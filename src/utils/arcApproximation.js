@@ -26,13 +26,14 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false) {
     let currentX = null;
     let currentY = null;
 
+    const EPS = 1e-6;
     segments.forEach((segment, index) => {
         // Первый сегмент всегда начинается с M (move)
-        if (
+        const needsMove =
             index === 0 ||
-            currentX !== segment.start.x ||
-            currentY !== segment.start.y
-        ) {
+            Math.abs(currentX - segment.start.x) > EPS ||
+            Math.abs(currentY - segment.start.y) > EPS;
+        if (needsMove) {
             pathCommands.push(
                 `M ${segment.start.x.toFixed(6)} ${segment.start.y.toFixed(6)}`
             );
