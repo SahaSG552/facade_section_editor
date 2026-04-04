@@ -25,8 +25,15 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
     }
 
     try {
-        const signMode = options.offsetSignMode || "direct";
-        const effectiveOffset = signMode === "direct" ? offset : -offset;
+        // Legacy convention: positive offset = inward, negative = outward.
+        // "direct" mode flips this: positive = outward.
+        const signMode = options.offsetSignMode || "legacy-inverted";
+        let effectiveOffset = signMode === "direct" ? offset : -offset;
+
+        // forceReverseOutput flips the final result
+        if (options.forceReverseOutput) {
+            effectiveOffset = -effectiveOffset;
+        }
 
         return engineCalculateOffset(pathData, effectiveOffset, {
             joinType: options.join || "sharp",

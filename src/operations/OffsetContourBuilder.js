@@ -264,6 +264,13 @@ export function buildOffsetContour(segments, distance, options = {}) {
             // Sharp join is valid: trim current at intersection and stitch next segment
             current.end = clonePoint(sharpJoin.intersection);
             next.start = clonePoint(sharpJoin.intersection); // FIX: stitch next segment to close gap
+
+            // For closed contours, the last join (i = numSegs-1, nextIdx = 0)
+            // modifies offsetSegments[0].start but result[0] was already pushed
+            // with the original start. Update result[0].start to close the loop.
+            if (closed && nextIdx === 0 && result.length > 0) {
+              result[0].start = clonePoint(sharpJoin.intersection);
+            }
           } else {
             // Use round join instead
             const arcJoin = createArcJoin(
@@ -297,6 +304,11 @@ export function buildOffsetContour(segments, distance, options = {}) {
         if (trimJoin && trimJoin.canApply) {
           current.end = clonePoint(trimJoin.intersection);
           next.start = clonePoint(trimJoin.intersection);
+
+          // Same fix for closed contours: update result[0].start
+          if (closed && nextIdx === 0 && result.length > 0) {
+            result[0].start = clonePoint(trimJoin.intersection);
+          }
         }
         // If trim can't apply, leave segments as-is (they'll be handled by downstream logic)
       }
