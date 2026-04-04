@@ -2068,11 +2068,14 @@ export default class ExtrusionBuilder {
                 options.outsideHalf === "right" ? "right" : "left";
 
             // Swap left/right mapping for outer vs inner extrusion as requested.
-            const outsideHalf = requestedOuterHalf === "left" ? "left" : "right";
+            const outsideHalf = requestedOuterHalf === "left" ? "right" : "left";
             const innerHalf = outsideHalf === "left" ? "right" : "left";
 
+            const hasProfileAnchorX = Number.isFinite(Number(options.profileAnchorX));
+            const hasProfileAnchorY = Number.isFinite(Number(options.profileAnchorY));
+            const useAnchorSplit = hasProfileAnchorX || hasProfileAnchorY;
             const splitOptions = {
-                useAnchorSplit: true,
+                useAnchorSplit,
                 anchorX: Number(options.profileAnchorX ?? 0),
                 anchorY: Number(options.profileAnchorY ?? 0),
             };
@@ -2237,9 +2240,7 @@ export default class ExtrusionBuilder {
 
                 geometry.computeVertexNormals();
                 geometry.normalizeNormals();
-                if (!isExtension) {
-                    this._invertGeometryNormals(geometry);
-                }
+                this._invertGeometryNormals(geometry);
 
                 const material = new THREE.MeshStandardMaterial({
                     color: new THREE.Color(color || "#cccccc"),
@@ -2397,7 +2398,7 @@ export default class ExtrusionBuilder {
                     if (innerGeometry) {
                         innerGeometry.computeVertexNormals();
                         innerGeometry.normalizeNormals();
-                        if (isExtension) {
+                        if (!isExtension) {
                             this._invertGeometryNormals(innerGeometry);
                         }
 
@@ -2450,17 +2451,36 @@ export default class ExtrusionBuilder {
             }
 
             // Merge all OUTSIDE half parts, then merge with INSIDE
-            const outsideMeshes = allMeshes.filter(
+            const outsideSweepMeshes = allMeshes.filter(
                 (m) =>
                     m &&
-                    (m.userData.halfProfile === outsideHalf ||
-                        m.userData.isLatheCorner),
+                    m.userData.halfProfile === outsideHalf &&
+                    !m.userData.isLatheCorner,
+            );
+            const outsideLatheMeshes = allMeshes.filter(
+                (m) => m && m.userData.isLatheCorner,
             );
             const insideMeshes = allMeshes.filter(
                 (m) => m && m.userData.isMergedInnerHalf,
             );
 
-            const mergedOutside = this.mergeExtrudeMeshes(outsideMeshes, color);
+            const mergedOutsideSweep = this.mergeExtrudeMeshes(
+                outsideSweepMeshes,
+                color,
+            );
+            const mergedOutsideLathe = this.mergeExtrudeMeshes(
+                outsideLatheMeshes,
+                color,
+            );
+
+            if (mergedOutsideSweep && !isExtension && mergedOutsideSweep.geometry) {
+                this._invertGeometryNormals(mergedOutsideSweep.geometry);
+            }
+
+            const mergedOutside = this.mergeExtrudeMeshes(
+                [mergedOutsideSweep, mergedOutsideLathe].filter(Boolean),
+                color,
+            );
             const mergedInside = this.mergeExtrudeMeshes(insideMeshes, color);
 
             if (mergedOutside && mergedInside) {
@@ -2584,22 +2604,10 @@ export default class ExtrusionBuilder {
             }
 
             // Force opposite sweep direction for all extrusions.
-            // Offset contours are already CW from CustomOffsetProcessor.ensureCW,
-            // and partFront paths are also CW. Reversing CW→CCW breaks left/right halves.
-            // Only reverse if the contour is NOT already CW.
+            // Keep this unconditional to preserve historical left/right behavior
+            // for both open and closed contours.
             if (Array.isArray(contour) && contour.length > 1) {
-                const signedArea2D = (pts) => {
-                    let a = 0;
-                    for (let i = 0; i < pts.length; i++) {
-                        const j = (i + 1) % pts.length;
-                        a += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
-                    }
-                    return a / 2;
-                };
-                // Positive area = CCW → reverse to CW
-                if (signedArea2D(contour) > 0) {
-                    contour = contour.slice().reverse();
-                }
+                contour = contour.slice().reverse();
             }
 
             let profile;

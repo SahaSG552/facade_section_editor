@@ -150,91 +150,6 @@ function ensureCW(pathData) {
 }
 
 /**
- * Reverse an SVG path string (flip orientation).
- */
-function reversePath(pathData) {
-    const subpaths = [];
-    let current = [];
-    const re = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
-    let m;
-    while ((m = re.exec(pathData)) !== null) {
-        const cmd = m[1];
-        const args = m[2].trim();
-        if (cmd.toUpperCase() === "M" && current.length > 0) {
-            subpaths.push(current);
-            current = [];
-        }
-        current.push({ cmd, args });
-        if (cmd.toUpperCase() === "Z") {
-            subpaths.push(current);
-            current = [];
-        }
-    }
-    if (current.length > 0) subpaths.push(current);
-
-    const reversed = subpaths.map(sp => {
-        if (sp.length === 0) return sp;
-        let hasZ = sp[sp.length - 1].cmd.toUpperCase() === "Z";
-        const body = hasZ ? sp.slice(0, -1) : [...sp];
-        if (body.length < 1) return sp;
-
-        const points = [];
-        let cx = 0, cy = 0;
-        for (const seg of body) {
-            const args = seg.args.split(/[\s,]+/).filter(Boolean).map(Number);
-            const upper = seg.cmd.toUpperCase();
-            const rel = seg.cmd === seg.cmd.toLowerCase() && upper !== "Z";
-            if (upper === "M") {
-                for (let i = 0; i + 1 < args.length; i += 2) {
-                    let x = args[i], y = args[i + 1];
-                    if (rel) { x += cx; y += cy; }
-                    points.push({ x, y });
-                    cx = x; cy = y;
-                }
-            } else if (upper === "L") {
-                for (let i = 0; i + 1 < args.length; i += 2) {
-                    let x = args[i], y = args[i + 1];
-                    if (rel) { x += cx; y += cy; }
-                    points.push({ x, y });
-                    cx = x; cy = y;
-                }
-            } else if (upper === "H") {
-                for (const x of args) {
-                    const fx = rel ? x + cx : x;
-                    points.push({ x: fx, y: cy });
-                    cx = fx;
-                }
-            } else if (upper === "V") {
-                for (const y of args) {
-                    const fy = rel ? y + cy : y;
-                    points.push({ x: cx, y: fy });
-                    cy = fy;
-                }
-            } else if (upper === "A") {
-                const tokens = seg.args.match(/[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g) || [];
-                if (tokens.length >= 7) {
-                    let ex = Number(tokens[5]), ey = Number(tokens[6]);
-                    if (rel) { ex += cx; ey += cy; }
-                    points.push({ x: ex, y: ey });
-                    cx = ex; cy = ey;
-                }
-            }
-        }
-
-        if (points.length < 2) return sp;
-        const revPoints = [...points].reverse();
-        const parts = [`M ${revPoints[0].x} ${revPoints[0].y}`];
-        for (let i = 1; i < revPoints.length; i++) {
-            parts.push(`L ${revPoints[i].x} ${revPoints[i].y}`);
-        }
-        if (hasZ) parts.push("Z");
-        return parts.join(" ");
-    });
-
-    return reversed.join(" ");
-}
-
-/**
  * Calculate offset for SVG path data using OffsetEngine.
  * @param {string} pathData - SVG path data
  * @param {number} offset - Offset distance
@@ -249,12 +164,14 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
     }
 
     try {
-        // Detect original orientation before offset
+        // Preserve original winding so downstream extrusion left/right mapping
+        // stays stable regardless of OffsetEngine internals.
         const originalCCW = signedArea(pathData) > 0;
 
         // Main canvas expects: positive offset = inward.
-        // OffsetEngine uses CCW normal: positive = left of path.
-        // Negate so positive → inward.
+        // OffsetEngine uses CCW normal (rotate90CCW): positive = left of path.
+        // Canvas paths are typically CW, so "left" = outward.
+        // Negate to flip: positive offset → inward.
         const effectiveOffset = -offset;
 
         let result = engineCalculateOffset(pathData, effectiveOffset, {
@@ -267,7 +184,6 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
             arcTolerance: options.arcTolerance || ARC_APPROX_TOLERANCE,
         });
 
-        // Restore original orientation so ExtrusionBuilder left/right mapping stays correct
         if (result) {
             const resultCCW = signedArea(result) > 0;
             if (resultCCW !== originalCCW) {
