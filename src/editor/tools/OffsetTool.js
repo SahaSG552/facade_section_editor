@@ -957,15 +957,26 @@ export default class OffsetTool extends BaseTool {
             const c = segmentWorldPoint(seg, seg.data?.center, vars);
             const a = segmentWorldPoint(seg, seg.data?.start, vars);
             const b = segmentWorldPoint(seg, seg.data?.end, vars);
-            // Use leftNormal of the chord direction to match the line convention.
-            // This ensures consistent offset direction across all segment types.
-            const chordDir = { x: num(b?.x) - num(a?.x), y: num(b?.y) - num(a?.y) };
-            const n = leftNormal({ x: num(a?.x), y: num(a?.y) }, { x: num(b?.x), y: num(b?.y) });
-            this._refNormal = normalizeVec(n);
-            this._refPoint = {
+            const ref = {
                 x: (num(a?.x) + num(b?.x)) / 2,
                 y: (num(a?.y) + num(b?.y)) / 2,
             };
+            // Determine outward normal based on contour orientation.
+            // For closed contours with a known center, outward = from center to chord midpoint.
+            // For open contours, use leftNormal of chord direction (CCW convention).
+            const sourceContour = this._sourceEntries.find((e) => e.kind === "contour" && e.contourId === Number(seg.contourId));
+            let n;
+            if (sourceContour?.closed && sourceContour.center) {
+                n = normalizeVec({ x: ref.x - sourceContour.center.x, y: ref.y - sourceContour.center.y });
+            } else {
+                n = leftNormal({ x: num(a?.x), y: num(a?.y) }, { x: num(b?.x), y: num(b?.y) });
+            }
+            this._refNormal = normalizeVec(n);
+            this._refPoint = { x: ref.x, y: ref.y };
+            return true;
+        }
+            this._refNormal = normalizeVec(n);
+            this._refPoint = { x: ref.x, y: ref.y };
             return true;
         }
 
