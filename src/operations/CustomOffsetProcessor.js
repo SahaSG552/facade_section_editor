@@ -150,33 +150,6 @@ function ensureCW(pathData) {
 }
 
 /**
- * Compute signed area of an SVG path (positive = CCW, negative = CW).
- */
-function signedArea(pathData) {
-    let area = 0;
-    let cx = 0, cy = 0, sx = 0, sy = 0;
-    const re = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
-    let m;
-    while ((m = re.exec(pathData)) !== null) {
-        const cmd = m[1].toUpperCase();
-        const args = m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number);
-        if (cmd === "M") {
-            cx = args[0] || 0; cy = args[1] || 0;
-            sx = cx; sy = cy;
-        } else if (cmd === "L" || cmd === "H" || cmd === "V") {
-            const nx = cmd === "H" ? args[0] : (args[0] !== undefined ? args[0] : cx);
-            const ny = cmd === "V" ? args[0] : (args[1] !== undefined ? args[1] : cy);
-            area += (cx * ny - nx * cy);
-            cx = nx; cy = ny;
-        } else if (cmd === "Z") {
-            area += (cx * sy - sx * cy);
-            cx = sx; cy = sy;
-        }
-    }
-    return area / 2;
-}
-
-/**
  * Reverse an SVG path string (flip orientation).
  */
 function reversePath(pathData) {
