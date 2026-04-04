@@ -17,81 +17,27 @@ import { OffsetEngine, calculateOffsetFromPathData as engineCalculateOffset } fr
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 
 /**
- * Compute signed area of an SVG path using Green's theorem.
- * Handles lines and arcs properly.
- * Positive = CCW, Negative = CW.
+ * Compute signed area of an SVG path (positive = CCW, negative = CW).
+ * Only looks at the polygonal approximation (ignores arcs for speed).
  */
 function signedArea(pathData) {
     let area = 0;
     let cx = 0, cy = 0, sx = 0, sy = 0;
-    const re = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
+    const re = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
     let m;
     while ((m = re.exec(pathData)) !== null) {
-        const cmd = m[1];
-        const upper = cmd.toUpperCase();
-        const rel = cmd === cmd.toLowerCase() && upper !== "Z";
+        const cmd = m[1].toUpperCase();
         const args = m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number);
-
-        if (upper === "M") {
-            if (sx !== 0 || sy !== 0) {
-                // Close previous subpath
-                area += (cx * sy - sx * cy);
-            }
+        if (cmd === "M") {
+            if (sx !== 0 || sy !== 0) { /* new subpath, close previous */ }
             cx = args[0] || 0; cy = args[1] || 0;
             sx = cx; sy = cy;
-        } else if (upper === "L") {
-            for (let i = 0; i + 1 < args.length; i += 2) {
-                let nx = args[i], ny = args[i + 1];
-                if (rel) { nx += cx; ny += cy; }
-                area += (cx * ny - nx * cy);
-                cx = nx; cy = ny;
-            }
-        } else if (upper === "H") {
-            for (const x of args) {
-                const nx = rel ? x + cx : x;
-                area += (cx * cy - nx * cy);
-                cx = nx;
-            }
-        } else if (upper === "V") {
-            for (const y of args) {
-                const ny = rel ? y + cy : y;
-                area += (cx * ny - cx * cy);
-                cy = ny;
-            }
-        } else if (upper === "A") {
-            const tokens = m[2].match(/[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g) || [];
-            if (tokens.length >= 7) {
-                const rx = Math.abs(Number(tokens[0]));
-                const ry = Math.abs(Number(tokens[1]));
-                const largeArc = Number(tokens[3]);
-                const sweep = Number(tokens[4]);
-                let ex = Number(tokens[5]), ey = Number(tokens[6]);
-                if (rel) { ex += cx; ey += cy; }
-
-                // Compute arc center
-                const dx = (cx - ex) / 2, dy = (cy - ey) / 2;
-                const lambda = (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry);
-                let arx = rx, ary = ry;
-                if (lambda > 1) { const s = Math.sqrt(lambda); arx *= s; ary *= s; }
-                const sq = Math.max(0, arx * arx * ary * ary - arx * arx * dy * dy - ary * ary * dx * dx);
-                const denom = arx * arx * dy * dy + ary * ary * dx * dx;
-                const factor = Math.sqrt(sq / denom);
-                const sign = largeArc === sweep ? -1 : 1;
-                const acx = (cx + ex) / 2 + sign * factor * arx * dy / ary;
-                const acy = (cy + ey) / 2 - sign * factor * ary * dx / arx;
-
-                // Green's theorem for arc: ∫(x dy - y dx) / 2
-                // For arc: area contribution = (r²/2)(θ₂-θ₁) + (acx*(ey-cy) - acy*(ex-cx))/2
-                const startAngle = Math.atan2((cy - acy) / ary, (cx - acx) / arx);
-                let endAngle = Math.atan2((ey - acy) / ary, (ex - acx) / arx);
-                let delta = endAngle - startAngle;
-                if (sweep === 1 && delta < 0) delta += 2 * Math.PI;
-                if (sweep === 0 && delta > 0) delta -= 2 * Math.PI;
-
-                area += (arx * ary / 2) * delta + (acx * (ey - cy) - acy * (ex - cx)) / 2;
-                cx = ex; cy = ey;
-            }
-        } else if (upper === "Z") {
+        } else if (cmd === "L" || cmd === "H" || cmd === "V") {
+            const nx = cmd === "H" ? args[0] : (args[0] !== undefined ? args[0] : cx);
+            const ny = cmd === "V" ? args[0] : (args[1] !== undefined ? args[1] : cy);
+            area += (cx * ny - nx * cy);
+            cx = nx; cy = ny;
+        } else if (cmd === "Z") {
             area += (cx * sy - sx * cy);
             cx = sx; cy = sy;
         }
@@ -233,11 +179,6 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
             useArcApproximation: options.useArcApproximation || false,
             arcTolerance: options.arcTolerance || ARC_APPROX_TOLERANCE,
         });
-
-        // Force CW orientation for correct 3D extrusion in ExtrusionBuilder
-        if (result) {
-            result = ensureCW(result);
-        }
 
         return result || "";
     } catch (err) {
