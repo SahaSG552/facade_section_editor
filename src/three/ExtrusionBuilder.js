@@ -2584,8 +2584,22 @@ export default class ExtrusionBuilder {
             }
 
             // Force opposite sweep direction for all extrusions.
+            // Offset contours are already CW from CustomOffsetProcessor.ensureCW,
+            // and partFront paths are also CW. Reversing CW→CCW breaks left/right halves.
+            // Only reverse if the contour is NOT already CW.
             if (Array.isArray(contour) && contour.length > 1) {
-                contour = contour.slice().reverse();
+                const signedArea2D = (pts) => {
+                    let a = 0;
+                    for (let i = 0; i < pts.length; i++) {
+                        const j = (i + 1) % pts.length;
+                        a += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+                    }
+                    return a / 2;
+                };
+                // Positive area = CCW → reverse to CW
+                if (signedArea2D(contour) > 0) {
+                    contour = contour.slice().reverse();
+                }
             }
 
             let profile;
