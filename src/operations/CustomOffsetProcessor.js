@@ -819,12 +819,98 @@ function offsetContour(segments, offset, options) {
     return finalSegments;
 }
 
+/**
+ * Parse SVG path data into an array of segments with cmdHint.
+ * Lightweight replacement for the missing normalizeInputContours.
+ */
+function parseSVGPathToSegments(pathData) {
+    const out = [];
+    if (!pathData || !String(pathData).trim()) return out;
+
+    const commandRe = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
+    let cx = 0, cy = 0, subX = 0, subY = 0;
+    let m = commandRe.exec(String(pathData));
+
+    while (m !== null) {
+        const cmd = m[1];
+        const rel = cmd === cmd.toLowerCase() && cmd.toLowerCase() !== "z";
+        const upper = cmd.toUpperCase();
+        const args = m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number).filter((n) => !Number.isNaN(n));
+
+        if (upper === "M") {
+            for (let i = 0; i + 1 < args.length; i += 2) {
+                let x = args[i], y = args[i + 1];
+                if (rel) { x += cx; y += cy; }
+                if (i === 0) { subX = x; subY = y; }
+                else {
+                    out.push({ type: "line", cmdHint: "L", start: { x: cx, y: cy }, end: { x, y } });
+                }
+                cx = x; cy = y;
+            }
+        } else if (upper === "L") {
+            for (let i = 0; i + 1 < args.length; i += 2) {
+                let x = args[i], y = args[i + 1];
+                if (rel) { x += cx; y += cy; }
+                out.push({ type: "line", cmdHint: "L", start: { x: cx, y: cy }, end: { x, y } });
+                cx = x; cy = y;
+            }
+        } else if (upper === "H") {
+            for (let i = 0; i < args.length; i++) {
+                let x = args[i];
+                if (rel) x += cx;
+                out.push({ type: "line", cmdHint: "H", start: { x: cx, y: cy }, end: { x, y: cy } });
+                cx = x;
+            }
+        } else if (upper === "V") {
+            for (let i = 0; i < args.length; i++) {
+                let y = args[i];
+                if (rel) y += cy;
+                out.push({ type: "line", cmdHint: "V", start: { x: cx, y: cy }, end: { x: cx, y: y } });
+                cy = y;
+            }
+        } else if (upper === "Z") {
+            out.push({ type: "line", cmdHint: "Z", start: { x: cx, y: cy }, end: { x: subX, y: subY } });
+            cx = subX; cy = subY;
+        } else if (upper === "A") {
+            const rawTokens = m[2].match(/[-+]?(?:\d*\.?\d+)(?:[eE][-+]?\d+)?/g) ?? [];
+            for (let i = 0; i + 6 < rawTokens.length; i += 7) {
+                const rx = Number(rawTokens[i]), ry = Number(rawTokens[i + 1]);
+                const largeArc = Math.round(Number(rawTokens[i + 3]));
+                const sweep = Math.round(Number(rawTokens[i + 4]));
+                let ex = Number(rawTokens[i + 5]), ey = Number(rawTokens[i + 6]);
+                if (rel) { ex += cx; ey += cy; }
+                const r = (rx + ry) / 2;
+                out.push({ type: "arc", cmdHint: "A", start: { x: cx, y: cy }, end: { x: ex, y: ey }, arc: { radius: r, largeArcFlag: largeArc, sweepFlag: sweep } });
+                cx = ex; cy = ey;
+            }
+        }
+        m = commandRe.exec(String(pathData));
+    }
+    return out;
+}
+
 function buildOffsetContourSegments(pathData, offset, options = {}) {
-    const inputContours = normalizeInputContours(pathData, options, {
-        normalizeArcAngles,
-        splitSegmentsIntoContours,
-        log,
-    });
+    // Parse SVG pathData into contour segments (inline replacement for normalizeInputContours)
+    const segments = parseSVGPathToSegments(pathData);
+    if (segments.length === 0) return [];
+
+    // Group segments into contours by Z commands and M commands
+    const contours = [];
+    let currentContour = [];
+    for (const seg of segments) {
+        if (seg.cmdHint === "M") {
+            if (currentContour.length > 0) {
+                contours.push(currentContour);
+            }
+            currentContour = [];
+        }
+        currentContour.push(seg);
+    }
+    if (currentContour.length > 0) {
+        contours.push(currentContour);
+    }
+
+    const inputContours = contours.length > 0 ? contours : [segments];
 
     if (inputContours.length === 0) {
         return [];
