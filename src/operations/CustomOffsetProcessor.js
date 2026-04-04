@@ -25,10 +25,9 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
     }
 
     try {
-        // Main canvas expects: positive offset = inward.
-        // OffsetEngine uses CCW normal: positive = outward for CCW contours.
-        // Negate so positive → inward.
-        const effectiveOffset = -offset;
+        // Pass offset directly to OffsetEngine.
+        // The engine handles sign based on contour orientation.
+        const effectiveOffset = offset;
 
         return engineCalculateOffset(pathData, effectiveOffset, {
             joinType: options.join || "sharp",
