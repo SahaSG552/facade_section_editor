@@ -248,13 +248,10 @@ export function buildOffsetContour(segments, distance, options = {}) {
       const outTangent = getTangent(next, "start");
       const cornerType = computeJoinType(inTangent, outTangent);
 
-      const currentIsArc = current.type === "arc";
-      const nextIsArc = next.type === "arc";
-
       if (cornerType === "convex") {
         const originalVertex = original.end;
 
-        if (joinType === "sharp" && !currentIsArc && !nextIsArc) {
+        if (joinType === "sharp") {
           const sharpJoin = computeSharpJoin(
             current.end,
             inTangent,
@@ -278,7 +275,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
             result.push(arcJoin);
           }
         } else {
-          // Round join for: round joinType, or any corner involving an arc
+          // Round join
           const arcJoin = createArcJoin(
             current.end,
             next.start,
@@ -287,33 +284,21 @@ export function buildOffsetContour(segments, distance, options = {}) {
           );
           result.push(arcJoin);
         }
-      } else if (cornerType === "concave") {
-        if (joinType === "sharp" && !currentIsArc && !nextIsArc) {
-          // Concave corner with sharp join: trim both segments at their intersection point
-          // Only for line-to-line corners — arc corners need different handling
-          const trimJoin = computeSharpJoin(
-            current.end,
-            inTangent,
-            next.start,
-            outTangent,
-            distance
-          );
+      } else if (cornerType === "concave" && joinType === "sharp") {
+        // Concave corner with sharp join: trim both segments at their intersection point
+        const trimJoin = computeSharpJoin(
+          current.end,
+          inTangent,
+          next.start,
+          outTangent,
+          distance
+        );
 
-          if (trimJoin && trimJoin.canApply) {
-            current.end = clonePoint(trimJoin.intersection);
-            next.start = clonePoint(trimJoin.intersection);
-          }
-          // If trim can't apply, leave segments as-is
-        } else {
-          // For concave corners involving arcs, use round join to bridge the gap
-          const arcJoin = createArcJoin(
-            current.end,
-            next.start,
-            original.end,
-            distance
-          );
-          result.push(arcJoin);
+        if (trimJoin && trimJoin.canApply) {
+          current.end = clonePoint(trimJoin.intersection);
+          next.start = clonePoint(trimJoin.intersection);
         }
+        // If trim can't apply, leave segments as-is (they'll be handled by downstream logic)
       }
     }
   }

@@ -1,0 +1,38 @@
+import { describe, it, expect } from "vitest";
+import { offsetSegment } from "../src/operations/OffsetCurveEvaluator.js";
+
+describe("Debug: offset arc directly", () => {
+    it("should offset CCW arc r=2 by distance 1", () => {
+        const segment = {
+            type: "arc",
+            start: { x: 2, y: 10 },
+            end: { x: 0, y: 8 },
+            arc: {
+                centerX: 2,
+                centerY: 8,
+                radius: 2,
+                startAngle: 90,  // degrees!
+                endAngle: 180,   // degrees!
+                sweepFlag: 1,
+            },
+        };
+
+        const result = offsetSegment(segment, 1);
+
+        console.log("=== DIRECT OFFSET DEBUG ===");
+        console.log("Input segment:", JSON.stringify(segment, null, 2));
+        console.log("Offset distance: 1");
+        console.log("Result:", JSON.stringify(result, null, 2));
+
+        expect(result).not.toBeNull();
+        expect(result.type).toBe("arc");
+        console.log("Result radius:", result.arc.radius);
+        console.log("Result startAngle:", result.arc.startAngle, "rad =", result.arc.startAngle * 180 / Math.PI, "deg");
+        console.log("Result endAngle:", result.arc.endAngle, "rad =", result.arc.endAngle * 180 / Math.PI, "deg");
+        console.log("Result start:", result.start);
+        console.log("Result end:", result.end);
+
+        // radius should grow: 2 + 1 = 3
+        expect(result.arc.radius).toBeCloseTo(3, 4);
+    });
+});
