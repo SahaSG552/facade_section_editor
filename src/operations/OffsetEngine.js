@@ -140,14 +140,13 @@ export class OffsetEngine {
                         ? sourceClosedHint
                         : this._isClosedContour(sourceContour);
 
+                const offsetMode = resolvedOptions.offsetMode || "one-sided";
+
                 // Determine contour orientation and adjust distance sign accordingly.
-                // For CW contours (area < 0): outward = right side, distance stays positive.
-                // For CCW contours (area > 0): outward = left side, distance must be negated.
-                // This ensures the sweep-aware arc formula works correctly for both orientations.
+                // For CW contours (signedArea < 0): outward = right side, distance stays positive.
+                // For CCW contours (signedArea > 0): outward = left side, distance must be negated.
                 const signedArea = this._computeSignedArea(sourceContour);
                 const effectiveDistance = signedArea > 0 ? -distance : distance;
-
-                const offsetMode = resolvedOptions.offsetMode || "one-sided";
 
                 let offsetSegments;
                 if (!sourceClosed) {
@@ -161,12 +160,12 @@ export class OffsetEngine {
                         });
                     } else {
                         // Two-sided modes: compute both +d and -d offset sides, then cap
-                        const positiveSegments = buildOffsetContour(sourceContour, effectiveDistance, {
+                        const positiveSegments = buildOffsetContour(sourceContour, distance, {
                             joinType: resolvedOptions.joinType,
                             capType: resolvedOptions.capType,
                             skipCap: true,
                         });
-                        const negativeSegments = buildOffsetContour(sourceContour, -effectiveDistance, {
+                        const negativeSegments = buildOffsetContour(sourceContour, -distance, {
                             joinType: resolvedOptions.joinType,
                             capType: resolvedOptions.capType,
                             skipCap: true,
@@ -182,7 +181,7 @@ export class OffsetEngine {
                         offsetSegments = capBothSides(
                             positiveSegments,
                             negativeSegments,
-                            effectiveDistance,
+                            distance,
                             resolvedOptions.capType
                         );
                     }
