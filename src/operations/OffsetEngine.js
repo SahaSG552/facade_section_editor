@@ -140,13 +140,14 @@ export class OffsetEngine {
                         ? sourceClosedHint
                         : this._isClosedContour(sourceContour);
 
-                const offsetMode = resolvedOptions.offsetMode || "one-sided";
-
                 // Determine contour orientation and adjust distance sign accordingly.
-                // For CW contours (signedArea < 0): outward = right side, distance stays positive.
-                // For CCW contours (signedArea > 0): outward = left side, distance must be negated.
+                // For CW contours (area < 0): outward = right side, distance stays positive.
+                // For CCW contours (area > 0): outward = left side, distance must be negated.
+                // This ensures the sweep-aware arc formula works correctly for both orientations.
                 const signedArea = this._computeSignedArea(sourceContour);
                 const effectiveDistance = signedArea > 0 ? -distance : distance;
+
+                const offsetMode = resolvedOptions.offsetMode || "one-sided";
 
                 let offsetSegments;
                 if (!sourceClosed) {
@@ -187,7 +188,7 @@ export class OffsetEngine {
                     }
                 } else {
                     // Closed contour: single-sided offset with join processing
-                    offsetSegments = buildOffsetContour(sourceContour, effectiveDistance, {
+                    offsetSegments = buildOffsetContour(sourceContour, distance, {
                         joinType: resolvedOptions.joinType,
                         capType: resolvedOptions.capType,
                     });
@@ -199,18 +200,9 @@ export class OffsetEngine {
 
                 const stitchedSegments = this._stitchSegments(offsetSegments, sourceClosed);
 
-                // Only trim self-intersections for closed contours.
-                // Paper.js boolean operations produce garbage for open/capped paths.
-                let finalSegments;
-                if (sourceClosed) {
-                    const trimmedSegments = trimSelfIntersections(stitchedSegments);
-                    finalSegments =
-                        Array.isArray(trimmedSegments) && trimmedSegments.length > 0
-                            ? trimmedSegments
-                            : stitchedSegments;
-                } else {
-                    finalSegments = stitchedSegments;
-                }
+                // Disable Paper.js self-intersection trimming — it hangs
+                // on open paths and produces garbage on closed paths.
+                const finalSegments = stitchedSegments;
 
                 const normalizedFinalSegments = this._ensureClosedWhenNeeded(
                     finalSegments,
