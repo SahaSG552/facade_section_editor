@@ -27,6 +27,7 @@ import {
   extendArcAngles,
   buildTangentBridge,
   buildUShapeBridge,
+  isSegmentDegenerated,
 } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
@@ -237,6 +238,15 @@ export function buildOffsetContour(segments, distance, options = {}) {
       const extended = extendArcAngles(offset.arc, ARC_ANGLE_EXTENSION);
       offset.arc.startAngle = extended.startAngle;
       offset.arc.endAngle = extended.endAngle;
+    }
+
+    // Rule 5: Check for segment degeneration.
+    if (isSegmentDegenerated(offset)) {
+      log.warn(
+        `buildOffsetContour: segment ${i} degenerated after offset (type=${segment.type}, distance=${distance})`
+      );
+      // Mark as degenerate — will be replaced with bridges in Task 10
+      offset._degenerate = true;
     }
 
     offsetSegments.push(offset);
