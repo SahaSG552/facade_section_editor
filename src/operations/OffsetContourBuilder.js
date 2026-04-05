@@ -25,6 +25,7 @@ import {
   preserveArcCenter,
   ARC_ANGLE_EXTENSION,
   extendArcAngles,
+  buildTangentBridge,
 } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
@@ -293,14 +294,20 @@ export function buildOffsetContour(segments, distance, options = {}) {
               result[0].start = clonePoint(sharpJoin.intersection);
             }
           } else {
-            // Use round join instead
-            const arcJoin = createArcJoin(
-              current.end,
-              next.start,
-              originalVertex,
-              distance
-            );
-            result.push(arcJoin);
+            // Rule 3 fallback: try tangent bridge before round join
+            const bridge = buildTangentBridge(current, next);
+            if (bridge) {
+              result.push(bridge);
+            } else {
+              // Use round join when tangent bridge cannot be built
+              const arcJoin = createArcJoin(
+                current.end,
+                next.start,
+                originalVertex,
+                distance
+              );
+              result.push(arcJoin);
+            }
           }
         } else {
           // Round join
