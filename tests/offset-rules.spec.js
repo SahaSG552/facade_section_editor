@@ -21,6 +21,7 @@ import {
   buildTangentBridge,
   buildUShapeBridge,
 } from "../src/operations/OffsetRules.js";
+import { buildOffsetContour } from "../src/operations/OffsetContourBuilder.js";
 
 describe("OffsetRules - Constants", () => {
   it("should export ARC_ANGLE_EXTENSION as 3 degrees in radians", () => {
@@ -588,5 +589,41 @@ describe("buildUShapeBridge", () => {
     const bridges = buildUShapeBridge(seg1, seg2);
     expect(bridges).not.toBeNull();
     expect(bridges).toHaveLength(3);
+  });
+});
+
+describe("buildOffsetContour integration", () => {
+  it("should preserve arc center through buildOffsetContour", () => {
+    const segments = [
+      {
+        type: "arc",
+        start: { x: -10, y: 0 },
+        end: { x: 10, y: 0 },
+        arc: {
+          center: { x: 0, y: 0 },
+          radius: 10,
+          startAngle: Math.PI,
+          endAngle: 0,
+          sweepFlag: 0,
+        },
+      },
+    ];
+
+    const result = buildOffsetContour(segments, 1, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result).toHaveLength(1);
+    const arcSeg = result[0];
+    expect(arcSeg.type).toBe("arc");
+
+    const center = arcSeg.arc.center || {
+      x: arcSeg.arc.centerX,
+      y: arcSeg.arc.centerY,
+    };
+    expect(center.x).toBeCloseTo(0, 6);
+    expect(center.y).toBeCloseTo(0, 6);
   });
 });

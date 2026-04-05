@@ -20,6 +20,7 @@ import {
   normalize,
 } from "./OffsetCurveEvaluator.js";
 import { capOpenContour } from "./OffsetCapper.js";
+import { getArcCenter, preserveArcCenter } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
 
@@ -214,6 +215,14 @@ export function buildOffsetContour(segments, distance, options = {}) {
         `buildOffsetContour: failed to offset segment ${i}, type=${segment.type}`
       );
       continue;
+    }
+
+    // Rule 1: Preserve arc center during offset.
+    if (segment.type === "arc") {
+      const originalCenter = getArcCenter(segment);
+      if (originalCenter) {
+        preserveArcCenter(offset, originalCenter);
+      }
     }
 
     offsetSegments.push(offset);
