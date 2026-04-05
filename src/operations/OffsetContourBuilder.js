@@ -26,6 +26,7 @@ import {
   ARC_ANGLE_EXTENSION,
   extendArcAngles,
   buildTangentBridge,
+  buildUShapeBridge,
 } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
@@ -294,19 +295,28 @@ export function buildOffsetContour(segments, distance, options = {}) {
               result[0].start = clonePoint(sharpJoin.intersection);
             }
           } else {
-            // Rule 3 fallback: try tangent bridge before round join
+            // Rule 3/4 fallback chain:
+            // 1. Try tangent bridge (simple line connection)
             const bridge = buildTangentBridge(current, next);
             if (bridge) {
               result.push(bridge);
             } else {
-              // Use round join when tangent bridge cannot be built
-              const arcJoin = createArcJoin(
-                current.end,
-                next.start,
-                originalVertex,
-                distance
-              );
-              result.push(arcJoin);
+              // 2. Try U-shape bridge (3-segment for diverging segments)
+              const uBridges = buildUShapeBridge(current, next);
+              if (uBridges && uBridges.length > 0) {
+                for (const ub of uBridges) {
+                  result.push(ub);
+                }
+              } else {
+                // 3. Final fallback: round join
+                const arcJoin = createArcJoin(
+                  current.end,
+                  next.start,
+                  originalVertex,
+                  distance
+                );
+                result.push(arcJoin);
+              }
             }
           }
         } else {
