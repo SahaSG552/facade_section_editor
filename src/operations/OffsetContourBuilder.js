@@ -274,7 +274,12 @@ export function buildOffsetContour(segments, distance, options = {}) {
       if (cornerType === "convex") {
         const originalVertex = original.end;
 
-        if (joinType === "sharp") {
+        // Detect arc-line or line-arc connections — these need U-bridge, not sharp join
+        const currentIsArc = current.type === "arc";
+        const nextIsArc = next.type === "arc";
+        const mixedConnection = currentIsArc !== nextIsArc;
+
+        if (joinType === "sharp" && !mixedConnection) {
           const sharpJoin = computeSharpJoin(
             current.end,
             inTangent,
@@ -317,6 +322,29 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 );
                 result.push(arcJoin);
               }
+            }
+          }
+        } else if (joinType === "sharp" && mixedConnection) {
+          // Rule 4: Arc-line connections always use U-shape bridge
+          // Sharp join creates non-parallel segments for mixed connections
+          const uBridges = buildUShapeBridge(current, next);
+          if (uBridges && uBridges.length > 0) {
+            for (const ub of uBridges) {
+              result.push(ub);
+            }
+          } else {
+            // Fallback to tangent bridge if U-shape fails
+            const bridge = buildTangentBridge(current, next);
+            if (bridge) {
+              result.push(bridge);
+            } else {
+              const arcJoin = createArcJoin(
+                current.end,
+                next.start,
+                originalVertex,
+                distance
+              );
+              result.push(arcJoin);
             }
           }
         } else {

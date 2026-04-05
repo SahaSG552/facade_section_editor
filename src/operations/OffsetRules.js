@@ -357,23 +357,52 @@ export function buildUShapeBridge(seg1, seg2) {
 
   if (!t1 || !t2) return null;
 
-  // Normals (perpendicular to tangents, pointing outward)
-  const n1 = { x: -t1.y, y: t1.x };
-  const n2 = { x: -t2.y, y: t2.x };
-
-  // Gap distance
+  // Gap vector
   const dx = seg2.start.x - seg1.end.x;
   const dy = seg2.start.y - seg1.end.y;
   const gap = Math.sqrt(dx * dx + dy * dy);
 
   if (gap < 1e-9) return null; // Already connected
 
+  // Check if tangents are parallel (dot product ≈ ±1)
+  const dot = t1.x * t2.x + t1.y * t2.y;
+  const parallel = Math.abs(Math.abs(dot) - 1) < 0.01;
+
+  if (parallel) {
+    // Parallel tangents: create a step bridge (П-shape)
+    // Leg 1: from seg1.end perpendicular to tangent direction
+    // Leg 2: connecting segment
+    // Leg 3: from seg2.start perpendicular to tangent direction (backwards)
+
+    // Normal to the common tangent direction
+    const n = { x: -t1.y, y: t1.x };
+
+    // Project gap onto normal to get step height
+    const stepH = dx * n.x + dy * n.y;
+
+    // Project gap onto tangent to get step width
+    const stepW = dx * t1.x + dy * t1.y;
+
+    // Point 1: seg1.end + n * stepH (perpendicular offset)
+    const p1 = { x: seg1.end.x + n.x * stepH, y: seg1.end.y + n.y * stepH };
+    // Point 2: seg2.start + n * stepH (same perpendicular level)
+    const p2 = { x: seg2.start.x + n.x * stepH, y: seg2.start.y + n.y * stepH };
+
+    return [
+      { type: "line", start: { x: seg1.end.x, y: seg1.end.y }, end: p1 },
+      { type: "line", start: p1, end: p2 },
+      { type: "line", start: p2, end: { x: seg2.start.x, y: seg2.start.y } },
+    ];
+  }
+
+  // Non-parallel tangents: use perpendicular legs from each tangent
+  const n1 = { x: -t1.y, y: t1.x };
+  const n2 = { x: -t2.y, y: t2.x };
+
   // Each leg extends by half the gap
   const legLen = gap / 2;
 
-  // Point 1: seg1.end + n1 * legLen
   const p1 = { x: seg1.end.x + n1.x * legLen, y: seg1.end.y + n1.y * legLen };
-  // Point 2: seg2.start + n2 * legLen
   const p2 = { x: seg2.start.x + n2.x * legLen, y: seg2.start.y + n2.y * legLen };
 
   return [
