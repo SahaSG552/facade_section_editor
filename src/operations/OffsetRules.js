@@ -305,3 +305,126 @@ export function extendArcAngles(arc, extension) {
 
   return { startAngle, endAngle };
 }
+
+/**
+ * Build a tangent bridge (line) between two offset segments.
+ *
+ * Creates a line segment from seg1.end to seg2.start.
+ * This is used when two offset segments diverge and need
+ * to be connected by a straight bridge.
+ *
+ * The bridge is a regular segment with no special flags —
+ * it becomes a permanent part of the contour.
+ *
+ * @param {Object} seg1 - First segment (line or arc)
+ * @param {Object} seg2 - Second segment (line or arc)
+ * @returns {Object|null} Bridge segment {type: "line", start, end}, or null if inputs invalid
+ */
+export function buildTangentBridge(seg1, seg2) {
+  if (!seg1 || !seg2 || !seg1.end || !seg2.start) return null;
+
+  return {
+    type: "line",
+    start: { x: seg1.end.x, y: seg1.end.y },
+    end: { x: seg2.start.x, y: seg2.start.y },
+  };
+}
+
+/**
+ * Build a U-shaped bridge between two diverging segments.
+ *
+ * Creates 3 line segments:
+ * 1. Perpendicular from seg1.end (along seg1's normal)
+ * 2. Connecting line between the two perpendiculars
+ * 3. Perpendicular to seg2.start (along seg2's normal)
+ *
+ * The bridge length is proportional to the gap between segments.
+ * Each perpendicular leg extends by half the gap distance.
+ *
+ * The bridges are regular segments with no special flags —
+ * they become permanent parts of the contour.
+ *
+ * @param {Object} seg1 - First segment (line or arc)
+ * @param {Object} seg2 - Second segment (line or arc)
+ * @returns {Array<Object>|null} Array of 3 bridge segments, or null if invalid
+ */
+export function buildUShapeBridge(seg1, seg2) {
+  if (!seg1 || !seg2 || !seg1.end || !seg2.start) return null;
+
+  // Get tangents at the connection points
+  const t1 = getTangentAtEnd(seg1);
+  const t2 = getTangentAtStart(seg2);
+
+  if (!t1 || !t2) return null;
+
+  // Normals (perpendicular to tangents, pointing outward)
+  const n1 = { x: -t1.y, y: t1.x };
+  const n2 = { x: -t2.y, y: t2.x };
+
+  // Gap distance
+  const dx = seg2.start.x - seg1.end.x;
+  const dy = seg2.start.y - seg1.end.y;
+  const gap = Math.sqrt(dx * dx + dy * dy);
+
+  if (gap < 1e-9) return null; // Already connected
+
+  // Each leg extends by half the gap
+  const legLen = gap / 2;
+
+  // Point 1: seg1.end + n1 * legLen
+  const p1 = { x: seg1.end.x + n1.x * legLen, y: seg1.end.y + n1.y * legLen };
+  // Point 2: seg2.start + n2 * legLen
+  const p2 = { x: seg2.start.x + n2.x * legLen, y: seg2.start.y + n2.y * legLen };
+
+  return [
+    { type: "line", start: { x: seg1.end.x, y: seg1.end.y }, end: p1 },
+    { type: "line", start: p1, end: p2 },
+    { type: "line", start: p2, end: { x: seg2.start.x, y: seg2.start.y } },
+  ];
+}
+
+/**
+ * Get tangent at the END of a segment.
+ */
+function getTangentAtEnd(segment) {
+  if (segment.type === "line") {
+    const dx = segment.end.x - segment.start.x;
+    const dy = segment.end.y - segment.start.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-9) return null;
+    return { x: dx / len, y: dy / len };
+  }
+  if (segment.type === "arc" && segment.arc) {
+    const angle = segment.arc.endAngle;
+    const sweep = segment.arc.sweepFlag !== undefined ? segment.arc.sweepFlag : 1;
+    if (sweep === 1) {
+      return { x: -Math.sin(angle), y: Math.cos(angle) };
+    } else {
+      return { x: Math.sin(angle), y: -Math.cos(angle) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Get tangent at the START of a segment.
+ */
+function getTangentAtStart(segment) {
+  if (segment.type === "line") {
+    const dx = segment.end.x - segment.start.x;
+    const dy = segment.end.y - segment.start.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-9) return null;
+    return { x: dx / len, y: dy / len };
+  }
+  if (segment.type === "arc" && segment.arc) {
+    const angle = segment.arc.startAngle;
+    const sweep = segment.arc.sweepFlag !== undefined ? segment.arc.sweepFlag : 1;
+    if (sweep === 1) {
+      return { x: -Math.sin(angle), y: Math.cos(angle) };
+    } else {
+      return { x: Math.sin(angle), y: -Math.cos(angle) };
+    }
+  }
+  return null;
+}

@@ -18,6 +18,8 @@ import {
   computeArcDelta,
   computeArcLength,
   extendArcAngles,
+  buildTangentBridge,
+  buildUShapeBridge,
 } from "../src/operations/OffsetRules.js";
 
 describe("OffsetRules - Constants", () => {
@@ -515,5 +517,76 @@ describe("OffsetRules - extendArcAngles", () => {
     const result = extendArcAngles(arc, ext);
     expect(result.startAngle).toBeCloseTo(-0.1, 10);
     expect(result.endAngle).toBeCloseTo(Math.PI / 2 + 0.1, 10);
+  });
+});
+
+describe("buildTangentBridge", () => {
+  it("should create line between two segment endpoints", () => {
+    const seg1 = { type: "line", start: {x:0,y:0}, end: {x:5,y:0} };
+    const seg2 = { type: "line", start: {x:7,y:3}, end: {x:10,y:3} };
+    const bridge = buildTangentBridge(seg1, seg2);
+    expect(bridge).not.toBeNull();
+    expect(bridge.type).toBe("line");
+    expect(bridge.start.x).toBe(5);
+    expect(bridge.start.y).toBe(0);
+    expect(bridge.end.x).toBe(7);
+    expect(bridge.end.y).toBe(3);
+  });
+
+  it("should return null for invalid inputs", () => {
+    expect(buildTangentBridge(null, {})).toBeNull();
+    expect(buildTangentBridge({}, null)).toBeNull();
+  });
+
+  it("should work with arc segments", () => {
+    const seg1 = { type: "arc", start: {x:0,y:0}, end: {x:5,y:5}, arc: {startAngle:0, endAngle:Math.PI/2, sweepFlag:1, radius:5} };
+    const seg2 = { type: "line", start: {x:7,y:7}, end: {x:10,y:10} };
+    const bridge = buildTangentBridge(seg1, seg2);
+    expect(bridge).not.toBeNull();
+    expect(bridge.type).toBe("line");
+  });
+});
+
+describe("buildUShapeBridge", () => {
+  it("should create 3 segments for diverging lines", () => {
+    const seg1 = { type: "line", start: {x:0,y:0}, end: {x:5,y:0} };
+    const seg2 = { type: "line", start: {x:5,y:5}, end: {x:10,y:5} };
+    const bridges = buildUShapeBridge(seg1, seg2);
+    expect(bridges).not.toBeNull();
+    expect(bridges).toHaveLength(3);
+    expect(bridges[0].type).toBe("line");
+    expect(bridges[1].type).toBe("line");
+    expect(bridges[2].type).toBe("line");
+    // First bridge starts at seg1.end
+    expect(bridges[0].start.x).toBe(5);
+    expect(bridges[0].start.y).toBe(0);
+    // Last bridge ends at seg2.start
+    expect(bridges[2].end.x).toBe(5);
+    expect(bridges[2].end.y).toBe(5);
+    // Continuity: bridges connect
+    expect(bridges[0].end.x).toBeCloseTo(bridges[1].start.x, 6);
+    expect(bridges[0].end.y).toBeCloseTo(bridges[1].start.y, 6);
+    expect(bridges[1].end.x).toBeCloseTo(bridges[2].start.x, 6);
+    expect(bridges[1].end.y).toBeCloseTo(bridges[2].start.y, 6);
+  });
+
+  it("should return null for invalid inputs", () => {
+    expect(buildUShapeBridge(null, {})).toBeNull();
+    expect(buildUShapeBridge({}, null)).toBeNull();
+  });
+
+  it("should return null when segments already connected", () => {
+    const seg1 = { type: "line", start: {x:0,y:0}, end: {x:5,y:0} };
+    const seg2 = { type: "line", start: {x:5,y:0}, end: {x:10,y:0} };
+    const bridges = buildUShapeBridge(seg1, seg2);
+    expect(bridges).toBeNull(); // gap = 0
+  });
+
+  it("should work with arc-to-line divergence", () => {
+    const seg1 = { type: "arc", start: {x:0,y:0}, end: {x:5,y:5}, arc: {startAngle:0, endAngle:Math.PI/2, sweepFlag:1, radius:5} };
+    const seg2 = { type: "line", start: {x:7,y:7}, end: {x:10,y:10} };
+    const bridges = buildUShapeBridge(seg1, seg2);
+    expect(bridges).not.toBeNull();
+    expect(bridges).toHaveLength(3);
   });
 });
