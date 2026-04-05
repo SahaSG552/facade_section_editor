@@ -20,7 +20,12 @@ import {
   normalize,
 } from "./OffsetCurveEvaluator.js";
 import { capOpenContour } from "./OffsetCapper.js";
-import { getArcCenter, preserveArcCenter } from "./OffsetRules.js";
+import {
+  getArcCenter,
+  preserveArcCenter,
+  ARC_ANGLE_EXTENSION,
+  extendArcAngles,
+} from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
 
@@ -223,6 +228,13 @@ export function buildOffsetContour(segments, distance, options = {}) {
       if (originalCenter) {
         preserveArcCenter(offset, originalCenter);
       }
+    }
+
+    // Rule 2: Extend arc angles for intersection search.
+    if (offset.type === "arc" && offset.arc) {
+      const extended = extendArcAngles(offset.arc, ARC_ANGLE_EXTENSION);
+      offset.arc.startAngle = extended.startAngle;
+      offset.arc.endAngle = extended.endAngle;
     }
 
     offsetSegments.push(offset);
