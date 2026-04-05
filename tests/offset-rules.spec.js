@@ -17,6 +17,7 @@ import {
   preserveArcCenter,
   computeArcDelta,
   computeArcLength,
+  extendArcAngles,
 } from "../src/operations/OffsetRules.js";
 
 describe("OffsetRules - Constants", () => {
@@ -474,5 +475,45 @@ describe("OffsetRules - computeArcLength", () => {
     };
     const length = computeArcLength(arc);
     expect(length).toBeCloseTo(Math.PI, 10);
+  });
+});
+
+describe("OffsetRules - extendArcAngles", () => {
+  it("should extend CCW arc angles", () => {
+    const arc = { startAngle: 0, endAngle: Math.PI / 2, sweepFlag: 1 };
+    const ext = 3 * Math.PI / 180; // 3 degrees
+    const result = extendArcAngles(arc, ext);
+    expect(result.startAngle).toBeCloseTo(-ext, 10);
+    expect(result.endAngle).toBeCloseTo(Math.PI / 2 + ext, 10);
+  });
+
+  it("should extend CW arc angles", () => {
+    const arc = { startAngle: 0, endAngle: -Math.PI / 2, sweepFlag: 0 };
+    const ext = 3 * Math.PI / 180;
+    const result = extendArcAngles(arc, ext);
+    expect(result.startAngle).toBeCloseTo(ext, 10);
+    expect(result.endAngle).toBeCloseTo(-Math.PI / 2 - ext, 10);
+  });
+
+  it("should not modify original arc", () => {
+    const arc = { startAngle: 0, endAngle: Math.PI, sweepFlag: 1 };
+    const ext = 0.1;
+    extendArcAngles(arc, ext);
+    expect(arc.startAngle).toBe(0);
+    expect(arc.endAngle).toBe(Math.PI);
+  });
+
+  it("should handle null arc", () => {
+    const result = extendArcAngles(null, 0.1);
+    expect(result.startAngle).toBe(0);
+    expect(result.endAngle).toBe(0);
+  });
+
+  it("should use default sweepFlag=1 when undefined", () => {
+    const arc = { startAngle: 0, endAngle: Math.PI / 2 };
+    const ext = 0.1;
+    const result = extendArcAngles(arc, ext);
+    expect(result.startAngle).toBeCloseTo(-0.1, 10);
+    expect(result.endAngle).toBeCloseTo(Math.PI / 2 + 0.1, 10);
   });
 });

@@ -266,3 +266,42 @@ export function computeArcLength(arc) {
 
   return radius * Math.abs(delta);
 }
+
+/**
+ * Extend arc angles by a given amount in both directions.
+ *
+ * For intersection search, arcs are allowed to extend their angular
+ * range slightly beyond their nominal start/end angles. This ensures
+ * that tangential or near-tangential connections with neighboring
+ * segments are not missed due to numerical precision.
+ *
+ * - startAngle is extended by -extension (backwards along the arc)
+ * - endAngle is extended by +extension (forwards along the arc)
+ * - The extension direction respects the sweep flag:
+ *   * CCW (sweepFlag=1): startAngle -= extension, endAngle += extension
+ *   * CW  (sweepFlag=0): startAngle += extension, endAngle -= extension
+ *     (because CW arcs go in the negative angle direction)
+ *
+ * @param {Object} arc - Arc data {startAngle, endAngle, sweepFlag}
+ * @param {number} extension - Angle extension in radians (positive)
+ * @returns {{startAngle: number, endAngle: number}} Extended angles
+ */
+export function extendArcAngles(arc, extension) {
+  if (!arc) return { startAngle: 0, endAngle: 0 };
+
+  const sweep = arc.sweepFlag !== undefined ? arc.sweepFlag : 1;
+  let startAngle = arc.startAngle || 0;
+  let endAngle = arc.endAngle || 0;
+
+  if (sweep === 1) {
+    // CCW: extend start backwards, end forwards
+    startAngle -= extension;
+    endAngle += extension;
+  } else {
+    // CW: extend start forwards, end backwards (CW goes negative)
+    startAngle += extension;
+    endAngle -= extension;
+  }
+
+  return { startAngle, endAngle };
+}
