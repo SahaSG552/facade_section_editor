@@ -20,10 +20,7 @@ import {
   normalize,
 } from "./OffsetCurveEvaluator.js";
 import { capOpenContour } from "./OffsetCapper.js";
-import { 
-  buildUShapeBridge, 
-  buildTangentBridge,
-} from "./OffsetRules.js";
+import { buildUShapeBridge, buildTangentBridge, isSegmentDegenerated } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
 
@@ -58,6 +55,239 @@ function cloneSegment(seg) {
     };
   }
   return cloned;
+}
+
+function buildSharpTangentBridge(current, next, inTangent, outTangent, offsetDistance) {
+  const p0 = current.end;
+  const p3 = next.start;
+  const leg = Math.abs(offsetDistance);
+
+  const p1 = {
+    x: p0.x + inTangent.x * leg,
+    y: p0.y + inTangent.y * leg,
+  };
+  const p2 = {
+    x: p3.x - outTangent.x * leg,
+    y: p3.y - outTangent.y * leg,
+  };
+
+  const bridgeSegments = [];
+
+  const dist01 = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+  if (dist01 > EPSILON) {
+    bridgeSegments.push({
+      type: "line",
+      start: clonePoint(p0),
+      end: clonePoint(p1),
+    });
+  }
+
+  const dist12 = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  if (dist12 > EPSILON) {
+    bridgeSegments.push({
+      type: "line",
+      start: clonePoint(p1),
+      end: clonePoint(p2),
+    });
+  }
+
+  const dist23 = Math.hypot(p3.x - p2.x, p3.y - p2.y);
+  if (dist23 > EPSILON) {
+    bridgeSegments.push({
+      type: "line",
+      start: clonePoint(p2),
+      end: clonePoint(p3),
+    });
+  }
+
+  if (bridgeSegments.length === 0) {
+    const tangent = buildTangentBridge(current, next);
+    return tangent ? [tangent] : [];
+  }
+
+  return bridgeSegments;
+}
+
+function buildDroppedGapBridge(
+  current,
+  next,
+  inTangent,
+  offsetDistance,
+  bridgeContext = {}
+) {
+  const absDistance = Math.abs(offsetDistance);
+  const leg =
+    typeof bridgeContext.leg === "number" && Number.isFinite(bridgeContext.leg)
+      ? bridgeContext.leg
+      : absDistance;
+  const extra =
+    typeof bridgeContext.extra === "number" && Number.isFinite(bridgeContext.extra)
+      ? bridgeContext.extra
+      : 0;
+
+  // Compute current segment length with continuous overflow propagation
+  const segLen = Math.hypot(
+    current.end.x - current.start.x,
+    current.end.y - current.start.y
+  );
+  const overflow = Math.max(0, extra - segLen);
+  const propagated = overflow;
+  const effectiveExtra = Math.min(Math.max(extra, 0), segLen + propagated);
+
+  const p0 = {
+    x: current.end.x - inTangent.x * effectiveExtra,
+    y: current.end.y - inTangent.y * effectiveExtra,
+  };
+  
+  // Check if shifting the anchor would reverse the current segment
+  // Compute dot product of original direction and new direction
+  const origDx = current.end.x - current.start.x;
+  const origDy = current.end.y - current.start.y;
+  const newDx = p0.x - current.start.x;
+  const newDy = p0.y - current.start.y;
+  const dotProduct = origDx * newDx + origDy * newDy;
+  
+  // If dot product is negative or near-zero, segment would reverse or collapse
+  // Collapse current segment to zero length at the bridge anchor point
+  if (dotProduct <= EPSILON * EPSILON) {
+    current.start = clonePoint(p0);
+    current.end = clonePoint(p0);
+  } else {
+    current.end = clonePoint(p0);
+  }
+  
+  const p3 = next.start;
+
+  if (leg <= EPSILON) {
+    const tangent = buildTangentBridge(current, next);
+    return tangent ? [tangent] : [];
+  }
+
+  const normal = { x: -inTangent.y, y: inTangent.x };
+  const horizontalGap = Math.abs(p3.x - p0.x) >= Math.abs(p3.y - p0.y);
+
+  let p1;
+  let p2;
+
+  if (horizontalGap) {
+    const ySign = Math.abs(normal.y) > EPSILON ? Math.sign(normal.y) : 1;
+    const yOffset = ySign * leg;
+    p1 = { x: p0.x, y: p0.y + yOffset };
+    p2 = { x: p3.x, y: p0.y + yOffset };
+  } else {
+    const xSign = Math.abs(normal.x) > EPSILON ? Math.sign(normal.x) : 1;
+    const xOffset = xSign * leg;
+    p1 = { x: p0.x + xOffset, y: p0.y };
+    p2 = { x: p0.x + xOffset, y: p3.y };
+  }
+
+  const bridgeSegments = [];
+
+  if (Math.hypot(p1.x - p0.x, p1.y - p0.y) > EPSILON) {
+    bridgeSegments.push({
+      type: "line",
+      start: clonePoint(p0),
+      end: clonePoint(p1),
+    });
+  }
+
+  if (Math.hypot(p2.x - p1.x, p2.y - p1.y) > EPSILON) {
+    bridgeSegments.push({
+      type: "line",
+      start: clonePoint(p1),
+      end: clonePoint(p2),
+    });
+  }
+
+  if (Math.hypot(p3.x - p2.x, p3.y - p2.y) > EPSILON) {
+    bridgeSegments.push({
+      type: "line",
+      start: clonePoint(p2),
+      end: clonePoint(p3),
+    });
+  }
+
+  if (bridgeSegments.length === 0) {
+    const tangent = buildTangentBridge(current, next);
+    return tangent ? [tangent] : [];
+  }
+
+  return bridgeSegments;
+}
+
+function getSkippedSourceIndices(currentSourceIndex, nextSourceIndex, sourceCount, closed) {
+  if (!closed) {
+    const skipped = [];
+    for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
+      skipped.push(idx);
+    }
+    return skipped;
+  }
+
+  const skipped = [];
+  let idx = (currentSourceIndex + 1) % sourceCount;
+  while (idx !== nextSourceIndex && skipped.length < sourceCount) {
+    skipped.push(idx);
+    idx = (idx + 1) % sourceCount;
+  }
+  return skipped;
+}
+
+function getArcRadiusFromSegment(segment) {
+  if (!segment || segment.type !== "arc" || !segment.arc) {
+    return null;
+  }
+
+  const { arc } = segment;
+  if (typeof arc.radius === "number" && Number.isFinite(arc.radius)) {
+    const radius = Math.abs(arc.radius);
+    return radius > EPSILON ? radius : null;
+  }
+
+  const centerX =
+    arc.center && typeof arc.center.x === "number" && Number.isFinite(arc.center.x)
+      ? arc.center.x
+      : arc.centerX;
+  const centerY =
+    arc.center && typeof arc.center.y === "number" && Number.isFinite(arc.center.y)
+      ? arc.center.y
+      : arc.centerY;
+
+  if (
+    typeof centerX !== "number" ||
+    !Number.isFinite(centerX) ||
+    typeof centerY !== "number" ||
+    !Number.isFinite(centerY)
+  ) {
+    return null;
+  }
+
+  const rs = Math.hypot(segment.start.x - centerX, segment.start.y - centerY);
+  const re = Math.hypot(segment.end.x - centerX, segment.end.y - centerY);
+
+  const rsValid = Number.isFinite(rs) && rs > EPSILON;
+  const reValid = Number.isFinite(re) && re > EPSILON;
+
+  if (rsValid && reValid) {
+    return (rs + re) * 0.5;
+  }
+  if (rsValid) {
+    return rs;
+  }
+  if (reValid) {
+    return re;
+  }
+
+  return null;
+}
+
+function hasDroppedSourceGap(currentSourceIndex, nextSourceIndex, sourceCount, closed) {
+  if (!closed) {
+    return nextSourceIndex - currentSourceIndex > 1;
+  }
+
+  const skipped = (nextSourceIndex - currentSourceIndex - 1 + sourceCount) % sourceCount;
+  return skipped > 0;
 }
 
 function getTangent(segment, position) {
@@ -210,26 +440,30 @@ export function buildOffsetContour(segments, distance, options = {}) {
     `buildOffsetContour: processing ${segments.length} segments, distance=${distance}, join=${joinType}, cap=${capType}`
   );
 
-  // Step 1: Offset each segment and track mapping to originals
+  // Step 1: Offset each segment
   const offsetSegments = [];
-  const segmentMapping = []; // Maps offsetSegments[i] → segments[j]
-  
+  const sourceIndices = [];
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     const offset = offsetSegment(segment, distance);
 
     if (!offset) {
-      // offsetSegment returned null (e.g., arc degenerated to radius <= 0)
-      // Skip this segment entirely - no placeholder generation
-      // Join logic will reconnect neighbors naturally through existing sharp/concave trim logic
+      log.warn(
+        `buildOffsetContour: failed to offset segment ${i}, type=${segment.type}`
+      );
+      continue;
+    }
+
+    // Check if offset segment is degenerate (zero-length line or zero-sweep arc)
+    if (isSegmentDegenerated(offset)) {
       log.debug(
-        `buildOffsetContour: segment ${i} (${segment.type}) offset returned null, skipping segment`
+        `buildOffsetContour: skipping degenerate offset segment ${i}, type=${offset.type}`
       );
       continue;
     }
 
     offsetSegments.push(offset);
-    segmentMapping.push(i); // Track which original segment this offset came from
+    sourceIndices.push(i);
   }
 
   if (offsetSegments.length === 0) {
@@ -249,17 +483,65 @@ export function buildOffsetContour(segments, distance, options = {}) {
   for (let i = 0; i < numSegs; i++) {
     const current = cloneSegment(offsetSegments[i]);
     const nextIdx = closed ? (i + 1) % numSegs : i + 1;
+    const currentSourceIndex = sourceIndices[i];
     
     result.push(current);
 
     // Only process joins for closed contours or between consecutive segments
     if (closed || i < numSegs - 1) {
       const next = offsetSegments[nextIdx];
-      const originalIdx = segmentMapping[i]; // Get original segment index
-      const original = segments[originalIdx];
+      const nextSourceIndex = sourceIndices[nextIdx];
+      const original = segments[currentSourceIndex];
 
       const inTangent = getTangent(current, "end");
       const outTangent = getTangent(next, "start");
+      const droppedGap = hasDroppedSourceGap(
+        currentSourceIndex,
+        nextSourceIndex,
+        segments.length,
+        closed
+      );
+
+      if (droppedGap && joinType === "sharp") {
+        const skippedSourceIndices = getSkippedSourceIndices(
+          currentSourceIndex,
+          nextSourceIndex,
+          segments.length,
+          closed
+        );
+
+        let arcRadius = null;
+        if (skippedSourceIndices.length === 1) {
+          arcRadius = getArcRadiusFromSegment(segments[skippedSourceIndices[0]]);
+        }
+
+        const absD = Math.abs(distance);
+        const leg = arcRadius != null ? Math.min(absD, arcRadius) : absD;
+        const extra = absD - leg;
+
+        const forcedBridge = buildDroppedGapBridge(
+          current,
+          next,
+          inTangent,
+          distance,
+          { leg, extra }
+        );
+
+        if (forcedBridge.length > 0) {
+          result.push(...forcedBridge);
+          continue;
+        }
+
+        const fallbackArc = createArcJoin(
+          current.end,
+          next.start,
+          original.end,
+          distance
+        );
+        result.push(fallbackArc);
+        continue;
+      }
+
       const cornerType = computeJoinType(inTangent, outTangent);
 
       if (cornerType === "convex") {
@@ -349,67 +631,25 @@ export function buildOffsetContour(segments, distance, options = {}) {
         if (gapDist < EPSILON) {
           // Already connected, no bridge needed
         } else if (joinType === "sharp") {
-          // Sharp mode: Build tangent-based U-bridge (V-H-V)
-          const p0 = current.end;
-          const p3 = next.start;
-          const leg = Math.abs(distance);
-          
-          // Compute bridge points using tangents and offset distance
-          const p1 = {
-            x: p0.x + inTangent.x * leg,
-            y: p0.y + inTangent.y * leg
-          };
-          const p2 = {
-            x: p3.x - outTangent.x * leg,
-            y: p3.y - outTangent.y * leg
-          };
+          const bridgeSegments = buildSharpTangentBridge(
+            current,
+            next,
+            inTangent,
+            outTangent,
+            distance
+          );
 
-          // Create bridge segments, skipping degenerate segments
-          const bridgeSegments = [];
-          
-          // Segment p0 -> p1
-          const dist01 = Math.sqrt((p1.x - p0.x) ** 2 + (p1.y - p0.y) ** 2);
-          if (dist01 > EPSILON) {
-            bridgeSegments.push({
-              type: "line",
-              start: clonePoint(p0),
-              end: clonePoint(p1),
-            });
-          }
-          
-          // Segment p1 -> p2
-          const dist12 = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2);
-          if (dist12 > EPSILON) {
-            bridgeSegments.push({
-              type: "line",
-              start: clonePoint(p1),
-              end: clonePoint(p2),
-            });
-          }
-          
-          // Segment p2 -> p3
-          const dist23 = Math.sqrt((p3.x - p2.x) ** 2 + (p3.y - p2.y) ** 2);
-          if (dist23 > EPSILON) {
-            bridgeSegments.push({
-              type: "line",
-              start: clonePoint(p2),
-              end: clonePoint(p3),
-            });
-          }
-
-          // If all three segments degenerate, try buildTangentBridge
-          if (bridgeSegments.length === 0) {
-            const tangent = buildTangentBridge(current, next);
-            if (tangent) {
-              result.push(tangent);
-            } else {
-              // Last resort: arc join
-              log.warn("Tangent connection: all bridge segments degenerated, using arc join");
-              const originalVertex = original.end;
-              result.push(createArcJoin(current.end, next.start, originalVertex, distance));
-            }
-          } else {
+          if (bridgeSegments.length > 0) {
             result.push(...bridgeSegments);
+          } else {
+            // Last resort: arc join
+            log.warn(
+              "Tangent connection: all bridge segments degenerated, using arc join"
+            );
+            const originalVertex = original.end;
+            result.push(
+              createArcJoin(current.end, next.start, originalVertex, distance)
+            );
           }
         } else {
           // Round mode: arc join
@@ -432,6 +672,18 @@ export function buildOffsetContour(segments, distance, options = {}) {
       capType
     );
   }
+
+  // Step 4: Filter out any degenerate segments (zero-length lines, zero-sweep arcs)
+  // These can be introduced by join processing or bridge building
+  finalSegments = finalSegments.filter((seg) => {
+    const isDegenerate = isSegmentDegenerated(seg);
+    if (isDegenerate) {
+      log.debug(
+        `buildOffsetContour: filtering degenerate segment: ${seg.type}`
+      );
+    }
+    return !isDegenerate;
+  });
 
   log.debug(
     `buildOffsetContour: returning ${finalSegments.length} segments`

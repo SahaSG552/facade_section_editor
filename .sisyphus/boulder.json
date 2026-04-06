@@ -10,7 +10,8 @@
     "ses_2b0cf3a9effeAuR1uZRWCJ4oEj",
     "ses_2b0cf71a4ffeJvsPgdw1sA480K",
     "ses_2b0c2a198ffeTFrhP7gBQWtCbo",
-    "ses_2b0b387cdffezXx7I9JQHS9AS0"
+    "ses_2b0b387cdffezXx7I9JQHS9AS0",
+    "ses_29e75b19dffekd2T6soMCb5Rmr"
   ],
   "plan_name": "offset-open-curve-modes-fix",
   "agent": "atlas",
@@ -59,6 +60,18 @@
       "agent": "Sisyphus-Junior",
       "category": "deep",
       "updated_at": "2026-04-02T17:47:28.308Z"
+    },
+    "todo:9": {
+      "task_key": "todo:9",
+      "task_label": "9",
+      "task_title": "Implement explicit offsetMode routing in Engine",
+      "session_id": "ses_29e101fdbffezUWBrpeAqKIn6p",
+      "agent": "Sisyphus-Junior",
+      "category": "quick",
+      "updated_at": "2026-04-06T08:40:25.689Z"
     }
+  },
+  "session_origins": {
+    "ses_29e75b19dffekd2T6soMCb5Rmr": "direct"
   }
 }
