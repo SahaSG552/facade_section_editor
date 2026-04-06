@@ -209,7 +209,7 @@ export class OffsetEngine {
                     sourceClosed,
                 );
 
-                let contourPathData = segmentsToSVGPath(normalizedFinalSegments);
+                let contourPathData = segmentsToSVGPath(normalizedFinalSegments, false, { skipArcAutoCorrect: true });
                 if (!sourceClosed && this._shouldStripCloseCommandForOpenContour(sourceContour)) {
                     contourPathData = this._stripTerminalCloseCommand(contourPathData);
                 }

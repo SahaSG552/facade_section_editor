@@ -20,6 +20,7 @@ import {
   normalize,
 } from "./OffsetCurveEvaluator.js";
 import { capOpenContour } from "./OffsetCapper.js";
+import { buildUShapeBridge, buildTangentBridge } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
 
@@ -272,14 +273,29 @@ export function buildOffsetContour(segments, distance, options = {}) {
               result[0].start = clonePoint(sharpJoin.intersection);
             }
           } else {
-            // Use round join instead
-            const arcJoin = createArcJoin(
-              current.end,
-              next.start,
-              originalVertex,
-              distance
-            );
-            result.push(arcJoin);
+            // Miter limit exceeded: use bridge fallback chain
+            let bridge = buildUShapeBridge(current, next);
+            if (!bridge) {
+              // U-bridge failed, try tangent bridge
+              const tangent = buildTangentBridge(current, next);
+              if (!tangent) {
+                // Last resort: arc join with warning
+                log.warn("Both U-bridge and tangent bridge failed, using arc join");
+                const arcJoin = createArcJoin(
+                  current.end,
+                  next.start,
+                  originalVertex,
+                  distance
+                );
+                result.push(arcJoin);
+              } else {
+                // Tangent bridge returns single segment
+                result.push(tangent);
+              }
+            } else {
+              // U-bridge returns array of 3 segments
+              result.push(...bridge);
+            }
           }
         } else {
           // Round join

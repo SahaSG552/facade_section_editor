@@ -15,9 +15,11 @@ const log = LoggerFactory.createLogger("arcApproximation");
  * Конвертирует segments (после optimizeSegmentsToArcs) обратно в SVG path строку
  * @param {Array} segments - массив сегментов (line, arc, bezier)
  * @param {boolean} invertSweepFlag - Инвертировать sweep flag для арок (при переходе из DXF в SVG координаты)
+ * @param {Object} options - опции для обработки сегментов
+ * @param {boolean} options.skipArcAutoCorrect - пропустить автокоррекцию радиуса дуги (по умолчанию false)
  * @returns {string} SVG path data (d attribute)
  */
-export function segmentsToSVGPath(segments, invertSweepFlag = false) {
+export function segmentsToSVGPath(segments, invertSweepFlag = false, options = {}) {
     if (!segments || segments.length === 0) {
         return "";
     }
@@ -60,21 +62,23 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false) {
 
                 // Auto-correct arc radius if too small for chord length (like in DXF export)
                 // This ensures corrected arcs are used in both 2D display and 3D rendering
-                const dx = segment.end.x - segment.start.x;
-                const dy = segment.end.y - segment.start.y;
-                const chordLength = Math.sqrt(dx * dx + dy * dy);
-                const minRadius = chordLength / 2;
+                if (!options.skipArcAutoCorrect) {
+                    const dx = segment.end.x - segment.start.x;
+                    const dy = segment.end.y - segment.start.y;
+                    const chordLength = Math.sqrt(dx * dx + dy * dy);
+                    const minRadius = chordLength / 2;
 
-                if (rx < minRadius - ARC_RADIUS_TOLERANCE) {
-                    log.warn(
-                        `[Arc Auto-correct] Radius ${rx.toFixed(
-                            2
-                        )}mm → ${minRadius.toFixed(
-                            2
-                        )}mm (chord ${chordLength.toFixed(2)}mm)`
-                    );
-                    rx = minRadius;
-                    ry = minRadius;
+                    if (rx < minRadius - ARC_RADIUS_TOLERANCE) {
+                        log.warn(
+                            `[Arc Auto-correct] Radius ${rx.toFixed(
+                                2
+                            )}mm → ${minRadius.toFixed(
+                                2
+                            )}mm (chord ${chordLength.toFixed(2)}mm)`
+                        );
+                        rx = minRadius;
+                        ry = minRadius;
+                    }
                 }
 
                 // rotation (обычно 0 для круговых дуг)
