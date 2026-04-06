@@ -20,15 +20,6 @@ import {
   normalize,
 } from "./OffsetCurveEvaluator.js";
 import { capOpenContour } from "./OffsetCapper.js";
-import {
-  getArcCenter,
-  preserveArcCenter,
-  ARC_ANGLE_EXTENSION,
-  extendArcAngles,
-  buildTangentBridge,
-  buildUShapeBridge,
-  isSegmentDegenerated,
-} from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetContourBuilder");
 
@@ -225,30 +216,6 @@ export function buildOffsetContour(segments, distance, options = {}) {
       continue;
     }
 
-    // Rule 1: Preserve arc center during offset.
-    if (segment.type === "arc") {
-      const originalCenter = getArcCenter(segment);
-      if (originalCenter) {
-        preserveArcCenter(offset, originalCenter);
-      }
-    }
-
-    // Rule 2: Extend arc angles for intersection search.
-    if (offset.type === "arc" && offset.arc) {
-      const extended = extendArcAngles(offset.arc, ARC_ANGLE_EXTENSION);
-      offset.arc.startAngle = extended.startAngle;
-      offset.arc.endAngle = extended.endAngle;
-    }
-
-    // Rule 5: Check for segment degeneration.
-    if (isSegmentDegenerated(offset)) {
-      log.warn(
-        `buildOffsetContour: segment ${i} degenerated after offset (type=${segment.type}, distance=${distance})`
-      );
-      // Mark as degenerate — will be replaced with bridges in Task 10
-      offset._degenerate = true;
-    }
-
     offsetSegments.push(offset);
   }
 
@@ -284,12 +251,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
       if (cornerType === "convex") {
         const originalVertex = original.end;
 
-        // Detect arc-line or line-arc connections — these need U-bridge, not sharp join
-        const currentIsArc = current.type === "arc";
-        const nextIsArc = next.type === "arc";
-        const mixedConnection = currentIsArc !== nextIsArc;
-
-        if (joinType === "sharp" && !mixedConnection) {
+        if (joinType === "sharp") {
           const sharpJoin = computeSharpJoin(
             current.end,
             inTangent,
@@ -310,52 +272,14 @@ export function buildOffsetContour(segments, distance, options = {}) {
               result[0].start = clonePoint(sharpJoin.intersection);
             }
           } else {
-            // Rule 3/4 fallback chain:
-            // 1. Try tangent bridge (simple line connection)
-            const bridge = buildTangentBridge(current, next);
-            if (bridge) {
-              result.push(bridge);
-            } else {
-              // 2. Try U-shape bridge (3-segment for diverging segments)
-              const uBridges = buildUShapeBridge(current, next);
-              if (uBridges && uBridges.length > 0) {
-                for (const ub of uBridges) {
-                  result.push(ub);
-                }
-              } else {
-                // 3. Final fallback: round join
-                const arcJoin = createArcJoin(
-                  current.end,
-                  next.start,
-                  originalVertex,
-                  distance
-                );
-                result.push(arcJoin);
-              }
-            }
-          }
-        } else if (joinType === "sharp" && mixedConnection) {
-          // Rule 4: Arc-line connections always use U-shape bridge
-          // Sharp join creates non-parallel segments for mixed connections
-          const uBridges = buildUShapeBridge(current, next);
-          if (uBridges && uBridges.length > 0) {
-            for (const ub of uBridges) {
-              result.push(ub);
-            }
-          } else {
-            // Fallback to tangent bridge if U-shape fails
-            const bridge = buildTangentBridge(current, next);
-            if (bridge) {
-              result.push(bridge);
-            } else {
-              const arcJoin = createArcJoin(
-                current.end,
-                next.start,
-                originalVertex,
-                distance
-              );
-              result.push(arcJoin);
-            }
+            // Use round join instead
+            const arcJoin = createArcJoin(
+              current.end,
+              next.start,
+              originalVertex,
+              distance
+            );
+            result.push(arcJoin);
           }
         } else {
           // Round join
