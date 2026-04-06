@@ -24,10 +24,12 @@ function signedArea(pathData) {
     let area = 0;
     let cx = 0, cy = 0, sx = 0, sy = 0;
     const re = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
-    let m;
-    while ((m = re.exec(pathData)) !== null) {
-        const cmd = m[1].toUpperCase();
-        const args = m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number);
+    for (;;) {
+        const match = re.exec(pathData);
+        if (match === null) break;
+
+        const cmd = match[1].toUpperCase();
+        const args = match[2].trim().split(/[\s,]+/).filter(Boolean).map(Number);
         if (cmd === "M") {
             if (sx !== 0 || sy !== 0) { /* new subpath, close previous */ }
             cx = args[0] || 0; cy = args[1] || 0;
@@ -53,10 +55,12 @@ function reversePath(pathData) {
     const subpaths = [];
     let current = [];
     const re = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
-    let m;
-    while ((m = re.exec(pathData)) !== null) {
-        const cmd = m[1];
-        const args = m[2].trim();
+    for (;;) {
+        const match = re.exec(pathData);
+        if (match === null) break;
+
+        const cmd = match[1];
+        const args = match[2].trim();
         if (cmd.toUpperCase() === "M" && current.length > 0) {
             subpaths.push(current);
             current = [];
@@ -178,7 +182,10 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
             joinType: options.join || "sharp",
             capType: options.cap || "flat",
             exportModule: options.exportModule,
-            trimSelfIntersections: options.trimSelfIntersections || false,
+            trimSelfIntersections:
+                typeof options.trimSelfIntersections === "boolean"
+                    ? options.trimSelfIntersections
+                    : true,
             offsetSignMode: "direct",
             useArcApproximation: options.useArcApproximation || false,
             arcTolerance: options.arcTolerance || ARC_APPROX_TOLERANCE,

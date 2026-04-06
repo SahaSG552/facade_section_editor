@@ -326,6 +326,42 @@ function cross(v1, v2) {
   return v1.x * v2.y - v1.y * v2.x;
 }
 
+function dot(v1, v2) {
+  return v1.x * v2.x + v1.y * v2.y;
+}
+
+/**
+ * Detect if two offset segments face each other across their gap.
+ * Uses tangent-derived normals for robust line/arc handling when tangent dot products
+ * become near-zero and are numerically ambiguous.
+ *
+ * Converging criterion:
+ * - g = nextStart - currentEnd
+ * - nIn = left normal of inTangent
+ * - nOut = left normal of outTangent
+ * - converging iff dot(nIn, g) > EPSILON and dot(nOut, -g) > EPSILON
+ *
+ * @param {Object} currentEnd - End point of current segment {x, y}
+ * @param {Object} nextStart - Start point of next segment {x, y}
+ * @param {Object} inTangent - Tangent at currentEnd {x, y}
+ * @param {Object} outTangent - Tangent at nextStart {x, y}
+ * @returns {boolean} True if segments are converging (facing each other)
+ */
+function isConvergingJoin(currentEnd, nextStart, inTangent, outTangent) {
+  const gap = {
+    x: nextStart.x - currentEnd.x,
+    y: nextStart.y - currentEnd.y,
+  };
+
+  const inNormal = { x: -inTangent.y, y: inTangent.x };
+  const outNormal = { x: -outTangent.y, y: outTangent.x };
+
+  const facingIn = dot(inNormal, gap);
+  const facingOut = dot(outNormal, { x: -gap.x, y: -gap.y });
+
+  return facingIn > EPSILON && facingOut > EPSILON;
+}
+
 function computeJoinType(inTangent, outTangent) {
   const c = cross(inTangent, outTangent);
   if (Math.abs(c) < EPSILON) {
@@ -568,28 +604,80 @@ export function buildOffsetContour(segments, distance, options = {}) {
               result[0].start = clonePoint(sharpJoin.intersection);
             }
           } else {
-            // Miter limit exceeded: use bridge fallback chain
-            let bridge = buildUShapeBridge(current, next);
-            if (!bridge) {
-              // U-bridge failed, try tangent bridge
+            // Miter limit exceeded: check if segments are converging
+            const converging = isConvergingJoin(
+              current.end,
+              next.start,
+              inTangent,
+              outTangent
+            );
+
+            if (converging) {
+              // Segments are converging - avoid U-bridge and prefer direct/tangential connection
+              // Order: tangent bridge -> direct intersection -> arc fallback
               const tangent = buildTangentBridge(current, next);
-              if (!tangent) {
-                // Last resort: arc join with warning
-                log.warn("Both U-bridge and tangent bridge failed, using arc join");
-                const arcJoin = createArcJoin(
-                  current.end,
-                  next.start,
-                  originalVertex,
-                  distance
-                );
-                result.push(arcJoin);
-              } else {
-                // Tangent bridge returns single segment
+              if (tangent) {
                 result.push(tangent);
+              } else {
+                // Tangent bridge failed, try direct intersection with tangents
+                const directIntersection = lineLineIntersection(
+                  current.end,
+                  inTangent,
+                  next.start,
+                  outTangent
+                );
+                
+                if (
+                  directIntersection &&
+                  Number.isFinite(directIntersection.x) &&
+                  Number.isFinite(directIntersection.y)
+                ) {
+                  // Stitch both segments to intersection point
+                  current.end = clonePoint(directIntersection);
+                  next.start = clonePoint(directIntersection);
+                  
+                  // Update result[0].start for closed contours
+                  if (closed && nextIdx === 0 && result.length > 0) {
+                    result[0].start = clonePoint(directIntersection);
+                  }
+                } else {
+                  // Last resort for converging: arc join
+                  log.warn(
+                    "Converging segments: tangent bridge and direct intersection failed, using arc join"
+                  );
+                  const arcJoin = createArcJoin(
+                    current.end,
+                    next.start,
+                    originalVertex,
+                    distance
+                  );
+                  result.push(arcJoin);
+                }
               }
             } else {
-              // U-bridge returns array of 3 segments
-              result.push(...bridge);
+              // Segments are diverging - use U-bridge fallback chain
+              let bridge = buildUShapeBridge(current, next);
+              if (!bridge) {
+                // U-bridge failed, try tangent bridge
+                const tangent = buildTangentBridge(current, next);
+                if (!tangent) {
+                  // Last resort: arc join with warning
+                  log.warn("Both U-bridge and tangent bridge failed, using arc join");
+                  const arcJoin = createArcJoin(
+                    current.end,
+                    next.start,
+                    originalVertex,
+                    distance
+                  );
+                  result.push(arcJoin);
+                } else {
+                  // Tangent bridge returns single segment
+                  result.push(tangent);
+                }
+              } else {
+                // U-bridge returns array of 3 segments
+                result.push(...bridge);
+              }
             }
           }
         } else {
@@ -631,25 +719,65 @@ export function buildOffsetContour(segments, distance, options = {}) {
         if (gapDist < EPSILON) {
           // Already connected, no bridge needed
         } else if (joinType === "sharp") {
-          const bridgeSegments = buildSharpTangentBridge(
-            current,
-            next,
+          const converging = isConvergingJoin(
+            current.end,
+            next.start,
             inTangent,
-            outTangent,
-            distance
+            outTangent
           );
 
-          if (bridgeSegments.length > 0) {
-            result.push(...bridgeSegments);
+          if (converging) {
+            // Converging tangent gap: avoid forced U-shape bridge.
+            const tangent = buildTangentBridge(current, next);
+            if (tangent) {
+              result.push(tangent);
+            } else {
+              const directIntersection = lineLineIntersection(
+                current.end,
+                inTangent,
+                next.start,
+                outTangent
+              );
+
+              if (
+                directIntersection &&
+                Number.isFinite(directIntersection.x) &&
+                Number.isFinite(directIntersection.y)
+              ) {
+                current.end = clonePoint(directIntersection);
+                next.start = clonePoint(directIntersection);
+
+                if (closed && nextIdx === 0 && result.length > 0) {
+                  result[0].start = clonePoint(directIntersection);
+                }
+              } else {
+                const originalVertex = original.end;
+                result.push(
+                  createArcJoin(current.end, next.start, originalVertex, distance)
+                );
+              }
+            }
           } else {
-            // Last resort: arc join
-            log.warn(
-              "Tangent connection: all bridge segments degenerated, using arc join"
+            const bridgeSegments = buildSharpTangentBridge(
+              current,
+              next,
+              inTangent,
+              outTangent,
+              distance
             );
-            const originalVertex = original.end;
-            result.push(
-              createArcJoin(current.end, next.start, originalVertex, distance)
-            );
+
+            if (bridgeSegments.length > 0) {
+              result.push(...bridgeSegments);
+            } else {
+              // Last resort: arc join
+              log.warn(
+                "Tangent connection: all bridge segments degenerated, using arc join"
+              );
+              const originalVertex = original.end;
+              result.push(
+                createArcJoin(current.end, next.start, originalVertex, distance)
+              );
+            }
           }
         } else {
           // Round mode: arc join
