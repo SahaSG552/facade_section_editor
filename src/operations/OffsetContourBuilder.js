@@ -95,7 +95,10 @@ function cross(v1, v2) {
 
 function computeJoinType(inTangent, outTangent) {
   const c = cross(inTangent, outTangent);
-  return c > EPSILON ? "convex" : "concave";
+  if (Math.abs(c) < EPSILON) {
+    return "tangent";
+  }
+  return c > 0 ? "convex" : "concave";
 }
 
 function lineLineIntersection(p1, d1, p2, d2) {
@@ -327,6 +330,29 @@ export function buildOffsetContour(segments, distance, options = {}) {
           }
         }
         // If trim can't apply, leave segments as-is (they'll be handled by downstream logic)
+      } else if (cornerType === "tangent") {
+        // G1 continuous connection: offset segments may have a gap
+        // If gap is small (tolerance-level), use tangent bridge
+        // Otherwise, use arc join (better gap coverage)
+        const dx = next.start.x - current.end.x;
+        const dy = next.start.y - current.end.y;
+        const gapDist = Math.sqrt(dx * dx + dy * dy);
+        const offsetDist = Math.abs(distance);
+        
+        if (gapDist < EPSILON) {
+          // Already connected, no bridge needed
+        } else if (gapDist < offsetDist * 0.5) {
+          // Small gap: use tangent bridge
+          const bridge = buildTangentBridge(current, next);
+          if (bridge && !pointsEqual(bridge.start, bridge.end, EPSILON)) {
+            result.push(bridge);
+          }
+        } else {
+          // Large gap: use arc join for better coverage
+          const originalVertex = original.end;
+          const arcJoin = createArcJoin(current.end, next.start, originalVertex, distance);
+          result.push(arcJoin);
+        }
       }
     }
   }
