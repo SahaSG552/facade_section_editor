@@ -362,6 +362,32 @@ function isConvergingJoin(currentEnd, nextStart, inTangent, outTangent) {
   return facingIn > EPSILON && facingOut > EPSILON;
 }
 
+/**
+ * Detect if two offset segments are diverging away from each other across the gap.
+ * Diverging criterion uses strict opposite-facing normals; tangent-facing/mixed cases
+ * are treated as non-diverging and should prefer trim/intersection first.
+ *
+ * @param {Object} currentEnd - End point of current segment {x, y}
+ * @param {Object} nextStart - Start point of next segment {x, y}
+ * @param {Object} inTangent - Tangent at currentEnd {x, y}
+ * @param {Object} outTangent - Tangent at nextStart {x, y}
+ * @returns {boolean} True if segments are diverging
+ */
+function isDivergingJoin(currentEnd, nextStart, inTangent, outTangent) {
+  const gap = {
+    x: nextStart.x - currentEnd.x,
+    y: nextStart.y - currentEnd.y,
+  };
+
+  const inNormal = { x: -inTangent.y, y: inTangent.x };
+  const outNormal = { x: -outTangent.y, y: outTangent.x };
+
+  const facingIn = dot(inNormal, gap);
+  const facingOut = dot(outNormal, { x: -gap.x, y: -gap.y });
+
+  return facingIn < -EPSILON && facingOut < -EPSILON;
+}
+
 function computeJoinType(inTangent, outTangent) {
   const c = cross(inTangent, outTangent);
   if (Math.abs(c) < EPSILON) {
@@ -392,6 +418,422 @@ function lineLineIntersection(p1, d1, p2, d2) {
     x: p1.x + t1 * d1.x,
     y: p1.y + t1 * d1.y,
   };
+}
+
+function getArcCenter(arc) {
+  if (
+    arc?.center &&
+    typeof arc.center.x === "number" &&
+    Number.isFinite(arc.center.x) &&
+    typeof arc.center.y === "number" &&
+    Number.isFinite(arc.center.y)
+  ) {
+    return { x: arc.center.x, y: arc.center.y };
+  }
+
+  if (
+    typeof arc?.centerX === "number" &&
+    Number.isFinite(arc.centerX) &&
+    typeof arc?.centerY === "number" &&
+    Number.isFinite(arc.centerY)
+  ) {
+    return { x: arc.centerX, y: arc.centerY };
+  }
+
+  return null;
+}
+
+function getArcRadius(arc, arcSegment) {
+  if (typeof arc?.radius === "number" && Number.isFinite(arc.radius)) {
+    const r = Math.abs(arc.radius);
+    if (r > EPSILON) {
+      return r;
+    }
+  }
+
+  const center = getArcCenter(arc);
+  if (!center || !arcSegment?.start) {
+    return null;
+  }
+
+  const fallback = Math.hypot(
+    arcSegment.start.x - center.x,
+    arcSegment.start.y - center.y
+  );
+  return Number.isFinite(fallback) && fallback > EPSILON ? fallback : null;
+}
+
+function normalizeAngle(angle) {
+  const twoPi = Math.PI * 2;
+  let out = angle % twoPi;
+  if (out < 0) {
+    out += twoPi;
+  }
+  return out;
+}
+
+function angularDistanceCCW(fromAngle, toAngle) {
+  const twoPi = Math.PI * 2;
+  let delta = normalizeAngle(toAngle) - normalizeAngle(fromAngle);
+  if (delta < 0) {
+    delta += twoPi;
+  }
+  return delta;
+}
+
+function isAngleOnArcSweep(angle, startAngle, endAngle, sweepFlag, tol = EPSILON) {
+  if (
+    !Number.isFinite(angle) ||
+    !Number.isFinite(startAngle) ||
+    !Number.isFinite(endAngle)
+  ) {
+    return false;
+  }
+
+  const a = normalizeAngle(angle);
+  const s = normalizeAngle(startAngle);
+  const e = normalizeAngle(endAngle);
+
+  if (sweepFlag === 1) {
+    const total = angularDistanceCCW(s, e);
+    const part = angularDistanceCCW(s, a);
+    return part <= total + tol;
+  }
+
+  const total = angularDistanceCCW(e, s);
+  const part = angularDistanceCCW(a, s);
+  return part <= total + tol;
+}
+
+function isPointOnFiniteLineSegment(point, lineSegment, tol = EPSILON) {
+  const xMin = Math.min(lineSegment.start.x, lineSegment.end.x) - tol;
+  const xMax = Math.max(lineSegment.start.x, lineSegment.end.x) + tol;
+  const yMin = Math.min(lineSegment.start.y, lineSegment.end.y) - tol;
+  const yMax = Math.max(lineSegment.start.y, lineSegment.end.y) + tol;
+
+  if (point.x < xMin || point.x > xMax || point.y < yMin || point.y > yMax) {
+    return false;
+  }
+
+  const dir = {
+    x: lineSegment.end.x - lineSegment.start.x,
+    y: lineSegment.end.y - lineSegment.start.y,
+  };
+  const rel = {
+    x: point.x - lineSegment.start.x,
+    y: point.y - lineSegment.start.y,
+  };
+  const area2 = Math.abs(cross(dir, rel));
+  const dirLen = Math.hypot(dir.x, dir.y);
+  return area2 <= tol * Math.max(1, dirLen);
+}
+
+function findArcLineIntersection(arcSegment, lineSegment, referencePoint) {
+  if (arcSegment?.type !== "arc" || lineSegment?.type !== "line" || !arcSegment.arc) {
+    return null;
+  }
+
+  const center = getArcCenter(arcSegment.arc);
+  const radius = getArcRadius(arcSegment.arc, arcSegment);
+  if (!center || radius == null) {
+    return null;
+  }
+
+  const p1 = lineSegment.start;
+  const p2 = lineSegment.end;
+  const d = { x: p2.x - p1.x, y: p2.y - p1.y };
+  const a = dot(d, d);
+  if (a <= EPSILON * EPSILON) {
+    return null;
+  }
+
+  const f = { x: p1.x - center.x, y: p1.y - center.y };
+  const b = 2 * dot(f, d);
+  const c = dot(f, f) - radius * radius;
+  const disc = b * b - 4 * a * c;
+
+  if (disc < -EPSILON) {
+    return null;
+  }
+
+  const roots = [];
+  if (Math.abs(disc) <= EPSILON) {
+    roots.push(-b / (2 * a));
+  } else {
+    const sqrtDisc = Math.sqrt(Math.max(0, disc));
+    roots.push((-b - sqrtDisc) / (2 * a));
+    roots.push((-b + sqrtDisc) / (2 * a));
+  }
+
+  const validPoints = [];
+  for (const t of roots) {
+    const point = {
+      x: p1.x + t * d.x,
+      y: p1.y + t * d.y,
+    };
+
+    if (!isPointOnFiniteLineSegment(point, lineSegment, EPSILON)) {
+      continue;
+    }
+
+    const angle = Math.atan2(point.y - center.y, point.x - center.x);
+    if (
+      !isAngleOnArcSweep(
+        angle,
+        arcSegment.arc.startAngle,
+        arcSegment.arc.endAngle,
+        arcSegment.arc.sweepFlag,
+        EPSILON
+      )
+    ) {
+      continue;
+    }
+
+    validPoints.push(point);
+  }
+
+  if (validPoints.length === 0) {
+    return null;
+  }
+
+  const reference = referencePoint || arcSegment.end;
+  let best = validPoints[0];
+  let bestDistance = distance(best, reference);
+
+  for (let i = 1; i < validPoints.length; i++) {
+    const candidate = validPoints[i];
+    const candidateDistance = distance(candidate, reference);
+    if (candidateDistance < bestDistance) {
+      best = candidate;
+      bestDistance = candidateDistance;
+    }
+  }
+
+  return best;
+}
+
+function findJoinIntersection(current, next) {
+  if (!current || !next) {
+    return null;
+  }
+
+  if (current.type === "line" && next.type === "line") {
+    return lineLineIntersection(
+      current.end,
+      getTangent(current, "end"),
+      next.start,
+      getTangent(next, "start")
+    );
+  }
+
+  if (current.type === "arc" && next.type === "line") {
+    return findArcLineIntersection(current, next, current.end);
+  }
+
+  if (current.type === "line" && next.type === "arc") {
+    return findArcLineIntersection(next, current, current.end);
+  }
+
+  // Arc-arc not implemented yet
+  return null;
+}
+
+function distancePointToInfiniteLine(point, lineStart, lineEnd) {
+  const dir = {
+    x: lineEnd.x - lineStart.x,
+    y: lineEnd.y - lineStart.y,
+  };
+  const len = Math.hypot(dir.x, dir.y);
+  if (len <= EPSILON) {
+    return null;
+  }
+
+  const rel = {
+    x: point.x - lineStart.x,
+    y: point.y - lineStart.y,
+  };
+
+  return Math.abs(cross(dir, rel)) / len;
+}
+
+/**
+ * For non-diverging sharp arc-line joins where geometric intersection is absent,
+ * collapse arc join endpoint to nearest arc endpoint and preserve line direction
+ * by projecting the far endpoint onto the line through joinPoint.
+ *
+ * @param {Object} current - Current offset segment (mutable)
+ * @param {Object} next - Next offset segment (mutable)
+ * @param {number} epsilon - Tolerance for degeneration checks
+ * @returns {boolean} True when collapse was applied and arc is degenerated
+ */
+function tryCollapseArcLineJoin(current, next, epsilon = EPSILON) {
+  const isArcLine = current?.type === "arc" && next?.type === "line";
+  const isLineArc = current?.type === "line" && next?.type === "arc";
+  if (!isArcLine && !isLineArc) {
+    return false;
+  }
+
+  const arcSeg = isArcLine ? current : next;
+  const lineSeg = isArcLine ? next : current;
+
+  const distToStart = distancePointToInfiniteLine(
+    arcSeg.start,
+    lineSeg.start,
+    lineSeg.end
+  );
+  const distToEnd = distancePointToInfiniteLine(
+    arcSeg.end,
+    lineSeg.start,
+    lineSeg.end
+  );
+
+  if (distToStart == null || distToEnd == null) {
+    return false;
+  }
+
+  const collapseToArcStart = distToStart <= distToEnd;
+
+  // Only collapse when nearest endpoint is the non-join-side endpoint.
+  // Otherwise this is a no-op and should continue with regular fallback chain.
+  if ((isArcLine && !collapseToArcStart) || (isLineArc && collapseToArcStart)) {
+    return false;
+  }
+
+  const joinPoint = collapseToArcStart
+    ? clonePoint(arcSeg.start)
+    : clonePoint(arcSeg.end);
+
+  // Collapse arc from join-side endpoint to chosen endpoint
+  if (isArcLine) {
+    arcSeg.end = clonePoint(joinPoint);
+    if (arcSeg.arc) {
+      arcSeg.arc.endAngle = arcSeg.arc.startAngle;
+    }
+  } else {
+    arcSeg.start = clonePoint(joinPoint);
+    if (arcSeg.arc) {
+      arcSeg.arc.startAngle = arcSeg.arc.endAngle;
+    }
+  }
+
+  // Preserve line direction by projecting far endpoint onto line through joinPoint
+  if (isArcLine) {
+    // arc->line: set line.start = joinPoint, project line.end along original direction
+    const dir = {
+      x: lineSeg.end.x - lineSeg.start.x,
+      y: lineSeg.end.y - lineSeg.start.y,
+    };
+    const dirLen = Math.hypot(dir.x, dir.y);
+    
+    if (dirLen > epsilon) {
+      const u = { x: dir.x / dirLen, y: dir.y / dirLen };
+      const farEnd = lineSeg.end;
+      const t = (farEnd.x - joinPoint.x) * u.x + (farEnd.y - joinPoint.y) * u.y;
+      lineSeg.start = clonePoint(joinPoint);
+      lineSeg.end = {
+        x: joinPoint.x + u.x * t,
+        y: joinPoint.y + u.y * t,
+      };
+    } else {
+      lineSeg.start = clonePoint(joinPoint);
+    }
+  } else {
+    // line->arc: set line.end = joinPoint, project line.start along original direction
+    const dir = {
+      x: lineSeg.end.x - lineSeg.start.x,
+      y: lineSeg.end.y - lineSeg.start.y,
+    };
+    const dirLen = Math.hypot(dir.x, dir.y);
+    
+    if (dirLen > epsilon) {
+      const u = { x: dir.x / dirLen, y: dir.y / dirLen };
+      const farEnd = lineSeg.start;
+      const t = (farEnd.x - joinPoint.x) * u.x + (farEnd.y - joinPoint.y) * u.y;
+      lineSeg.end = clonePoint(joinPoint);
+      lineSeg.start = {
+        x: joinPoint.x + u.x * t,
+        y: joinPoint.y + u.y * t,
+      };
+    } else {
+      lineSeg.end = clonePoint(joinPoint);
+    }
+  }
+
+  return pointsEqual(arcSeg.start, arcSeg.end, epsilon);
+}
+
+function collapseArcLineAtNearEndpoint(current, next, joinPoint, epsilon = EPSILON) {
+  const isArcLine = current?.type === "arc" && next?.type === "line";
+  const isLineArc = current?.type === "line" && next?.type === "arc";
+  if (!isArcLine && !isLineArc) {
+    return false;
+  }
+
+  const arcSeg = isArcLine ? current : next;
+  const lineSeg = isArcLine ? next : current;
+  const oppositeArcEndpoint = isArcLine ? arcSeg.start : arcSeg.end;
+  const tol = Math.max(epsilon * 10, 1e-9);
+
+  if (!pointsEqual(joinPoint, oppositeArcEndpoint, tol)) {
+    return false;
+  }
+
+  if (isArcLine) {
+    arcSeg.end = clonePoint(oppositeArcEndpoint);
+    if (arcSeg.arc) {
+      arcSeg.arc.endAngle = arcSeg.arc.startAngle;
+    }
+  } else {
+    arcSeg.start = clonePoint(oppositeArcEndpoint);
+    if (arcSeg.arc) {
+      arcSeg.arc.startAngle = arcSeg.arc.endAngle;
+    }
+  }
+
+  // Preserve line direction by projecting far endpoint onto line through oppositeArcEndpoint
+  if (isArcLine) {
+    // arc->line: set line.start = oppositeArcEndpoint, project line.end along original direction
+    const dir = {
+      x: lineSeg.end.x - lineSeg.start.x,
+      y: lineSeg.end.y - lineSeg.start.y,
+    };
+    const dirLen = Math.hypot(dir.x, dir.y);
+    
+    if (dirLen > epsilon) {
+      const u = { x: dir.x / dirLen, y: dir.y / dirLen };
+      const farEnd = lineSeg.end;
+      const t = (farEnd.x - oppositeArcEndpoint.x) * u.x + (farEnd.y - oppositeArcEndpoint.y) * u.y;
+      lineSeg.start = clonePoint(oppositeArcEndpoint);
+      lineSeg.end = {
+        x: oppositeArcEndpoint.x + u.x * t,
+        y: oppositeArcEndpoint.y + u.y * t,
+      };
+    } else {
+      lineSeg.start = clonePoint(oppositeArcEndpoint);
+    }
+  } else {
+    // line->arc: set line.end = oppositeArcEndpoint, project line.start along original direction
+    const dir = {
+      x: lineSeg.end.x - lineSeg.start.x,
+      y: lineSeg.end.y - lineSeg.start.y,
+    };
+    const dirLen = Math.hypot(dir.x, dir.y);
+    
+    if (dirLen > epsilon) {
+      const u = { x: dir.x / dirLen, y: dir.y / dirLen };
+      const farEnd = lineSeg.start;
+      const t = (farEnd.x - oppositeArcEndpoint.x) * u.x + (farEnd.y - oppositeArcEndpoint.y) * u.y;
+      lineSeg.end = clonePoint(oppositeArcEndpoint);
+      lineSeg.start = {
+        x: oppositeArcEndpoint.x + u.x * t,
+        y: oppositeArcEndpoint.y + u.y * t,
+      };
+    } else {
+      lineSeg.end = clonePoint(oppositeArcEndpoint);
+    }
+  }
+
+  return true;
 }
 
 function computeSharpJoin(p1, d1, p2, d2, offsetDistance) {
@@ -604,54 +1046,56 @@ export function buildOffsetContour(segments, distance, options = {}) {
               result[0].start = clonePoint(sharpJoin.intersection);
             }
           } else {
-            // Miter limit exceeded: check if segments are converging
-            const converging = isConvergingJoin(
+            // Miter limit exceeded: use diverging-only fallback with strict priority for non-diverging
+            const diverging = isDivergingJoin(
               current.end,
               next.start,
               inTangent,
               outTangent
             );
 
-            if (converging) {
-              // Segments are converging - avoid U-bridge and prefer direct/tangential connection
-              // Order: tangent bridge -> direct intersection -> arc fallback
-              const tangent = buildTangentBridge(current, next);
-              if (tangent) {
-                result.push(tangent);
+            if (!diverging) {
+              // Non-diverging (converging or tangent-facing):
+              // Order: direct intersection -> tangent bridge -> arc fallback
+              const directIntersection = findJoinIntersection(current, next);
+
+              if (
+                directIntersection &&
+                Number.isFinite(directIntersection.x) &&
+                Number.isFinite(directIntersection.y)
+              ) {
+                // Stitch both segments to intersection point
+                current.end = clonePoint(directIntersection);
+                next.start = clonePoint(directIntersection);
+                collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
+
+                // Update result[0].start for closed contours
+                if (closed && nextIdx === 0 && result.length > 0) {
+                  result[0].start = clonePoint(directIntersection);
+                }
               } else {
-                // Tangent bridge failed, try direct intersection with tangents
-                const directIntersection = lineLineIntersection(
-                  current.end,
-                  inTangent,
-                  next.start,
-                  outTangent
-                );
-                
-                if (
-                  directIntersection &&
-                  Number.isFinite(directIntersection.x) &&
-                  Number.isFinite(directIntersection.y)
-                ) {
-                  // Stitch both segments to intersection point
-                  current.end = clonePoint(directIntersection);
-                  next.start = clonePoint(directIntersection);
-                  
-                  // Update result[0].start for closed contours
+                const collapsedArcLine = tryCollapseArcLineJoin(current, next, EPSILON);
+                if (collapsedArcLine) {
                   if (closed && nextIdx === 0 && result.length > 0) {
-                    result[0].start = clonePoint(directIntersection);
+                    result[0].start = clonePoint(next.start);
                   }
                 } else {
-                  // Last resort for converging: arc join
-                  log.warn(
-                    "Converging segments: tangent bridge and direct intersection failed, using arc join"
-                  );
-                  const arcJoin = createArcJoin(
-                    current.end,
-                    next.start,
-                    originalVertex,
-                    distance
-                  );
-                  result.push(arcJoin);
+                  const tangent = buildTangentBridge(current, next);
+                  if (tangent) {
+                    result.push(tangent);
+                  } else {
+                    // Last resort for non-diverging: arc join
+                    log.warn(
+                      "Non-diverging segments: direct intersection and tangent bridge failed, using arc join"
+                    );
+                    const arcJoin = createArcJoin(
+                      current.end,
+                      next.start,
+                      originalVertex,
+                      distance
+                    );
+                    result.push(arcJoin);
+                  }
                 }
               }
             } else {
@@ -719,42 +1163,45 @@ export function buildOffsetContour(segments, distance, options = {}) {
         if (gapDist < EPSILON) {
           // Already connected, no bridge needed
         } else if (joinType === "sharp") {
-          const converging = isConvergingJoin(
+          const diverging = isDivergingJoin(
             current.end,
             next.start,
             inTangent,
             outTangent
           );
 
-          if (converging) {
-            // Converging tangent gap: avoid forced U-shape bridge.
-            const tangent = buildTangentBridge(current, next);
-            if (tangent) {
-              result.push(tangent);
+          if (!diverging) {
+            // Non-diverging tangent gap: prioritize geometric trim before bridges.
+            const directIntersection = findJoinIntersection(current, next);
+
+            if (
+              directIntersection &&
+              Number.isFinite(directIntersection.x) &&
+              Number.isFinite(directIntersection.y)
+            ) {
+              current.end = clonePoint(directIntersection);
+              next.start = clonePoint(directIntersection);
+              collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
+
+              if (closed && nextIdx === 0 && result.length > 0) {
+                result[0].start = clonePoint(directIntersection);
+              }
             } else {
-              const directIntersection = lineLineIntersection(
-                current.end,
-                inTangent,
-                next.start,
-                outTangent
-              );
-
-              if (
-                directIntersection &&
-                Number.isFinite(directIntersection.x) &&
-                Number.isFinite(directIntersection.y)
-              ) {
-                current.end = clonePoint(directIntersection);
-                next.start = clonePoint(directIntersection);
-
+              const collapsedArcLine = tryCollapseArcLineJoin(current, next, EPSILON);
+              if (collapsedArcLine) {
                 if (closed && nextIdx === 0 && result.length > 0) {
-                  result[0].start = clonePoint(directIntersection);
+                  result[0].start = clonePoint(next.start);
                 }
               } else {
-                const originalVertex = original.end;
-                result.push(
-                  createArcJoin(current.end, next.start, originalVertex, distance)
-                );
+                const tangent = buildTangentBridge(current, next);
+                if (tangent) {
+                  result.push(tangent);
+                } else {
+                  const originalVertex = original.end;
+                  result.push(
+                    createArcJoin(current.end, next.start, originalVertex, distance)
+                  );
+                }
               }
             }
           } else {
@@ -819,4 +1266,4 @@ export function buildOffsetContour(segments, distance, options = {}) {
   return finalSegments;
 }
 
-export { getTangent, computeJoinType, lineLineIntersection };
+export { getTangent, computeJoinType, lineLineIntersection, isAngleOnArcSweep, findJoinIntersection };
