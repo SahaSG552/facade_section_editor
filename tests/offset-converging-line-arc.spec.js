@@ -181,15 +181,76 @@ describe("OffsetContourBuilder converging sharp fallback", () => {
       expect(hasForbiddenHorizontalBridge).toBe(false);
       expect(result.every((s) => s.type === "line")).toBe(true);
 
-      // For d=-3, verify second segment is collinear (vertical, not diagonal)
-      // by checking that dx is near-zero while dy is non-zero
+      // For d=-3, verify vertical line continues parallel inward progression (x=3)
       if (d === -3 && result.length >= 2) {
+        const firstSeg = result[0];
         const secondSeg = result[1];
-        const dx = Math.abs(secondSeg.end.x - secondSeg.start.x);
-        const dy = Math.abs(secondSeg.end.y - secondSeg.start.y);
-        expect(dx).toBeLessThan(1e-6);
-        expect(dy).toBeGreaterThan(EPSILON);
+
+        expect(firstSeg.end.x).toBeCloseTo(3, 6);
+        expect(secondSeg.start.x).toBeCloseTo(3, 6);
+        expect(secondSeg.end.x).toBeCloseTo(3, 6);
       }
     }
+  });
+
+  it("enforces strict non-resurrection for degenerated line at |d|=6/7 inward", () => {
+    // User repro contour:
+    // M10 10 L2 10 A2 2 0 0 1 0 8 L0 16
+    const segments = [
+      {
+        type: "line",
+        start: { x: 10, y: 10 },
+        end: { x: 2, y: 10 },
+      },
+      {
+        type: "arc",
+        start: { x: 2, y: 10 },
+        end: { x: 0, y: 8 },
+        arc: {
+          center: { x: 2, y: 8 },
+          centerX: 2,
+          centerY: 8,
+          radius: 2,
+          startAngle: Math.PI / 2,
+          endAngle: Math.PI,
+          sweepFlag: 1,
+        },
+      },
+      {
+        type: "line",
+        start: { x: 0, y: 8 },
+        end: { x: 0, y: 16 },
+      },
+    ];
+
+    const resultD6 = buildOffsetContour(segments, -6, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+    const linesD6 = resultD6.filter((s) => s.type === "line");
+    expect(linesD6).toHaveLength(1);
+    expect(resultD6).toHaveLength(1);
+
+    const resultD7 = buildOffsetContour(segments, -7, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    // No reversed vertical resurrection (downward tiny tail) is allowed.
+    const hasReversedVertical = resultD7.some((seg) => {
+      if (seg.type !== "line") return false;
+      const dx = Math.abs(seg.end.x - seg.start.x);
+      const dy = seg.end.y - seg.start.y;
+      const isVertical = dx < 1e-6;
+      const isDownward = dy < -1e-6;
+      return isVertical && isDownward;
+    });
+    expect(hasReversedVertical).toBe(false);
+
+    // Expected stable topology: single line, no flipped tiny tail.
+    expect(resultD7.every((s) => s.type === "line")).toBe(true);
+    expect(resultD7).toHaveLength(1);
   });
 });

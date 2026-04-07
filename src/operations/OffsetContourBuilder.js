@@ -836,6 +836,62 @@ function collapseArcLineAtNearEndpoint(current, next, joinPoint, epsilon = EPSIL
   return true;
 }
 
+function stitchCollapsedArcThroughNeighborLineSupport(
+  result,
+  current,
+  next,
+  closed,
+  nextIdx
+) {
+  if (!Array.isArray(result) || result.length < 2) {
+    return false;
+  }
+
+  if (current?.type !== "arc" || next?.type !== "line") {
+    return false;
+  }
+
+  const prev = result[result.length - 2];
+  if (!prev || prev.type !== "line") {
+    return false;
+  }
+
+  const prevNextIntersection = lineLineIntersection(
+    prev.end,
+    getTangent(prev, "end"),
+    next.start,
+    getTangent(next, "start")
+  );
+
+  if (
+    !prevNextIntersection ||
+    !Number.isFinite(prevNextIntersection.x) ||
+    !Number.isFinite(prevNextIntersection.y)
+  ) {
+    return false;
+  }
+
+  prev.end = clonePoint(prevNextIntersection);
+  current.start = clonePoint(prevNextIntersection);
+  current.end = clonePoint(prevNextIntersection);
+  if (current.arc) {
+    current.arc.endAngle = current.arc.startAngle;
+  }
+  next.start = clonePoint(prevNextIntersection);
+
+  if (closed && nextIdx === 0 && result.length > 0) {
+    result[0].start = clonePoint(prevNextIntersection);
+  }
+
+  return true;
+}
+
+function shouldCollapseArcLineJoin(current, next, epsilon = EPSILON) {
+  const currentProbe = cloneSegment(current);
+  const nextProbe = cloneSegment(next);
+  return tryCollapseArcLineJoin(currentProbe, nextProbe, epsilon);
+}
+
 function computeSharpJoin(p1, d1, p2, d2, offsetDistance) {
   const intersection = lineLineIntersection(p1, d1, p2, d2);
 
@@ -962,7 +1018,8 @@ export function buildOffsetContour(segments, distance, options = {}) {
     const current = cloneSegment(offsetSegments[i]);
     const nextIdx = closed ? (i + 1) % numSegs : i + 1;
     const currentSourceIndex = sourceIndices[i];
-    
+    current.__sourceIndex = currentSourceIndex;
+
     result.push(current);
 
     // Only process joins for closed contours or between consecutive segments
@@ -1074,6 +1131,20 @@ export function buildOffsetContour(segments, distance, options = {}) {
                   result[0].start = clonePoint(directIntersection);
                 }
               } else {
+                const stitchedCollapsedArc =
+                  shouldCollapseArcLineJoin(current, next, EPSILON) &&
+                  stitchCollapsedArcThroughNeighborLineSupport(
+                    result,
+                    current,
+                    next,
+                    closed,
+                    nextIdx
+                  );
+
+                if (stitchedCollapsedArc) {
+                  continue;
+                }
+
                 const collapsedArcLine = tryCollapseArcLineJoin(current, next, EPSILON);
                 if (collapsedArcLine) {
                   if (closed && nextIdx === 0 && result.length > 0) {
@@ -1187,6 +1258,20 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 result[0].start = clonePoint(directIntersection);
               }
             } else {
+              const stitchedCollapsedArc =
+                shouldCollapseArcLineJoin(current, next, EPSILON) &&
+                stitchCollapsedArcThroughNeighborLineSupport(
+                  result,
+                  current,
+                  next,
+                  closed,
+                  nextIdx
+                );
+
+              if (stitchedCollapsedArc) {
+                continue;
+              }
+
               const collapsedArcLine = tryCollapseArcLineJoin(current, next, EPSILON);
               if (collapsedArcLine) {
                 if (closed && nextIdx === 0 && result.length > 0) {
@@ -1257,8 +1342,54 @@ export function buildOffsetContour(segments, distance, options = {}) {
         `buildOffsetContour: filtering degenerate segment: ${seg.type}`
       );
     }
-    return !isDegenerate;
+    if (isDegenerate) {
+      return false;
+    }
+
+    // Strict non-resurrection rule:
+    // if a line segment trimmed from a source line degenerates, it must not
+    // reappear as a flipped tiny segment (opposite direction).
+    if (
+      seg.type === "line" &&
+      typeof seg.__sourceIndex === "number" &&
+      Number.isInteger(seg.__sourceIndex) &&
+      seg.__sourceIndex >= 0 &&
+      seg.__sourceIndex < segments.length
+    ) {
+      const source = segments[seg.__sourceIndex];
+      if (source?.type === "line") {
+        const sourceDx = source.end.x - source.start.x;
+        const sourceDy = source.end.y - source.start.y;
+        const sourceLen = Math.hypot(sourceDx, sourceDy);
+
+        const segDx = seg.end.x - seg.start.x;
+        const segDy = seg.end.y - seg.start.y;
+        const segLen = Math.hypot(segDx, segDy);
+
+        if (segLen <= EPSILON || sourceLen <= EPSILON) {
+          return false;
+        }
+
+        const sourceDir = { x: sourceDx / sourceLen, y: sourceDy / sourceLen };
+        const segDir = { x: segDx / segLen, y: segDy / segLen };
+        if (dot(sourceDir, segDir) <= 0) {
+          log.debug(
+            `buildOffsetContour: filtering reversed resurrected line from source ${seg.__sourceIndex}`
+          );
+          return false;
+        }
+      }
+    }
+
+    return true;
   });
+
+  // Strip internal metadata before returning public segments
+  for (const seg of finalSegments) {
+    if (Object.prototype.hasOwnProperty.call(seg, "__sourceIndex")) {
+      delete seg.__sourceIndex;
+    }
+  }
 
   log.debug(
     `buildOffsetContour: returning ${finalSegments.length} segments`
