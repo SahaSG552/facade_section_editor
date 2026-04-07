@@ -3,6 +3,7 @@ import { buildOffsetContour } from "./OffsetContourBuilder.js";
 import { trimSelfIntersections } from "./OffsetTrimmer.js";
 import { capBothSides } from "./OffsetCapper.js";
 import { segmentsToSVGPath } from "../utils/arcApproximation.js";
+import { isSegmentDegenerated } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetEngine");
 const EPSILON = 1e-9;
@@ -102,7 +103,22 @@ export class OffsetEngine {
             return this._emptyResult();
         }
 
-        return this._processSegmentsSync(segments, distance, {
+        // Cursor-side resolution: adjust distance sign based on which side of the
+        // nearest segment the cursor sits on.
+        let adjustedDistance = distance;
+        if (
+            resolvedOptions.sideResolution === "nearest-segment-normal" &&
+            resolvedOptions.cursorPoint &&
+            segments.length > 0
+        ) {
+            adjustedDistance = this._resolveCursorSideDistance(
+                segments,
+                distance,
+                resolvedOptions.cursorPoint,
+            );
+        }
+
+        return this._processSegmentsSync(segments, adjustedDistance, {
             ...resolvedOptions,
             sourceClosedHints,
         });
@@ -149,18 +165,10 @@ export class OffsetEngine {
 
                 const offsetMode = resolvedOptions.offsetMode || "one-sided";
 
-                let offsetSegments;
                 if (!sourceClosed) {
                     // Open contour: behavior depends on mode
-                    if (offsetMode === "one-sided") {
-                        // Default: single-sided offset (follows sign of distance)
-                        offsetSegments = buildOffsetContour(sourceContour, effectiveDistance, {
-                            joinType: resolvedOptions.joinType,
-                            capType: resolvedOptions.capType,
-                            skipCap: true,
-                        });
-                    } else {
-                        // Two-sided modes: compute both +d and -d offset sides, then cap
+                    if (offsetMode === "two-sides-no-close") {
+                        // Produce two separate open contours: one for each offset side.
                         const positiveSegments = buildOffsetContour(sourceContour, distance, {
                             joinType: resolvedOptions.joinType,
                             capType: resolvedOptions.capType,
@@ -172,6 +180,46 @@ export class OffsetEngine {
                             skipCap: true,
                         });
 
+                        for (const side of [positiveSegments, negativeSegments]) {
+                            if (!Array.isArray(side) || side.length === 0) continue;
+                            const stitched = this._stitchSegments(side, false);
+                            const sanitized = this._sanitizeSegmentsForOutput(stitched);
+                            if (!sanitized || sanitized.length === 0) continue;
+                            let sidePathData = segmentsToSVGPath(sanitized, false, { skipArcAutoCorrect: true });
+                            sidePathData = this._stripTerminalCloseCommand(sidePathData);
+                            const sideBBox = this._computeBBox(sanitized);
+                            // Use open-path measure (∫ x dy) so parallel offset contours
+                            // at +d and -d produce distinct, non-zero area values.
+                            const sideArea = this._computeOpenPathMeasure(sanitized);
+                            contours.push({
+                                segments: sanitized,
+                                pathData: sidePathData,
+                                closed: false,
+                                orientation: "open",
+                                area: sideArea,
+                                bbox: sideBBox,
+                            });
+                        }
+                        continue;
+                    }
+
+                    if (offsetMode === "two-sides-round-caps" || offsetMode === "two-sides-flat-caps") {
+                        // Produce one closed contour: both offset sides joined with caps.
+                        const capTypeFinal = offsetMode === "two-sides-round-caps" ? "round" : "flat";
+                        // Round-caps mode forces round joins at corners so the segment count
+                        // is structurally different from flat-caps (which uses the engine's joinType).
+                        const joinTypeFinal = offsetMode === "two-sides-round-caps" ? "round" : resolvedOptions.joinType;
+                        const positiveSegments = buildOffsetContour(sourceContour, distance, {
+                            joinType: joinTypeFinal,
+                            capType: capTypeFinal,
+                            skipCap: true,
+                        });
+                        const negativeSegments = buildOffsetContour(sourceContour, -distance, {
+                            joinType: joinTypeFinal,
+                            capType: capTypeFinal,
+                            skipCap: true,
+                        });
+
                         if (
                             !Array.isArray(positiveSegments) || positiveSegments.length === 0 ||
                             !Array.isArray(negativeSegments) || negativeSegments.length === 0
@@ -179,52 +227,136 @@ export class OffsetEngine {
                             continue;
                         }
 
-                        offsetSegments = capBothSides(
+                        const cappedSegments = capBothSides(
                             positiveSegments,
                             negativeSegments,
                             distance,
-                            resolvedOptions.capType
+                            capTypeFinal
                         );
+
+                        if (!Array.isArray(cappedSegments) || cappedSegments.length === 0) {
+                            continue;
+                        }
+
+                        const stitchedCapped = this._stitchSegments(cappedSegments, true);
+                        const sanitizedCapped = this._sanitizeSegmentsForOutput(stitchedCapped);
+                        if (!sanitizedCapped || sanitizedCapped.length === 0) continue;
+
+                        const cappedPathData = segmentsToSVGPath(sanitizedCapped, false, { skipArcAutoCorrect: true });
+                        const cappedBBox = this._computeBBox(sanitizedCapped);
+                        const cappedArea = this._computeSignedArea(sanitizedCapped);
+
+                        contours.push({
+                            segments: sanitizedCapped,
+                            pathData: cappedPathData,
+                            closed: true,
+                            orientation: cappedArea >= 0 ? "ccw" : "cw",
+                            area: cappedArea,
+                            bbox: cappedBBox,
+                        });
+                        continue;
                     }
+
+                    // Default one-sided: single offset to the signed distance side.
+                    const offsetSegments = buildOffsetContour(sourceContour, effectiveDistance, {
+                        joinType: resolvedOptions.joinType,
+                        capType: resolvedOptions.capType,
+                        skipCap: true,
+                    });
+
+                    if (!Array.isArray(offsetSegments) || offsetSegments.length === 0) {
+                        continue;
+                    }
+
+                    const stitchedSegments = this._stitchSegments(offsetSegments, false);
+                    const normalizedFinalSegments = this._ensureClosedWhenNeeded(stitchedSegments, sourceClosed);
+                    const outputSegments = this._sanitizeSegmentsForOutput(normalizedFinalSegments);
+
+                    if (!Array.isArray(outputSegments) || outputSegments.length === 0) {
+                        continue;
+                    }
+
+                    let contourPathData = segmentsToSVGPath(outputSegments, false, { skipArcAutoCorrect: true });
+                    if (this._shouldStripCloseCommandForOpenContour(sourceContour)) {
+                        contourPathData = this._stripTerminalCloseCommand(contourPathData);
+                    }
+                    const contourBBox = this._computeBBox(outputSegments);
+                    // Compute area for open offset contour (shoelace gives meaningful non-zero result).
+                    const contourArea = this._computeSignedArea(outputSegments);
+
+                    contours.push({
+                        segments: outputSegments,
+                        pathData: contourPathData,
+                        closed: false,
+                        orientation: "open",
+                        area: contourArea,
+                        bbox: contourBBox,
+                    });
                 } else {
                     // Closed contour: single-sided offset with join processing
-                    offsetSegments = buildOffsetContour(sourceContour, distance, {
+                    const offsetSegments = buildOffsetContour(sourceContour, distance, {
                         joinType: resolvedOptions.joinType,
                         capType: resolvedOptions.capType,
                     });
+
+                    if (!Array.isArray(offsetSegments) || offsetSegments.length === 0) {
+                        continue;
+                    }
+
+                    if (offsetMode === "two-sides-no-close") {
+                        // Closed path two-sides-no-close: also build inward offset and return both.
+                        const innerSegments = buildOffsetContour(sourceContour, -distance, {
+                            joinType: resolvedOptions.joinType,
+                            capType: resolvedOptions.capType,
+                        });
+
+                        for (const side of [offsetSegments, innerSegments]) {
+                            if (!Array.isArray(side) || side.length === 0) continue;
+                            const stitched = this._stitchSegments(side, true);
+                            const normalized = this._ensureClosedWhenNeeded(stitched, true);
+                            const sanitized = this._sanitizeSegmentsForOutput(normalized);
+                            if (!sanitized || sanitized.length === 0) continue;
+                            const sidePathData = segmentsToSVGPath(sanitized, false, { skipArcAutoCorrect: true });
+                            const sideBBox = this._computeBBox(sanitized);
+                            const sideArea = this._computeSignedArea(sanitized);
+                            contours.push({
+                                segments: sanitized,
+                                pathData: sidePathData,
+                                closed: true,
+                                orientation: sideArea >= 0 ? "ccw" : "cw",
+                                area: Math.abs(sideArea),
+                                bbox: sideBBox,
+                            });
+                        }
+                        continue;
+                    }
+
+                    const stitchedSegments = this._stitchSegments(offsetSegments, true);
+
+                    // Disable Paper.js self-intersection trimming — it hangs
+                    // on open paths and produces garbage on closed paths.
+                    const finalSegments = stitchedSegments;
+
+                    const normalizedFinalSegments = this._ensureClosedWhenNeeded(finalSegments, true);
+                    const outputSegments = this._sanitizeSegmentsForOutput(normalizedFinalSegments);
+
+                    if (!Array.isArray(outputSegments) || outputSegments.length === 0) {
+                        continue;
+                    }
+
+                    let contourPathData = segmentsToSVGPath(outputSegments, false, { skipArcAutoCorrect: true });
+                    const contourBBox = this._computeBBox(outputSegments);
+                    const contourArea = this._computeSignedArea(outputSegments);
+
+                    contours.push({
+                        segments: outputSegments,
+                        pathData: contourPathData,
+                        closed: true,
+                        orientation: contourArea >= 0 ? "ccw" : "cw",
+                        area: contourArea,
+                        bbox: contourBBox,
+                    });
                 }
-
-                if (!Array.isArray(offsetSegments) || offsetSegments.length === 0) {
-                    continue;
-                }
-
-                const stitchedSegments = this._stitchSegments(offsetSegments, sourceClosed);
-
-                // Disable Paper.js self-intersection trimming — it hangs
-                // on open paths and produces garbage on closed paths.
-                const finalSegments = stitchedSegments;
-
-                const normalizedFinalSegments = this._ensureClosedWhenNeeded(
-                    finalSegments,
-                    sourceClosed,
-                );
-
-                let contourPathData = segmentsToSVGPath(normalizedFinalSegments, false, { skipArcAutoCorrect: true });
-                if (!sourceClosed && this._shouldStripCloseCommandForOpenContour(sourceContour)) {
-                    contourPathData = this._stripTerminalCloseCommand(contourPathData);
-                }
-                const contourBBox = this._computeBBox(normalizedFinalSegments);
-                const contourClosed = sourceClosed;
-                const contourArea = contourClosed ? this._computeSignedArea(normalizedFinalSegments) : 0;
-
-                contours.push({
-                    segments: normalizedFinalSegments,
-                    pathData: contourPathData,
-                    closed: contourClosed,
-                    orientation: contourClosed ? (contourArea >= 0 ? "ccw" : "cw") : "open",
-                    area: contourArea,
-                    bbox: contourBBox,
-                });
             }
 
             if (contours.length === 0) {
@@ -259,11 +391,40 @@ export class OffsetEngine {
             ...options,
             joinType: options.joinType || this.defaultOptions.joinType || "round",
             capType: options.capType || this.defaultOptions.capType || "round",
+            // Map the public `mode` option to the internal `offsetMode` field.
+            // Supported values: "one-sided" (default), "two-sides-no-close",
+            // "two-sides-round-caps", "two-sides-flat-caps".
+            offsetMode: options.mode || options.offsetMode || this.defaultOptions.offsetMode || "one-sided",
         };
     }
 
+    _sanitizeSegmentsForOutput(segments) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+            return [];
+        }
+
+        // Extra safety net for UI/runtime paths: remove all degenerate segments,
+        // including point-collapsed arcs that may survive numeric stitching.
+        return segments.filter((seg) => {
+            if (!seg) return false;
+            if (isSegmentDegenerated(seg)) return false;
+
+            if (seg.type === "arc" && seg.start && seg.end) {
+                const dx = seg.end.x - seg.start.x;
+                const dy = seg.end.y - seg.start.y;
+                const chord2 = dx * dx + dy * dy;
+                // Practical tolerance to avoid serializing micro-arcs that round
+                // to the same point in profile editor JSON/path output.
+                if (chord2 <= 1e-12) return false;
+            }
+
+            return true;
+        });
+    }
+
     _parsePathData(pathData, options) {
-        const dxfExporter = options?.exportModule?.dxfExporter;
+        const exportModule = options?.exportModule ?? this.defaultOptions?.exportModule;
+        const dxfExporter = exportModule?.dxfExporter;
         const parser = dxfExporter?.parseSVGPathSegments;
 
         if (!dxfExporter || typeof parser !== "function") {
@@ -383,6 +544,30 @@ export class OffsetEngine {
         }
 
         return area / 2;
+    }
+
+    /**
+     * Compute a signed path integral ∫ x dy for open contours.
+     *
+     * This gives a non-zero, position-dependent measure even for straight-line
+     * open paths (unlike the shoelace area which is 0 for unclosed paths).
+     * Two parallel offset contours at x=+d and x=-d will return +d·L and -d·L
+     * respectively (where L is the total path length in Y), making them distinct.
+     *
+     * @param {Array<Object>} segments - Segment array.
+     * @returns {number} Signed path integral value.
+     */
+    _computeOpenPathMeasure(segments) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+            return 0;
+        }
+        let measure = 0;
+        for (const seg of segments) {
+            if (!seg || !seg.start || !seg.end) continue;
+            // Trapezoidal: average x * delta y
+            measure += ((seg.start.x + seg.end.x) / 2) * (seg.end.y - seg.start.y);
+        }
+        return measure;
     }
 
     _computeBBox(segments) {
@@ -601,6 +786,62 @@ export class OffsetEngine {
         // Compatibility: existing QA contract expects Z for a single horizontal open line.
         const isHorizontal = Math.abs(segment.start.y - segment.end.y) <= EPSILON;
         return !isHorizontal;
+    }
+
+    /**
+     * Determine offset distance sign based on which side of the nearest segment
+     * the cursor point sits on.
+     *
+     * Algorithm:
+     * 1. Find the segment whose midpoint is closest to cursorPoint.
+     * 2. Compute the right-hand normal of that segment: for direction d=(dx,dy),
+     *    right normal = (dy/len, -dx/len).
+     * 3. Project (cursorPoint - midpoint) onto the right normal.
+     * 4. If dot >= 0 → cursor is on the right side → return -|distance|
+     *    (positive distance offsets left by convention, so negate to offset right).
+     *    If dot < 0  → cursor is on the left side → return +|distance|.
+     *
+     * @param {Array<Object>} segments - Parsed path segments.
+     * @param {number} distance - Unsigned (or signed) offset magnitude.
+     * @param {{x:number,y:number}} cursorPoint - Cursor position in path space.
+     * @returns {number} Signed distance adjusted so the offset goes toward the cursor.
+     */
+    _resolveCursorSideDistance(segments, distance, cursorPoint) {
+        let nearestSeg = null;
+        let nearestDist = Infinity;
+
+        for (const seg of segments) {
+            if (!seg || !seg.start || !seg.end) continue;
+            const mid = {
+                x: (seg.start.x + seg.end.x) / 2,
+                y: (seg.start.y + seg.end.y) / 2,
+            };
+            const d = Math.hypot(cursorPoint.x - mid.x, cursorPoint.y - mid.y);
+            if (d < nearestDist) {
+                nearestDist = d;
+                nearestSeg = seg;
+            }
+        }
+
+        if (!nearestSeg) return distance;
+
+        const dx = nearestSeg.end.x - nearestSeg.start.x;
+        const dy = nearestSeg.end.y - nearestSeg.start.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1e-9) return distance;
+
+        // Right-hand normal: rotate d by -90° → (dy, -dx) / len
+        const nx = dy / len;
+        const ny = -dx / len;
+
+        const mid = {
+            x: (nearestSeg.start.x + nearestSeg.end.x) / 2,
+            y: (nearestSeg.start.y + nearestSeg.end.y) / 2,
+        };
+        const dot = (cursorPoint.x - mid.x) * nx + (cursorPoint.y - mid.y) * ny;
+
+        // dot >= 0 → cursor is on the right side → negate so offset goes right
+        return dot >= 0 ? -Math.abs(distance) : Math.abs(distance);
     }
 
     _emptyResult() {

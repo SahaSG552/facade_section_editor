@@ -4,6 +4,7 @@ import { app } from "../../app/main.js";
 import { ARC_APPROX_TOLERANCE } from "../../config/constants.js";
 import { buildOffsetDistanceSeries } from "../../utils/offsetSeries.js";
 import { calculateOffsetFromPathData } from "../../operations/OffsetEngine.js";
+import { sanitizeParsedContourSegments } from "./shared/segmentSanitizer.js";
 import { arcCenterFromEndpoints, arcFlagsViaPoint } from "./ArcTool.js";
 import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
 import { getRectGeomLocal, getRectClampedRx } from "../geometry/rectGeometry.js";
@@ -372,10 +373,10 @@ function buildOffsetCandidate(entry, offsetDist, exportModule, vars = {}, offset
     if (!path || !String(path).trim()) return null;
 
     const previewState = { _nextContourId: 1, _nextSegmentId: 1 };
-    const parsedSegments = normalizeOpenContours(
+    const parsedSegments = sanitizeParsedContourSegments(normalizeOpenContours(
         parsePathToSegments(path, previewState, { allowClose }),
         allowClose,
-    );
+    ));
     if (parsedSegments.length === 0) return null;
 
     const centerLocal = segmentsCenter(parsedSegments);
@@ -551,6 +552,14 @@ function parsePathToSegments(pathStr, state, { allowClose = true } = {}) {
                 const r = (rx + ry) / 2;
                 const startBit = { x: cx, y: -cy };
                 const endBit = { x: ex, y: -ey };
+                // Skip point-collapsed arcs at parse time (start≈end).
+                const chordDx = ex - cx;
+                const chordDy = ey - cy;
+                if (chordDx * chordDx + chordDy * chordDy <= 1e-8) {
+                    cx = ex;
+                    cy = ey;
+                    continue;
+                }
                 const sweepBit = 1 - sweepSvg;
                 const centerBit = arcCenterFromEndpoints(startBit, endBit, r, largeArc, 1 - sweepBit);
                 if (centerBit) {
@@ -577,7 +586,7 @@ function parsePathToSegments(pathStr, state, { allowClose = true } = {}) {
         m = commandRe.exec(String(pathStr));
     }
 
-    return out;
+    return sanitizeParsedContourSegments(out);
 }
 
 /**
@@ -1119,13 +1128,6 @@ export default class OffsetTool extends BaseTool {
         this._input.value = r4(this._signedDistance);
     }
 
-    _refreshPreview() {
-        // Minimal preview: just render ghost with distance line, no offset computation
-        // Full offset preview is too heavy and causes hangs
-        this._previewPaths = [];
-        this._renderGhost();
-    }
-
     _cancelManualInput() {
         this._manualValue = "";
         this._count = 1;
@@ -1665,7 +1667,7 @@ export default class OffsetTool extends BaseTool {
                 continue;
             }
             const sourceEntry = this._sourceEntries.find((e) => e.sourceId === preview.sourceId);
-            const commitSegments = preview.segments ?? [];
+            const commitSegments = sanitizeParsedContourSegments(preview.segments ?? []);
             const groups = splitByContour(commitSegments);
             for (const group of groups) {
                 if (group.length === 0) continue;

@@ -48,23 +48,29 @@ describe("buildOffsetContour - bridge topology across dropped arc", () => {
     },
   ];
 
-  it("preserves U/V-H-V bridge in sharp mode when intermediate arc degenerates at d=2", () => {
+  it("connects via direct intersection (not U-bridge) when intermediate arc degenerates at d=2 and segments converge", () => {
     const result = buildOffsetContour(segments, 2, {
       joinType: "sharp",
       capType: "flat",
       skipCap: true,
     });
 
+    // All segments should be lines (arc was dropped)
     expect(result.every((s) => s.type === "line")).toBe(true);
-    expect(result).toHaveLength(5);
+
+    // The two offset lines converge at (-2, 8) — a direct intersection exists,
+    // so the priority rule applies: intersection first, bridge only if diverging.
+    // Result should be 2 connected segments, NOT 5 bridge segments.
+    expect(result).toHaveLength(2);
 
     expect(toPathTuples(result)).toEqual([
-      ["line", 10, 8, 2, 8],
-      ["line", 2, 8, 2, 6],
-      ["line", 2, 6, -2, 6],
-      ["line", -2, 6, -2, 8],
+      ["line", 10, 8, -2, 8],
       ["line", -2, 8, -2, 16],
     ]);
+
+    // Connectivity check
+    expect(result[0].end.x).toBeCloseTo(result[1].start.x, 4);
+    expect(result[0].end.y).toBeCloseTo(result[1].start.y, 4);
   });
 
   it("shifts first dropped-gap bridge anchor for d=3 when arc radius is exceeded", () => {

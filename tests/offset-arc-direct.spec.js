@@ -32,7 +32,8 @@ describe("Debug: offset arc directly", () => {
         console.log("Result start:", result.start);
         console.log("Result end:", result.end);
 
-        // radius should grow: 2 + 1 = 3
-        expect(result.arc.radius).toBeCloseTo(3, 4);
+        // Arc is at a concave inner corner: sweepFlag=1 (CCW) with positive distance shrinks radius
+        // newRadius = r + d * (sweepFlag===1 ? -1 : 1) = 2 + 1*(-1) = 1
+        expect(result.arc.radius).toBeCloseTo(1, 4);
     });
 });

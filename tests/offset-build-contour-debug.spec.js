@@ -50,7 +50,9 @@ describe("Debug: buildOffsetContour with arc", () => {
         expect(arcSeg.type).toBe("arc");
         console.log("Arc radius from buildOffsetContour:", arcSeg.arc.radius);
 
-        // Radius should grow: 2 + 1 = 3
-        expect(arcSeg.arc.radius).toBeCloseTo(3, 4);
+        // Arc is at a concave inner corner: sweepFlag=1 (CCW) with positive distance shrinks radius.
+        // newRadius = r + d * (sweepFlag===1 ? -1 : 1) = 2 + 1*(-1) = 1
+        // This makes arc endpoints (2,9) and (1,8) align perfectly with offset lines.
+        expect(arcSeg.arc.radius).toBeCloseTo(1, 4);
     });
 });

@@ -50,13 +50,16 @@ export function isLineDegenerated(segment) {
     return true;
   }
 
-  const { start, end } = segment;
+  // Support both OffsetEngine format ({start, end})
+  // and Editor format ({data: {start, end}}).
+  const start = segment.start ?? segment.data?.start;
+  const end = segment.end ?? segment.data?.end;
   if (!start || !end) {
     return true;
   }
 
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
+  const dx = Number(end.x) - Number(start.x);
+  const dy = Number(end.y) - Number(start.y);
   const lengthSquared = dx * dx + dy * dy;
   const epsilonSquared = DEGENERATION_EPSILON * DEGENERATION_EPSILON;
 
@@ -69,6 +72,7 @@ export function isLineDegenerated(segment) {
  * An arc segment is degenerate when:
  * - No arc data present
  * - Radius ≤ DEGENERATION_EPSILON
+ * - Chord length (distance between start and end) ≤ DEGENERATION_EPSILON (point-collapsed arc)
  * - Sweep angle magnitude ≤ DEGENERATION_EPSILON (start angle ≈ end angle)
  * - Arc length (radius * |sweep|) ≤ DEGENERATION_EPSILON
  *
@@ -80,19 +84,61 @@ export function isArcDegenerated(segment) {
     return true;
   }
 
-  const { arc } = segment;
-  if (!arc) {
+  // Support both OffsetEngine format ({start, end, arc: {...}})
+  // and Editor format ({data: {start, end, radius, sweep, center}}).
+  const start = segment.start ?? segment.data?.start;
+  const end = segment.end ?? segment.data?.end;
+  const arcObj = segment.arc ?? null;
+  const dataObj = segment.data ?? null;
+
+  // Editor-format arc: check point-collapse first (most reliable indicator).
+  if (!arcObj && dataObj) {
+    if (start && end) {
+      const dx = Number(end.x) - Number(start.x);
+      const dy = Number(end.y) - Number(start.y);
+      const chordSquared = dx * dx + dy * dy;
+      const chordTol = 1e-6;
+      if (chordSquared <= chordTol * chordTol) {
+        return true;
+      }
+    }
+    const radius = Number(dataObj.radius ?? 0);
+    if (radius <= DEGENERATION_EPSILON) {
+      return true;
+    }
+    // Editor arcs without arcObj are considered valid if chord > 0 and radius > 0.
+    return false;
+  }
+
+  // OffsetEngine format: require arc object.
+  if (!arcObj) {
     return true;
   }
 
-  const radius = arc.radius || 0;
+  // Early check: if chord length (distance between start and end) is near-zero,
+  // the arc collapses to a point regardless of stored angle/radius values.
+  // This prevents serialized `A r r ... samePoint` artifacts from surviving.
+  if (start && end) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const chordSquared = dx * dx + dy * dy;
+    // Use a practical geometric tolerance here so arcs collapsed by numeric
+    // stitching (e.g. 2.0000004 -> 2.0000000) are still treated as degenerate.
+    const chordTol = Math.max(DEGENERATION_EPSILON, 1e-6);
+    const epsilonSquared = chordTol * chordTol;
+    if (chordSquared <= epsilonSquared) {
+      return true;
+    }
+  }
+
+  const radius = arcObj.radius || 0;
   if (radius <= DEGENERATION_EPSILON) {
     return true;
   }
 
-  const startAngle = arc.startAngle || 0;
-  const endAngle = arc.endAngle || 0;
-  const sweepFlag = arc.sweepFlag !== undefined ? arc.sweepFlag : 1;
+  const startAngle = arcObj.startAngle || 0;
+  const endAngle = arcObj.endAngle || 0;
+  const sweepFlag = arcObj.sweepFlag !== undefined ? arcObj.sweepFlag : 1;
 
   // Compute signed delta based on sweep direction
   let delta = endAngle - startAngle;

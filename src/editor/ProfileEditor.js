@@ -14,6 +14,7 @@ import CircleTool from "./tools/CircleTool.js";
 import RectTool from "./tools/RectTool.js";
 import EllipseTool from "./tools/EllipseTool.js";
 import OffsetTool from "./tools/OffsetTool.js";
+import { isSegmentDegenerated } from "../operations/OffsetRules.js";
 import { evaluateMathExpression } from "../utils/utils.js";
 import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
 import { isFormulaToken, evaluateTokenWithVars } from "../utils/formulaPolicy.js";
@@ -421,6 +422,28 @@ function _orderElementsLikePathEditor(elements, editorSnapshot) {
     }
 
     return normalized;
+}
+
+function _sanitizeEditorStateSegments(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return [];
+
+    return segments.filter((seg) => {
+        if (!seg) return false;
+        if (isSegmentDegenerated(seg)) return false;
+
+        if (seg.type === 'arc') {
+            const start = seg.data?.start ?? seg.start;
+            const end = seg.data?.end ?? seg.end;
+            if (start && end) {
+                const dx = Number(end.x) - Number(start.x);
+                const dy = Number(end.y) - Number(start.y);
+                const chord2 = dx * dx + dy * dy;
+                if (chord2 <= 1e-8) return false;
+            }
+        }
+
+        return true;
+    });
 }
 
 /**
@@ -2073,6 +2096,11 @@ export default class ProfileEditor {
                 snapshot,
                 this._pathEditor?.variableValues ?? this.state.variableValues ?? {}
             );
+
+            // Final UI-path safety net: remove any degenerate segments (especially
+            // point-collapsed arcs) before state notify / PathEditor sync.
+            this.state.segments = _sanitizeEditorStateSegments(this.state.segments);
+
             if (typeof this.state._syncSymmetryContours === 'function') {
                 this.state._syncSymmetryContours();
             }

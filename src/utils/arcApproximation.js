@@ -52,9 +52,21 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false, options = {
                 currentY = segment.end.y;
                 break;
 
-            case "arc":
+            case "arc": {
                 // SVG arc command: A rx ry x-axis-rotation large-arc-flag sweep-flag x y
                 const arc = segment.arc;
+
+                // Skip degenerated point-like arcs (start ~= end) to avoid
+                // serializing artifacts like: A r r ... x y where x,y equals current point.
+                const arcDx = segment.end.x - segment.start.x;
+                const arcDy = segment.end.y - segment.start.y;
+                const arcChord2 = arcDx * arcDx + arcDy * arcDy;
+                if (arcChord2 <= 1e-12) {
+                    // Treat as fully collapsed: do not emit arc command.
+                    currentX = segment.end.x;
+                    currentY = segment.end.y;
+                    break;
+                }
 
                 // radius (для DXF arc может быть уже готовый объект)
                 let rx = arc.radius || arc.rx || 0;
@@ -115,6 +127,7 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false, options = {
                 currentX = segment.end.x;
                 currentY = segment.end.y;
                 break;
+            }
 
             case "bezier":
                 // Cubic Bezier: C x1 y1 x2 y2 x y
