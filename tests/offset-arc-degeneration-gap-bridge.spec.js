@@ -48,7 +48,12 @@ describe("buildOffsetContour - bridge topology across dropped arc", () => {
     },
   ];
 
-  it("connects via direct intersection (not U-bridge) when intermediate arc degenerates at d=2 and segments converge", () => {
+  it("builds П-bridge (not direct intersection) when arc collapses at exactly d=arcRadius for offset consistency", () => {
+    // d=2 == arcRadius=2: the arc collapses exactly. At this exact distance the
+    // two adjacent offset lines meet at next.start (t2=0), so directIntersection
+    // was previously chosen, skipping the П-bridge pocket. This broke multi-step
+    // consistency: offset(base,1) then offset(result,1) produces a П-bridge, so
+    // a single offset(base,2) must also produce one.
     const result = buildOffsetContour(segments, 2, {
       joinType: "sharp",
       capType: "flat",
@@ -58,19 +63,24 @@ describe("buildOffsetContour - bridge topology across dropped arc", () => {
     // All segments should be lines (arc was dropped)
     expect(result.every((s) => s.type === "line")).toBe(true);
 
-    // The two offset lines converge at (-2, 8) — a direct intersection exists,
-    // so the priority rule applies: intersection first, bridge only if diverging.
-    // Result should be 2 connected segments, NOT 5 bridge segments.
-    expect(result).toHaveLength(2);
+    // П-bridge with depth=2 (leg=2, extra=0, floor at y=6):
+    //   entry L(10,8)→(2,8), first leg (2,8)→(2,6), floor (2,6)→(-2,6),
+    //   second leg (-2,6)→(-2,8), exit (-2,8)→(-2,16)
+    expect(result).toHaveLength(5);
 
     expect(toPathTuples(result)).toEqual([
-      ["line", 10, 8, -2, 8],
+      ["line", 10, 8, 2, 8],
+      ["line", 2, 8, 2, 6],
+      ["line", 2, 6, -2, 6],
+      ["line", -2, 6, -2, 8],
       ["line", -2, 8, -2, 16],
     ]);
 
     // Connectivity check
-    expect(result[0].end.x).toBeCloseTo(result[1].start.x, 4);
-    expect(result[0].end.y).toBeCloseTo(result[1].start.y, 4);
+    for (let i = 0; i < result.length - 1; i++) {
+      expect(result[i].end.x).toBeCloseTo(result[i + 1].start.x, 4);
+      expect(result[i].end.y).toBeCloseTo(result[i + 1].start.y, 4);
+    }
   });
 
   it("shifts first dropped-gap bridge anchor for d=3 when arc radius is exceeded", () => {
@@ -213,5 +223,131 @@ describe("buildOffsetContour - bridge topology across dropped arc", () => {
       expect(Math.abs(firstVertical.start.x - 12)).toBeLessThan(0.5);
       expect(Math.abs(firstVertical.end.x - 12)).toBeLessThan(0.5);
     }
+  });
+});
+
+describe("buildOffsetContour - symmetric bridge when arc fully collapses (r === |d|)", () => {
+  // Base contour from user bug report (contourId=5):
+  //   L (10,11)→(2,11)  [horizontal left]
+  //   A r=3, center (2,8), (2,11)→(1,10.8284)  [partial arc, CW]
+  //   L (1,10.8284)→(1,16)  [vertical down]
+  //
+  // Correct offset -3: bridge should be symmetric at depth=2, not depth=3.
+  // Two-step: offset(-2) then offset(-1) gives: (2,8)→(2,6)→(-2,6)→(-2,8)→(-2,16)
+  // Direct: offset(-3) must match.
+  const baseContour = [
+    {
+      type: "line",
+      start: { x: 10, y: 11 },
+      end: { x: 2, y: 11 },
+    },
+    {
+      type: "arc",
+      start: { x: 2, y: 11 },
+      end: { x: 1, y: 10.8284271247 },
+      arc: {
+        centerX: 2,
+        centerY: 8,
+        center: { x: 2, y: 8 },
+        radius: 3,
+        startAngle: 90,
+        endAngle: 180,
+        sweepFlag: 1,
+      },
+    },
+    {
+      type: "line",
+      start: { x: 1, y: 10.8284271247 },
+      end: { x: 1, y: 16 },
+    },
+  ];
+
+  it("direct offset(+3) produces symmetric П-bridge matching two-step offset(-2)→offset(-1)", () => {
+    const result = buildOffsetContour(baseContour, 3, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    // All segments should be lines (arc collapses)
+    expect(result.every((s) => s.type === "line")).toBe(true);
+
+    // Expected: M10,8 → L2,8 → L2,6 → L-2,6 → L-2,8 → L-2,16
+    // The symmetric bridge is at y=6 (depth=2, not depth=3)
+    // and the exit leg returns to y=8 (the arc center level)
+    expect(result).toHaveLength(5);
+
+    const pts = result.flatMap((s) => [s.start, s.end]);
+    // Entry horizontal: from (10,8) to (2,8)
+    expect(result[0].start.x).toBeCloseTo(10, 3);
+    expect(result[0].start.y).toBeCloseTo(8, 3);
+    expect(result[0].end.x).toBeCloseTo(2, 3);
+    expect(result[0].end.y).toBeCloseTo(8, 3);
+    // First bridge leg down: (2,8) → (2,6)
+    expect(result[1].start.x).toBeCloseTo(2, 3);
+    expect(result[1].start.y).toBeCloseTo(8, 3);
+    expect(result[1].end.x).toBeCloseTo(2, 3);
+    expect(result[1].end.y).toBeCloseTo(6, 3);
+    // Bridge floor: (2,6) → (-2,6)
+    expect(result[2].start.x).toBeCloseTo(2, 3);
+    expect(result[2].start.y).toBeCloseTo(6, 3);
+    expect(result[2].end.x).toBeCloseTo(-2, 3);
+    expect(result[2].end.y).toBeCloseTo(6, 3);
+    // Second bridge leg up: (-2,6) → (-2,8)
+    expect(result[3].start.x).toBeCloseTo(-2, 3);
+    expect(result[3].start.y).toBeCloseTo(6, 3);
+    expect(result[3].end.x).toBeCloseTo(-2, 3);
+    expect(result[3].end.y).toBeCloseTo(8, 3);
+    // Exit vertical: (-2,8) → (-2,16)
+    expect(result[4].start.x).toBeCloseTo(-2, 3);
+    expect(result[4].start.y).toBeCloseTo(8, 3);
+    expect(result[4].end.x).toBeCloseTo(-2, 3);
+    expect(result[4].end.y).toBeCloseTo(16, 3);
+  });
+
+  it("direct offset(+4) matches two-step offset(+3)→offset(+1) — over-collapse extra=1", () => {
+    // Two-step derivation (verified analytically):
+    //   Step 1: offset(baseContour, 3) = M10,8 L2,8 L2,6 L-2,6 L-2,8 L-2,16
+    //   Step 2: offset(step1, 1):
+    //     - L(10,8)→(2,8)  shifts y-1 → L(10,7)→(2,7)
+    //     - L(2,8)→(2,6)   shifts x+1 → L(3,8)→(3,6)  → join with entry: (3,7)
+    //     - L(2,6)→(-2,6)  shifts y-1 → L(2,5)→(-2,5) → join:            (3,5)
+    //     - L(-2,6)→(-2,8) shifts x-1 → L(-3,6)→(-3,8) → join:          (-3,5)
+    //     - L(-2,8)→(-2,16) shifts x-1 → L(-3,8)→(-3,16) → join:        (-3,8)
+    //   Result: M10,7 L3,7 L3,5 L-3,5 L-3,8 L-3,16
+    const result = buildOffsetContour(baseContour, 4, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result.every((s) => s.type === "line")).toBe(true);
+    expect(result).toHaveLength(5);
+
+    // Entry horizontal: (10,7) → (3,7)
+    expect(result[0].start.x).toBeCloseTo(10, 3);
+    expect(result[0].start.y).toBeCloseTo(7, 3);
+    expect(result[0].end.x).toBeCloseTo(3, 3);
+    expect(result[0].end.y).toBeCloseTo(7, 3);
+    // First bridge leg: (3,7) → (3,5)
+    expect(result[1].start.x).toBeCloseTo(3, 3);
+    expect(result[1].start.y).toBeCloseTo(7, 3);
+    expect(result[1].end.x).toBeCloseTo(3, 3);
+    expect(result[1].end.y).toBeCloseTo(5, 3);
+    // Bridge floor: (3,5) → (-3,5)
+    expect(result[2].start.x).toBeCloseTo(3, 3);
+    expect(result[2].start.y).toBeCloseTo(5, 3);
+    expect(result[2].end.x).toBeCloseTo(-3, 3);
+    expect(result[2].end.y).toBeCloseTo(5, 3);
+    // Second bridge leg: (-3,5) → (-3,8)
+    expect(result[3].start.x).toBeCloseTo(-3, 3);
+    expect(result[3].start.y).toBeCloseTo(5, 3);
+    expect(result[3].end.x).toBeCloseTo(-3, 3);
+    expect(result[3].end.y).toBeCloseTo(8, 3);
+    // Exit vertical: (-3,8) → (-3,16)
+    expect(result[4].start.x).toBeCloseTo(-3, 3);
+    expect(result[4].start.y).toBeCloseTo(8, 3);
+    expect(result[4].end.x).toBeCloseTo(-3, 3);
+    expect(result[4].end.y).toBeCloseTo(16, 3);
   });
 });

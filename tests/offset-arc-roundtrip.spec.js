@@ -265,3 +265,84 @@ describe("OffsetContourBuilder — SVG endpoint form arc (no center/radius field
     expect(lastSeg.end.y).toBeCloseTo(16, 1);
   });
 });
+
+/**
+ * Contour7: the result of offset(contour5, +2).
+ * This is a П-bridged contour: arc collapsed, П-bridge inserted.
+ *   M 10 9, L 2 9, A 1 1 0 0 1 1 8, L 1 7, L -1 7, L -1 8, L -1 16
+ */
+function makeContour7() {
+  return [
+    { type: "line", start: { x: 10, y: 9 }, end: { x: 2, y: 9 } },
+    {
+      type: "arc",
+      start: { x: 2, y: 9 },
+      end: { x: 1, y: 8 },
+      arc: {
+        center: { x: 2, y: 8 },
+        centerX: 2,
+        centerY: 8,
+        radius: 1,
+        startAngle: Math.PI / 2,
+        endAngle: Math.PI,
+        sweepFlag: 1,
+      },
+    },
+    { type: "line", start: { x: 1, y: 8 }, end: { x: 1, y: 7 } },
+    { type: "line", start: { x: 1, y: 7 }, end: { x: -1, y: 7 } },
+    { type: "line", start: { x: -1, y: 7 }, end: { x: -1, y: 8 } },
+    { type: "line", start: { x: -1, y: 8 }, end: { x: -1, y: 16 } },
+  ];
+}
+
+describe("OffsetContourBuilder — offset(contour7, +2): П-bridged contour with further outward offset", () => {
+  it("offset contour7 by d=+2 produces clean line-only contour without spurious П-bridge", () => {
+    // contour7 already contains a П-bridge (seg2→seg3→seg4 form the U-shape).
+    // When offset by +2, the arc (r=1) collapses to zero, and the two adjacent
+    // lines (offset of seg0→x=3, and offset of seg2→still x=3) should intersect
+    // directly at (3,7) — no П-bridge should be inserted between them.
+    //
+    // Expected result:
+    //   (10,7)→(3,7)→(3,5)→(−3,5)→(−3,8)→(−3,16)
+    // 5 line segments total.
+
+    const result = buildOffsetContour(makeContour7(), 2, OPTIONS);
+
+    // Must be contiguous
+    for (let i = 0; i < result.length - 1; i++) {
+      const gap = Math.hypot(
+        result[i + 1].start.x - result[i].end.x,
+        result[i + 1].start.y - result[i].end.y
+      );
+      expect(gap).toBeLessThan(TOLERANCE);
+    }
+
+    // All segments must be lines
+    for (const seg of result) {
+      expect(seg.type).toBe("line");
+    }
+
+    // First segment: horizontal at y=7, ending at x=3
+    expect(result[0].start.y).toBeCloseTo(7, 1);
+    expect(result[0].end.x).toBeCloseTo(3, 1);
+    expect(result[0].end.y).toBeCloseTo(7, 1);
+
+    // Second segment: vertical at x=3, from y=7 down to y=5
+    expect(result[1].start.x).toBeCloseTo(3, 1);
+    expect(result[1].start.y).toBeCloseTo(7, 1);
+    expect(result[1].end.x).toBeCloseTo(3, 1);
+    expect(result[1].end.y).toBeCloseTo(5, 1);
+
+    // Third segment: horizontal at y=5, from x=3 to x=-3
+    expect(result[2].start.y).toBeCloseTo(5, 1);
+    expect(result[2].end.y).toBeCloseTo(5, 1);
+    expect(result[2].end.x).toBeCloseTo(-3, 1);
+
+    // Last segment: vertical at x=-3, ending at y=16
+    const lastSeg = result[result.length - 1];
+    expect(lastSeg.type).toBe("line");
+    expect(lastSeg.start.x).toBeCloseTo(-3, 1);
+    expect(lastSeg.end.x).toBeCloseTo(-3, 1);
+    expect(lastSeg.end.y).toBeCloseTo(16, 1);
+  });
+});

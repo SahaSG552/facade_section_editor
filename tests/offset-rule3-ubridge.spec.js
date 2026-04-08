@@ -449,3 +449,209 @@ describe("Rule 3: U-bridge joins at failed sharp corners", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Self-intersection trimming: П-bridge (U-bridge) leg collapse
+// ---------------------------------------------------------------------------
+
+function toPathTuples(segments) {
+  return segments.map((seg) => [
+    seg.type,
+    Number(seg.start.x.toFixed(6)),
+    Number(seg.start.y.toFixed(6)),
+    Number(seg.end.x.toFixed(6)),
+    Number(seg.end.y.toFixed(6)),
+  ]);
+}
+
+describe("Step 4c: trim self-intersection backtrack loops", () => {
+  /**
+   * П-bridge (U-bridge): horizontal entry, two vertical legs, a floor, then exit.
+   *
+   *   x=10,y=8 ──── x=2,y=8
+   *                  |   (right leg)
+   *              x=2,y=6 ── x=-2,y=6  (floor)
+   *                              |   (left leg)
+   *   x=-2,y=8 ────────── x=-2,y=16  (exit upward)
+   *
+   * At d=-2, legs (width 4) collapse to x=0. The raw offset for the right-leg
+   * produces a backtrack segment L(0,10)→(0,8) before the exit L(0,8)→(0,16).
+   * Expected trimmed result: just 2 lines.
+   */
+  it("trims backtrack loop when П-bridge legs collapse at d=-2 (leg width=4)", () => {
+    const contour5 = [
+      { type: "line", start: { x: 10, y: 8 }, end: { x: 2, y: 8 } },
+      { type: "line", start: { x: 2, y: 8 }, end: { x: 2, y: 6 } },
+      { type: "line", start: { x: 2, y: 6 }, end: { x: -2, y: 6 } },
+      { type: "line", start: { x: -2, y: 6 }, end: { x: -2, y: 8 } },
+      { type: "line", start: { x: -2, y: 8 }, end: { x: -2, y: 16 } },
+    ];
+    const result = buildOffsetContour(contour5, -2, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result).toHaveLength(2);
+    expect(toPathTuples(result)).toEqual([
+      ["line", 10, 10, 0, 10],
+      ["line", 0, 10, 0, 16],
+    ]);
+  });
+
+  /**
+   * At d=-3 the legs overshoot past center (raw offset at x=±1 instead of ±2).
+   * seg[i] (entry y=11) now CROSSES seg[j] (exit x=1) mid-segment at (1,11),
+   * not merely "ends on" it.  The general line-line intersection trim must catch
+   * this and produce the same clean L-shape, shifted by one more unit.
+   */
+  it("trims overshoot loop when d > leg collapse distance (d=-3, legs width=4)", () => {
+    const contour5 = [
+      { type: "line", start: { x: 10, y: 8 }, end: { x: 2, y: 8 } },
+      { type: "line", start: { x: 2, y: 8 }, end: { x: 2, y: 6 } },
+      { type: "line", start: { x: 2, y: 6 }, end: { x: -2, y: 6 } },
+      { type: "line", start: { x: -2, y: 6 }, end: { x: -2, y: 8 } },
+      { type: "line", start: { x: -2, y: 8 }, end: { x: -2, y: 16 } },
+    ];
+    const result = buildOffsetContour(contour5, -3, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result).toHaveLength(2);
+    expect(toPathTuples(result)).toEqual([
+      ["line", 10, 11, 1, 11],
+      ["line", 1, 11, 1, 16],
+    ]);
+  });
+
+  /**
+   * Downstream consistency check: the trimmed contour6 (result of d=-2 above)
+   * offset by a further d=-1 should yield 2 clean, parallel segments.
+   * Parallelism: both segments shift by 1 in their normal direction.
+   */
+  it("downstream offset of trimmed contour is clean and parallel (no diagonal artefacts)", () => {
+    const contour6 = [
+      { type: "line", start: { x: 10, y: 10 }, end: { x: 0, y: 10 } },
+      { type: "line", start: { x: 0, y: 10 }, end: { x: 0, y: 16 } },
+    ];
+    const result = buildOffsetContour(contour6, -1, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    // L-shape offset: horizontal shrinks, vertical grows upward
+    expect(result).toHaveLength(2);
+    expect(toPathTuples(result)).toEqual([
+      ["line", 10, 11, 1, 11],
+      ["line", 1, 11, 1, 16],
+    ]);
+  });
+
+  /**
+   * At d=-8 the exit segment (the vertical leg at x=5+3=6) degenerates to zero
+   * length because d > (bridge half-width + leg height) = 2+6=8.
+   * The intersection point lands exactly at seg[j]'s END (tj=1), so seg[j] must
+   * be removed entirely.  Result: a single horizontal segment.
+   *
+   * Raw offset lines: y=16 (entry), x=-6 (right-leg), y=14 (floor), x=6 (exit, ×2).
+   * Entry line (y=16) intersects exit line (x=6) at (6,16) = exit segment's endpoint.
+   * All intermediates are lines and at least one reverses relative to the exit dir → trim.
+   * Expected: L(10,16)→(6,16).
+   */
+  it("removes degenerate exit segment when d exceeds bridge+leg distance (d=-8)", () => {
+    const contour5 = [
+      { type: "line", start: { x: 10, y: 8 }, end: { x: 2, y: 8 } },
+      { type: "line", start: { x: 2, y: 8 }, end: { x: 2, y: 6 } },
+      { type: "line", start: { x: 2, y: 6 }, end: { x: -2, y: 6 } },
+      { type: "line", start: { x: -2, y: 6 }, end: { x: -2, y: 8 } },
+      { type: "line", start: { x: -2, y: 8 }, end: { x: -2, y: 16 } },
+    ];
+    const result = buildOffsetContour(contour5, -8, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(toPathTuples(result)).toEqual([["line", 10, 16, 6, 16]]);
+  });
+
+  /**
+   * At d=-9 the exit segment is fully consumed: d > (bridge half-width + leg height) = 2+6=8,
+   * so the intersection of the entry line (y=17) with the exit line (x=7) falls at tj=9/8>1,
+   * meaning the exit segment is entirely "swallowed" by the backtrack.
+   *
+   * Raw offset: entry L(10,17)→(-7,17), right-leg, floor, left-leg (reversed),
+   * exit (reversed), remaining-exit L(7,8)→(7,16).
+   * Entry (y=17) crosses exit-x-line (x=7) at (7,17) with tj=9/8 > 1 → exit consumed.
+   * Expected: L(10,17)→(7,17).
+   */
+  it("removes fully-consumed exit segment when d far exceeds bridge+leg distance (d=-9)", () => {
+    const contour5 = [
+      { type: "line", start: { x: 10, y: 8 }, end: { x: 2, y: 8 } },
+      { type: "line", start: { x: 2, y: 8 }, end: { x: 2, y: 6 } },
+      { type: "line", start: { x: 2, y: 6 }, end: { x: -2, y: 6 } },
+      { type: "line", start: { x: -2, y: 6 }, end: { x: -2, y: 8 } },
+      { type: "line", start: { x: -2, y: 8 }, end: { x: -2, y: 16 } },
+    ];
+    const result = buildOffsetContour(contour5, -9, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result).toHaveLength(1);
+    expect(toPathTuples(result)).toEqual([["line", 10, 17, 7, 17]]);
+  });
+
+  /**
+   * At d=-12 the entry segment degenerates to zero length: the intersection of the
+   * entry line (y=20) with the exit line (x=10) is at (10,20) = entry.start (ti=0).
+   * At the same time the exit segment is consumed (tj=1.5>1).
+   * Both entry and exit are consumed → all segments degenerate → result: 0 segments.
+   *
+   * Geometry: entry cap at x=10, exit-x = -2+12 = 10, so they coincide.
+   * Expected: [] (empty).
+   */
+  it("returns empty when entry and exit both degenerate (d=-12)", () => {
+    const contour5 = [
+      { type: "line", start: { x: 10, y: 8 }, end: { x: 2, y: 8 } },
+      { type: "line", start: { x: 2, y: 8 }, end: { x: 2, y: 6 } },
+      { type: "line", start: { x: 2, y: 6 }, end: { x: -2, y: 6 } },
+      { type: "line", start: { x: -2, y: 6 }, end: { x: -2, y: 8 } },
+      { type: "line", start: { x: -2, y: 8 }, end: { x: -2, y: 16 } },
+    ];
+    const result = buildOffsetContour(contour5, -12, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result).toHaveLength(0);
+  });
+
+  /**
+   * At d=-13 the exit line (x=11) is PAST the entry cap (x=10): ti < 0, tj > 1.
+   * Both entry and exit are fully consumed → result: 0 segments.
+   * Expected: [] (empty).
+   */
+  it("returns empty when offset completely consumes the contour (d=-13)", () => {
+    const contour5 = [
+      { type: "line", start: { x: 10, y: 8 }, end: { x: 2, y: 8 } },
+      { type: "line", start: { x: 2, y: 8 }, end: { x: 2, y: 6 } },
+      { type: "line", start: { x: 2, y: 6 }, end: { x: -2, y: 6 } },
+      { type: "line", start: { x: -2, y: 6 }, end: { x: -2, y: 8 } },
+      { type: "line", start: { x: -2, y: 8 }, end: { x: -2, y: 16 } },
+    ];
+    const result = buildOffsetContour(contour5, -13, {
+      joinType: "sharp",
+      capType: "flat",
+      skipCap: true,
+    });
+
+    expect(result).toHaveLength(0);
+  });
+});

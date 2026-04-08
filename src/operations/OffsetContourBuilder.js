@@ -124,6 +124,10 @@ function buildDroppedGapBridge(
     typeof bridgeContext.extra === "number" && Number.isFinite(bridgeContext.extra)
       ? bridgeContext.extra
       : 0;
+  const arcRadius =
+    typeof bridgeContext.arcRadius === "number" && Number.isFinite(bridgeContext.arcRadius)
+      ? bridgeContext.arcRadius
+      : null;
 
   // Compute current segment length with continuous overflow propagation
   const segLen = Math.hypot(
@@ -156,7 +160,7 @@ function buildDroppedGapBridge(
     current.end = clonePoint(p0);
   }
   
-  const p3 = next.start;
+  let p3 = next.start;
 
   if (leg <= EPSILON) {
     const tangent = buildTangentBridge(current, next);
@@ -166,17 +170,48 @@ function buildDroppedGapBridge(
   const normal = { x: -inTangent.y, y: inTangent.x };
   const horizontalGap = Math.abs(p3.x - p0.x) >= Math.abs(p3.y - p0.y);
 
+  // When an arc fully collapsed (arcRadius != null), the offset arc degenerated to its
+  // center point at p0. The adjacent line's raw start is the arc's original endpoint
+  // shifted by the offset vector — it may lie at a different level than the arc center.
+  //
+  // For a horizontal bridge: project next.start onto the arc-center level so the exit
+  // leg is correct. The arc center in offset coordinates is `extra` units away from p0
+  // in the anti-normal direction: arc_center_y = p0.y - normal.y * extra.
+  // The bridge depth = |span| / 2 - extra (span = |effectiveP3.x - p0.x|).
+  //
+  // This formula is derived from the two-step invariant:
+  //   offset(base, d1+d2) == offset(offset(base, d1), d2)
+  // and works for extra === 0 (exact collapse) and extra > 0 (over-collapse alike).
+  let effectiveLeg = leg;
+  let effectiveP3 = p3;
+  if (arcRadius != null && leg > EPSILON) {
+    if (horizontalGap) {
+      // Snap p3 to arc-center level and use invariant depth
+      const arcCenterY = p0.y - normal.y * extra;
+      effectiveP3 = { x: p3.x, y: arcCenterY };
+      effectiveLeg = Math.max(0, Math.abs(p3.x - p0.x) / 2 - extra);
+    } else {
+      // Snap p3 to arc-center level and use invariant depth
+      const arcCenterX = p0.x - normal.x * extra;
+      effectiveP3 = { x: arcCenterX, y: p3.y };
+      effectiveLeg = Math.max(0, Math.abs(p3.y - p0.y) / 2 - extra);
+    }
+    // Update next.start to reflect the corrected position
+    setSegmentEndpoint(next, "start", effectiveP3);
+    p3 = effectiveP3;
+  }
+
   let p1;
   let p2;
 
   if (horizontalGap) {
     const ySign = Math.abs(normal.y) > EPSILON ? Math.sign(normal.y) : 1;
-    const yOffset = ySign * leg;
+    const yOffset = ySign * effectiveLeg;
     p1 = { x: p0.x, y: p0.y + yOffset };
     p2 = { x: p3.x, y: p0.y + yOffset };
   } else {
     const xSign = Math.abs(normal.x) > EPSILON ? Math.sign(normal.x) : 1;
-    const xOffset = xSign * leg;
+    const xOffset = xSign * effectiveLeg;
     p1 = { x: p0.x + xOffset, y: p0.y };
     p2 = { x: p0.x + xOffset, y: p3.y };
   }
@@ -647,6 +682,257 @@ function isPointOnFiniteLineSegment(point, lineSegment, tol = EPSILON) {
   const area2 = Math.abs(cross(dir, rel));
   const dirLen = Math.hypot(dir.x, dir.y);
   return area2 <= tol * Math.max(1, dirLen);
+}
+
+/**
+ * Finds the self-intersection point between two LINE segments for backtrack-loop detection.
+ *
+ * Returns the intersection point {x, y} when:
+ *   ti ∈ (EPSILON, 1+EPSILON]  — seg[i] is trimmed at or before its natural end.
+ *                                  ti < 1 = mid-segment overshoot (e.g. d > collapse distance).
+ *                                  ti ≈ 1 = endpoint-on-line (the classic d=collapse-distance case).
+ *   tj ∈ (EPSILON, +∞)         — intersection is inside or past seg[j].
+ *                                  tj < 1 = normal trim, tj ≥ 1 = seg[j] consumed (caller removes it).
+ *
+ * Only operates on LINE segments; arcs are skipped to avoid false positives.
+ *
+ * Returns `tj` alongside the intersection point so callers can distinguish:
+ *   - tj < 1  → normal interior trim of seg[j]
+ *   - tj ≈ 1  → seg[j] degenerates to zero length (intersection at seg[j].end)
+ *   - tj > 1  → seg[j] is fully consumed by the backtrack (caller must remove it)
+ *
+ * @param {Object} segI - Line segment {type, start, end}
+ * @param {Object} segJ - Line segment {type, start, end}
+ * @returns {{x:number, y:number, ti:number, tj:number}|null} Intersection point with parametric ti/tj, or null
+ */
+function findLineSelfIntersection(segI, segJ) {
+  if (segI.type !== "line" || segJ.type !== "line") return null;
+
+  const dx1 = segI.end.x - segI.start.x;
+  const dy1 = segI.end.y - segI.start.y;
+  const dx2 = segJ.end.x - segJ.start.x;
+  const dy2 = segJ.end.y - segJ.start.y;
+
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < EPSILON) return null; // parallel or degenerate
+
+  const cx = segJ.start.x - segI.start.x;
+  const cy = segJ.start.y - segI.start.y;
+
+  const ti = (cx * dy2 - cy * dx2) / denom;
+  const tj = (cx * dy1 - cy * dx1) / denom;
+
+  // ti must be in (EPSILON, 1+EPSILON]: intersection must be on or before seg[i]'s end,
+  // and strictly past its start (ti ≤ 0 would mean seg[i]'s start is at/past the meeting
+  // point — a different collapse pattern handled separately via findEntryCollapse).
+  if (ti <= EPSILON || ti > 1 + EPSILON) return null;
+  // tj: must be > 0 (not at/before seg[j].start).
+  // No upper bound: tj > 1 means seg[j] is fully consumed — caller handles it.
+  if (tj <= EPSILON) return null;
+
+  return {
+    x: segI.start.x + ti * dx1,
+    y: segI.start.y + ti * dy1,
+    ti,
+    tj,
+  };
+}
+
+/**
+ * Detect the "entry consumed" collapse pattern:
+ *
+ * When the offset distance is large enough that seg[i]'s start is AT or PAST the
+ * line of seg[j] (ti ≤ 0 in the intersection formula), the entry segment itself
+ * degenerates.  Simultaneously the exit segment is fully consumed (tj > 1+EPSILON).
+ *
+ * This is Pattern 4: both entry and exit are consumed — remove i..j entirely.
+ *
+ * Crucially, ti≤0 AND tj≈1 (tj in [1-EPSILON, 1+EPSILON]) must NOT trigger this
+ * pattern, because that exact configuration is just a normal connected corner in a
+ * closed contour (the segments share an endpoint, not a backtrack).  Only when the
+ * exit is *fully consumed past its end* (tj > 1+EPSILON) do we have a genuine collapse.
+ *
+ * @param {Object} segI - Entry line segment {type, start, end}
+ * @param {Object} segJ - Exit line segment {type, start, end}
+ * @returns {{ti:number, tj:number}|null} Parametric values if Pattern 4 detected, else null
+ */
+function findEntryCollapse(segI, segJ) {
+  if (segI.type !== "line" || segJ.type !== "line") return null;
+
+  const dx1 = segI.end.x - segI.start.x;
+  const dy1 = segI.end.y - segI.start.y;
+  const dx2 = segJ.end.x - segJ.start.x;
+  const dy2 = segJ.end.y - segJ.start.y;
+
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < EPSILON) return null; // parallel — no unique intersection
+
+  const cx = segJ.start.x - segI.start.x;
+  const cy = segJ.start.y - segI.start.y;
+
+  const ti = (cx * dy2 - cy * dx2) / denom;
+  const tj = (cx * dy1 - cy * dx1) / denom;
+
+  // Pattern 4 requires:
+  //   ti ≤ EPSILON    → entry start is at or past the intersection (entry consumed)
+  //   tj > 1+EPSILON  → exit is fully consumed past its end (not just a shared corner)
+  if (ti > EPSILON) return null;         // normal case — handled by findLineSelfIntersection
+  if (tj <= 1 + EPSILON) return null;    // shared corner or degenerate exit — not Pattern 4
+
+  return { ti, tj };
+}
+
+/**
+ * Remove self-intersection backtrack loops from an open offset contour.
+ *
+ * When a П-bridge (or any narrow U-shape) offset collapses—or overshoots—the
+ * raw output can contain a "backtrack loop": a short detour that doubles back
+ * and intersects a later segment.  Three patterns are handled:
+ *
+ *   1. Endpoint-on-line  (ti ≈ 1, tj < 1): seg[i].end lies on the interior of seg[j].
+ *      Occurs at exactly d = collapse distance (e.g. legs width = 4, d = 2).
+ *
+ *   2. Mid-segment cross (ti < 1, tj < 1): seg[i] itself crosses the interior of seg[j].
+ *      Occurs when d > collapse distance (e.g. legs width = 4, d = 3).
+ *      In this case seg[i] is also shortened to the intersection.
+ *
+ *   3. Exit degenerate/consumed (ti ≤ 1, tj ≥ 1): the intersection lands at or past seg[j]'s END.
+ *      Occurs when d > (bridge_width/2 + leg_length): the exit segment degenerates
+ *      to zero length (tj≈1) or is fully consumed (tj>1).  seg[j] is removed entirely
+ *      along with the intermediates, leaving only the trimmed seg[i].
+ *
+ *   4. Entry consumed (ti ≤ 0, tj > 1): the entry segment itself is at or past the
+ *      intersection AND the exit is fully consumed past its end.  Both seg[i] and
+ *      seg[j] are removed entirely along with all intermediates.  Detected via the
+ *      separate `findEntryCollapse` helper.
+ *      Guard: seg[i].start ≠ seg[j].end (otherwise they share a corner of a closed
+ *      contour — that is normal topology, not a backtrack).
+ *      Result may be zero segments when the contour fully degenerates.
+ *
+ * Algorithm:
+ *   For every non-adjacent pair (i, j) with j ≥ i+2:
+ *   1. Test Pattern 4 first via findEntryCollapse (handles ti ≤ 0).
+ *      Guard: all intermediates LINE + reversal vs seg[j] + seg[i].start ≠ seg[j].end.
+ *   2. Test Patterns 1/2/3 via findLineSelfIntersection (requires ti > EPSILON).
+ *      Guard: all intermediates LINE + at least one reversal relative to seg[j].
+ *   On confirmed backtrack:
+ *   - Pattern 4: remove i..j inclusive (everything consumed).
+ *   - Pattern 3: trim seg[i].end to intersection, remove i+1..j.
+ *   - Pattern 1/2: trim both seg[i].end and seg[j].start, remove i+1..j-1.
+ *   Repeat until stable.
+ *
+ * @param {Array} segments - Offset contour segments
+ * @returns {Array} Trimmed segments (may be shorter)
+ */
+function trimSelfIntersections(segments) {
+  const result = [...segments];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < result.length - 2; i++) {
+      for (let j = i + 2; j < result.length; j++) {
+        // ── Pattern 4: entry consumed (ti ≤ 0) AND exit fully consumed (tj > 1) ──
+        //
+        // Checked FIRST, before the regular intersection test, because this pattern
+        // occurs when d is large enough that seg[i]'s start is already past the exit
+        // line — findLineSelfIntersection would reject it (ti ≤ EPSILON).
+        //
+        // Guard is the same as below: all intermediates must be LINE type and at
+        // least one must reverse relative to seg[j].  Additionally, the backtrack
+        // must also include a reversal relative to seg[i] itself (to avoid matching
+        // a degenerate corner in a closed contour where two segments merely share an
+        // endpoint).
+        const collapse = findEntryCollapse(result[i], result[j]);
+        if (collapse !== null) {
+          // Additional guard: all intermediates must be LINE type and at least one
+          // must reverse relative to seg[j] (genuine backtrack, not a round join).
+          // Also: seg[i].start and seg[j].end must NOT coincide — if they do, these
+          // segments are simply connected at a corner of a closed contour, not a backtrack.
+          const iStart = result[i].start;
+          const jEnd = result[j].end;
+          const isSharedCorner =
+            Math.abs(iStart.x - jEnd.x) < EPSILON &&
+            Math.abs(iStart.y - jEnd.y) < EPSILON;
+          if (!isSharedCorner) {
+            const segJDx = result[j].end.x - result[j].start.x;
+            const segJDy = result[j].end.y - result[j].start.y;
+            let allLines4 = true;
+            let hasReversalJ = false;
+            for (let m = i + 1; m < j; m++) {
+              if (result[m].type !== "line") { allLines4 = false; break; }
+              const mDx = result[m].end.x - result[m].start.x;
+              const mDy = result[m].end.y - result[m].start.y;
+              if (mDx * segJDx + mDy * segJDy < -EPSILON) hasReversalJ = true;
+            }
+            if (allLines4 && hasReversalJ) {
+              // Both entry AND exit consumed — remove everything from i through j inclusive.
+              log.debug(
+                `trimSelfIntersections: entry seg[${i}] and exit seg[${j}] both consumed (Pattern 4), removing ${j - i + 1} segment(s)`
+              );
+              result.splice(i, j - i + 1);
+              changed = true;
+              break outer;
+            }
+          }
+        }
+
+        // ── Patterns 1/2/3: normal backtrack (ti > EPSILON) ──
+        const pt = findLineSelfIntersection(result[i], result[j]);
+        if (pt === null) continue;
+
+        // Guard: verify that the intermediate segments form a genuine backtrack loop,
+        // not an acute-angle round join whose LINE segments happen to cross.
+        //
+        // A genuine backtrack satisfies BOTH:
+        //   1. All intermediate segments are LINE type (arc = valid round connector).
+        //   2. At least one intermediate points in the OPPOSITE direction to seg[j]
+        //      (dot product < -EPSILON).  A round join's neighbours are never reversed
+        //      relative to the exiting segment.
+        const segJDx = result[j].end.x - result[j].start.x;
+        const segJDy = result[j].end.y - result[j].start.y;
+        let allLines = true;
+        let hasReversal = false;
+        for (let m = i + 1; m < j; m++) {
+          if (result[m].type !== "line") {
+            allLines = false;
+            break;
+          }
+          const mDx = result[m].end.x - result[m].start.x;
+          const mDy = result[m].end.y - result[m].start.y;
+          if (mDx * segJDx + mDy * segJDy < -EPSILON) {
+            hasReversal = true;
+          }
+        }
+        if (!allLines || !hasReversal) continue;
+
+        // Use the parametric tj to determine what is consumed (ti > EPSILON guaranteed here):
+        //
+        //   tj < 1-EPSILON  → Pattern 1/2: normal trim (both segs partially used)
+        //   tj ≥ 1-EPSILON  → Pattern 3: exit consumed/degenerate
+        const tjVal = pt.tj;
+
+        if (tjVal >= 1 - EPSILON) {
+          // Pattern 3: exit consumed/degenerate — trim entry end, remove intermediates + exit.
+          log.debug(
+            `trimSelfIntersections: exit seg[${j}] ${tjVal > 1 + EPSILON ? "consumed" : "degenerate"} at (${pt.x.toFixed(4)},${pt.y.toFixed(4)}), removing ${j - i} segment(s) (intermediates + exit)`
+          );
+          setSegmentEndpoint(result[i], "end", pt);
+          result.splice(i + 1, j - i); // remove intermediates AND seg[j]
+        } else {
+          // Pattern 1/2: normal backtrack trim.
+          log.debug(
+            `trimSelfIntersections: backtrack loop between seg[${i}] and seg[${j}] at (${pt.x.toFixed(4)},${pt.y.toFixed(4)}), removing ${j - i - 1} intermediate segment(s)`
+          );
+          setSegmentEndpoint(result[i], "end", pt);
+          setSegmentEndpoint(result[j], "start", clonePoint(pt));
+          result.splice(i + 1, j - i - 1);
+        }
+        changed = true;
+        break outer;
+      }
+    }
+  }
+  return result;
 }
 
 function findArcLineIntersection(arcSegment, lineSegment, referencePoint) {
@@ -1260,7 +1546,14 @@ export function buildOffsetContour(segments, distance, options = {}) {
       const nextSourceIndex = sourceIndices[nextIdx];
       const original = segments[currentSourceIndex];
 
-      const inTangent = getTangent(current, "end");
+      // For degenerate segments (zero-length, due to prior join trimming), the
+      // tangent from the segment geometry is (0,0). Fall back to the source
+      // segment direction so subsequent join logic can still find intersections.
+      let inTangent = getTangent(current, "end");
+      if (inTangent.x === 0 && inTangent.y === 0) {
+        const srcSeg = segments[currentSourceIndex];
+        if (srcSeg) inTangent = getTangent(srcSeg, "end");
+      }
       const outTangent = getTangent(next, "start");
       const droppedGap = hasDroppedSourceGap(
         currentSourceIndex,
@@ -1270,8 +1563,82 @@ export function buildOffsetContour(segments, distance, options = {}) {
       );
 
       if (droppedGap) {
-        // Priority rule: intersection first (if segments converge), bridge only if diverging.
-        const diverging = isDivergingJoin(
+        // Pre-compute arcRadius of the dropped segment so the directIntersection
+        // check below can distinguish "concave arc collapsed exactly" (needs bridge)
+        // from "convex / no-arc collapsed" (can use direct intersection).
+        const skippedForArcCheck = getSkippedSourceIndices(
+          currentSourceIndex,
+          nextSourceIndex,
+          segments.length,
+          closed
+        );
+        let droppedArcRadius = null;
+        if (skippedForArcCheck.length === 1) {
+          droppedArcRadius = getArcRadiusFromSegment(
+            segments[skippedForArcCheck[0]]
+          );
+        }
+
+        // Priority rule: prefer a direct intersection over a bridge, but only when
+        // the intersection lies "in front of" both segments (t-parameters >= 0).
+        // When the intersection is behind next.start (t2 < 0), the two offset
+        // lines are already past each other — a bridge is required instead.
+        //
+        // Special case: when a concave arc collapses at exactly d = arcRadius,
+        // t2 == 0 (next.start already sits on the intersection point). The
+        // intersection is geometrically valid but the arc produced a П-bridge
+        // pocket that must be preserved for offset consistency. We suppress the
+        // direct-intersection path whenever a collapsed concave arc is involved
+        // and t2 ≤ EPSILON (i.e. t2 == 0 within floating-point tolerance).
+        const directIntersection = (() => {
+          const pt = findJoinIntersection(current, next);
+          if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null;
+
+          // For line→line joins, verify the intersection is not behind next.start.
+          if (current.type === "line" && next.type === "line") {
+            const nextTangent = getTangent(next, "start");
+            const dx = pt.x - next.start.x;
+            const dy = pt.y - next.start.y;
+            const t2 = nextTangent.x * dx + nextTangent.y * dy;
+            if (t2 < -EPSILON) return null; // intersection is behind next → need bridge
+            // When a concave arc collapsed at the exact offset distance the two
+            // adjacent lines meet precisely at next.start (t2 ≈ 0). Using the
+            // direct intersection here would skip the П-bridge that the arc
+            // pocket requires, violating multi-step offset consistency.
+            if (droppedArcRadius != null && t2 <= EPSILON) return null;
+          }
+          return pt;
+        })();
+
+        if (directIntersection) {
+          setSegmentEndpoint(current, "end", directIntersection);
+          setSegmentEndpoint(next, "start", directIntersection);
+          collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
+
+          if (closed && nextIdx === 0 && result.length > 0) {
+            result[0].start = clonePoint(directIntersection);
+          }
+          continue;
+        }
+
+        // No usable direct intersection — check whether segments are diverging or not.
+        // Exception: when a concave arc has collapsed at exactly d=arcRadius, we must
+        // force the П-bridge regardless of the diverging check (the tangent-bridge path
+        // would produce a flat connector instead of the required pocket shape).
+        const forceUBridge = droppedArcRadius != null && (() => {
+          const pt = findJoinIntersection(current, next);
+          if (!pt) return false;
+          if (current.type === "line" && next.type === "line") {
+            const nextTangent = getTangent(next, "start");
+            const dx = pt.x - next.start.x;
+            const dy = pt.y - next.start.y;
+            const t2 = nextTangent.x * dx + nextTangent.y * dy;
+            return t2 <= EPSILON; // exact collapse — directIntersection was suppressed
+          }
+          return false;
+        })();
+
+        const diverging = forceUBridge || isDivergingJoin(
           current.end,
           next.start,
           inTangent,
@@ -1279,25 +1646,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
         );
 
         if (!diverging) {
-          // Segments converge or are tangent — find direct intersection and trim
-          const directIntersection = findJoinIntersection(current, next);
-
-          if (
-            directIntersection &&
-            Number.isFinite(directIntersection.x) &&
-            Number.isFinite(directIntersection.y)
-          ) {
-            setSegmentEndpoint(current, "end", directIntersection);
-            setSegmentEndpoint(next, "start", directIntersection);
-            collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
-
-            if (closed && nextIdx === 0 && result.length > 0) {
-              result[0].start = clonePoint(directIntersection);
-            }
-            continue;
-          }
-
-          // No intersection found — try tangent bridge before resorting to U-bridge
+          // Non-diverging but no intersection: try tangent bridge before U-bridge
           const tangent = buildTangentBridge(current, next);
           if (tangent) {
             result.push(tangent);
@@ -1305,18 +1654,9 @@ export function buildOffsetContour(segments, distance, options = {}) {
           }
         }
 
-        // Segments are diverging (or non-diverging fallbacks failed) — build U-bridge
-        const skippedSourceIndices = getSkippedSourceIndices(
-          currentSourceIndex,
-          nextSourceIndex,
-          segments.length,
-          closed
-        );
-
-        let arcRadius = null;
-        if (skippedSourceIndices.length === 1) {
-          arcRadius = getArcRadiusFromSegment(segments[skippedSourceIndices[0]]);
-        }
+        // Segments are diverging (or non-diverging fallbacks failed) — build U-bridge.
+        // Re-use droppedArcRadius pre-computed above (same skipped-source lookup).
+        const arcRadius = droppedArcRadius;
 
         const absD = Math.abs(distance);
         const leg = arcRadius != null ? Math.min(absD, arcRadius) : absD;
@@ -1327,7 +1667,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
           next,
           inTangent,
           distance,
-          { leg, extra }
+          { leg, extra, arcRadius }
         );
 
         if (forcedBridge.length > 0) {
@@ -1943,6 +2283,13 @@ export function buildOffsetContour(segments, distance, options = {}) {
         setSegmentEndpoint(finalSegments[i], "start", clonePoint(seg.end));
     }
   }
+
+  // Step 4c: Trim self-intersection backtrack loops.
+  // When a П-bridge (or any narrow U-shape) collapses at large offsets, the raw
+  // offset produces a short "backtrack" segment that doubles back over a later
+  // segment. Detect this pattern (seg[i].end lies on interior of seg[j]) and
+  // remove the intermediate loop, trimming seg[j].start to seg[i].end.
+  finalSegments = trimSelfIntersections(finalSegments);
 
   // Strip internal metadata before returning public segments
   for (const seg of finalSegments) {
