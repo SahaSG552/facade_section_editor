@@ -415,19 +415,44 @@ export function buildUShapeBridge(seg1, seg2) {
   const parallel = Math.abs(Math.abs(dot) - 1) < 0.01;
 
   if (parallel) {
-    // Parallel tangents: create a step bridge (П-shape)
-    // Leg 1: from seg1.end perpendicular to tangent direction
-    // Leg 2: connecting segment
-    // Leg 3: from seg2.start perpendicular to tangent direction (backwards)
+    const antiParallel = dot < 0; // dot ≈ -1: tangents point toward each other
+
+    if (antiParallel) {
+      // Anti-parallel tangents (dot ≈ -1): segments face each other.
+      // Build a U-bridge by stepping inward along the tangent direction then across.
+      //
+      // Example: arc ends going down (t1=(0,-1)), line starts going up (t2=(0,1))
+      //   depth = half the gap component in the normal direction
+      //   p1 = seg1.end + t1 * depth  (step inward along t1)
+      //   p2 = seg2.start - t2 * depth = seg2.start + t1 * depth  (step inward from seg2)
+      //   Bridge: seg1.end → p1 → p2 → seg2.start
+
+      // Left normal of t1
+      const n = { x: -t1.y, y: t1.x };
+      // Gap component perpendicular to tangent (the "width" between the two endpoints)
+      const gN = Math.abs(dx * n.x + dy * n.y);
+      // Depth: step inward by half the gap width
+      const depth = gN / 2;
+
+      const p1 = { x: seg1.end.x + t1.x * depth, y: seg1.end.y + t1.y * depth };
+      // t2 = -t1 for anti-parallel, so seg2.start - t2*depth = seg2.start + t1*depth
+      const p2 = { x: seg2.start.x + t1.x * depth, y: seg2.start.y + t1.y * depth };
+
+      return [
+        { type: "line", start: { x: seg1.end.x, y: seg1.end.y }, end: p1 },
+        { type: "line", start: p1, end: p2 },
+        { type: "line", start: p2, end: { x: seg2.start.x, y: seg2.start.y } },
+      ];
+    }
+
+    // Parallel tangents (dot ≈ +1): segments point in the same direction.
+    // Create a step bridge perpendicular to the tangent.
 
     // Normal to the common tangent direction
     const n = { x: -t1.y, y: t1.x };
 
     // Project gap onto normal to get step height
     const stepH = dx * n.x + dy * n.y;
-
-    // Project gap onto tangent to get step width
-    const stepW = dx * t1.x + dy * t1.y;
 
     // Point 1: seg1.end + n * stepH (perpendicular offset)
     const p1 = { x: seg1.end.x + n.x * stepH, y: seg1.end.y + n.y * stepH };

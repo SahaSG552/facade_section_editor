@@ -1570,7 +1570,7 @@ export default class OffsetTool extends BaseTool {
             const dot = document.createElementNS(SVG_NS, "circle");
             dot.setAttribute("cx", this._nearestPoint.x);
             dot.setAttribute("cy", this._nearestPoint.y);
-            dot.setAttribute("r", "3");
+            dot.setAttribute("r", "0.1");
             dot.setAttribute("fill", "#ff6600");
             dot.setAttribute("opacity", "0.8");
             dot.setAttribute("pointer-events", "none");

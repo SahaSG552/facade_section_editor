@@ -169,19 +169,41 @@ export function offsetArc(segment, distance) {
         return null;
     }
 
-    const center = getArcCenter(arc);
-    if (!center) {
-        return null;
-    }
+    let center = getArcCenter(arc);
+    const sweepFlag = arc.sweepFlag === 1 ? 1 : 0;
 
-    const radius = Number(arc.radius);
     // DXF exporter returns angles in degrees — convert to radians if needed.
     // Heuristic: if |angle| > 2*PI, it's in degrees.
     const toRad = (deg) => deg * Math.PI / 180;
     const isDegrees = (v) => Number.isFinite(v) && Math.abs(v) > 2 * Math.PI + 0.01;
-    const startAngle = isDegrees(arc.startAngle) ? toRad(arc.startAngle) : Number(arc.startAngle);
-    const endAngle = isDegrees(arc.endAngle) ? toRad(arc.endAngle) : Number(arc.endAngle);
-    const sweepFlag = arc.sweepFlag === 1 ? 1 : 0;
+
+    let radius = Number(arc.radius);
+    let startAngle = isDegrees(arc.startAngle) ? toRad(arc.startAngle) : Number(arc.startAngle);
+    let endAngle = isDegrees(arc.endAngle) ? toRad(arc.endAngle) : Number(arc.endAngle);
+
+    // SVG endpoint form: arc.rx present but center is missing.
+    // Convert endpoint parametrization → center parametrization.
+    if (!center && Number.isFinite(arc.rx) && segment.start && segment.end) {
+        const r = arc.rx; // only circular arcs (rx === ry) are supported
+        const converted = svgArcToCenter(
+            segment.start,
+            segment.end,
+            r,
+            arc.largeArcFlag ?? 0,
+            sweepFlag
+        );
+        if (!converted) {
+            return null;
+        }
+        center = converted.center;
+        radius = r;
+        startAngle = converted.startAngle;
+        endAngle = converted.endAngle;
+    }
+
+    if (!center) {
+        return null;
+    }
 
     if (!Number.isFinite(radius) || !Number.isFinite(startAngle) || !Number.isFinite(endAngle)) {
         return null;
@@ -224,6 +246,9 @@ export function offsetArc(segment, distance) {
 
     if ("rx" in arc) {
         nextArc.rx = newRadius;
+        // Materialise the center so downstream code (getArcCenter in OffsetContourBuilder)
+        // does not have to re-derive it from SVG endpoint form.
+        nextArc.center = { x: center.x, y: center.y };
     }
 
     if ("ry" in arc) {
@@ -281,6 +306,49 @@ function getArcCenter(arc) {
     }
 
     return null;
+}
+
+/**
+ * Convert SVG arc endpoint parametrization to center parametrization.
+ *
+ * Implements the algorithm from the SVG specification §B.2.4.
+ * Only handles circular arcs (rx === ry, xRotation === 0).
+ *
+ * @param {{x:number,y:number}} p1 - Arc start point.
+ * @param {{x:number,y:number}} p2 - Arc end point.
+ * @param {number} r - Arc radius (rx = ry).
+ * @param {0|1} largeArcFlag - SVG large-arc-flag.
+ * @param {0|1} sweepFlag - SVG sweep-flag.
+ * @returns {{center:{x,y}, startAngle:number, endAngle:number}|null} Center form, or null on degenerate input.
+ */
+function svgArcToCenter(p1, p2, r, largeArcFlag, sweepFlag) {
+    if (!Number.isFinite(r) || r <= EPSILON) return null;
+    const x1p = (p1.x - p2.x) / 2;
+    const y1p = (p1.y - p2.y) / 2;
+
+    const dSq = x1p * x1p + y1p * y1p;
+    const rSq = r * r;
+
+    // If the two endpoints are coincident (degenerate), bail out.
+    if (dSq < EPSILON * EPSILON) return null;
+
+    // Clamp to handle floating-point issues where dSq > rSq by a tiny amount.
+    const numerator = Math.max(0, rSq - dSq);
+    const denominator = dSq;
+    const sq = numerator / denominator;
+    const sign = largeArcFlag === sweepFlag ? -1 : 1;
+    const f = sign * Math.sqrt(sq);
+
+    const cxp = f * y1p;   // note: formula uses r*y1p/r = y1p (normalized)
+    const cyp = -f * x1p;
+
+    const cx = cxp + (p1.x + p2.x) / 2;
+    const cy = cyp + (p1.y + p2.y) / 2;
+
+    const startAngle = Math.atan2((p1.y - cy) / r, (p1.x - cx) / r);
+    const endAngle = Math.atan2((p2.y - cy) / r, (p2.x - cx) / r);
+
+    return { center: { x: cx, y: cy }, startAngle, endAngle };
 }
 
 export default {

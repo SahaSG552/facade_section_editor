@@ -420,7 +420,52 @@ function lineLineIntersection(p1, d1, p2, d2) {
   };
 }
 
-function getArcCenter(arc) {
+/**
+ * Convert SVG arc endpoint parametrization to center parametrization.
+ *
+ * Implements the algorithm from the SVG specification §B.2.4.
+ * Only handles circular arcs (rx === ry, xRotation === 0).
+ *
+ * @param {{x:number,y:number}} p1 - Arc start point.
+ * @param {{x:number,y:number}} p2 - Arc end point.
+ * @param {number} r - Arc radius (rx = ry).
+ * @param {0|1} largeArcFlag - SVG large-arc-flag.
+ * @param {0|1} sweepFlag - SVG sweep-flag.
+ * @returns {{center:{x:number,y:number}, startAngle:number, endAngle:number}|null}
+ */
+function svgArcToCenterLocal(p1, p2, r, largeArcFlag, sweepFlag) {
+  if (!Number.isFinite(r) || r <= EPSILON) return null;
+  const x1p = (p1.x - p2.x) / 2;
+  const y1p = (p1.y - p2.y) / 2;
+  const dSq = x1p * x1p + y1p * y1p;
+  const rSq = r * r;
+  if (dSq < EPSILON * EPSILON) return null;
+  const numerator = Math.max(0, rSq - dSq);
+  const sq = numerator / dSq;
+  const sign = largeArcFlag === sweepFlag ? -1 : 1;
+  const f = sign * Math.sqrt(sq);
+  const cxp = f * y1p;
+  const cyp = -f * x1p;
+  const cx = cxp + (p1.x + p2.x) / 2;
+  const cy = cyp + (p1.y + p2.y) / 2;
+  const startAngle = Math.atan2((p1.y - cy) / r, (p1.x - cx) / r);
+  const endAngle = Math.atan2((p2.y - cy) / r, (p2.x - cx) / r);
+  return { center: { x: cx, y: cy }, startAngle, endAngle };
+}
+
+/**
+ * Resolve arc center from arc metadata and optional segment endpoints.
+ *
+ * Supports:
+ * - Modern form: arc.center.x / arc.center.y
+ * - Legacy form: arc.centerX / arc.centerY
+ * - SVG endpoint form: arc.rx present, center derived from segment.start/end
+ *
+ * @param {Object} arc - Arc data object.
+ * @param {Object|null} [arcSegment] - The arc segment (for SVG endpoint fallback).
+ * @returns {{x:number,y:number}|null} Center point, or null when unavailable.
+ */
+function getArcCenter(arc, arcSegment = null) {
   if (
     arc?.center &&
     typeof arc.center.x === "number" &&
@@ -440,6 +485,23 @@ function getArcCenter(arc) {
     return { x: arc.centerX, y: arc.centerY };
   }
 
+  // SVG endpoint form: derive center from start/end endpoints and radius.
+  if (
+    Number.isFinite(arc?.rx) &&
+    arcSegment?.start &&
+    arcSegment?.end
+  ) {
+    const r = arc.rx;
+    const converted = svgArcToCenterLocal(
+      arcSegment.start,
+      arcSegment.end,
+      r,
+      arc.largeArcFlag ?? 0,
+      arc.sweepFlag ?? 0
+    );
+    return converted ? converted.center : null;
+  }
+
   return null;
 }
 
@@ -451,7 +513,15 @@ function getArcRadius(arc, arcSegment) {
     }
   }
 
-  const center = getArcCenter(arc);
+  // SVG endpoint form: rx is the radius.
+  if (typeof arc?.rx === "number" && Number.isFinite(arc.rx)) {
+    const r = Math.abs(arc.rx);
+    if (r > EPSILON) {
+      return r;
+    }
+  }
+
+  const center = getArcCenter(arc, arcSegment);
   if (!center || !arcSegment?.start) {
     return null;
   }
@@ -475,7 +545,7 @@ function updateArcEndpointAndAngle(arcSegment, endpointKey, point) {
     return;
   }
 
-  const center = getArcCenter(arcSegment.arc);
+  const center = getArcCenter(arcSegment.arc, arcSegment);
   const radius = getArcRadius(arcSegment.arc, arcSegment);
 
   // Fallback: keep topology update even if arc metadata is incomplete.
@@ -584,7 +654,7 @@ function findArcLineIntersection(arcSegment, lineSegment, referencePoint) {
     return null;
   }
 
-  const center = getArcCenter(arcSegment.arc);
+  const center = getArcCenter(arcSegment.arc, arcSegment);
   const radius = getArcRadius(arcSegment.arc, arcSegment);
   if (!center || radius == null) {
     return null;
@@ -726,6 +796,66 @@ function findCircleLineSegmentIntersection(center, radius, lineSegment, referenc
     }
   }
 
+  return best;
+}
+
+/**
+ * Find the intersection of a circle with an INFINITE line (no segment bounds check).
+ * Used as fallback when the correct intersection lies outside the finite segment —
+ * e.g. when a shrinking arc trims a short adjacent line segment.
+ *
+ * @param {{x:number,y:number}} center - Circle center
+ * @param {number} radius - Circle radius
+ * @param {{start:{x,y}, end:{x,y}}} lineSegment - Defines the line direction (treated as infinite)
+ * @param {{x:number,y:number}} referencePoint - Prefer intersection closest to this point
+ * @returns {{x:number,y:number}|null} Best intersection point, or null if no real intersection
+ */
+function findCircleLineIntersection(center, radius, lineSegment, referencePoint) {
+  const p1 = lineSegment.start;
+  const p2 = lineSegment.end;
+  const d = { x: p2.x - p1.x, y: p2.y - p1.y };
+  const a = dot(d, d);
+  if (a <= EPSILON * EPSILON) {
+    return null;
+  }
+
+  const f = { x: p1.x - center.x, y: p1.y - center.y };
+  const b = 2 * dot(f, d);
+  const c = dot(f, f) - radius * radius;
+  const disc = b * b - 4 * a * c;
+
+  // Use a relative tolerance for near-tangent detection to handle floating-point
+  // center imprecision (e.g. from SVG endpoint form arc center derivation).
+  // When |disc| is small relative to the scale (4*a*radius²), treat as tangent.
+  const discTol = 4 * a * radius * radius * 1e-4;
+  if (disc < -discTol) {
+    return null;
+  }
+
+  const roots = [];
+  if (disc <= discTol) {
+    // Tangent or near-tangent: use the closest point on the infinite line to the center
+    roots.push(-b / (2 * a));
+  } else {
+    const sqrtDisc = Math.sqrt(Math.max(0, disc));
+    roots.push((-b - sqrtDisc) / (2 * a));
+    roots.push((-b + sqrtDisc) / (2 * a));
+  }
+
+  // No segment bounds check — treat line as infinite
+  const points = roots.map((t) => ({ x: p1.x + t * d.x, y: p1.y + t * d.y }));
+  if (points.length === 0) return null;
+
+  const ref = referencePoint || p1;
+  let best = points[0];
+  let bestDist = distance(best, ref);
+  for (let i = 1; i < points.length; i++) {
+    const cd = distance(points[i], ref);
+    if (cd < bestDist) {
+      best = points[i];
+      bestDist = cd;
+    }
+  }
   return best;
 }
 
@@ -1217,6 +1347,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
       const cornerType = computeJoinType(inTangent, outTangent);
 
+
       if (cornerType === "convex") {
         const originalVertex = original.end;
 
@@ -1226,10 +1357,12 @@ export function buildOffsetContour(segments, distance, options = {}) {
           // (e.g., when the offset arc's sweep grows beyond the original angular range).
           const arcLineTrimmed = (() => {
             if (current.type === "arc" && next.type === "line") {
-              const center = getArcCenter(current.arc);
+              const center = getArcCenter(current.arc, current);
               const radius = getArcRadius(current.arc, current);
               if (!center || radius == null) return false;
-              const pt = findCircleLineSegmentIntersection(center, radius, next, current.end);
+              const pt =
+                findCircleLineSegmentIntersection(center, radius, next, current.end) ??
+                findCircleLineIntersection(center, radius, next, next.start);
               if (!pt) return false;
               setSegmentEndpoint(current, "end", pt);
               setSegmentEndpoint(next, "start", pt);
@@ -1249,10 +1382,12 @@ export function buildOffsetContour(segments, distance, options = {}) {
               return true;
             }
             if (current.type === "line" && next.type === "arc") {
-              const center = getArcCenter(next.arc);
+              const center = getArcCenter(next.arc, next);
               const radius = getArcRadius(next.arc, next);
               if (!center || radius == null) return false;
-              const pt = findCircleLineSegmentIntersection(center, radius, current, next.start);
+              const pt =
+                findCircleLineSegmentIntersection(center, radius, current, next.start) ??
+                findCircleLineIntersection(center, radius, current, next.start);
               if (!pt) return false;
               setSegmentEndpoint(current, "end", pt);
               setSegmentEndpoint(next, "start", pt);
@@ -1395,11 +1530,16 @@ export function buildOffsetContour(segments, distance, options = {}) {
         // For arc→line or line→arc joins, use circle-line intersection for geometric accuracy
         // (tangent-tangent approximation fails when the trim point is far from the raw arc end).
         let concaveTrimmed = false;
+        // Track whether we attempted a circle-line geometric intersection and it failed
+        // (meaning the arc genuinely doesn't reach the line — segments are diverging).
+        let circleLineIntersectionFailed = false;
         if (current.type === "arc" && next.type === "line") {
-          const center = getArcCenter(current.arc);
+          const center = getArcCenter(current.arc, current);
           const radius = getArcRadius(current.arc, current);
           if (center && radius != null) {
-            const pt = findCircleLineSegmentIntersection(center, radius, next, current.end);
+            const pt =
+              findCircleLineSegmentIntersection(center, radius, next, current.end) ??
+              findCircleLineIntersection(center, radius, next, next.start);
             if (pt) {
               setSegmentEndpoint(current, "end", pt);
               setSegmentEndpoint(next, "start", pt);
@@ -1417,13 +1557,18 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 result[0].start = clonePoint(pt);
               }
               concaveTrimmed = true;
+            } else {
+              // Circle doesn't intersect the line — arc has shrunk away from the line.
+              circleLineIntersectionFailed = true;
             }
           }
         } else if (current.type === "line" && next.type === "arc") {
-          const center = getArcCenter(next.arc);
+          const center = getArcCenter(next.arc, next);
           const radius = getArcRadius(next.arc, next);
           if (center && radius != null) {
-            const pt = findCircleLineSegmentIntersection(center, radius, current, next.start);
+            const pt =
+              findCircleLineSegmentIntersection(center, radius, current, next.start) ??
+              findCircleLineIntersection(center, radius, current, next.start);
             if (pt) {
               setSegmentEndpoint(current, "end", pt);
               setSegmentEndpoint(next, "start", pt);
@@ -1431,11 +1576,141 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 result[0].start = clonePoint(pt);
               }
               concaveTrimmed = true;
+            } else {
+              circleLineIntersectionFailed = true;
             }
           }
         }
 
         if (!concaveTrimmed) {
+          // When the arc's circle genuinely doesn't intersect the adjacent line, the segments
+          // are diverging: the arc has shrunk past the point where it can meet the line.
+          // In this case, build a bridge instead of forcing a tangent-line intersection
+          // (which would produce an incorrect join point outside the actual geometry).
+          if (circleLineIntersectionFailed) {
+            // The arc's circle no longer intersects the adjacent line — the arc has shrunk
+            // past the point where it can geometrically meet the line.
+            //
+            // Strategy: extend the arc to the angle where its tangent is anti-parallel to the
+            // line direction (the "bridge angle"), then snap the line start to the foot of the
+            // perpendicular from that bridge point onto the line. This produces a clean П-bridge.
+            if (current.type === "arc" && next.type === "line") {
+              const center = getArcCenter(current.arc, current);
+              const radius = getArcRadius(current.arc, current);
+              const lineDir = normalize({
+                x: next.end.x - next.start.x,
+                y: next.end.y - next.start.y,
+              });
+
+              if (center && radius != null && lineDir) {
+                // Bridge angle: the angle on the arc circle closest to the line.
+                // This is the direction from the arc center perpendicular toward the line.
+                // lineNormal = left normal of lineDir
+                const lineNormalX = -lineDir.y;
+                const lineNormalY = lineDir.x;
+                // Signed distance from center to line (positive = center on normal side)
+                const P = next.start; // any point on line
+                const centerToLine =
+                  (P.x - center.x) * lineNormalX + (P.y - center.y) * lineNormalY;
+                // Direction from center toward line
+                const sign = centerToLine >= 0 ? 1 : -1;
+                const dirToLineX = sign * lineNormalX;
+                const dirToLineY = sign * lineNormalY;
+                const bridgeAngle = Math.atan2(dirToLineY, dirToLineX);
+
+                const bridgePoint = {
+                  x: center.x + radius * Math.cos(bridgeAngle),
+                  y: center.y + radius * Math.sin(bridgeAngle),
+                };
+
+                // Snap the arc end to the bridge point (also updates arc.endAngle)
+                setSegmentEndpoint(current, "end", bridgePoint);
+
+                // Snap next.start to the foot of perpendicular from bridgePoint onto the line
+                const lineOrigin = next.start; // read after mutation is ok — bridgePoint is computed
+                const tProj =
+                  (bridgePoint.x - lineOrigin.x) * lineDir.x +
+                  (bridgePoint.y - lineOrigin.y) * lineDir.y;
+                const lineMatchPoint = {
+                  x: lineOrigin.x + lineDir.x * tProj,
+                  y: lineOrigin.y + lineDir.y * tProj,
+                };
+                setSegmentEndpoint(next, "start", lineMatchPoint);
+
+                if (closed && nextIdx === 0 && result.length > 0) {
+                  result[0].start = clonePoint(lineMatchPoint);
+                }
+              }
+            } else if (current.type === "line" && next.type === "arc") {
+              // Symmetric case: line→arc
+              const center = getArcCenter(next.arc, next);
+              const radius = getArcRadius(next.arc, next);
+              const lineDir = normalize({
+                x: current.end.x - current.start.x,
+                y: current.end.y - current.start.y,
+              });
+
+              if (center && radius != null && lineDir) {
+                // Bridge angle: closest point on arc circle to the line.
+                const lineNormalX = -lineDir.y;
+                const lineNormalY = lineDir.x;
+                const P = current.end;
+                const centerToLine =
+                  (P.x - center.x) * lineNormalX + (P.y - center.y) * lineNormalY;
+                const sign = centerToLine >= 0 ? 1 : -1;
+                const dirToLineX = sign * lineNormalX;
+                const dirToLineY = sign * lineNormalY;
+                const bridgeAngle = Math.atan2(dirToLineY, dirToLineX);
+
+                const bridgePoint = {
+                  x: center.x + radius * Math.cos(bridgeAngle),
+                  y: center.y + radius * Math.sin(bridgeAngle),
+                };
+
+                // Snap the arc start to the bridge point (also updates arc.startAngle)
+                setSegmentEndpoint(next, "start", bridgePoint);
+
+                // Snap current.end to foot of perpendicular from bridgePoint onto the line
+                const lineOrigin = current.start;
+                const tProj =
+                  (bridgePoint.x - lineOrigin.x) * lineDir.x +
+                  (bridgePoint.y - lineOrigin.y) * lineDir.y;
+                const lineMatchPoint = {
+                  x: lineOrigin.x + lineDir.x * tProj,
+                  y: lineOrigin.y + lineDir.y * tProj,
+                };
+                setSegmentEndpoint(current, "end", lineMatchPoint);
+
+                if (closed && nextIdx === 0 && result.length > 0) {
+                  result[0].start = clonePoint(lineMatchPoint);
+                }
+              }
+            }
+
+            // After extending the arc and snapping the line, recompute tangents and check divergence
+            const effectiveInTangent = getTangent(current, "end");
+            const effectiveOutTangent = getTangent(next, "start");
+            const diverging = isDivergingJoin(
+              current.end,
+              next.start,
+              effectiveInTangent,
+              effectiveOutTangent
+            );
+            if (diverging) {
+              let bridge = buildUShapeBridge(current, next);
+              if (bridge) {
+                result.push(...bridge);
+              } else {
+                const tangent = buildTangentBridge(current, next);
+                if (tangent) {
+                  result.push(tangent);
+                }
+                // If both bridge types fail, leave segments as-is
+              }
+              continue;
+            }
+          }
+
           const trimJoin = computeSharpJoin(
             current.end,
             inTangent,
@@ -1621,7 +1896,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
   for (let i = finalSegments.length - 1; i >= 0; i--) {
     const seg = finalSegments[i];
     if (seg.type !== "arc") continue;
-    const center = getArcCenter(seg.arc);
+    const center = getArcCenter(seg.arc, seg);
     if (!center) continue;
 
     const sx = seg.start.x - center.x, sy = seg.start.y - center.y;
