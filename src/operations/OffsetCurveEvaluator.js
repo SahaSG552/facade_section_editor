@@ -151,10 +151,12 @@ export function offsetLine(segment, distance) {
  * Offset an arc segment as a concentric arc with adjusted radius.
  *
  * Formula:
- * newRadius = radius + distance * (sweepFlag === 1 ? 1 : -1)
+ * newRadius = radius + distance * (sweepFlag === 1 ? -1 : 1)
  *
- * - sweepFlag = 1 (CCW), positive distance grows radius (outside)
- * - sweepFlag = 0 (CW), positive distance shrinks radius (inside)
+ * - sweepFlag = 1 (CW in SVG/screen): rotate90CCW(tangent) points toward center
+ *   → positive distance shrinks radius (inward)
+ * - sweepFlag = 0 (CCW in SVG/screen): rotate90CCW(tangent) points away from center
+ *   → positive distance grows radius (outward)
  *
  * Center and angles are preserved. Start/end are recalculated from
  * center + newRadius * [cos(angle), sin(angle)].

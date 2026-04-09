@@ -156,13 +156,6 @@ export class OffsetEngine {
                         ? sourceClosedHint
                         : this._isClosedContour(sourceContour);
 
-                // Determine contour orientation and adjust distance sign accordingly.
-                // For CW contours (area < 0): outward = right side, distance stays positive.
-                // For CCW contours (area > 0): outward = left side, distance must be negated.
-                // This ensures the sweep-aware arc formula works correctly for both orientations.
-                const signedArea = this._computeSignedArea(sourceContour);
-                const effectiveDistance = signedArea > 0 ? -distance : distance;
-
                 const offsetMode = resolvedOptions.offsetMode || "one-sided";
 
                 if (!sourceClosed) {
@@ -257,8 +250,17 @@ export class OffsetEngine {
                         continue;
                     }
 
-                    // Default one-sided: single offset to the signed distance side.
-                    const offsetSegments = buildOffsetContour(sourceContour, effectiveDistance, {
+                    // Default one-sided (open contour): determine effective distance.
+                    // - Cursor-side mode: distance has already been sign-resolved by _processPathSync.
+                    // - Legacy (no cursor): negate distance for CCW-wound open paths so that
+                    //   positive user distance consistently means "outward" regardless of orientation.
+                    const hasCursorSideResolution =
+                        resolvedOptions.sideResolution === "nearest-segment-normal" &&
+                        !!resolvedOptions.cursorPoint;
+                    const openEffectiveDistance = hasCursorSideResolution
+                        ? distance
+                        : (this._computeSignedArea(sourceContour) > 0 ? -distance : distance);
+                    const offsetSegments = buildOffsetContour(sourceContour, openEffectiveDistance, {
                         joinType: resolvedOptions.joinType,
                         capType: resolvedOptions.capType,
                         skipCap: true,

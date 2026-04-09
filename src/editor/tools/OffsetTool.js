@@ -328,6 +328,21 @@ function pointWithTransforms(point, transforms, vars = {}) {
     return rotatePoint(base, angle);
 }
 
+function pointToPathSpace(point, transforms, vars = {}) {
+    const world = { x: num(point?.x), y: num(point?.y) };
+    if (!Number.isFinite(world.x) || !Number.isFinite(world.y)) return null;
+
+    let angle = 0;
+    for (const t of transforms ?? []) {
+        if (String(t?.type ?? "").toUpperCase() !== "RT") continue;
+        const v = evalAngle(t?.params?.[0] ?? "", vars);
+        if (Number.isFinite(v)) angle += v;
+    }
+
+    const local = rotatePoint(world, -angle);
+    return { x: local.x, y: -local.y };
+}
+
 /**
  * Compute the bounding-box center of all start/end points in a segment array.
  * Used to determine the world-space centroid of an offset candidate contour.
@@ -359,17 +374,37 @@ function segmentsCenter(segments) {
  * @param {Object} [vars={}]   - Variable values for transform evaluation.
  * @returns {{ pathData: string, allowClose: boolean, segments: Array, centerWorld: {x,y}|null } | null}
  */
-function buildOffsetCandidate(entry, offsetDist, exportModule, vars = {}, offsetCalculator = calculateOffsetFromPathData) {
+function buildOffsetCandidate(
+    entry,
+    offsetDist,
+    exportModule,
+    vars = {},
+    offsetCalculator = calculateOffsetFromPathData,
+    runtimeOptions = {},
+) {
     const allowClose = !!entry.closed;
     const useArcApproximation = /[CcSsQqTt]/.test(entry.pathData);
-    const path = offsetCalculator(entry.pathData, offsetDist, {
+    const cursorPointPath = pointToPathSpace(
+        runtimeOptions.cursorPoint,
+        Array.isArray(entry.transforms) ? entry.transforms : [],
+        vars,
+    );
+
+    const offsetOptions = {
         offsetSignMode: "direct",
         useArcApproximation,
         arcTolerance: ARC_APPROX_TOLERANCE,
-            exportModule,
+        exportModule,
         trimSelfIntersections: allowClose,
         forceReverseOutput: false,
-    });
+    };
+
+    if (!allowClose && runtimeOptions.sideResolution && cursorPointPath) {
+        offsetOptions.sideResolution = runtimeOptions.sideResolution;
+        offsetOptions.cursorPoint = cursorPointPath;
+    }
+
+    const path = offsetCalculator(entry.pathData, offsetDist, offsetOptions);
     if (!path || !String(path).trim()) return null;
 
     const previewState = { _nextContourId: 1, _nextSegmentId: 1 };
@@ -1265,6 +1300,10 @@ export default class OffsetTool extends BaseTool {
                     this._exportModule,
                     vars,
                     this._offsetCalculator,
+                    {
+                        sideResolution: "nearest-segment-normal",
+                        cursorPoint: this._cursorPoint,
+                    },
                 );
 
                 if (candidate) {

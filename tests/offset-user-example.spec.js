@@ -33,7 +33,8 @@ describe("User example: line-arc-line offset", () => {
         console.log("Arc start:", arcSeg.start);
         console.log("Arc end:", arcSeg.end);
 
-        // Outward offset: arc radius should grow from 2 to 3
+        // Path has positive signed area → effectiveDistance = -1 (legacy negation).
+        // With sweepFlag=1 arc and d=-1: r + (-1)*(-1) = 2+1 = 3 (arc grows outward).
         expect(arcSeg.arc.radius).toBeCloseTo(3, 4);
     });
 });
