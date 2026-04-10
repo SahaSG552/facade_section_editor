@@ -9,6 +9,54 @@ const log = LoggerFactory.createLogger("OffsetEngine");
 const EPSILON = 1e-9;
 
 /**
+ * Reverse an open contour segment chain for offset normalization.
+ * Swaps each segment's start/end and reverses the array order.
+ * Arc segments have sweepFlag flipped and start/end angles swapped.
+ * @param {Array<Object>} segments
+ * @returns {Array<Object>}
+ */
+function reverseContourForOffset(segments) {
+    return segments.slice().reverse().map((seg) => {
+        const rev = {
+            ...seg,
+            start: { x: seg.end.x, y: seg.end.y },
+            end: { x: seg.start.x, y: seg.start.y },
+        };
+        if (seg.type === "arc" && seg.arc) {
+            rev.arc = {
+                ...seg.arc,
+                startAngle: seg.arc.endAngle,
+                endAngle: seg.arc.startAngle,
+                sweepFlag: seg.arc.sweepFlag === 1 ? 0 : 1,
+            };
+            if (seg.arc.center) {
+                rev.arc.center = { x: seg.arc.center.x, y: seg.arc.center.y };
+            }
+        }
+        return rev;
+    });
+}
+
+function getArcRadiusFromSegment(segment) {
+    if (!segment || segment.type !== "arc" || !segment.arc) {
+        return null;
+    }
+
+    const { arc } = segment;
+    if (typeof arc.radius === "number" && Number.isFinite(arc.radius)) {
+        const r = Math.abs(arc.radius);
+        return r > EPSILON ? r : null;
+    }
+
+    if (typeof arc.rx === "number" && Number.isFinite(arc.rx)) {
+        const r = Math.abs(arc.rx);
+        return r > EPSILON ? r : null;
+    }
+
+    return null;
+}
+
+/**
  * @typedef {Object} OffsetEngineOptions
  * @property {"sharp"|"round"} [joinType="round"] - Corner join type passed to OffsetContourBuilder.
  * @property {"flat"|"round"} [capType="round"] - Open contour cap type passed to OffsetContourBuilder.
@@ -86,6 +134,76 @@ export class OffsetEngine {
      */
     async processSegments(segments, distance, options = {}) {
         return this._processSegmentsSync(segments, distance, options);
+    }
+
+    _findDegenerationSplitDistance(segments, distance) {
+        if (!Array.isArray(segments) || segments.length === 0 || !Number.isFinite(distance)) {
+            return null;
+        }
+
+        const distanceSign = Math.sign(distance);
+        if (distanceSign === 0) {
+            return null;
+        }
+
+        let candidate = null;
+
+        for (const segment of segments) {
+            if (!segment || segment.type !== "arc" || !segment.arc) continue;
+
+            const radius = getArcRadiusFromSegment(segment);
+            if (radius == null) continue;
+
+            const sweepFlag = segment.arc.sweepFlag === 1 ? 1 : 0;
+            const k = sweepFlag === 1 ? -1 : 1;
+
+            // Arc shrinks only when distance*k < 0.
+            if (distance * k >= 0) continue;
+
+            // Signed distance at which this arc collapses to zero radius.
+            const collapseDistance = -radius / k;
+
+            if (Math.sign(collapseDistance) !== distanceSign) continue;
+            if (Math.abs(distance) <= Math.abs(collapseDistance) + EPSILON) continue;
+
+            if (candidate == null || Math.abs(collapseDistance) < Math.abs(candidate)) {
+                candidate = collapseDistance;
+            }
+        }
+
+        return candidate;
+    }
+
+    _buildOpenOffsetWithDegenerationSplits(sourceContour, distance, resolvedOptions) {
+        let workingContour = sourceContour;
+        let remainingDistance = distance;
+        let passes = 0;
+
+        const buildOptions = {
+            joinType: resolvedOptions.joinType,
+            capType: resolvedOptions.capType,
+            skipCap: true,
+        };
+
+        // Split only at actual arc-collapse thresholds, then process remainder.
+        // This enforces multi-step consistency for direct offsets (d=3 behaves like d=2 then d=1).
+        while (passes < 8 && Math.abs(remainingDistance) > EPSILON) {
+            const splitDistance = this._findDegenerationSplitDistance(workingContour, remainingDistance);
+            if (splitDistance == null) {
+                return buildOffsetContour(workingContour, remainingDistance, buildOptions);
+            }
+
+            const partial = buildOffsetContour(workingContour, splitDistance, buildOptions);
+            if (!Array.isArray(partial) || partial.length === 0) {
+                return partial;
+            }
+
+            workingContour = partial;
+            remainingDistance -= splitDistance;
+            passes += 1;
+        }
+
+        return buildOffsetContour(workingContour, remainingDistance, buildOptions);
     }
 
     _processPathSync(pathData, distance, options = {}) {
@@ -260,11 +378,27 @@ export class OffsetEngine {
                     const openEffectiveDistance = hasCursorSideResolution
                         ? distance
                         : (this._computeSignedArea(sourceContour) > 0 ? -distance : distance);
-                    const offsetSegments = buildOffsetContour(sourceContour, openEffectiveDistance, {
-                        joinType: resolvedOptions.joinType,
-                        capType: resolvedOptions.capType,
-                        skipCap: true,
-                    });
+
+                    // Normalize: all join/bridge rules in buildOffsetContour were built around
+                    // the convention that distance < 0 means "offset to the left of traversal".
+                    // When distance > 0, we equivalently reverse the contour, compute at -distance,
+                    // then reverse the result back. This makes every rule work uniformly for
+                    // any contour traversal direction without per-case patches.
+                    const needsNormalization = openEffectiveDistance > 0;
+                    const buildSegs = needsNormalization
+                        ? reverseContourForOffset(sourceContour)
+                        : sourceContour;
+                    const buildDistance = needsNormalization ? -openEffectiveDistance : openEffectiveDistance;
+
+                    let offsetSegments = this._buildOpenOffsetWithDegenerationSplits(
+                        buildSegs,
+                        buildDistance,
+                        resolvedOptions,
+                    );
+
+                    if (needsNormalization && Array.isArray(offsetSegments) && offsetSegments.length > 0) {
+                        offsetSegments = reverseContourForOffset(offsetSegments);
+                    }
 
                     if (!Array.isArray(offsetSegments) || offsetSegments.length === 0) {
                         continue;

@@ -205,12 +205,12 @@ function buildDroppedGapBridge(
   let p2;
 
   if (horizontalGap) {
-    const ySign = Math.abs(normal.y) > EPSILON ? Math.sign(normal.y) : 1;
+    const ySign = Math.abs(normal.y) > EPSILON ? Math.sign(normal.y) : Math.sign(inTangent.y) || 1;
     const yOffset = ySign * effectiveLeg;
     p1 = { x: p0.x, y: p0.y + yOffset };
     p2 = { x: p3.x, y: p0.y + yOffset };
   } else {
-    const xSign = Math.abs(normal.x) > EPSILON ? Math.sign(normal.x) : 1;
+    const xSign = Math.abs(normal.x) > EPSILON ? Math.sign(normal.x) : Math.sign(inTangent.x) || 1;
     const xOffset = xSign * effectiveLeg;
     p1 = { x: p0.x + xOffset, y: p0.y };
     p2 = { x: p0.x + xOffset, y: p3.y };
@@ -2103,6 +2103,33 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 result[0].start = clonePoint(directIntersection);
               }
             } else {
+              // Anti-parallel tangent check: when inTangent ≈ -outTangent (U-turn geometry)
+              // AND the junction is line→arc (not arc→line), isDivergingJoin gives an
+              // orientation-dependent result. The same physical junction produces
+              // `diverging=false` for a forward line→arc traversal (gap to the right of
+              // the left normal), but `diverging=true` for the reversed arc→line case
+              // (gap to the left). For line→arc with no direct intersection, the correct
+              // resolution is a U-bridge, not tryCollapseArcLineJoin.
+              //
+              // The arc→line case is intentionally excluded: at large offsets the arc
+              // grows outward and the gap is resolved by the arc's sweep trimming or
+              // stitch mechanisms that run after this block.
+              const isAntiParallel = dot(inTangent, outTangent) < -0.5;
+              const isLineToArc = current.type === "line" && next.type === "arc";
+              if (isAntiParallel && isLineToArc) {
+                const antiParallelBridge = buildSharpTangentBridge(
+                  current,
+                  next,
+                  inTangent,
+                  outTangent,
+                  distance
+                );
+                if (antiParallelBridge.length > 0) {
+                  result.push(...antiParallelBridge);
+                  continue;
+                }
+              }
+
               const stitchedCollapsedArc =
                 shouldCollapseArcLineJoin(current, next, EPSILON) &&
                 stitchCollapsedArcThroughNeighborLineSupport(

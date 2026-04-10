@@ -1,0 +1,150 @@
+# Libraries
+
+- `src\bits\BitRegistry.js` — class BitRegistry, const bitRegistry
+- `src\bits\ExtensionCalculator.js` — class ExtensionCalculator
+- `src\bits\PhantomBitCalculator.js` — class PhantomBitCalculator
+- `src\canvas\PanelCoordinateHelper.js` — class PanelCoordinateHelper
+- `src\canvas\SVGElementFactory.js` — class SVGElementFactory
+- `src\canvas\zoomUtils.js`
+  - function calculateElementsBBox: (elements) => void
+  - function zoomToBBox: (canvasManager, bbox, padding) => void
+  - function zoomToElements: (canvasManager, elements, padding) => void
+  - function fitAllVisibleElements: (canvasManager, layerNames, padding) => void
+  - function fitToBounds: (canvasManager, bounds) => void
+  - function zoomToSVGElement: (canvasManager, svgElement, padding) => void
+  - _...1 more_
+- `src\config\AppConfig.js` — class AppConfig, const appConfig
+- `src\core\ManagerFactory.js` — class ManagerFactory
+- `src\data\bitsStore.js`
+  - function getBits: () => void
+  - function setBits: (newBits) => void
+  - function getOperationsForGroup: (groupName) => void
+  - function addBit: (groupName, bitData) => void
+  - function updateBit: (groupName, id, patch) => void
+  - function deleteBit: (groupName, id) => void
+  - _...4 more_
+- `src\editor\geometry\rectGeometry.js`
+  - function getRectGeomLocal: (data) => void
+  - function getRectClampedRx: (data) => void
+  - function getRectCornerPointMap: (geom) => void
+  - function getRectCornerInwardMap: (geom) => void
+  - function getRectBoundaryPrimitives: (data) => void
+  - const RECT_CORNER_KEYS
+- `src\editor\tools\ArcTool.js`
+  - function circumcenter: (p1, p2, p3) => void
+  - function arcCenterFromEndpoints: (pt1, pt2, r, largeArc, sweep) => void
+  - function arcFlagsViaPoint: (pt1, pt2, ptThrough, cx, cy) => void
+  - function arc2ptData: (pt1, pt2, radius, cursorPos) => void
+- `src\editor\tools\shared\copyPreviewUtils.js`
+  - function deepClone: (value) => void
+  - function collectSegmentSnapshots: (state, segmentIds) => void
+  - function materializeCopiedSegments: (state, snapshots, {...}) => void
+  - function commitCopiedSnapshots: ({...}, snapshots, historyLabel, keepSourceSelection, sourceIds, preserveGroupLinks, }) => void
+  - function commitStagedTransformTarget: ({...}, targetPoint, applyPreview, commit, refreshPreview, finishCommand, }) => void
+  - function transitionCopyMode: ({...}, next, onEnterCopy, onExitCopy }) => void
+- `src\editor\tools\shared\segmentSanitizer.js` — function sanitizeParsedContourSegments: (segments) => void
+- `src\editor\tools\shared\selectionUtils.js`
+  - function expandSegIdsToGroupClosure: (seedIds, allSegments, elementGroups) => void
+  - function resolveClickSelectionIds: (hitId, allSegments, elementGroups, {...}) => void
+  - function computeBoxSelection: (allSegments, start, end, {...}, variableValues, groupSelectionMode, elementGroups) => void
+  - function buildSelectionBoxGhost: (start, end, svgNs) => void
+- `src\editor\tools\shared\transformGeometry.js`
+  - function sumRtAngle: (transforms, vars) => void
+  - function withRtAngle: (transforms, nextAngle) => void
+  - function rotatePoint: (p, angleDeg) => void
+  - function mirrorPoint: (p, A, B) => void
+  - function worldFromRaw: (rawPoint, rtAngle) => void
+  - function rawFromWorld: (worldPoint, rtAngle) => void
+  - _...2 more_
+- `src\editor\transforms\TransformCommands.js`
+  - function parseModLine: (line) => void
+  - function evalAngle: (token, vars) => void
+  - function modToSvgTransform: (t, vars) => void
+  - function modListToSvgTransform: (transforms, vars) => void
+- `src\operations\BitDataHelper.js` — class BitDataHelper
+- `src\operations\BooleanOperationStrategy.js` — class BooleanOperationStrategy
+- `src\operations\CustomOffsetProcessor.js`
+  - function calculateOffsetFromPathData: (pathData, offset, options) => void
+  - function calculateOffsetFromSVG: (svgElement, offset, options) => void
+  - class CustomOffsetCalculator
+- `src\operations\OffsetCapper.js`
+  - function capFlat: (point1, point2) => void
+  - function capRound: (centerPoint, offsetDistance, startPoint, endPoint, sweepFlag) => void
+  - function capBothSides: (positiveSegments, negativeSegments, offsetDistance, capType) => void
+  - function capOpenContour: (offsetSegments, offsetDistance, capType) => void
+- `src\operations\OffsetContourBuilder.js` — function buildOffsetContour: (segments, distance, options) => void
+- `src\operations\OffsetCurveEvaluator.js`
+  - function rotate90CCW: (vec) => void
+  - function rotate90CW: (vec) => void
+  - function normalize: (vec) => void
+  - function tangentAtArc: (angle, center, sweepFlag) => void
+  - function offsetLine: (segment, distance) => void
+  - function offsetArc: (segment, distance) => void
+  - _...1 more_
+- `src\operations\OffsetEngine.js` — function calculateOffsetFromPathData: (pathData, offset, options) => void, class OffsetEngine
+- `src\operations\OffsetRules.js`
+  - function isLineDegenerated: (segment) => void
+  - function isArcDegenerated: (segment) => void
+  - function isSegmentDegenerated: (segment) => void
+  - function getArcCenter: (segment) => void
+  - function preserveArcCenter: (offsetSegment, originalCenter) => void
+  - function computeArcDelta: (arc) => void
+  - _...7 more_
+- `src\operations\OffsetTrimmer.js`
+  - function trimSelfIntersections: (segments) => void
+  - function segmentsToPathString: (segments) => void
+  - function pathStringToSegments: (pathString) => void
+- `src\operations\PaperBooleanProcessor.js`
+  - function resolveSelfIntersections: (pathData, options) => void
+  - function paperCalculateResultPolygon: (panelSection, bitsOnCanvas, phantomBits) => void
+  - function paperCalculateResultPolygonDebug: (panelSection, bitsOnCanvas, phantomBits) => void
+- `src\operations\UpdatePipeline.js` — class UpdatePipeline
+- `src\three\BREPVisualizer.js` — class BREPVisualizer
+- `src\three\Edge.js` — class Edge
+- `src\three\Face.js` — class Face
+- `src\three\FaceIDGenerator.js` — class FaceIDGenerator
+- `src\three\MeshAnalysisUtils.js` — class MeshAnalysisUtils
+- `src\three\SemanticEdgesGeometry.js` — class SemanticEdgesGeometry
+- `src\three\Vertex.js` — class Vertex
+- `src\ui\pressEvents.js` — function addUnifiedPressListener: (element, handler, options) => void
+- `src\utils\arcApproximation.js` — function segmentsToSVGPath: (segments, invertSweepFlag, options) => void, function approximatePath: (pathData, exportModule, tolerance) => void
+- `src\utils\empty-shim.js` — function createRequire
+- `src\utils\fillet.js`
+  - function getPathOrientation: (points) => void
+  - function buildFilletArc: (prev, curr, next, radius) => void
+  - function filletPolyline: (points, options) => void
+- `src\utils\formulaPolicy.js` — function isFormulaToken: (value) => void, function evaluateTokenWithVars: (token, vars, fallback) => void
+- `src\utils\meshRepair.js` — function getRepairInstance: (config) => void, class MeshRepair
+- `src\utils\offsetSeries.js` — function buildPartialSeries: (total, steps) => void, function buildOffsetDistanceSeries: (distance, count) => void
+- `src\utils\utils.js`
+  - function angleToRad: (angle) => void
+  - function distancePtToPt: (p1, p2) => void
+  - function evaluateMathExpression: (value) => void
+  - function weldGeometry: (geometry, tolerance) => void
+- `src\utils\validation.js`
+  - function validateCoordinates: (x, y) => void
+  - function validatePanelDimensions: (width, height, thickness) => void
+  - function validateBitDiameter: (diameter) => void
+  - function validateVCarveAngle: (angle) => void
+  - function validateRadius: (radius) => void
+  - function validateZoomLevel: (zoomLevel) => void
+  - _...4 more_
+- `src\utils\variableTokens.js`
+  - function isValidVariableName: (name) => void
+  - const VARIABLE_NAME_PATTERN
+  - const VARIABLE_NAME_RE
+  - const VARIABLE_TOKEN_RE_GLOBAL
+  - const VARIABLE_TOKEN_TEST_RE
+- `src\utils\yPolicy.js`
+  - function isShapeYAttr: (attrKey) => void
+  - function shapeYSign: (shapeSpace) => void
+  - function shapeStoredToUiNumber: (attrKey, storedValue, shapeSpace) => void
+  - function shapeUiToStoredNumber: (attrKey, uiValue, shapeSpace) => void
+  - function shapeUiToStoredToken: (attrKey, uiToken, shapeSpace) => void
+  - function isPathYArg: (cmd, argIndex) => void
+  - _...2 more_
+- `tests\helpers\topology-helpers.js`
+  - function assertContinuity: (segments) => void
+  - function assertNoZeroLength: (segments) => void
+  - function assertContourCount: (result, expected) => void
+  - const EPS

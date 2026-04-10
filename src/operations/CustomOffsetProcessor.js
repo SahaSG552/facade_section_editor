@@ -168,9 +168,11 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
     }
 
     try {
-        // Preserve original winding so downstream extrusion left/right mapping
-        // stays stable regardless of OffsetEngine internals.
-        const originalCCW = signedArea(pathData) > 0;
+        // Preserve winding only for closed paths. For open contours, signed-area
+        // is not a stable orientation signal and can cause spurious reversals
+        // across sequential offsets (breaking bridge direction consistency).
+        const inputHasClose = /[Zz]/.test(pathData);
+        const originalCCW = inputHasClose ? signedArea(pathData) > 0 : null;
 
         // Main canvas expects: positive offset = inward.
         // OffsetEngine uses CCW normal (rotate90CCW): positive = left of path.
@@ -186,12 +188,14 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
                 typeof options.trimSelfIntersections === "boolean"
                     ? options.trimSelfIntersections
                     : true,
+            sideResolution: options.sideResolution,
+            cursorPoint: options.cursorPoint,
             offsetSignMode: "direct",
             useArcApproximation: options.useArcApproximation || false,
             arcTolerance: options.arcTolerance || ARC_APPROX_TOLERANCE,
         });
 
-        if (result) {
+        if (result && inputHasClose && originalCCW !== null) {
             const resultCCW = signedArea(result) > 0;
             if (resultCCW !== originalCCW) {
                 result = reversePath(result);

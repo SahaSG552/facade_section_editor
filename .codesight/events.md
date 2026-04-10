@@ -1,0 +1,27 @@
+# Events & Queues
+
+- `canvas:ready` [event] — `src/bits/BitsModule.js`
+- `bits:add` [event] — `src/bits/BitsModule.js`
+- `app:initialized` [event] — `src/canvas/CanvasModule.js`
+- `app:started` [event] — `src/core/app.js`
+- `app:shutdown` [event] — `src/core/app.js`
+- `module:${this.name}:initialized` [event] — `src/core/BaseModule.js`
+- `module:${this.name}:shutdown` [event] — `src/core/BaseModule.js`
+- `csg:cancelled` [event] — `src/scheduling/CSGScheduler.js`
+- `csg:scheduled` [event] — `src/scheduling/CSGScheduler.js`
+- `csg:applied` [event] — `src/scheduling/CSGScheduler.js`
+- `Auto-loaded ${restoredCount} saved bit positions` [event] — `src/script.js`
+- `Failed to auto-load saved positions` [event] — `src/script.js`
+- `DXF export completed successfully` [event] — `src/script.js`
+- `Failed to export DXF: ` [event] — `src/script.js`
+- `Saved ${payload.bits.length} bit positions` [event] — `src/script.js`
+- `Exported ${payload.bits.length} bit positions to JSON file` [event] — `src/script.js`
+- `Loaded ${restoredCount} bit positions from JSON file` [event] — `src/script.js`
+- `Failed to load positions: invalid JSON format` [event] — `src/script.js`
+- `Cleared ${bitCount} bits from canvas` [event] — `src/script.js`
+- `state:${key}Changed` [event] — `src/state/AppState.js`
+- `mode:changed` [event] — `src/state/AppState.js`
+- `meshRepair:statsUpdated` [event] — `src/state/AppState.js`
+- `meshRepair:statsReset` [event] — `src/state/AppState.js`
+- `meshRepair:exportValidation` [event] — `src/three/ThreeModule.js`
+- `canvas:resized` [event] — `src/ui/UIModule.js`

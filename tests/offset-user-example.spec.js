@@ -37,4 +37,30 @@ describe("User example: line-arc-line offset", () => {
         // With sweepFlag=1 arc and d=-1: r + (-1)*(-1) = 2+1 = 3 (arc grows outward).
         expect(arcSeg.arc.radius).toBeCloseTo(3, 4);
     });
+
+    it("reversed contour: direct d=-3 equals sequential d=-2 then d=-1 after arc degeneration", async () => {
+        const pathData = "M 0 16 L 0 8 A 2 2 0 0 0 2 10 L 10 10";
+        const engine = new (await import("../src/operations/OffsetEngine.js")).OffsetEngine({ exportModule });
+
+        const direct = await engine.processPath(pathData, -3);
+        const step2 = await engine.processPath(pathData, -2);
+        const seq = await engine.processPath(step2.pathData, -1);
+
+        expect(direct.pathData).toBe(seq.pathData);
+        expect(direct.contours).toHaveLength(1);
+        expect(seq.contours).toHaveLength(1);
+
+        const directSegments = direct.contours[0].segments;
+        const seqSegments = seq.contours[0].segments;
+        expect(directSegments).toHaveLength(seqSegments.length);
+
+        // Expected stable geometry at d=-3:
+        // M -3 16 L -3 8 L -3 5 L 3 5 L 3 7 L 10 7
+        expect(direct.pathData).toContain("M -3.000000 16.000000");
+        expect(direct.pathData).toContain("L -3.000000 8.000000");
+        expect(direct.pathData).toContain("L -3.000000 5.000000");
+        expect(direct.pathData).toContain("L 3.000000 5.000000");
+        expect(direct.pathData).toContain("L 3.000000 7.000000");
+        expect(direct.pathData).toContain("L 10.000000 7.000000");
+    });
 });
