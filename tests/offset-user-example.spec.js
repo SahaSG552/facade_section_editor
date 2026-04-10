@@ -187,4 +187,46 @@ describe("User example: line-arc-line offset", () => {
         expect(path).not.toContain("L 0.513437 6.521165");
         expect(path).toContain("L 3.936329 15.648877");
     });
+
+    it("combined symmetric contour: offsets -2..-5 remain consistent (no middle collapse)", () => {
+        const source = "M 13 16 L 10 8 A 2 2 0 0 1 8 10 L 0 10 L -8 10 A 2 2 0 0 1 -10 8 L -13 16";
+
+        const extractCenterRun = (path) => {
+            const m = path.match(/L\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)\s+L\s+0\.000000\s+(-?\d+\.\d+)\s+L\s+(-?\d+\.\d+)\s+(-?\d+\.\d+)/);
+            if (!m) return null;
+            return {
+                leftX: Number(m[1]),
+                leftY: Number(m[2]),
+                centerY: Number(m[3]),
+                rightX: Number(m[4]),
+                rightY: Number(m[5]),
+            };
+        };
+
+        const expectedCenterY = {
+            2: 8,
+            3: 7,
+            4: 6,
+            5: 5,
+        };
+
+        for (const mag of [2, 3, 4, 5]) {
+            const path = calculateOffsetViaProcessor(source, -mag, {
+                join: "sharp",
+                cap: "flat",
+                exportModule,
+            });
+
+            const center = extractCenterRun(path);
+            expect(center).toBeTruthy();
+
+            // Center run must stay mirrored around x=0 and keep expected y level.
+            expect(Math.abs(center.leftX + center.rightX)).toBeLessThan(0.05);
+            expect(Math.abs(center.leftY - center.rightY)).toBeLessThan(0.05);
+            expect(center.centerY).toBeCloseTo(expectedCenterY[mag], 3);
+
+            // Regression: old behavior skipped center segment at x=0.
+            expect(path).toContain(`L 0.000000 ${expectedCenterY[mag].toFixed(6)}`);
+        }
+    });
 });

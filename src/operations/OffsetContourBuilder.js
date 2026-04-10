@@ -826,11 +826,44 @@ function findEntryCollapse(segI, segJ) {
  */
 function trimSelfIntersections(segments) {
   const result = [...segments];
+  const MAX_LOCAL_BACKTRACK_SPAN = 2;
+
+  // Multi-lobe open contours can contain several independent reversal zones.
+  // Running single-loop backtrack trim over such shapes may incorrectly stitch
+  // distant zones and collapse the central valid span.
+  let reversalCount = 0;
+  for (let i = 0; i < result.length - 1; i++) {
+    const a = result[i];
+    const b = result[i + 1];
+    if (a.type !== "line" || b.type !== "line") continue;
+
+    const adx = a.end.x - a.start.x;
+    const ady = a.end.y - a.start.y;
+    const bdx = b.end.x - b.start.x;
+    const bdy = b.end.y - b.start.y;
+    const al = Math.hypot(adx, ady);
+    const bl = Math.hypot(bdx, bdy);
+    if (al <= EPSILON || bl <= EPSILON) continue;
+
+    const dotDir = (adx / al) * (bdx / bl) + (ady / al) * (bdy / bl);
+    if (dotDir < -0.5) {
+      reversalCount += 1;
+      if (reversalCount > 1) {
+        return result;
+      }
+    }
+  }
+
   let changed = true;
   while (changed) {
     changed = false;
     outer: for (let i = 0; i < result.length - 2; i++) {
       for (let j = i + 2; j < result.length; j++) {
+        // Backtrack trimming is intended for local U-loop collapses.
+        // Long-range pairs across multiple independent bridge zones can create
+        // false positives and collapse valid contour middle spans.
+        if (j - i > MAX_LOCAL_BACKTRACK_SPAN) continue;
+
         // ── Pattern 4: entry consumed (ti ≤ 0) AND exit fully consumed (tj > 1) ──
         //
         // Checked FIRST, before the regular intersection test, because this pattern
@@ -1561,6 +1594,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
   // Step 2: Process corners and joins
   let result = [];
+  let droppedGapJoinCount = 0;
   const numSegs = offsetSegments.length;
 
   for (let i = 0; i < numSegs; i++) {
@@ -1594,6 +1628,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
       );
 
       if (droppedGap) {
+        droppedGapJoinCount += 1;
         // Pre-compute arcRadius of the dropped segment so the directIntersection
         // check below can distinguish "concave arc collapsed exactly" (needs bridge)
         // from "convex / no-arc collapsed" (can use direct intersection).
@@ -1846,7 +1881,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
                     const sweepFlag = arcSeg.arc?.sweepFlag === 1 ? 1 : 0;
                     const k = sweepFlag === 1 ? -1 : 1;
                     const shrinking = distance * k < 0;
-                    const preCollapse = Math.abs(distance) + EPSILON < arcRadius;
+                    const preCollapse = Math.abs(distance) <= arcRadius + EPSILON;
                     isShrinkingPreCollapseArc = shrinking && preCollapse;
                   }
                 }
@@ -2182,7 +2217,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
                   const sweepFlag = arcSeg.arc?.sweepFlag === 1 ? 1 : 0;
                   const k = sweepFlag === 1 ? -1 : 1;
                   const shrinking = distance * k < 0;
-                  const preCollapse = Math.abs(distance) + EPSILON < arcRadius;
+                  const preCollapse = Math.abs(distance) <= arcRadius + EPSILON;
                   isShrinkingPreCollapseArc = shrinking && preCollapse;
                 }
               }
@@ -2385,7 +2420,12 @@ export function buildOffsetContour(segments, distance, options = {}) {
   // offset produces a short "backtrack" segment that doubles back over a later
   // segment. Detect this pattern (seg[i].end lies on interior of seg[j]) and
   // remove the intermediate loop, trimming seg[j].start to seg[i].end.
-  finalSegments = trimSelfIntersections(finalSegments);
+  // Important: when multiple dropped gaps are present in one open contour,
+  // distant bridge zones may be falsely linked by backtrack detection.
+  // Keep local trimming for the common single-gap case; skip for multi-gap.
+  if (droppedGapJoinCount <= 1) {
+    finalSegments = trimSelfIntersections(finalSegments);
+  }
 
   // Strip internal metadata before returning public segments
   for (const seg of finalSegments) {

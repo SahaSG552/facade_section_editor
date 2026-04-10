@@ -59,6 +59,38 @@ function getArcRadiusFromSegment(segment) {
     return null;
 }
 
+function getArcCenterFromSegment(segment) {
+    const arc = segment?.arc;
+    if (!arc) return null;
+
+    if (
+        arc.center &&
+        Number.isFinite(arc.center.x) &&
+        Number.isFinite(arc.center.y)
+    ) {
+        return { x: arc.center.x, y: arc.center.y };
+    }
+
+    if (Number.isFinite(arc.centerX) && Number.isFinite(arc.centerY)) {
+        return { x: arc.centerX, y: arc.centerY };
+    }
+
+    return null;
+}
+
+function getUnitDirection(start, end) {
+    if (!start || !end) return null;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const len = Math.hypot(dx, dy);
+    if (!Number.isFinite(len) || len <= EPSILON) return null;
+    return { x: dx / len, y: dy / len };
+}
+
+function getTangencyMeasure(centerToLine, radius, k, d) {
+    return Math.abs(centerToLine - d) - (radius + k * d);
+}
+
 function lineDirection(segment) {
     if (!segment?.start || !segment?.end) return null;
     const dx = segment.end.x - segment.start.x;
@@ -215,6 +247,107 @@ export class OffsetEngine {
     }
 
     /**
+     * Find earliest signed distance where an arc and adjacent line become tangent
+     * (transition to separation) during a single signed offset step.
+     *
+     * For offset line and offset circle, tangency condition is:
+     *   |s - d| = r + k d
+     * where:
+     *   s = signed distance from arc center to source line along line left-normal,
+     *   r = current arc radius,
+     *   k = (sweepFlag===1 ? -1 : 1).
+     *
+     * @param {Array<Object>} segments
+     * @param {number} distance
+     * @returns {number|null}
+     */
+    _findArcLineSeparationSplitDistance(segments, distance) {
+        if (!Array.isArray(segments) || segments.length < 2 || !Number.isFinite(distance)) {
+            return null;
+        }
+
+        const distanceSign = Math.sign(distance);
+        if (distanceSign === 0) return null;
+
+        let candidate = null;
+
+        const considerPair = (arcSegment, lineSegment) => {
+            if (!arcSegment?.arc || lineSegment?.type !== "line") return;
+
+            const center = getArcCenterFromSegment(arcSegment);
+            const radius = getArcRadiusFromSegment(arcSegment);
+            if (!center || radius == null) return;
+
+            const lineDir = getUnitDirection(lineSegment.start, lineSegment.end);
+            if (!lineDir) return;
+
+            const lineNormal = { x: -lineDir.y, y: lineDir.x };
+            const c = lineNormal.x * lineSegment.start.x + lineNormal.y * lineSegment.start.y;
+            const s = lineNormal.x * center.x + lineNormal.y * center.y - c;
+            const k = arcSegment.arc.sweepFlag === 1 ? -1 : 1;
+
+            // Only meaningful while arc still exists.
+            if (radius + k * distance <= EPSILON) return;
+
+            const startMeasure = getTangencyMeasure(s, radius, k, 0);
+            const endMeasure = getTangencyMeasure(s, radius, k, distance);
+
+            // We split only on true intersecting -> separating transition.
+            if (!(startMeasure <= EPSILON && endMeasure > EPSILON)) return;
+
+            const roots = [];
+            const denom1 = 1 + k;
+            const denom2 = 1 - k;
+
+            if (Math.abs(denom1) > EPSILON) {
+                roots.push((s - radius) / denom1);
+            }
+            if (Math.abs(denom2) > EPSILON) {
+                roots.push((s + radius) / denom2);
+            }
+
+            for (const root of roots) {
+                if (!Number.isFinite(root)) continue;
+                if (Math.sign(root) !== distanceSign) continue;
+                if (Math.abs(root) <= EPSILON) continue;
+                if (Math.abs(root) >= Math.abs(distance) - EPSILON) continue;
+                if (radius + k * root <= EPSILON) continue;
+
+                const delta = 1e-7 * distanceSign;
+                const before = getTangencyMeasure(s, radius, k, root - delta);
+                const after = getTangencyMeasure(s, radius, k, root + delta);
+                if (!(before <= EPSILON && after >= -EPSILON)) continue;
+
+                if (candidate == null || Math.abs(root) < Math.abs(candidate)) {
+                    candidate = root;
+                }
+            }
+        };
+
+        for (let i = 0; i < segments.length - 1; i += 1) {
+            const a = segments[i];
+            const b = segments[i + 1];
+
+            if (a?.type === "arc" && b?.type === "line") considerPair(a, b);
+            if (a?.type === "line" && b?.type === "arc") considerPair(b, a);
+        }
+
+        return candidate;
+    }
+
+    _findNextSplitDistance(segments, distance) {
+        const arcCollapse = this._findDegenerationSplitDistance(segments, distance);
+        const arcLineSeparation = this._findArcLineSeparationSplitDistance(segments, distance);
+
+        if (arcCollapse == null) return arcLineSeparation;
+        if (arcLineSeparation == null) return arcCollapse;
+
+        return Math.abs(arcCollapse) <= Math.abs(arcLineSeparation)
+            ? arcCollapse
+            : arcLineSeparation;
+    }
+
+    /**
      * Build one-sided open-contour offset with deterministic split points at arc
      * degeneration thresholds. This preserves the sequential invariant:
      * offset(d1 + d2) == offset(offset(d1), d2)
@@ -237,9 +370,10 @@ export class OffsetEngine {
         };
 
         // Split only at actual arc-collapse thresholds, then process remainder.
-        // This enforces multi-step consistency for direct offsets (d=3 behaves like d=2 then d=1).
+        // Also split exactly at arc-line tangency (first separation) so arc state at
+        // the break point is mathematically frozen before bridge logic.
         while (passes < MAX_DEGENERATION_SPLITS && Math.abs(remainingDistance) > EPSILON) {
-            const splitDistance = this._findDegenerationSplitDistance(workingContour, remainingDistance);
+            const splitDistance = this._findNextSplitDistance(workingContour, remainingDistance);
             if (splitDistance == null) {
                 return buildOffsetContour(workingContour, remainingDistance, buildOptions);
             }
@@ -789,6 +923,14 @@ export class OffsetEngine {
         return segments.filter((seg) => {
             if (!seg) return false;
             if (isSegmentDegenerated(seg)) return false;
+
+            if (seg.type === "line" && seg.start && seg.end) {
+                const dx = seg.end.x - seg.start.x;
+                const dy = seg.end.y - seg.start.y;
+                const len2 = dx * dx + dy * dy;
+                // Remove tiny link segments that round to identical endpoints in path output.
+                if (len2 <= 1e-12) return false;
+            }
 
             if (seg.type === "arc" && seg.start && seg.end) {
                 const dx = seg.end.x - seg.start.x;
