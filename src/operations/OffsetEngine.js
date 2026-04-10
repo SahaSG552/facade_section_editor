@@ -7,6 +7,9 @@ import { isSegmentDegenerated } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetEngine");
 const EPSILON = 1e-9;
+const MAX_DEGENERATION_SPLITS = 8;
+const MAX_MONOTONIC_OPEN_STEPS = 4096;
+const MONOTONIC_OPEN_STEP = 0.01;
 
 /**
  * Reverse an open contour segment chain for offset normalization.
@@ -54,6 +57,34 @@ function getArcRadiusFromSegment(segment) {
     }
 
     return null;
+}
+
+function lineDirection(segment) {
+    if (!segment?.start || !segment?.end) return null;
+    const dx = segment.end.x - segment.start.x;
+    const dy = segment.end.y - segment.start.y;
+    const len = Math.hypot(dx, dy);
+    if (!Number.isFinite(len) || len <= EPSILON) return null;
+    return { x: dx / len, y: dy / len };
+}
+
+function leftNormal(direction) {
+    return { x: -direction.y, y: direction.x };
+}
+
+function dot2(a, b) {
+    return a.x * b.x + a.y * b.y;
+}
+
+function lineLineIntersectionPoint(p, d, q, e) {
+    const det = d.x * e.y - d.y * e.x;
+    if (Math.abs(det) <= EPSILON) {
+        return null;
+    }
+    const qpx = q.x - p.x;
+    const qpy = q.y - p.y;
+    const t = (qpx * e.y - qpy * e.x) / det;
+    return { x: p.x + d.x * t, y: p.y + d.y * t };
 }
 
 /**
@@ -136,6 +167,15 @@ export class OffsetEngine {
         return this._processSegmentsSync(segments, distance, options);
     }
 
+    /**
+     * Find the earliest signed distance at which any shrinking arc in the
+     * contour collapses (new radius becomes 0), provided the requested
+     * absolute distance crosses that threshold.
+     *
+     * @param {Array<Object>} segments - Contour segments.
+     * @param {number} distance - Remaining signed offset distance.
+     * @returns {number|null} Signed split distance or null when no split is needed.
+     */
     _findDegenerationSplitDistance(segments, distance) {
         if (!Array.isArray(segments) || segments.length === 0 || !Number.isFinite(distance)) {
             return null;
@@ -174,6 +214,17 @@ export class OffsetEngine {
         return candidate;
     }
 
+    /**
+     * Build one-sided open-contour offset with deterministic split points at arc
+     * degeneration thresholds. This preserves the sequential invariant:
+     * offset(d1 + d2) == offset(offset(d1), d2)
+     * when arcs collapse during the operation.
+     *
+     * @param {Array<Object>} sourceContour - Input contour segments.
+     * @param {number} distance - Signed distance to apply.
+     * @param {OffsetEngineOptions} resolvedOptions - Resolved engine options.
+     * @returns {Array<Object>} Offset segments from OffsetContourBuilder.
+     */
     _buildOpenOffsetWithDegenerationSplits(sourceContour, distance, resolvedOptions) {
         let workingContour = sourceContour;
         let remainingDistance = distance;
@@ -187,7 +238,7 @@ export class OffsetEngine {
 
         // Split only at actual arc-collapse thresholds, then process remainder.
         // This enforces multi-step consistency for direct offsets (d=3 behaves like d=2 then d=1).
-        while (passes < 8 && Math.abs(remainingDistance) > EPSILON) {
+        while (passes < MAX_DEGENERATION_SPLITS && Math.abs(remainingDistance) > EPSILON) {
             const splitDistance = this._findDegenerationSplitDistance(workingContour, remainingDistance);
             if (splitDistance == null) {
                 return buildOffsetContour(workingContour, remainingDistance, buildOptions);
@@ -204,6 +255,195 @@ export class OffsetEngine {
         }
 
         return buildOffsetContour(workingContour, remainingDistance, buildOptions);
+    }
+
+    /**
+     * Build open one-sided offset through monotonic signed steps.
+     *
+     * Why: direct large-distance builds can skip intermediate topology transitions
+     * (e.g., short-line collapse after arc degeneration), causing forbidden
+     * "resurrection" or vector inversion. Stepwise accumulation enforces:
+     *   offset(base, d1+d2) == offset(offset(base, d1), d2)
+     * for open contours in direct-sign mode.
+     *
+     * @param {Array<Object>} sourceContour - Input contour.
+     * @param {number} distance - Signed total distance.
+     * @param {OffsetEngineOptions} resolvedOptions - Resolved options.
+     * @returns {Array<Object>} Offset contour segments.
+     */
+    _buildOpenOffsetMonotonic(sourceContour, distance, resolvedOptions) {
+        let workingContour = sourceContour;
+        let remainingDistance = distance;
+        let steps = 0;
+        let collapseGuide = null;
+
+        const tryCreateCollapseGuide = (beforeSegments, afterSegments) => {
+            if (!Array.isArray(beforeSegments) || beforeSegments.length < 2) return null;
+            if (!Array.isArray(afterSegments) || afterSegments.length !== 1) return null;
+
+            const survivor = afterSegments[0];
+            const first = beforeSegments[0];
+            const last = beforeSegments[beforeSegments.length - 1];
+
+            const survivorSource = Number.isInteger(survivor?.__sourceIndex) ? survivor.__sourceIndex : null;
+            const firstSource = Number.isInteger(first?.__sourceIndex) ? first.__sourceIndex : null;
+            const lastSource = Number.isInteger(last?.__sourceIndex) ? last.__sourceIndex : null;
+
+            const scoreSegmentMatch = (a, b) => {
+                const ad = lineDirection(a);
+                const bd = lineDirection(b);
+                if (!ad || !bd) return -Infinity;
+                const align = Math.abs(dot2(ad, bd));
+                const amid = { x: (a.start.x + a.end.x) / 2, y: (a.start.y + a.end.y) / 2 };
+                const bmid = { x: (b.start.x + b.end.x) / 2, y: (b.start.y + b.end.y) / 2 };
+                const dist = Math.hypot(amid.x - bmid.x, amid.y - bmid.y);
+                return align - dist * 1e-3;
+            };
+
+            let side = null;
+            if (survivorSource != null && firstSource != null && survivorSource === firstSource) {
+                side = "tail";
+            } else if (survivorSource != null && lastSource != null && survivorSource === lastSource) {
+                side = "head";
+            }
+
+            if (!side) {
+                if (this._pointsEqual(survivor.start, first.start, EPSILON * 10)) side = "tail";
+                else if (this._pointsEqual(survivor.end, last.end, EPSILON * 10)) side = "head";
+            }
+
+            if (!side) {
+                const firstScore = scoreSegmentMatch(survivor, first);
+                const lastScore = scoreSegmentMatch(survivor, last);
+                side = firstScore >= lastScore ? "tail" : "head";
+            }
+
+            let collapsedNeighbor = null;
+            if (side === "tail") {
+                for (let i = beforeSegments.length - 1; i >= 0; i -= 1) {
+                    if (beforeSegments[i]?.type === "line") {
+                        collapsedNeighbor = beforeSegments[i];
+                        break;
+                    }
+                }
+            } else {
+                for (let i = 0; i < beforeSegments.length; i += 1) {
+                    if (beforeSegments[i]?.type === "line") {
+                        collapsedNeighbor = beforeSegments[i];
+                        break;
+                    }
+                }
+            }
+            if (!collapsedNeighbor) return null;
+
+            const collapsedDir = lineDirection(collapsedNeighbor);
+            if (!collapsedDir) return null;
+
+            const lineSeg = afterSegments[0];
+            const lineDir = lineDirection(lineSeg);
+            if (!lineDir) return null;
+
+            return {
+                side,
+                collapsedDirection: collapsedDir,
+                collapsedNormal: leftNormal(collapsedDir),
+                collapsedLinePoint: side === "tail"
+                    ? { x: lineSeg.end.x, y: lineSeg.end.y }
+                    : { x: lineSeg.start.x, y: lineSeg.start.y },
+                advanceBeforeUse: false,
+            };
+        };
+
+        const applyCollapseGuide = (segments, stepDistance) => {
+            if (!collapseGuide || !Array.isArray(segments) || segments.length !== 1) {
+                return segments;
+            }
+            const seg = segments[0];
+            if (seg.type !== "line") return segments;
+
+            const lineDir = lineDirection(seg);
+            if (!lineDir) return segments;
+
+            if (collapseGuide.advanceBeforeUse) {
+                collapseGuide.collapsedLinePoint = {
+                    x: collapseGuide.collapsedLinePoint.x + collapseGuide.collapsedNormal.x * stepDistance,
+                    y: collapseGuide.collapsedLinePoint.y + collapseGuide.collapsedNormal.y * stepDistance,
+                };
+            } else {
+                collapseGuide.advanceBeforeUse = true;
+            }
+
+            const linePoint = collapseGuide.side === "tail"
+                ? seg.end
+                : seg.start;
+            const inter = lineLineIntersectionPoint(
+                linePoint,
+                lineDir,
+                collapseGuide.collapsedLinePoint,
+                collapseGuide.collapsedDirection,
+            );
+            if (!inter || !Number.isFinite(inter.x) || !Number.isFinite(inter.y)) {
+                return segments;
+            }
+
+            if (collapseGuide.side === "tail") {
+                const fixed = seg.start;
+                const t = dot2({ x: inter.x - fixed.x, y: inter.y - fixed.y }, lineDir);
+                if (t <= EPSILON) return [];
+                seg.end = {
+                    x: fixed.x + lineDir.x * t,
+                    y: fixed.y + lineDir.y * t,
+                };
+            } else {
+                const fixed = seg.end;
+                const backDir = { x: -lineDir.x, y: -lineDir.y };
+                const t = dot2({ x: inter.x - fixed.x, y: inter.y - fixed.y }, backDir);
+                if (t <= EPSILON) return [];
+                seg.start = {
+                    x: fixed.x + backDir.x * t,
+                    y: fixed.y + backDir.y * t,
+                };
+            }
+
+            return segments;
+        };
+
+        while (Math.abs(remainingDistance) > EPSILON && steps < MAX_MONOTONIC_OPEN_STEPS) {
+            const stepMagnitude = Math.min(MONOTONIC_OPEN_STEP, Math.abs(remainingDistance));
+            const stepDistance = Math.sign(remainingDistance) * stepMagnitude;
+
+            const partialRaw = this._buildOpenOffsetWithDegenerationSplits(
+                workingContour,
+                stepDistance,
+                resolvedOptions,
+            );
+
+            const nextGuide = tryCreateCollapseGuide(workingContour, partialRaw);
+            if (nextGuide) {
+                collapseGuide = nextGuide;
+            }
+
+            const partial = applyCollapseGuide(partialRaw, stepDistance);
+
+            if (!Array.isArray(partial) || partial.length === 0) {
+                return partial;
+            }
+
+            workingContour = partial;
+            remainingDistance -= stepDistance;
+            steps += 1;
+        }
+
+        if (Math.abs(remainingDistance) > EPSILON) {
+            // Safety fallback for very large distances: apply remaining in one pass.
+            return this._buildOpenOffsetWithDegenerationSplits(
+                workingContour,
+                remainingDistance,
+                resolvedOptions,
+            );
+        }
+
+        return workingContour;
     }
 
     _processPathSync(pathData, distance, options = {}) {
@@ -370,14 +610,18 @@ export class OffsetEngine {
 
                     // Default one-sided (open contour): determine effective distance.
                     // - Cursor-side mode: distance has already been sign-resolved by _processPathSync.
-                    // - Legacy (no cursor): negate distance for CCW-wound open paths so that
+                    // - Direct mode: trust the caller-provided sign as-is.
+                    // - Legacy mode (default): negate distance for CCW-wound open paths so that
                     //   positive user distance consistently means "outward" regardless of orientation.
                     const hasCursorSideResolution =
                         resolvedOptions.sideResolution === "nearest-segment-normal" &&
                         !!resolvedOptions.cursorPoint;
+                    const useDirectOpenSign = resolvedOptions.offsetSignMode === "direct";
                     const openEffectiveDistance = hasCursorSideResolution
                         ? distance
-                        : (this._computeSignedArea(sourceContour) > 0 ? -distance : distance);
+                        : (useDirectOpenSign
+                            ? distance
+                            : (this._computeSignedArea(sourceContour) > 0 ? -distance : distance));
 
                     // Normalize: all join/bridge rules in buildOffsetContour were built around
                     // the convention that distance < 0 means "offset to the left of traversal".
@@ -390,11 +634,12 @@ export class OffsetEngine {
                         : sourceContour;
                     const buildDistance = needsNormalization ? -openEffectiveDistance : openEffectiveDistance;
 
-                    let offsetSegments = this._buildOpenOffsetWithDegenerationSplits(
-                        buildSegs,
-                        buildDistance,
-                        resolvedOptions,
-                    );
+                    const useMonotonicOpenBuild =
+                        useDirectOpenSign && Math.abs(buildDistance) > EPSILON;
+
+                    let offsetSegments = useMonotonicOpenBuild
+                        ? this._buildOpenOffsetMonotonic(buildSegs, buildDistance, resolvedOptions)
+                        : this._buildOpenOffsetWithDegenerationSplits(buildSegs, buildDistance, resolvedOptions);
 
                     if (needsNormalization && Array.isArray(offsetSegments) && offsetSegments.length > 0) {
                         offsetSegments = reverseContourForOffset(offsetSegments);

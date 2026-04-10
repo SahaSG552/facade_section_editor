@@ -15,6 +15,9 @@ import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { OffsetEngine, calculateOffsetFromPathData as engineCalculateOffset } from "./OffsetEngine.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
+const COMMAND_RE = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
+const SUBPATH_RE = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
+const HAS_CLOSE_COMMAND_RE = /[Zz]/;
 
 /**
  * Compute signed area of an SVG path (positive = CCW, negative = CW).
@@ -23,7 +26,7 @@ const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 function signedArea(pathData) {
     let area = 0;
     let cx = 0, cy = 0, sx = 0, sy = 0;
-    const re = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
+    const re = new RegExp(COMMAND_RE);
     for (;;) {
         const match = re.exec(pathData);
         if (match === null) break;
@@ -54,7 +57,7 @@ function reversePath(pathData) {
     // Parse into subpaths, reverse each, then reverse subpath order
     const subpaths = [];
     let current = [];
-    const re = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
+    const re = new RegExp(SUBPATH_RE);
     for (;;) {
         const match = re.exec(pathData);
         if (match === null) break;
@@ -142,22 +145,19 @@ function reversePath(pathData) {
 }
 
 /**
- * Ensure path is CW orientation. If CCW, reverse it.
- */
-function ensureCW(pathData) {
-    const area = signedArea(pathData);
-    if (area > 0) {
-        // CCW → reverse to CW
-        return reversePath(pathData);
-    }
-    return pathData;
-}
-
-/**
  * Calculate offset for SVG path data using OffsetEngine.
  * @param {string} pathData - SVG path data
  * @param {number} offset - Offset distance
  * @param {Object} options - Offset options
+ * @param {"sharp"|"round"} [options.join] - Join type.
+ * @param {"flat"|"round"} [options.cap] - Cap type.
+ * @param {Object} [options.exportModule] - Export module with parser dependencies.
+ * @param {boolean} [options.trimSelfIntersections] - Override trim policy.
+ * @param {"nearest-segment-normal"} [options.sideResolution] - Open-path cursor side resolver.
+ * @param {{x:number,y:number}} [options.cursorPoint] - Cursor in path-space coords.
+ * @param {boolean} [options.useArcApproximation] - Enable cubic arc approximation path.
+ * @param {number} [options.arcTolerance] - Approximation tolerance.
+ * @param {boolean} [options.forceReverseOutput] - Preserve legacy passthrough at near-zero offset.
  * @returns {string} SVG path data
  */
 export function calculateOffsetFromPathData(pathData, offset, options = {}) {
@@ -171,7 +171,7 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
         // Preserve winding only for closed paths. For open contours, signed-area
         // is not a stable orientation signal and can cause spurious reversals
         // across sequential offsets (breaking bridge direction consistency).
-        const inputHasClose = /[Zz]/.test(pathData);
+        const inputHasClose = HAS_CLOSE_COMMAND_RE.test(pathData);
         const originalCCW = inputHasClose ? signedArea(pathData) > 0 : null;
 
         // Main canvas expects: positive offset = inward.

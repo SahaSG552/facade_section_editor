@@ -1384,11 +1384,7 @@ function stitchCollapsedArcThroughNeighborLineSupport(
     getTangent(next, "start")
   );
 
-  if (
-    !prevNextIntersection ||
-    !Number.isFinite(prevNextIntersection.x) ||
-    !Number.isFinite(prevNextIntersection.y)
-  ) {
+  if (!isFinitePoint(prevNextIntersection)) {
     return false;
   }
 
@@ -1397,9 +1393,7 @@ function stitchCollapsedArcThroughNeighborLineSupport(
   updateArcEndpointAndAngle(current, "end", prevNextIntersection);
   next.start = clonePoint(prevNextIntersection);
 
-  if (closed && nextIdx === 0 && result.length > 0) {
-    result[0].start = clonePoint(prevNextIntersection);
-  }
+  syncClosedLoopStart(result, closed, nextIdx, prevNextIntersection);
 
   return true;
 }
@@ -1424,6 +1418,43 @@ function computeSharpJoin(p1, d1, p2, d2, offsetDistance) {
   const canApply = dist1 <= maxMiterLen && dist2 <= maxMiterLen;
 
   return { intersection, canApply };
+}
+
+/**
+ * Check that a point object has finite numeric coordinates.
+ *
+ * @param {{x:number,y:number}|null|undefined} point
+ * @returns {boolean}
+ */
+function isFinitePoint(point) {
+  return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
+}
+
+/**
+ * Stitch two neighboring segments at a shared join point.
+ *
+ * @param {Object} current
+ * @param {Object} next
+ * @param {{x:number,y:number}} point
+ */
+function stitchJoinAtPoint(current, next, point) {
+  setSegmentEndpoint(current, "end", point);
+  setSegmentEndpoint(next, "start", point);
+}
+
+/**
+ * Keep first segment start synchronized when the final join in a closed
+ * contour mutates the stitched connection point.
+ *
+ * @param {Array<Object>} result
+ * @param {boolean} closed
+ * @param {number} nextIdx
+ * @param {{x:number,y:number}} point
+ */
+function syncClosedLoopStart(result, closed, nextIdx, point) {
+  if (closed && nextIdx === 0 && result.length > 0) {
+    result[0].start = clonePoint(point);
+  }
 }
 
 function createArcJoin(p1, p2, vertex, offsetDistance) {
@@ -1611,13 +1642,10 @@ export function buildOffsetContour(segments, distance, options = {}) {
         })();
 
         if (directIntersection) {
-          setSegmentEndpoint(current, "end", directIntersection);
-          setSegmentEndpoint(next, "start", directIntersection);
+          stitchJoinAtPoint(current, next, directIntersection);
           collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
 
-          if (closed && nextIdx === 0 && result.length > 0) {
-            result[0].start = clonePoint(directIntersection);
-          }
+          syncClosedLoopStart(result, closed, nextIdx, directIntersection);
           continue;
         }
 
@@ -1695,6 +1723,8 @@ export function buildOffsetContour(segments, distance, options = {}) {
           // For arc→line or line→arc convex joins, try geometric circle-line intersection first.
           // This gives the correct trim point even when the arc end angle needs to be updated
           // (e.g., when the offset arc's sweep grows beyond the original angular range).
+          let lineToArcNoIntersection = false;
+          let lineToArcRadius = null;
           const arcLineTrimmed = (() => {
             if (current.type === "arc" && next.type === "line") {
               const center = getArcCenter(current.arc, current);
@@ -1704,8 +1734,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 findCircleLineSegmentIntersection(center, radius, next, current.end) ??
                 findCircleLineIntersection(center, radius, next, next.start);
               if (!pt) return false;
-              setSegmentEndpoint(current, "end", pt);
-              setSegmentEndpoint(next, "start", pt);
+              stitchJoinAtPoint(current, next, pt);
               // If arc degenerated (start≈end after trimming), remove it from result.
               // Use a practical chord tolerance (1e-3) to handle floating-point center imprecision.
               const chordLen = Math.hypot(current.start.x - current.end.x, current.start.y - current.end.y);
@@ -1716,24 +1745,23 @@ export function buildOffsetContour(segments, distance, options = {}) {
                   setSegmentEndpoint(result[result.length - 1], "end", pt);
                 }
               }
-              if (closed && nextIdx === 0 && result.length > 0) {
-                result[0].start = clonePoint(pt);
-              }
+              syncClosedLoopStart(result, closed, nextIdx, pt);
               return true;
             }
             if (current.type === "line" && next.type === "arc") {
               const center = getArcCenter(next.arc, next);
               const radius = getArcRadius(next.arc, next);
+              lineToArcRadius = radius;
               if (!center || radius == null) return false;
               const pt =
                 findCircleLineSegmentIntersection(center, radius, current, next.start) ??
                 findCircleLineIntersection(center, radius, current, next.start);
-              if (!pt) return false;
-              setSegmentEndpoint(current, "end", pt);
-              setSegmentEndpoint(next, "start", pt);
-              if (closed && nextIdx === 0 && result.length > 0) {
-                result[0].start = clonePoint(pt);
+              if (!pt) {
+                lineToArcNoIntersection = true;
+                return false;
               }
+              stitchJoinAtPoint(current, next, pt);
+              syncClosedLoopStart(result, closed, nextIdx, pt);
               return true;
             }
             return false;
@@ -1741,6 +1769,31 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
           if (arcLineTrimmed) {
             continue;
+          }
+
+          // Pre-collapse anti-parallel line->arc case: near-separating geometry where
+          // the arc has not collapsed yet, but line/arc already lose intersection.
+          // Use sharp tangent bridge legs for orientation-invariant behavior.
+          if (lineToArcNoIntersection) {
+            const isAntiParallel = dot(inTangent, outTangent) < -0.5;
+            const isPreCollapse =
+              typeof lineToArcRadius === "number" &&
+              Number.isFinite(lineToArcRadius) &&
+              Math.abs(distance) + EPSILON < lineToArcRadius;
+
+            if (isAntiParallel && isPreCollapse) {
+              const sharpBridge = buildSharpTangentBridge(
+                current,
+                next,
+                inTangent,
+                outTangent,
+                distance
+              );
+              if (sharpBridge.length > 0) {
+                result.push(...sharpBridge);
+                continue;
+              }
+            }
           }
 
           const sharpJoin = computeSharpJoin(
@@ -1753,15 +1806,12 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
           if (sharpJoin && sharpJoin.canApply) {
             // Sharp join is valid: trim current at intersection and stitch next segment
-            setSegmentEndpoint(current, "end", sharpJoin.intersection);
-            setSegmentEndpoint(next, "start", sharpJoin.intersection); // FIX: stitch next segment to close gap
+            stitchJoinAtPoint(current, next, sharpJoin.intersection); // FIX: stitch next segment to close gap
 
             // For closed contours, the last join (i = numSegs-1, nextIdx = 0)
             // modifies offsetSegments[0].start but result[0] was already pushed
             // with the original start. Update result[0].start to close the loop.
-            if (closed && nextIdx === 0 && result.length > 0) {
-              result[0].start = clonePoint(sharpJoin.intersection);
-            }
+            syncClosedLoopStart(result, closed, nextIdx, sharpJoin.intersection);
           } else {
             // Miter limit exceeded: use diverging-only fallback with strict priority for non-diverging
             const diverging = isDivergingJoin(
@@ -1776,21 +1826,45 @@ export function buildOffsetContour(segments, distance, options = {}) {
               // Order: direct intersection -> tangent bridge -> arc fallback
               const directIntersection = findJoinIntersection(current, next);
 
-              if (
-                directIntersection &&
-                Number.isFinite(directIntersection.x) &&
-                Number.isFinite(directIntersection.y)
-              ) {
+              if (isFinitePoint(directIntersection)) {
                 // Stitch both segments to intersection point
-                setSegmentEndpoint(current, "end", directIntersection);
-                setSegmentEndpoint(next, "start", directIntersection);
+                stitchJoinAtPoint(current, next, directIntersection);
                 collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
 
                 // Update result[0].start for closed contours
-                if (closed && nextIdx === 0 && result.length > 0) {
-                  result[0].start = clonePoint(directIntersection);
-                }
+                syncClosedLoopStart(result, closed, nextIdx, directIntersection);
               } else {
+                const isAntiParallel = dot(inTangent, outTangent) < -0.5;
+                const isLineToArc = current.type === "line" && next.type === "arc";
+                const isArcToLine = current.type === "arc" && next.type === "line";
+
+                let isShrinkingPreCollapseArc = false;
+                if (isLineToArc || isArcToLine) {
+                  const arcSeg = isLineToArc ? next : current;
+                  const arcRadius = getArcRadiusFromSegment(arcSeg);
+                  if (arcRadius != null) {
+                    const sweepFlag = arcSeg.arc?.sweepFlag === 1 ? 1 : 0;
+                    const k = sweepFlag === 1 ? -1 : 1;
+                    const shrinking = distance * k < 0;
+                    const preCollapse = Math.abs(distance) + EPSILON < arcRadius;
+                    isShrinkingPreCollapseArc = shrinking && preCollapse;
+                  }
+                }
+
+                if (isAntiParallel && isShrinkingPreCollapseArc && (isLineToArc || isArcToLine)) {
+                  const antiParallelBridge = buildSharpTangentBridge(
+                    current,
+                    next,
+                    inTangent,
+                    outTangent,
+                    distance
+                  );
+                  if (antiParallelBridge.length > 0) {
+                    result.push(...antiParallelBridge);
+                    continue;
+                  }
+                }
+
                 const stitchedCollapsedArc =
                   shouldCollapseArcLineJoin(current, next, EPSILON) &&
                   stitchCollapsedArcThroughNeighborLineSupport(
@@ -1807,9 +1881,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
                 const collapsedArcLine = tryCollapseArcLineJoin(current, next, EPSILON);
                 if (collapsedArcLine) {
-                  if (closed && nextIdx === 0 && result.length > 0) {
-                    result[0].start = clonePoint(next.start);
-                  }
+                  syncClosedLoopStart(result, closed, nextIdx, next.start);
                 } else {
                   const tangent = buildTangentBridge(current, next);
                   if (tangent) {
@@ -1881,8 +1953,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
               findCircleLineSegmentIntersection(center, radius, next, current.end) ??
               findCircleLineIntersection(center, radius, next, next.start);
             if (pt) {
-              setSegmentEndpoint(current, "end", pt);
-              setSegmentEndpoint(next, "start", pt);
+              stitchJoinAtPoint(current, next, pt);
               // If arc degenerated (start≈end after trimming), remove it from result.
               // Use a practical chord tolerance (1e-3) to handle floating-point center imprecision.
               const chordLen = Math.hypot(current.start.x - current.end.x, current.start.y - current.end.y);
@@ -1893,9 +1964,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
                   setSegmentEndpoint(result[result.length - 1], "end", pt);
                 }
               }
-              if (closed && nextIdx === 0 && result.length > 0) {
-                result[0].start = clonePoint(pt);
-              }
+              syncClosedLoopStart(result, closed, nextIdx, pt);
               concaveTrimmed = true;
             } else {
               // Circle doesn't intersect the line — arc has shrunk away from the line.
@@ -1910,11 +1979,8 @@ export function buildOffsetContour(segments, distance, options = {}) {
               findCircleLineSegmentIntersection(center, radius, current, next.start) ??
               findCircleLineIntersection(center, radius, current, next.start);
             if (pt) {
-              setSegmentEndpoint(current, "end", pt);
-              setSegmentEndpoint(next, "start", pt);
-              if (closed && nextIdx === 0 && result.length > 0) {
-                result[0].start = clonePoint(pt);
-              }
+              stitchJoinAtPoint(current, next, pt);
+              syncClosedLoopStart(result, closed, nextIdx, pt);
               concaveTrimmed = true;
             } else {
               circleLineIntersectionFailed = true;
@@ -1977,9 +2043,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 };
                 setSegmentEndpoint(next, "start", lineMatchPoint);
 
-                if (closed && nextIdx === 0 && result.length > 0) {
-                  result[0].start = clonePoint(lineMatchPoint);
-                }
+                syncClosedLoopStart(result, closed, nextIdx, lineMatchPoint);
               }
             } else if (current.type === "line" && next.type === "arc") {
               // Symmetric case: line→arc
@@ -2021,9 +2085,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 };
                 setSegmentEndpoint(current, "end", lineMatchPoint);
 
-                if (closed && nextIdx === 0 && result.length > 0) {
-                  result[0].start = clonePoint(lineMatchPoint);
-                }
+                syncClosedLoopStart(result, closed, nextIdx, lineMatchPoint);
               }
             }
 
@@ -2060,13 +2122,10 @@ export function buildOffsetContour(segments, distance, options = {}) {
           );
 
           if (trimJoin && trimJoin.canApply) {
-            setSegmentEndpoint(current, "end", trimJoin.intersection);
-            setSegmentEndpoint(next, "start", trimJoin.intersection);
+            stitchJoinAtPoint(current, next, trimJoin.intersection);
 
             // Same fix for closed contours: update result[0].start
-            if (closed && nextIdx === 0 && result.length > 0) {
-              result[0].start = clonePoint(trimJoin.intersection);
-            }
+            syncClosedLoopStart(result, closed, nextIdx, trimJoin.intersection);
           }
           // If trim can't apply, leave segments as-is (they'll be handled by downstream logic)
         }
@@ -2090,18 +2149,11 @@ export function buildOffsetContour(segments, distance, options = {}) {
             // Non-diverging tangent gap: prioritize geometric trim before bridges.
             const directIntersection = findJoinIntersection(current, next);
 
-            if (
-              directIntersection &&
-              Number.isFinite(directIntersection.x) &&
-              Number.isFinite(directIntersection.y)
-            ) {
-              setSegmentEndpoint(current, "end", directIntersection);
-              setSegmentEndpoint(next, "start", directIntersection);
+            if (isFinitePoint(directIntersection)) {
+              stitchJoinAtPoint(current, next, directIntersection);
               collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
 
-              if (closed && nextIdx === 0 && result.length > 0) {
-                result[0].start = clonePoint(directIntersection);
-              }
+              syncClosedLoopStart(result, closed, nextIdx, directIntersection);
             } else {
               // Anti-parallel tangent check: when inTangent ≈ -outTangent (U-turn geometry)
               // AND the junction is line→arc (not arc→line), isDivergingJoin gives an
@@ -2116,7 +2168,26 @@ export function buildOffsetContour(segments, distance, options = {}) {
               // stitch mechanisms that run after this block.
               const isAntiParallel = dot(inTangent, outTangent) < -0.5;
               const isLineToArc = current.type === "line" && next.type === "arc";
-              if (isAntiParallel && isLineToArc) {
+              const isArcToLine = current.type === "arc" && next.type === "line";
+
+              // Mirror-invariant anti-parallel policy:
+              // - line->arc and arc->line should behave symmetrically;
+              // - only apply while the arc is shrinking and has not collapsed yet,
+              //   otherwise keep legacy branches for post-collapse processing.
+              let isShrinkingPreCollapseArc = false;
+              if (isLineToArc || isArcToLine) {
+                const arcSeg = isLineToArc ? next : current;
+                const arcRadius = getArcRadiusFromSegment(arcSeg);
+                if (arcRadius != null) {
+                  const sweepFlag = arcSeg.arc?.sweepFlag === 1 ? 1 : 0;
+                  const k = sweepFlag === 1 ? -1 : 1;
+                  const shrinking = distance * k < 0;
+                  const preCollapse = Math.abs(distance) + EPSILON < arcRadius;
+                  isShrinkingPreCollapseArc = shrinking && preCollapse;
+                }
+              }
+
+              if (isAntiParallel && isShrinkingPreCollapseArc && (isLineToArc || isArcToLine)) {
                 const antiParallelBridge = buildSharpTangentBridge(
                   current,
                   next,
@@ -2146,9 +2217,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
               const collapsedArcLine = tryCollapseArcLineJoin(current, next, EPSILON);
               if (collapsedArcLine) {
-                if (closed && nextIdx === 0 && result.length > 0) {
-                  result[0].start = clonePoint(next.start);
-                }
+                syncClosedLoopStart(result, closed, nextIdx, next.start);
               } else {
                 const tangent = buildTangentBridge(current, next);
                 if (tangent) {
