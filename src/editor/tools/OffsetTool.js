@@ -41,6 +41,25 @@ function pointsBBox(points) {
     return { minX, minY, maxX, maxY, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 };
 }
 
+function contourSignedAreaEditor(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return 0;
+    const pts = [];
+    const first = segments[0]?.data?.start;
+    if (first) pts.push({ x: num(first.x), y: num(first.y) });
+    for (const seg of segments) {
+        const end = seg?.data?.end;
+        if (end) pts.push({ x: num(end.x), y: num(end.y) });
+    }
+    if (pts.length < 3) return 0;
+    let area = 0;
+    for (let i = 0; i < pts.length - 1; i += 1) {
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        area += p1.x * p2.y - p2.x * p1.y;
+    }
+    return area / 2;
+}
+
 function pointsEqual(a, b, eps = 1e-6) {
     return Math.abs(num(a?.x) - num(b?.x)) <= eps && Math.abs(num(a?.y) - num(b?.y)) <= eps;
 }
@@ -1294,9 +1313,11 @@ export default class OffsetTool extends BaseTool {
                     continue;
                 }
 
+                const previewDistance = dist * this._offsetDirection;
+                const engineDistance = this._resolveContourEngineDistance(entry, previewDistance);
                 const candidate = buildOffsetCandidate(
                     entry,
-                    dist * this._offsetDirection,
+                    engineDistance,
                     this._exportModule,
                     vars,
                     this._offsetCalculator,
@@ -1309,7 +1330,7 @@ export default class OffsetTool extends BaseTool {
                 if (candidate) {
                     this._previewPaths.push({
                         sourceId: entry.sourceId,
-                        distance: dist,
+                        distance: previewDistance,
                         pathData: candidate.pathData,
                         editorPathData: segmentsToEditorPathData(candidate.segments, candidate.allowClose),
                         allowClose: candidate.allowClose,
@@ -1323,6 +1344,22 @@ export default class OffsetTool extends BaseTool {
 
         this._publishOffsetDebugInfo();
         this._renderGhost();
+    }
+
+    _resolveContourEngineDistance(entry, signedDistance) {
+        if (!entry?.closed || !Array.isArray(entry.chain) || entry.chain.length === 0) {
+            return signedDistance;
+        }
+
+        const area = contourSignedAreaEditor(entry.chain);
+        const orientationSign = area >= 0 ? 1 : -1;
+        const arcCount = entry.chain.filter((seg) => seg?.type === "arc").length;
+        const lineCount = entry.chain.length - arcCount;
+        const arcOnlySign = arcCount > 0 && lineCount === 0 ? -1 : 1;
+
+        // UI sign is normalized (+ outside). Engine closed-contour sign still depends
+        // on winding and arc-only sweep convention, so map explicitly.
+        return signedDistance * orientationSign * arcOnlySign;
     }
 
     _publishOffsetDebugInfo() {
@@ -1498,6 +1535,8 @@ export default class OffsetTool extends BaseTool {
 
         for (const entry of this._sourceEntries) {
             if (entry.kind !== "contour") continue;
+            const contourArea = entry.closed ? contourSignedAreaEditor(entry.chain) : 0;
+            const outsideIsLeft = !entry.closed || contourArea < 0;
             const chain = entry.chain || [];
             for (const seg of chain) {
                 const d = seg?.data;
@@ -1516,7 +1555,10 @@ export default class OffsetTool extends BaseTool {
 
                     // Get arc center
                     let cx = null, cy = null;
-                    if (d._expr?.center && Number.isFinite(d._expr.center.x)) {
+                    if (d.center && Number.isFinite(d.center.x)) {
+                        cx = num(d.center.x);
+                        cy = num(d.center.y);
+                    } else if (d._expr?.center && Number.isFinite(d._expr.center.x)) {
                         cx = num(d._expr.center.x);
                         cy = num(d._expr.center.y);
                     } else if (d._expr?.cx !== undefined && Number.isFinite(d._expr.cx)) {
@@ -1528,7 +1570,8 @@ export default class OffsetTool extends BaseTool {
                     }
 
                     if (cx === null || cy === null) {
-                        const center = this._computeArcCenter(ax, ay, bx, by, rx, ry, largeArc, sweep);
+                        const sweepSvg = Math.round(1 - sweep);
+                        const center = this._computeArcCenter(ax, ay, bx, by, rx, ry, largeArc, sweepSvg);
                         if (center) { cx = center.x; cy = center.y; }
                         else continue;
                     }
@@ -1551,6 +1594,10 @@ export default class OffsetTool extends BaseTool {
                         const dir = sweep === 1 ? -1 : 1;
                         nx = dir * ndx / nLen;
                         ny = dir * ndy / nLen;
+                        if (!outsideIsLeft) {
+                            nx = -nx;
+                            ny = -ny;
+                        }
                     } else {
                         nx = 0; ny = 1;
                     }
@@ -1569,6 +1616,10 @@ export default class OffsetTool extends BaseTool {
                     const nLen = Math.hypot(nx, ny);
                     if (nLen > 1e-9) { nx /= nLen; ny /= nLen; }
                     else { nx = 0; ny = 1; }
+                    if (!outsideIsLeft) {
+                        nx = -nx;
+                        ny = -ny;
+                    }
                 }
 
                 if (unsignedDist < bestDist) {

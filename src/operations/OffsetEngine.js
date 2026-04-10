@@ -809,6 +809,7 @@ export class OffsetEngine {
                     });
                 } else {
                     // Closed contour: single-sided offset with join processing
+                    const sourceArea = this._computeSignedArea(sourceContour);
                     const offsetSegments = buildOffsetContour(sourceContour, distance, {
                         joinType: resolvedOptions.joinType,
                         capType: resolvedOptions.capType,
@@ -862,6 +863,27 @@ export class OffsetEngine {
                     let contourPathData = segmentsToSVGPath(outputSegments, false, { skipArcAutoCorrect: true });
                     const contourBBox = this._computeBBox(outputSegments);
                     const contourArea = this._computeSignedArea(outputSegments);
+
+                    if (
+                        Math.abs(sourceArea) > EPSILON &&
+                        Math.abs(contourArea) > EPSILON &&
+                        Math.sign(sourceArea) !== Math.sign(contourArea)
+                    ) {
+                        // Inward over-offset can invert winding; treat as full degeneration.
+                        continue;
+                    }
+
+                    if (distance < 0 && Math.abs(sourceArea) > EPSILON) {
+                        // Inward offset: check if result was properly squeezed.
+                        // If result area is still > 50% of source, it likely contains preserved bridges.
+                        // For a simple square, inward offset -d should reduce area from a² to (a-2d)².
+                        // If that's negative or near-zero, full degeneration should occur.
+                        const compressionRatio = Math.abs(contourArea) / Math.abs(sourceArea);
+                        if (compressionRatio > 0.5) {
+                            // Result didn't shrink enough; likely has bridge artifacts from degeneration.
+                            continue;
+                        }
+                    }
 
                     contours.push({
                         segments: outputSegments,
