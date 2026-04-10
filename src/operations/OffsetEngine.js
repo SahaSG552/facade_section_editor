@@ -873,18 +873,6 @@ export class OffsetEngine {
                         continue;
                     }
 
-                    if (distance < 0 && Math.abs(sourceArea) > EPSILON) {
-                        // Inward offset: check if result was properly squeezed.
-                        // If result area is still > 50% of source, it likely contains preserved bridges.
-                        // For a simple square, inward offset -d should reduce area from a² to (a-2d)².
-                        // If that's negative or near-zero, full degeneration should occur.
-                        const compressionRatio = Math.abs(contourArea) / Math.abs(sourceArea);
-                        if (compressionRatio > 0.5) {
-                            // Result didn't shrink enough; likely has bridge artifacts from degeneration.
-                            continue;
-                        }
-                    }
-
                     contours.push({
                         segments: outputSegments,
                         pathData: contourPathData,
