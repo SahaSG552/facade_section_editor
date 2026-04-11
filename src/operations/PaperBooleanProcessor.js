@@ -121,8 +121,26 @@ function selectByOverlap(path, referencePath) {
     return "";
 }
 
-export function resolveSelfIntersections(pathData, options = {}) {
-    if (!pathData) return "";
+function collectPathComponents(path) {
+    if (!path) return [];
+
+    if (path.children && path.children.length > 0) {
+        return path.children
+            .map((child) => ({
+                pathData: child?.pathData || "",
+                area: Number(child?.area) || 0,
+                clockwise: !!child?.clockwise,
+            }))
+            .filter((entry) => !!entry.pathData);
+    }
+
+    return path.pathData
+        ? [{ pathData: path.pathData, area: Number(path.area) || 0, clockwise: !!path.clockwise }]
+        : [];
+}
+
+export function resolveSelfIntersectionsDetailed(pathData, options = {}) {
+    if (!pathData) return { pathData: "", components: [], hadSelfIntersections: false };
 
     const tempCanvas = document.createElement("canvas");
     paper.setup(tempCanvas);
@@ -130,42 +148,59 @@ export function resolveSelfIntersections(pathData, options = {}) {
     try {
         const subject = createCompoundPathFromPathData(pathData);
         if (!subject) {
-            return "";
+            return { pathData: "", components: [], hadSelfIntersections: false };
         }
 
         ensureClosed(subject);
 
+        const intersections = subject.getIntersections(subject) || [];
+        const crossingIntersections = intersections.filter((location) =>
+            typeof location?.isCrossing === "function" ? location.isCrossing() : false
+        );
+        const hadSelfIntersections = crossingIntersections.length > 0;
+
+        if (!hadSelfIntersections) {
+            const passthroughPath = subject.pathData || pathData;
+            subject.remove();
+            return { pathData: passthroughPath, components: [], hadSelfIntersections: false };
+        }
+
         let referencePath = null;
         if (options.referencePathData) {
-            referencePath = createCompoundPathFromPathData(
-                options.referencePathData
-            );
+            referencePath = createCompoundPathFromPathData(options.referencePathData);
             if (referencePath) {
                 ensureClosed(referencePath);
             }
         }
 
-        const result = subject.unite(subject);
-        let cleaned = "";
-        if (referencePath) {
-            cleaned = selectByOverlap(result, referencePath);
+        const result = typeof subject.resolveCrossings === "function"
+            ? subject.resolveCrossings()
+            : subject.unite(subject);
+        let components = collectPathComponents(result);
+
+        if (referencePath && !options.preserveAllComponents) {
+            const selectedPathData = selectByOverlap(result, referencePath);
+            components = components.filter((entry) => entry.pathData === selectedPathData);
         }
-        if (!cleaned) {
-            cleaned = result?.pathData || "";
-        }
+
+        const cleanedPathData = components.map((entry) => entry.pathData).filter(Boolean).join(" ").trim();
 
         subject.remove();
         referencePath?.remove?.();
         result?.remove?.();
 
-        return cleaned;
+        return { pathData: cleanedPathData, components, hadSelfIntersections: true };
     } catch (error) {
         console.error("Paper.js self-union failed:", error);
-        return "";
+        return { pathData: "", components: [], hadSelfIntersections: false };
     } finally {
         paper.project.clear();
         paper.project.remove();
     }
+}
+
+export function resolveSelfIntersections(pathData, options = {}) {
+    return resolveSelfIntersectionsDetailed(pathData, options).pathData;
 }
 
 /**

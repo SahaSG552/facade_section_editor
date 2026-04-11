@@ -17,6 +17,7 @@ import { describe, it, expect, vi } from "vitest";
 // Mock Paper.js-dependent module so OffsetTrimmer can be imported
 vi.mock("../src/operations/PaperBooleanProcessor.js", () => ({
     resolveSelfIntersections: (pathData) => pathData,
+    resolveSelfIntersectionsDetailed: (pathData) => ({ pathData, components: [] }),
 }));
 
 import OffsetCurveEvaluator from "../src/operations/OffsetCurveEvaluator.js";

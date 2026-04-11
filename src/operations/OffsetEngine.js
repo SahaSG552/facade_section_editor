@@ -1,12 +1,13 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { buildOffsetContour } from "./OffsetContourBuilder.js";
-import { trimSelfIntersections } from "./OffsetTrimmer.js";
+import { trimSelfIntersections, trimSelfIntersectionsDetailed } from "./OffsetTrimmer.js";
 import { capBothSides } from "./OffsetCapper.js";
 import { segmentsToSVGPath } from "../utils/arcApproximation.js";
 import { isSegmentDegenerated } from "./OffsetRules.js";
 
 const log = LoggerFactory.createLogger("OffsetEngine");
 const EPSILON = 1e-9;
+const STITCH_BRIDGE_THRESHOLD = 1e-3;
 const MAX_DEGENERATION_SPLITS = 8;
 const MAX_MONOTONIC_OPEN_STEPS = 4096;
 const MONOTONIC_OPEN_STEP = 0.01;
@@ -848,39 +849,45 @@ export class OffsetEngine {
                     }
 
                     const stitchedSegments = this._stitchSegments(offsetSegments, true);
+                    const trimmedComponents = resolvedOptions.trimSelfIntersections !== false
+                        ? trimSelfIntersectionsDetailed(stitchedSegments)
+                        : [];
+                    const resolvedContours = trimmedComponents.length > 0
+                        ? trimmedComponents
+                            .filter((component) => {
+                                if (Math.abs(sourceArea) <= EPSILON || Math.abs(component.area) <= EPSILON) {
+                                    return true;
+                                }
+                                return Math.sign(sourceArea) === Math.sign(component.area);
+                            })
+                            .map((component) => component.segments)
+                        : this._splitContours(stitchedSegments);
 
-                    // Disable Paper.js self-intersection trimming — it hangs
-                    // on open paths and produces garbage on closed paths.
-                    const finalSegments = stitchedSegments;
+                    for (const resolvedContour of resolvedContours) {
+                        const normalizedFinalSegments = this._ensureClosedWhenNeeded(resolvedContour, true);
+                        const outputSegments = this._sanitizeSegmentsForOutput(normalizedFinalSegments);
 
-                    const normalizedFinalSegments = this._ensureClosedWhenNeeded(finalSegments, true);
-                    const outputSegments = this._sanitizeSegmentsForOutput(normalizedFinalSegments);
+                        if (!Array.isArray(outputSegments) || outputSegments.length === 0) {
+                            continue;
+                        }
 
-                    if (!Array.isArray(outputSegments) || outputSegments.length === 0) {
-                        continue;
+                        let contourPathData = segmentsToSVGPath(outputSegments, false, { skipArcAutoCorrect: true });
+                        const contourBBox = this._computeBBox(outputSegments);
+                        const contourArea = this._computeSignedArea(outputSegments);
+
+                        if (Math.abs(contourArea) <= EPSILON) {
+                            continue;
+                        }
+
+                        contours.push({
+                            segments: outputSegments,
+                            pathData: contourPathData,
+                            closed: true,
+                            orientation: contourArea >= 0 ? "ccw" : "cw",
+                            area: contourArea,
+                            bbox: contourBBox,
+                        });
                     }
-
-                    let contourPathData = segmentsToSVGPath(outputSegments, false, { skipArcAutoCorrect: true });
-                    const contourBBox = this._computeBBox(outputSegments);
-                    const contourArea = this._computeSignedArea(outputSegments);
-
-                    if (
-                        Math.abs(sourceArea) > EPSILON &&
-                        Math.abs(contourArea) > EPSILON &&
-                        Math.sign(sourceArea) !== Math.sign(contourArea)
-                    ) {
-                        // Inward over-offset can invert winding; treat as full degeneration.
-                        continue;
-                    }
-
-                    contours.push({
-                        segments: outputSegments,
-                        pathData: contourPathData,
-                        closed: true,
-                        orientation: contourArea >= 0 ? "ccw" : "cw",
-                        area: contourArea,
-                        bbox: contourBBox,
-                    });
                 }
             }
 
@@ -1160,16 +1167,41 @@ export class OffsetEngine {
             return [];
         }
 
-        const stitched = segments.map((segment) => this._cloneSegment(segment));
+        const cloned = segments.map((segment) => this._cloneSegment(segment));
+        const stitched = [cloned[0]];
 
-        for (let i = 0; i < stitched.length - 1; i += 1) {
-            const next = stitched[i + 1];
-            const nextStart = { ...stitched[i].end };
+        for (let i = 1; i < cloned.length; i += 1) {
+            const prev = stitched[stitched.length - 1];
+            const next = cloned[i];
 
-            if (!this._pointsEqual(next.start, nextStart, EPSILON)) {
-                next.start = nextStart;
-                this._syncArcMetadata(next);
+            if (!prev?.end || !next?.start) {
+                stitched.push(next);
+                continue;
             }
+
+            const targetStart = { ...prev.end };
+            if (this._pointsEqual(next.start, targetStart, EPSILON)) {
+                stitched.push(next);
+                continue;
+            }
+
+            const dx = targetStart.x - next.start.x;
+            const dy = targetStart.y - next.start.y;
+            const gap = Math.hypot(dx, dy);
+
+            if (gap <= STITCH_BRIDGE_THRESHOLD) {
+                next.start = targetStart;
+                this._syncArcMetadata(next);
+                stitched.push(next);
+                continue;
+            }
+
+            stitched.push({
+                type: "line",
+                start: targetStart,
+                end: { ...next.start },
+            });
+            stitched.push(next);
         }
 
         if (closed && stitched.length > 1) {
@@ -1177,8 +1209,20 @@ export class OffsetEngine {
             const closingEnd = { ...stitched[0].start };
 
             if (!this._pointsEqual(last.end, closingEnd, EPSILON)) {
-                last.end = closingEnd;
-                this._syncArcMetadata(last);
+                const dx = closingEnd.x - last.end.x;
+                const dy = closingEnd.y - last.end.y;
+                const gap = Math.hypot(dx, dy);
+
+                if (gap <= STITCH_BRIDGE_THRESHOLD) {
+                    last.end = closingEnd;
+                    this._syncArcMetadata(last);
+                } else {
+                    stitched.push({
+                        type: "line",
+                        start: { ...last.end },
+                        end: closingEnd,
+                    });
+                }
             }
         }
 

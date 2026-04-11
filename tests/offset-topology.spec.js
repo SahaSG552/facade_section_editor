@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 // Mock Paper.js-dependent module
 vi.mock("../src/operations/PaperBooleanProcessor.js", () => ({
     resolveSelfIntersections: (pathData) => pathData,
+    resolveSelfIntersectionsDetailed: (pathData) => ({ pathData, components: [] }),
 }));
 
 import { OffsetEngine } from "../src/operations/OffsetEngine.js";

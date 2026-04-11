@@ -13,7 +13,7 @@
  */
 
 import LoggerFactory from "../core/LoggerFactory.js";
-import { resolveSelfIntersections } from "./PaperBooleanProcessor.js";
+import { resolveSelfIntersections, resolveSelfIntersectionsDetailed } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("OffsetTrimmer");
 
@@ -110,6 +110,46 @@ export function trimSelfIntersections(segments) {
     return cleanSegments;
   } catch (error) {
     log.error("trimSelfIntersections failed:", error);
+    return [];
+  }
+}
+
+export function trimSelfIntersectionsDetailed(segments) {
+  if (!segments || !Array.isArray(segments) || segments.length === 0) {
+    log.warn("trimSelfIntersectionsDetailed: invalid or empty segments input");
+    return [];
+  }
+
+  try {
+    const pathData = segmentsToPathString(segments);
+    if (!pathData) {
+      log.warn("trimSelfIntersectionsDetailed: failed to convert segments to path");
+      return [];
+    }
+
+    const resolved = resolveSelfIntersectionsDetailed(pathData, { preserveAllComponents: true });
+    if (!resolved?.hadSelfIntersections) {
+      return [];
+    }
+    if (!resolved?.components?.length) {
+      return [];
+    }
+
+    const detailedComponents = resolved.components
+      .map((component) => ({
+        pathData: component.pathData,
+        area: Number(component.area) || 0,
+        clockwise: !!component.clockwise,
+        segments: pathStringToSegments(component.pathData),
+      }))
+      .filter((component) => Array.isArray(component.segments) && component.segments.length > 0);
+
+    log.info(
+      `Trimmed ${segments.length} input segments → ${detailedComponents.reduce((sum, c) => sum + c.segments.length, 0)} clean segments`
+    );
+    return detailedComponents;
+  } catch (error) {
+    log.error("trimSelfIntersectionsDetailed failed:", error);
     return [];
   }
 }
@@ -397,7 +437,9 @@ export function pathStringToSegments(pathString) {
     }
 
     commandMatches.forEach((match) => {
-      const cmd = match[1].toUpperCase();
+      const rawCmd = match[1];
+      const rel = rawCmd === rawCmd.toLowerCase();
+      const cmd = rawCmd.toUpperCase();
       const paramsStr = match[2].trim();
 
       // Parse numbers from params string
@@ -420,8 +462,8 @@ export function pathStringToSegments(pathString) {
       switch (cmd) {
         case "M": // Move
           if (params.length >= 2) {
-            currentX = params[0];
-            currentY = params[1];
+            currentX = rel ? currentX + params[0] : params[0];
+            currentY = rel ? currentY + params[1] : params[1];
             startX = currentX;
             startY = currentY;
           }
@@ -430,13 +472,15 @@ export function pathStringToSegments(pathString) {
 
         case "L": // Line
           if (params.length >= 2) {
+            const endX = rel ? currentX + params[0] : params[0];
+            const endY = rel ? currentY + params[1] : params[1];
             segments.push({
               type: "line",
               start: { x: currentX, y: currentY },
-              end: { x: params[0], y: params[1] },
+              end: { x: endX, y: endY },
             });
-            currentX = params[0];
-            currentY = params[1];
+            currentX = endX;
+            currentY = endY;
           }
           break;
 
@@ -447,8 +491,8 @@ export function pathStringToSegments(pathString) {
             const rotation = params[2];
             const largeArc = params[3] !== 0 ? 1 : 0;
             const sweep = params[4] !== 0 ? 1 : 0;
-            const endX = params[5];
-            const endY = params[6];
+            const endX = rel ? currentX + params[5] : params[5];
+            const endY = rel ? currentY + params[6] : params[6];
 
             // Reconstruct arc center, startAngle, endAngle from SVG endpoint parameterization
             // Algorithm: W3C SVG spec Appendix F.6 (Endpoint to Center conversion)
@@ -479,12 +523,12 @@ export function pathStringToSegments(pathString) {
 
         case "C": { // Cubic Bezier: x1 y1 x2 y2 x y
           if (params.length >= 6) {
-            const cp1x = params[0];
-            const cp1y = params[1];
-            const cp2x = params[2];
-            const cp2y = params[3];
-            const endX = params[4];
-            const endY = params[5];
+            const cp1x = rel ? currentX + params[0] : params[0];
+            const cp1y = rel ? currentY + params[1] : params[1];
+            const cp2x = rel ? currentX + params[2] : params[2];
+            const cp2y = rel ? currentY + params[3] : params[3];
+            const endX = rel ? currentX + params[4] : params[4];
+            const endY = rel ? currentY + params[5] : params[5];
 
             // Approximate cubic bezier as line segments for downstream consumers
             // that only support line/arc (OffsetTool, parsePathToSegments, etc.)
@@ -539,6 +583,7 @@ export function pathStringToSegments(pathString) {
 
 export default {
   trimSelfIntersections,
+  trimSelfIntersectionsDetailed,
   segmentsToPathString,
   pathStringToSegments,
 };

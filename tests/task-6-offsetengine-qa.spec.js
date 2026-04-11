@@ -5,6 +5,7 @@ import { assertContourCount, assertContinuity, assertNoZeroLength } from "./help
 vi.mock("../src/operations/PaperBooleanProcessor.js", () => {
     return {
         resolveSelfIntersections: (pathData) => pathData,
+        resolveSelfIntersectionsDetailed: (pathData) => ({ pathData, components: [] }),
     };
 });
 

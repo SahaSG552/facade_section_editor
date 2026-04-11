@@ -2,8 +2,10 @@ import LoggerFactory from "../../core/LoggerFactory.js";
 import BaseTool from "./BaseTool.js";
 import { app } from "../../app/main.js";
 import { ARC_APPROX_TOLERANCE } from "../../config/constants.js";
+import { approximatePath } from "../../utils/arcApproximation.js";
 import { buildOffsetDistanceSeries } from "../../utils/offsetSeries.js";
 import { calculateOffsetFromPathData } from "../../operations/OffsetEngine.js";
+import { resolveSelfIntersectionsDetailed } from "../../operations/PaperBooleanProcessor.js";
 import { sanitizeParsedContourSegments } from "./shared/segmentSanitizer.js";
 import { arcCenterFromEndpoints, arcFlagsViaPoint } from "./ArcTool.js";
 import { computeBoxSelection, buildSelectionBoxGhost, resolveClickSelectionIds } from "./shared/selectionUtils.js";
@@ -78,6 +80,22 @@ function leftNormal(a, b) {
     const len = Math.hypot(dx, dy);
     if (len <= 1e-9) return { x: 1, y: 0 };
     return { x: -dy / len, y: dx / len };
+}
+
+function cubicBezierPoint(p0, p1, p2, p3, t) {
+    const mt = 1 - t;
+    return mt * mt * mt * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t * t * t * p3;
+}
+
+function estimateBezierSteps(x0, y0, x1, y1, x2, y2, x3, y3) {
+    const ctrlPolyLen =
+        Math.hypot(x1 - x0, y1 - y0) +
+        Math.hypot(x2 - x1, y2 - y1) +
+        Math.hypot(x3 - x2, y3 - y2);
+    const chordLen = Math.hypot(x3 - x0, y3 - y0);
+    const excess = Math.max(0, ctrlPolyLen - chordLen);
+    const steps = Math.ceil(excess / 0.5);
+    return Math.max(4, Math.min(24, steps));
 }
 
 function buildRectPathData(seg) {
@@ -379,6 +397,18 @@ function segmentsCenter(segments) {
     return bb ? { x: bb.cx, y: bb.cy } : null;
 }
 
+function convertBezierPathToArcs(pathData, exportModule, tolerance = ARC_APPROX_TOLERANCE) {
+    if (!pathData || typeof pathData !== "string") return pathData;
+    if (!/[CcSsQqTt]/.test(pathData)) return pathData;
+
+    try {
+        const approximated = approximatePath(pathData, exportModule, tolerance);
+        return approximated || pathData;
+    } catch (_err) {
+        return pathData;
+    }
+}
+
 /**
  * Attempt to compute an offset contour for one source entry at a given distance.
  * Returns the SVG path string, parsed segment array, and the world-space centroid
@@ -423,14 +453,52 @@ function buildOffsetCandidate(
         offsetOptions.cursorPoint = cursorPointPath;
     }
 
-    const path = offsetCalculator(entry.pathData, offsetDist, offsetOptions);
+    let path = offsetCalculator(entry.pathData, offsetDist, offsetOptions);
     if (!path || !String(path).trim()) return null;
 
+    path = convertBezierPathToArcs(path, exportModule, ARC_APPROX_TOLERANCE);
+
     const previewState = { _nextContourId: 1, _nextSegmentId: 1 };
-    const parsedSegments = sanitizeParsedContourSegments(normalizeOpenContours(
+    let parsedSegments = sanitizeParsedContourSegments(normalizeOpenContours(
         parsePathToSegments(path, previewState, { allowClose }),
         allowClose,
     ));
+
+    // Fallback for PathEditor preview: if closed result still self-intersects,
+    // force split via Paper and keep components matching source winding.
+    if (allowClose) {
+        try {
+            const detailed = resolveSelfIntersectionsDetailed(path, { preserveAllComponents: true });
+            if (detailed?.hadSelfIntersections && Array.isArray(detailed.components) && detailed.components.length > 1) {
+                const sourceAreaSvg = -contourSignedAreaEditor(entry.chain || []);
+                const windingSign = Math.sign(sourceAreaSvg);
+                const picked = detailed.components.filter((component) => {
+                    const area = Number(component?.area) || 0;
+                    if (Math.abs(area) <= 1e-9) return false;
+                    if (windingSign === 0) return true;
+                    return Math.sign(area) === windingSign;
+                });
+                const useComponents = picked.length > 0 ? picked : detailed.components;
+                const splitPathRaw = useComponents.map((component) => component.pathData).filter(Boolean).join(" ").trim();
+                const splitPath = convertBezierPathToArcs(splitPathRaw, exportModule, ARC_APPROX_TOLERANCE);
+
+                if (splitPath) {
+                    const splitState = { _nextContourId: 1, _nextSegmentId: 1 };
+                    const splitSegments = sanitizeParsedContourSegments(normalizeOpenContours(
+                        parsePathToSegments(splitPath, splitState, { allowClose }),
+                        allowClose,
+                    ));
+                    if (splitSegments.length > 0) {
+                        path = splitPath;
+                        parsedSegments = splitSegments;
+                    }
+                }
+            }
+        } catch (_err) {
+            // Non-fatal: keep engine output when Paper fallback is unavailable.
+        }
+    }
+
     if (parsedSegments.length === 0) return null;
 
     const centerLocal = segmentsCenter(parsedSegments);
@@ -449,7 +517,7 @@ function buildOffsetCandidate(
 function parsePathToSegments(pathStr, state, { allowClose = true } = {}) {
     const out = [];
     if (!pathStr || !String(pathStr).trim()) return out;
-    const commandRe = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
+    const commandRe = /([MmLlHhVvZzAaCc])([^MmLlHhVvZzAaCc]*)/g;
 
     let cx = 0;
     let cy = 0;
@@ -636,6 +704,52 @@ function parsePathToSegments(pathStr, state, { allowClose = true } = {}) {
                 cx = ex;
                 cy = ey;
             }
+        }
+
+        if (upper === "C") {
+            for (let i = 0; i + 5 < args.length; i += 6) {
+                let x1 = args[i];
+                let y1 = args[i + 1];
+                let x2 = args[i + 2];
+                let y2 = args[i + 3];
+                let x = args[i + 4];
+                let y = args[i + 5];
+                if (rel) {
+                    x1 += cx;
+                    y1 += cy;
+                    x2 += cx;
+                    y2 += cy;
+                    x += cx;
+                    y += cy;
+                }
+
+                const steps = estimateBezierSteps(cx, cy, x1, y1, x2, y2, x, y);
+                let px = cx;
+                let py = cy;
+                for (let s = 1; s <= steps; s++) {
+                    const t = s / steps;
+                    const qx = cubicBezierPoint(cx, x1, x2, x, t);
+                    const qy = cubicBezierPoint(cy, y1, y2, y, t);
+                    out.push({
+                        id: `seg-${state._nextSegmentId++}`,
+                        selected: false,
+                        contourId,
+                        type: "line",
+                        cmdHint: "L",
+                        data: {
+                            start: { x: px, y: -py },
+                            end: { x: qx, y: -qy },
+                        },
+                    });
+                    px = qx;
+                    py = qy;
+                }
+
+                cx = x;
+                cy = y;
+            }
+            m = commandRe.exec(String(pathStr));
+            continue;
         }
         m = commandRe.exec(String(pathStr));
     }
