@@ -2440,18 +2440,13 @@ export function buildOffsetContour(segments, distance, options = {}) {
       return false;
     }
 
-    // Filter extremely short lines (quasi-zero numerical artifacts)
+  // Filter extremely short lines (quasi-zero numerical artifacts)
     if (seg.type === "line") {
       const segDx = seg.end.x - seg.start.x;
       const segDy = seg.end.y - seg.start.y;
       const segLen = Math.hypot(segDx, segDy);
       
-      if (0 < segLen && segLen < EXTREMELY_SHORT) {
-        log.debug(
-          `buildOffsetContour: filtering extremely short line (<${EXTREMELY_SHORT.toExponential(0)}): len=${segLen.toExponential(2)}`
-        );
-        return false;
-      }
+
     }
 
     // Strict non-resurrection rule:
