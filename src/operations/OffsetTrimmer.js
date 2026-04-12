@@ -428,7 +428,7 @@ export function pathStringToSegments(pathString) {
 
     // Simple SVG command parser for absolute coordinates
     // Regex: Extract command letter + following numbers
-    const commandRegex = /([MLACZmlacz])([^MLACZmlacz]*)/g;
+    const commandRegex = /([MLACHVZmlachvz])([^MLACHVZmlachvz]*)/g;
     const commandMatches = [];
     let cmdMatch = commandRegex.exec(pathString);
     while (cmdMatch !== null) {
@@ -480,6 +480,30 @@ export function pathStringToSegments(pathString) {
               end: { x: endX, y: endY },
             });
             currentX = endX;
+            currentY = endY;
+          }
+          break;
+
+        case "H": // Horizontal line
+          if (params.length >= 1) {
+            const endX = rel ? currentX + params[0] : params[0];
+            segments.push({
+              type: "line",
+              start: { x: currentX, y: currentY },
+              end: { x: endX, y: currentY },
+            });
+            currentX = endX;
+          }
+          break;
+
+        case "V": // Vertical line
+          if (params.length >= 1) {
+            const endY = rel ? currentY + params[0] : params[0];
+            segments.push({
+              type: "line",
+              start: { x: currentX, y: currentY },
+              end: { x: currentX, y: endY },
+            });
             currentY = endY;
           }
           break;

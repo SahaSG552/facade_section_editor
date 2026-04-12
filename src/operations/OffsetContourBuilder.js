@@ -2424,6 +2424,11 @@ export function buildOffsetContour(segments, distance, options = {}) {
   log.info(
     `[⭐ BEFORE-FILTER] result=${finalSegments.length}: [${finalSegments.map(s => `${s.type}(${s.start.x.toFixed(2)},${s.start.y.toFixed(2)})→(${s.end.x.toFixed(2)},${s.end.y.toFixed(2)})`).join(", ")}]`
   );
+  
+  // Conservative thresholds for near-degenerate line detection:
+  // Lines < 1e-4 are treated as quasi-zero numerical artifacts and always filtered
+  const EXTREMELY_SHORT = 1e-4;
+  
   finalSegments = finalSegments.filter((seg) => {
     const isDegenerate = isSegmentDegenerated(seg);
     if (isDegenerate) {
@@ -2433,6 +2438,20 @@ export function buildOffsetContour(segments, distance, options = {}) {
     }
     if (isDegenerate) {
       return false;
+    }
+
+    // Filter extremely short lines (quasi-zero numerical artifacts)
+    if (seg.type === "line") {
+      const segDx = seg.end.x - seg.start.x;
+      const segDy = seg.end.y - seg.start.y;
+      const segLen = Math.hypot(segDx, segDy);
+      
+      if (0 < segLen && segLen < EXTREMELY_SHORT) {
+        log.debug(
+          `buildOffsetContour: filtering extremely short line (<${EXTREMELY_SHORT.toExponential(0)}): len=${segLen.toExponential(2)}`
+        );
+        return false;
+      }
     }
 
     // Strict non-resurrection rule:
