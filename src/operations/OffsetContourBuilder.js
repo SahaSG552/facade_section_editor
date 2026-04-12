@@ -1559,6 +1559,8 @@ export function buildOffsetContour(segments, distance, options = {}) {
   // Step 1: Offset each segment
   const offsetSegments = [];
   const sourceIndices = [];
+  const skippedSegments = new Map();  // Maps source index -> segment reason (degenerate, null, etc)
+  
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     const offset = offsetSegment(segment, distance);
@@ -1567,6 +1569,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
       log.warn(
         `buildOffsetContour: failed to offset segment ${i}, type=${segment.type}`
       );
+      skippedSegments.set(i, { reason: "null", original: segment });
       continue;
     }
 
@@ -1575,6 +1578,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
       log.debug(
         `buildOffsetContour: skipping degenerate offset segment ${i}, type=${offset.type}`
       );
+      skippedSegments.set(i, { reason: "degenerate", original: segment, offset });
       continue;
     }
 
@@ -1627,7 +1631,35 @@ export function buildOffsetContour(segments, distance, options = {}) {
         closed
       );
 
-      if (droppedGap) {
+      // Also check if there are skipped (degenerate or null) segments between current and next
+      const hasSkippedBetween = (() => {
+        if (closed) {
+          if (nextSourceIndex > currentSourceIndex) {
+            for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
+              if (skippedSegments.has(idx)) return true;
+            }
+          } else {
+            for (let idx = currentSourceIndex + 1; idx < segments.length; idx++) {
+              if (skippedSegments.has(idx)) return true;
+            }
+            for (let idx = 0; idx < nextSourceIndex; idx++) {
+              if (skippedSegments.has(idx)) return true;
+            }
+          }
+        } else {
+          for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
+            if (skippedSegments.has(idx)) return true;
+          }
+        }
+        return false;
+      })();
+
+      if (droppedGap || hasSkippedBetween) {
+        if (hasSkippedBetween) {
+          log.debug(`[GAP-DETECTED] Skipped segments between source ${currentSourceIndex} and ${nextSourceIndex}`);
+        } else {
+          log.debug(`[GAP-DETECTED] Dropped gap between source ${currentSourceIndex} and ${nextSourceIndex}`);
+        }
         droppedGapJoinCount += 1;
         // Pre-compute arcRadius of the dropped segment so the directIntersection
         // check below can distinguish "concave arc collapsed exactly" (needs bridge)
@@ -1639,9 +1671,65 @@ export function buildOffsetContour(segments, distance, options = {}) {
           closed
         );
         let droppedArcRadius = null;
+        let droppedArcSegment = null;
         if (skippedForArcCheck.length === 1) {
-          droppedArcRadius = getArcRadiusFromSegment(
-            segments[skippedForArcCheck[0]]
+          droppedArcSegment = segments[skippedForArcCheck[0]];
+          droppedArcRadius = getArcRadiusFromSegment(droppedArcSegment);
+        }
+
+        // CRITICAL FIX: When an arc is skipped/dropped between current and next segments,
+        // the inTangent should come from the SKIPPED ARC's end, not from current segment's end.
+        // This ensures the bridge is constructed in the correct direction.
+        if (hasSkippedBetween) {
+          // Find the first skipped arc within the range
+          let skippedArcSegment = null;
+          if (closed) {
+            if (nextSourceIndex > currentSourceIndex) {
+              for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
+                if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
+                  skippedArcSegment = skippedSegments.get(idx).original;
+                  break;
+                }
+              }
+            } else {
+              for (let idx = currentSourceIndex + 1; idx < segments.length; idx++) {
+                if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
+                  skippedArcSegment = skippedSegments.get(idx).original;
+                  break;
+                }
+              }
+              if (!skippedArcSegment) {
+                for (let idx = 0; idx < nextSourceIndex; idx++) {
+                  if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
+                    skippedArcSegment = skippedSegments.get(idx).original;
+                    break;
+                  }
+                }
+              }
+            }
+          } else {
+            for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
+              if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
+                skippedArcSegment = skippedSegments.get(idx).original;
+                break;
+              }
+            }
+          }
+          
+          if (skippedArcSegment) {
+            const originalInTangent = inTangent;
+            inTangent = getTangent(skippedArcSegment, "end");
+            log.debug(
+              `[ARC-FIX] Skipped arc found: correcting inTangent from (${originalInTangent.x.toFixed(3)},${originalInTangent.y.toFixed(3)}) ` +
+              `to arc end: (${inTangent.x.toFixed(3)},${inTangent.y.toFixed(3)})`
+            );
+          }
+        } else if (droppedArcSegment && droppedArcSegment.type === "arc") {
+          const originalInTangent = inTangent;
+          inTangent = getTangent(droppedArcSegment, "end");
+          log.debug(
+            `[ARC-FIX] Dropped arc detected: correcting inTangent from (${originalInTangent.x.toFixed(3)},${originalInTangent.y.toFixed(3)}) ` +
+            `to arc end: (${inTangent.x.toFixed(3)},${inTangent.y.toFixed(3)})`
           );
         }
 
