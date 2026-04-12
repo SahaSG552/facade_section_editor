@@ -1559,32 +1559,25 @@ export function buildOffsetContour(segments, distance, options = {}) {
   // Step 1: Offset each segment
   const offsetSegments = [];
   const sourceIndices = [];
-  const skippedSegments = new Map();  // Maps source index -> segment reason (degenerate, null, etc)
-  
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     const offset = offsetSegment(segment, distance);
 
     if (!offset) {
-      log.info(
-        `[⭐ SKIPPED NULL] segment ${i}, type=${segment.type}`
+      log.warn(
+        `buildOffsetContour: failed to offset segment ${i}, type=${segment.type}`
       );
-      skippedSegments.set(i, { reason: "null", original: segment });
       continue;
     }
 
     // Check if offset segment is degenerate (zero-length line or zero-sweep arc)
     if (isSegmentDegenerated(offset)) {
-      log.info(
-        `[⭐ SKIPPED DEGENERATE] segment ${i}, type=${offset.type}`
+      log.debug(
+        `buildOffsetContour: skipping degenerate offset segment ${i}, type=${offset.type}`
       );
-      skippedSegments.set(i, { reason: "degenerate", original: segment, offset });
       continue;
     }
 
-    log.info(
-      `[✓ OFFSET OK] segment ${i}, type=${offset.type}, will be at offsetSegments[${offsetSegments.length}]`
-    );
     offsetSegments.push(offset);
     sourceIndices.push(i);
   }
@@ -1593,10 +1586,6 @@ export function buildOffsetContour(segments, distance, options = {}) {
     log.warn("buildOffsetContour: no offset segments produced");
     return [];
   }
-
-  log.info(
-    `[⭐ OFFSET SUMMARY] Total segments: ${segments.length}, offsetSegments: ${offsetSegments.length}, sourceIndices: [${sourceIndices.join(", ")}], skipped: [${Array.from(skippedSegments.keys()).join(", ")}]`
-  );
 
   const closed = isClosedContour(segments);
   log.debug(
@@ -1614,14 +1603,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
     const currentSourceIndex = sourceIndices[i];
     current.__sourceIndex = currentSourceIndex;
 
-    log.info(
-      `[⭐ LOOP i=${i}] Processing offset segment ${i} (type=${current.type}, source=${currentSourceIndex})`
-    );
-
     result.push(current);
-    log.info(
-      `[⭐ PUSHED] Added segment type=${current.type} to result (result.length now ${result.length})`
-    );
 
     // Only process joins for closed contours or between consecutive segments
     if (closed || i < numSegs - 1) {
@@ -1645,42 +1627,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
         closed
       );
 
-      // Also check if there are skipped (degenerate or null) segments between current and next
-      const hasSkippedBetween = (() => {
-        if (closed) {
-          if (nextSourceIndex > currentSourceIndex) {
-            for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
-              if (skippedSegments.has(idx)) {
-                log.info(`[⭐ SKIPPED FOUND] idx=${idx} between ${currentSourceIndex} and ${nextSourceIndex}`);
-                return true;
-              }
-            }
-          } else {
-            for (let idx = currentSourceIndex + 1; idx < segments.length; idx++) {
-              if (skippedSegments.has(idx)) return true;
-            }
-            for (let idx = 0; idx < nextSourceIndex; idx++) {
-              if (skippedSegments.has(idx)) return true;
-            }
-          }
-        } else {
-          for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
-            if (skippedSegments.has(idx)) {
-              log.info(`[⭐ SKIPPED FOUND] idx=${idx} between ${currentSourceIndex} and ${nextSourceIndex} (open contour)`);
-              return true;
-            }
-          }
-        }
-        log.info(`[⭐ NO SKIPPED] between ${currentSourceIndex} and ${nextSourceIndex}, droppedGap=${droppedGap}`);
-        return false;
-      })();
-
-      if (droppedGap || hasSkippedBetween) {
-        if (hasSkippedBetween) {
-          log.info(`[⭐ GAP-DETECTED] Skipped segments between source ${currentSourceIndex} and ${nextSourceIndex}`);
-        } else {
-          log.info(`[⭐ GAP-DETECTED] Dropped gap between source ${currentSourceIndex} and ${nextSourceIndex}`);
-        }
+      if (droppedGap) {
         droppedGapJoinCount += 1;
         // Pre-compute arcRadius of the dropped segment so the directIntersection
         // check below can distinguish "concave arc collapsed exactly" (needs bridge)
@@ -1692,61 +1639,10 @@ export function buildOffsetContour(segments, distance, options = {}) {
           closed
         );
         let droppedArcRadius = null;
-        let droppedArcSegment = null;
         if (skippedForArcCheck.length === 1) {
-          droppedArcSegment = segments[skippedForArcCheck[0]];
-          droppedArcRadius = getArcRadiusFromSegment(droppedArcSegment);
-        }
-
-        // CRITICAL FIX (moved before directIntersection check):
-        // When an arc is skipped/dropped between current and next segments,
-        // the inTangent should come from the SKIPPED ARC's end, not from current segment's end.
-        // This ensures the bridge is constructed in the correct direction.
-        if (hasSkippedBetween) {
-          // Find the first skipped arc within the range
-          let skippedArcSegment_inner = null;
-          if (closed) {
-            if (nextSourceIndex > currentSourceIndex) {
-              for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
-                if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
-                  skippedArcSegment_inner = skippedSegments.get(idx).original;
-                  break;
-                }
-              }
-            } else {
-              for (let idx = currentSourceIndex + 1; idx < segments.length; idx++) {
-                if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
-                  skippedArcSegment_inner = skippedSegments.get(idx).original;
-                  break;
-                }
-              }
-              if (!skippedArcSegment_inner) {
-                for (let idx = 0; idx < nextSourceIndex; idx++) {
-                  if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
-                    skippedArcSegment_inner = skippedSegments.get(idx).original;
-                    break;
-                  }
-                }
-              }
-            }
-          } else {
-            for (let idx = currentSourceIndex + 1; idx < nextSourceIndex; idx++) {
-              if (skippedSegments.has(idx) && skippedSegments.get(idx).original?.type === "arc") {
-                skippedArcSegment_inner = skippedSegments.get(idx).original;
-                break;
-              }
-            }
-          }
-          
-          if (skippedArcSegment_inner) {
-            const originalInTangent = inTangent;
-            inTangent = getTangent(skippedArcSegment_inner, "end");
-            log.debug(
-              `[ARC-FIX-EARLY] Skipped arc found (applied BEFORE directIntersection): ` +
-              `correcting inTangent from (${originalInTangent.x.toFixed(3)},${originalInTangent.y.toFixed(3)}) ` +
-              `to arc end: (${inTangent.x.toFixed(3)},${inTangent.y.toFixed(3)})`
-            );
-          }
+          droppedArcRadius = getArcRadiusFromSegment(
+            segments[skippedForArcCheck[0]]
+          );
         }
 
         // Priority rule: prefer a direct intersection over a bridge, but only when
@@ -1878,9 +1774,6 @@ export function buildOffsetContour(segments, distance, options = {}) {
               // Use a practical chord tolerance (1e-3) to handle floating-point center imprecision.
               const chordLen = Math.hypot(current.start.x - current.end.x, current.start.y - current.end.y);
               if (chordLen < 1e-3) {
-                log.info(
-                  `[⭐ ARC-DEGENERATE-REMOVAL] Removing arc with chord=${chordLen.toFixed(6)}, pt=(${pt.x.toFixed(6)}, ${pt.y.toFixed(6)})`
-                );
                 result.pop();
                 // Snap previous segment's end to join point to close any floating-point gap
                 if (result.length > 0) {
@@ -1895,9 +1788,25 @@ export function buildOffsetContour(segments, distance, options = {}) {
               const radius = getArcRadius(next.arc, next);
               lineToArcRadius = radius;
               if (!center || radius == null) return false;
-              const pt =
-                findCircleLineSegmentIntersection(center, radius, current, next.start) ??
-                findCircleLineIntersection(center, radius, current, next.start);
+              // For a convex line→arc join, prefer the circle-line intersection
+              // closest to next.start (the arc's expected start position).
+              // When the offset arc grows (outward), the line may cross the arc circle
+              // at an interior point (entering intersection) far from next.start AND
+              // at an exiting point just past the line's end that is closer to next.start.
+              // findCircleLineSegmentIntersection picks the closest-to-ref point within
+              // segment bounds and can return the interior (wrong) crossing; the infinite-
+              // line version returns the exit point which is correct. Use whichever is
+              // closer to next.start to get the correct trim anchor.
+              const ptSeg = findCircleLineSegmentIntersection(center, radius, current, next.start);
+              const ptInf = findCircleLineIntersection(center, radius, current, next.start);
+              let pt = null;
+              if (ptSeg && ptInf) {
+                const dSeg = Math.hypot(ptSeg.x - next.start.x, ptSeg.y - next.start.y);
+                const dInf = Math.hypot(ptInf.x - next.start.x, ptInf.y - next.start.y);
+                pt = dSeg <= dInf ? ptSeg : ptInf;
+              } else {
+                pt = ptSeg ?? ptInf;
+              }
               if (!pt) {
                 lineToArcNoIntersection = true;
                 return false;
@@ -2100,9 +2009,6 @@ export function buildOffsetContour(segments, distance, options = {}) {
               // Use a practical chord tolerance (1e-3) to handle floating-point center imprecision.
               const chordLen = Math.hypot(current.start.x - current.end.x, current.start.y - current.end.y);
               if (chordLen < 1e-3) {
-                log.info(
-                  `[⭐ ARC-DEGENERATE-REMOVAL-2] Removing arc with chord=${chordLen.toFixed(6)}, pt=(${pt.x.toFixed(6)}, ${pt.y.toFixed(6)})`
-                );
                 result.pop();
                 // Snap previous segment's end to join point to close any floating-point gap
                 if (result.length > 0) {
@@ -2421,32 +2327,15 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
   // Step 4: Filter out any degenerate segments (zero-length lines, zero-sweep arcs)
   // These can be introduced by join processing or bridge building
-  log.info(
-    `[⭐ BEFORE-FILTER] result=${finalSegments.length}: [${finalSegments.map(s => `${s.type}(${s.start.x.toFixed(2)},${s.start.y.toFixed(2)})→(${s.end.x.toFixed(2)},${s.end.y.toFixed(2)})`).join(", ")}]`
-  );
-  
-  // Conservative thresholds for near-degenerate line detection:
-  // Lines < 1e-4 are treated as quasi-zero numerical artifacts and always filtered
-  const EXTREMELY_SHORT = 1e-4;
-  
   finalSegments = finalSegments.filter((seg) => {
     const isDegenerate = isSegmentDegenerated(seg);
     if (isDegenerate) {
-      log.info(
-        `[⭐ FILTERING-DEGENERATE] type=${seg.type}, from=(${seg.start.x.toFixed(6)},${seg.start.y.toFixed(6)}) to=(${seg.end.x.toFixed(6)},${seg.end.y.toFixed(6)})`
+      log.debug(
+        `buildOffsetContour: filtering degenerate segment: ${seg.type}`
       );
     }
     if (isDegenerate) {
       return false;
-    }
-
-  // Filter extremely short lines (quasi-zero numerical artifacts)
-    if (seg.type === "line") {
-      const segDx = seg.end.x - seg.start.x;
-      const segDy = seg.end.y - seg.start.y;
-      const segLen = Math.hypot(segDx, segDy);
-      
-
     }
 
     // Strict non-resurrection rule:
@@ -2506,10 +2395,9 @@ export function buildOffsetContour(segments, distance, options = {}) {
     const inverted = sweepFlag === 1 ? cross < -EPSILON : cross > EPSILON;
     if (!inverted) continue;
 
-    log.info(
-      `[⭐ ARC-INVERTED-REMOVAL] arc at index ${i}: cross=${cross.toFixed(6)}, sweepFlag=${sweepFlag}, start=(${seg.start.x.toFixed(6)},${seg.start.y.toFixed(6)}), end=(${seg.end.x.toFixed(6)},${seg.end.y.toFixed(6)})`
+    log.debug(
+      `buildOffsetContour: removing orientation-inverted arc (cross=${cross.toFixed(4)}, sweepFlag=${sweepFlag})`
     );
-
     const prevSeg = i > 0 ? finalSegments[i - 1] : null;
     const nextSeg = i < finalSegments.length - 1 ? finalSegments[i + 1] : null;
 
@@ -2517,41 +2405,9 @@ export function buildOffsetContour(segments, distance, options = {}) {
     let mitrePt = null;
     if (prevSeg && nextSeg) {
       const d1 = getTangent(prevSeg, "end");
-       // CRITICAL FIX: When an arc is inverted and being removed, use the arc's
-       // own direction (start→end) for d2, NOT the next segment's tangent.
-       // This ensures the miter reconnection respects the arc's geometry.
-       const d2 = { x: seg.end.x - seg.start.x, y: seg.end.y - seg.start.y };
-       const d2len = Math.hypot(d2.x, d2.y);
-       if (d2len > EPSILON) {
-         d2.x /= d2len;
-         d2.y /= d2len;
-       }
+      const d2 = getTangent(nextSeg, "start");
       if (d1 && d2) {
         mitrePt = lineLineIntersection(prevSeg.end, d1, nextSeg.start, d2);
-        
-        // CRITICAL FIX: Detect unreasonable miter points when arc is inverted.
-        // If the miter point would produce a segment far longer than expected,
-        // or if it's very far from both connection points, use arc's end instead.
-        // This prevents spurious Y coordinates when the arc geometry doesn't align
-        // with the next segment's direction.
-        if (mitrePt && Number.isFinite(mitrePt.x) && Number.isFinite(mitrePt.y)) {
-           const arcChord = Math.hypot(seg.end.x - seg.start.x, seg.end.y - seg.start.y);
-           const distMiterToArcEnd = Math.hypot(mitrePt.x - seg.end.x, mitrePt.y - seg.end.y);
-          
-           // Only apply fallback if arc is nearly degenerate (chord < 0.1) AND
-           // miter point is very far from arc end (> 2x arc chord away)
-           if (arcChord < 0.1 && distMiterToArcEnd > Math.max(2, arcChord * 2)) {
-            mitrePt = clonePoint(seg.end);
-            log.info(
-               `[⭐ MITER-FALLBACK-COLLAPSED-ARC] arcChord=${arcChord.toFixed(6)}, distMiterToArcEnd=${distMiterToArcEnd.toFixed(6)}, using arc-end: (${mitrePt.x.toFixed(6)},${mitrePt.y.toFixed(6)})`
-            );
-          }
-        } else if (!mitrePt) {
-          mitrePt = clonePoint(seg.end);
-          log.info(
-            `[⭐ MITER-NULL-FALLBACK] Using arc-end: (${mitrePt.x.toFixed(6)},${mitrePt.y.toFixed(6)})`
-          );
-        }
       }
     }
 
@@ -2569,7 +2425,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
     } else {
       // Fallback: snap to saved arc endpoints.
       if (i > 0)
-        setSegmentEndpoint(finalSegments[i - 1], "end", clonePoint(seg.end));
+        setSegmentEndpoint(finalSegments[i - 1], "end", clonePoint(seg.start));
       if (i < finalSegments.length)
         setSegmentEndpoint(finalSegments[i], "start", clonePoint(seg.end));
     }
@@ -2584,13 +2440,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
   // distant bridge zones may be falsely linked by backtrack detection.
   // Keep local trimming for the common single-gap case; skip for multi-gap.
   if (droppedGapJoinCount <= 1) {
-    log.info(
-      `[⭐ PRE-TRIM-SELF-INTERSECTIONS] finalSegments=${finalSegments.length}: [${finalSegments.map(s => `${s.type}(${s.start.x.toFixed(2)},${s.start.y.toFixed(2)})→(${s.end.x.toFixed(2)},${s.end.y.toFixed(2)})`).join(", ")}]`
-    );
     finalSegments = trimSelfIntersections(finalSegments);
-    log.info(
-      `[⭐ POST-TRIM-SELF-INTERSECTIONS] finalSegments=${finalSegments.length}: [${finalSegments.map(s => `${s.type}(${s.start.x.toFixed(2)},${s.start.y.toFixed(2)})→(${s.end.x.toFixed(2)},${s.end.y.toFixed(2)})`).join(", ")}]`
-    );
   }
 
   // Strip internal metadata before returning public segments

@@ -14,6 +14,25 @@ function largestContour(contours) {
 }
 
 describe("near-degenerate line inversion guard", () => {
+  it("collapses the tiny right-side segment at d=0.1 instead of keeping ~0.0177 line", async () => {
+    const engine = new OffsetEngine({ exportModule });
+    const result = await engine.processPath(PATH4, 0.1, { trimSelfIntersections: false });
+
+    expect(result.contours.length).toBeGreaterThan(0);
+    const main = largestContour(result.contours);
+    expect(main).toBeTruthy();
+
+    const hasTinyRightSideLine = main.segments.some((s) => {
+      if (s.type !== "line") return false;
+      const dx = s.end.x - s.start.x;
+      const dy = s.end.y - s.start.y;
+      const len = Math.hypot(dx, dy);
+      return s.start.x > 8.0 && s.end.x > 8.0 && len < 0.03;
+    });
+
+    expect(hasTinyRightSideLine).toBe(false);
+  });
+
   it("does not keep inverted tiny right-side vertical on contour4->next step", async () => {
     const engine = new OffsetEngine({ exportModule });
     const result = await engine.processPath(PATH4, 0.12, { trimSelfIntersections: false });

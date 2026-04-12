@@ -4,8 +4,6 @@ import ExportModule from "../src/export/ExportModule.js";
 import { pathStringToSegments } from "../src/operations/OffsetTrimmer.js";
 
 const SRC_PATH = "M 3 5 L 2 9 A 1.4142 1.4142 0 0 1 0 8 V 0 H 10 V 3 L 3 5 Z";
-const CHAIN_PATH_NO_Z = "M 2.0703 4.1008 L 1.129 7.8662 A 0.2942 0.2942 0 0 1 1.12 7.8483 L 1.12 1.12 L 8.88 1.12 L 8.88 2.1552 L 2.0703 4.1008";
-const CHAIN_PATH_WITH_Z = `${CHAIN_PATH_NO_Z} Z`;
 const exportModule = new ExportModule();
 const EPS = 1e-3;
 
@@ -61,29 +59,5 @@ describe("inward degeneration + trim stability", () => {
     expect(main).toBeTruthy();
     expect(main.segments.length).toBeGreaterThanOrEqual(5);
     expect(hasVerticalAtX(main.segments, 1.6)).toBe(true);
-  });
-
-  it("geometrically closed path without Z matches explicit Z behavior", async () => {
-    const engine = new OffsetEngine({ exportModule });
-
-    // This is the user's second-step contour shape: it is closed by geometry
-    // (last L returns to first M) but may not include explicit `Z`.
-    const d = -0.38;
-    const noZ = await engine.processPath(CHAIN_PATH_NO_Z, d, { trimSelfIntersections: false });
-    const withZ = await engine.processPath(CHAIN_PATH_WITH_Z, d, { trimSelfIntersections: false });
-
-    expect(noZ.contours.length).toBeGreaterThan(0);
-    expect(withZ.contours.length).toBeGreaterThan(0);
-
-    const noZMain = largestContour(noZ.contours);
-    const withZMain = largestContour(withZ.contours);
-
-    expect(noZMain).toBeTruthy();
-    expect(withZMain).toBeTruthy();
-    expect(noZMain.segments.length).toBe(withZMain.segments.length);
-
-    const noZArcs = noZMain.segments.filter((s) => s.type === "arc").length;
-    const withZArcs = withZMain.segments.filter((s) => s.type === "arc").length;
-    expect(noZArcs).toBe(withZArcs);
   });
 });

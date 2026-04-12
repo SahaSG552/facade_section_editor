@@ -647,10 +647,9 @@ export class OffsetEngine {
                 const geometricallyClosed = this._isClosedContour(sourceContour);
                 const sourceClosed =
                     typeof sourceClosedHint === "boolean"
-                        // Important: PathEditor polylines may be explicitly closed by the
-                        // last line segment returning to the first point without an SVG `Z`.
-                        // In that case sourceClosedHint is false, but treating the contour as
-                        // open breaks offset sign/normalization and can collapse topology.
+                        // PathEditor can emit polylines that are closed by geometry
+                        // (last segment returns to start) without explicit `Z`.
+                        // Such contours must still use the closed offset branch.
                         ? (sourceClosedHint || geometricallyClosed)
                         : geometricallyClosed;
 
