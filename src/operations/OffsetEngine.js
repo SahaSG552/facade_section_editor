@@ -120,6 +120,64 @@ function lineLineIntersectionPoint(p, d, q, e) {
     return { x: p.x + d.x * t, y: p.y + d.y * t };
 }
 
+function normalizeSignedArcDelta(startAngle, endAngle, sweepFlag, largeArcFlag) {
+    let delta = endAngle - startAngle;
+    while (delta <= -Math.PI) delta += Math.PI * 2;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+
+    if (sweepFlag === 1 && delta < 0) {
+        delta += Math.PI * 2;
+    } else if (sweepFlag !== 1 && delta > 0) {
+        delta -= Math.PI * 2;
+    }
+
+    const absDelta = Math.abs(delta);
+    if (largeArcFlag === 1 && absDelta < Math.PI - EPSILON) {
+        delta += sweepFlag === 1 ? Math.PI * 2 : -Math.PI * 2;
+    } else if (largeArcFlag !== 1 && absDelta > Math.PI + EPSILON) {
+        delta += sweepFlag === 1 ? -Math.PI * 2 : Math.PI * 2;
+    }
+
+    return delta;
+}
+
+function pointEquals(a, b, tolerance = 1e-6) {
+    if (!a || !b) return false;
+    return Math.abs(a.x - b.x) <= tolerance && Math.abs(a.y - b.y) <= tolerance;
+}
+
+function orientation(a, b, c) {
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function onSegment(a, b, p, tolerance = 1e-7) {
+    return (
+        p.x <= Math.max(a.x, b.x) + tolerance &&
+        p.x >= Math.min(a.x, b.x) - tolerance &&
+        p.y <= Math.max(a.y, b.y) + tolerance &&
+        p.y >= Math.min(a.y, b.y) - tolerance
+    );
+}
+
+function segmentsIntersect(p1, p2, q1, q2, tolerance = 1e-7) {
+    const o1 = orientation(p1, p2, q1);
+    const o2 = orientation(p1, p2, q2);
+    const o3 = orientation(q1, q2, p1);
+    const o4 = orientation(q1, q2, p2);
+
+    if ((o1 > tolerance && o2 < -tolerance || o1 < -tolerance && o2 > tolerance) &&
+        (o3 > tolerance && o4 < -tolerance || o3 < -tolerance && o4 > tolerance)) {
+        return true;
+    }
+
+    if (Math.abs(o1) <= tolerance && onSegment(p1, p2, q1, tolerance)) return true;
+    if (Math.abs(o2) <= tolerance && onSegment(p1, p2, q2, tolerance)) return true;
+    if (Math.abs(o3) <= tolerance && onSegment(q1, q2, p1, tolerance)) return true;
+    if (Math.abs(o4) <= tolerance && onSegment(q1, q2, p2, tolerance)) return true;
+
+    return false;
+}
+
 /**
  * @typedef {Object} OffsetEngineOptions
  * @property {"sharp"|"round"} [joinType="round"] - Corner join type passed to OffsetContourBuilder.
@@ -853,7 +911,10 @@ export class OffsetEngine {
                     }
 
                     const stitchedSegments = this._stitchSegments(offsetSegments, true);
-                    const trimmedComponents = resolvedOptions.trimSelfIntersections !== false
+                    const shouldTrimSelfIntersections =
+                        resolvedOptions.trimSelfIntersections !== false &&
+                        this._hasPotentialSelfIntersection(stitchedSegments, true);
+                    const trimmedComponents = shouldTrimSelfIntersections
                         ? trimSelfIntersectionsDetailed(stitchedSegments)
                         : [];
                     const resolvedContours = trimmedComponents.length > 0
@@ -964,6 +1025,84 @@ export class OffsetEngine {
 
             return true;
         });
+    }
+
+    _segmentToPolylinePoints(segment) {
+        if (!segment?.start || !segment?.end) return [];
+
+        if (segment.type === "line") {
+            return [segment.start, segment.end];
+        }
+
+        if (segment.type !== "arc" || !segment.arc) {
+            return [segment.start, segment.end];
+        }
+
+        const center = getArcCenterFromSegment(segment);
+        const radius = getArcRadiusFromSegment(segment);
+        if (!center || !radius) {
+            return [segment.start, segment.end];
+        }
+
+        const startAngle = Math.atan2(segment.start.y - center.y, segment.start.x - center.x);
+        const endAngle = Math.atan2(segment.end.y - center.y, segment.end.x - center.x);
+        const sweepFlag = segment.arc?.sweepFlag === 1 ? 1 : 0;
+        const largeArcFlag = segment.arc?.largeArcFlag === 1 ? 1 : 0;
+        const delta = normalizeSignedArcDelta(startAngle, endAngle, sweepFlag, largeArcFlag);
+
+        const steps = Math.max(8, Math.min(96, Math.ceil(Math.abs(delta) / (Math.PI / 18))));
+        const points = [];
+        for (let i = 0; i <= steps; i += 1) {
+            const t = i / steps;
+            const a = startAngle + delta * t;
+            points.push({
+                x: center.x + radius * Math.cos(a),
+                y: center.y + radius * Math.sin(a),
+            });
+        }
+
+        points[0] = { x: segment.start.x, y: segment.start.y };
+        points[points.length - 1] = { x: segment.end.x, y: segment.end.y };
+        return points;
+    }
+
+    _hasPotentialSelfIntersection(segments, closed) {
+        if (!Array.isArray(segments) || segments.length < 4) return false;
+
+        const pieces = [];
+        for (let i = 0; i < segments.length; i += 1) {
+            const pts = this._segmentToPolylinePoints(segments[i]);
+            for (let j = 1; j < pts.length; j += 1) {
+                const a = pts[j - 1];
+                const b = pts[j];
+                if (!a || !b || pointEquals(a, b, 1e-7)) continue;
+                pieces.push({ segIndex: i, a, b });
+            }
+        }
+
+        const n = segments.length;
+        for (let i = 0; i < pieces.length; i += 1) {
+            const p = pieces[i];
+            for (let j = i + 1; j < pieces.length; j += 1) {
+                const q = pieces[j];
+                if (p.segIndex === q.segIndex) continue;
+
+                const diff = Math.abs(p.segIndex - q.segIndex);
+                const adjacent = diff === 1 || (closed && diff === n - 1);
+                if (adjacent) {
+                    const sharedEndpoint =
+                        pointEquals(p.a, q.a) || pointEquals(p.a, q.b) ||
+                        pointEquals(p.b, q.a) || pointEquals(p.b, q.b);
+                    if (sharedEndpoint) continue;
+                }
+
+                if (segmentsIntersect(p.a, p.b, q.a, q.b)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     _parsePathData(pathData, options) {
@@ -1172,6 +1311,24 @@ export class OffsetEngine {
         }
 
         const cloned = segments.map((segment) => this._cloneSegment(segment));
+
+        const segmentChordLength = (seg) => {
+            if (!seg?.start || !seg?.end) return 0;
+            return Math.hypot(seg.end.x - seg.start.x, seg.end.y - seg.start.y);
+        };
+
+        const shouldSnapClosedGap = (prevSeg, nextSeg, gap) => {
+            if (!closed) return false;
+            const prevLen = segmentChordLength(prevSeg);
+            const nextLen = segmentChordLength(nextSeg);
+            const minNeighborLen = Math.min(prevLen, nextLen);
+            if (!Number.isFinite(minNeighborLen) || minNeighborLen <= EPSILON) return false;
+
+            // Closed contour near-degenerate stitching: prefer snapping over
+            // inserting tiny bridge lines when the gap is small relative to
+            // neighboring segments (prevents micro-stub resurrection).
+            return gap <= 0.05 && gap <= minNeighborLen * 0.1;
+        };
         const stitched = [cloned[0]];
 
         for (let i = 1; i < cloned.length; i += 1) {
@@ -1193,7 +1350,7 @@ export class OffsetEngine {
             const dy = targetStart.y - next.start.y;
             const gap = Math.hypot(dx, dy);
 
-            if (gap <= STITCH_BRIDGE_THRESHOLD) {
+            if (gap <= STITCH_BRIDGE_THRESHOLD || shouldSnapClosedGap(prev, next, gap)) {
                 next.start = targetStart;
                 this._syncArcMetadata(next);
                 stitched.push(next);
@@ -1217,7 +1374,7 @@ export class OffsetEngine {
                 const dy = closingEnd.y - last.end.y;
                 const gap = Math.hypot(dx, dy);
 
-                if (gap <= STITCH_BRIDGE_THRESHOLD) {
+                if (gap <= STITCH_BRIDGE_THRESHOLD || shouldSnapClosedGap(last, stitched[0], gap)) {
                     last.end = closingEnd;
                     this._syncArcMetadata(last);
                 } else {

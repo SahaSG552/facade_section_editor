@@ -30,6 +30,7 @@ describe("inward degeneration + trim stability", () => {
     expect(segments.length).toBe(5);
     expect(segments.every((s) => s.type === "line")).toBe(true);
   });
+  const LARGE_ARC_CONTOUR = "M 3 5 L 2 9 A 1.4142 1.4142 0 0 1 0 8 V 0 H 10 V 3 L 3 5";
 
   it("direct inward d=1.2 with trim keeps non-empty closed contour", async () => {
     const engine = new OffsetEngine({ exportModule });
@@ -40,6 +41,17 @@ describe("inward degeneration + trim stability", () => {
     expect(main).toBeTruthy();
     expect(main.segments.length).toBeGreaterThanOrEqual(5);
     expect(hasVerticalAtX(main.segments, 1.2)).toBe(true);
+  });
+
+  it("does not invoke Paper trim on non-self-intersecting large-arc contour", async () => {
+    const engine = new OffsetEngine({ exportModule });
+    const result = await engine.processPath(LARGE_ARC_CONTOUR, -6);
+
+    expect(result.contours.length).toBe(1);
+    const main = largestContour(result.contours);
+    expect(main).toBeTruthy();
+    expect(main.segments.length).toBe(6);
+    expect(main.segments.some((s) => s.type === "arc")).toBe(true);
   });
 
   it("sequential inward +0.4 x3 keeps main contour topology (no 3-segment collapse)", async () => {

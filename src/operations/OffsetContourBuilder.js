@@ -32,6 +32,11 @@ function distance(p1, p2) {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
 }
 
+function getSegmentLength(seg) {
+  if (!seg?.start || !seg?.end) return 0;
+  return Math.hypot(seg.end.x - seg.start.x, seg.end.y - seg.start.y);
+}
+
 function pointsEqual(p1, p2, tol = EPSILON) {
   return distance(p1, p2) <= tol;
 }
@@ -1431,6 +1436,196 @@ function stitchCollapsedArcThroughNeighborLineSupport(
   return true;
 }
 
+function wouldReverseOrCollapseLine(lineSegment, point, epsilon = EPSILON, sourceSegment = null) {
+  if (lineSegment?.type !== "line" || !point) {
+    return false;
+  }
+
+  const basis = sourceSegment?.type === "line" ? sourceSegment : lineSegment;
+
+  const oldDx = basis.end.x - basis.start.x;
+  const oldDy = basis.end.y - basis.start.y;
+  const newDx = point.x - lineSegment.start.x;
+  const newDy = point.y - lineSegment.start.y;
+
+  const oldLen = Math.hypot(oldDx, oldDy);
+  const newLen = Math.hypot(newDx, newDy);
+  if (oldLen <= epsilon || newLen <= epsilon) {
+    return true;
+  }
+
+  const forwardDot = oldDx * newDx + oldDy * newDy;
+  return forwardDot <= epsilon * oldLen * newLen;
+}
+
+function stitchCollapsedLineThroughNeighborArcSupport(
+  result,
+  current,
+  next,
+  closed,
+  nextIdx,
+  joinPoint
+) {
+  if (!Array.isArray(result) || result.length < 2) {
+    return false;
+  }
+
+  if (current?.type !== "line" || next?.type !== "arc" || !isFinitePoint(joinPoint)) {
+    return false;
+  }
+
+  const prev = result[result.length - 2];
+  if (!prev) {
+    return false;
+  }
+
+  setSegmentEndpoint(prev, "end", joinPoint);
+  current.start = clonePoint(joinPoint);
+  current.end = clonePoint(joinPoint);
+  setSegmentEndpoint(next, "start", joinPoint);
+  syncClosedLoopStart(result, closed, nextIdx, joinPoint);
+
+  return true;
+}
+
+function reconnectClosedDroppedGapsAfterFiltering(finalSegments, sourceSegments, sourceCount) {
+  if (!Array.isArray(finalSegments) || finalSegments.length < 2) {
+    return finalSegments;
+  }
+
+  const projectPointOntoLine = (point, lineStart, lineEnd) => {
+    if (!point || !lineStart || !lineEnd) return null;
+    const dx = lineEnd.x - lineStart.x;
+    const dy = lineEnd.y - lineStart.y;
+    const lenSq = dx * dx + dy * dy;
+    if (lenSq <= EPSILON * EPSILON) return null;
+    const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lenSq;
+    return {
+      x: lineStart.x + t * dx,
+      y: lineStart.y + t * dy,
+    };
+  };
+
+  for (let i = 0; i < finalSegments.length; i += 1) {
+    const current = finalSegments[i];
+    const next = finalSegments[(i + 1) % finalSegments.length];
+    if (!current?.end || !next?.start) {
+      continue;
+    }
+
+    if (pointsEqual(current.end, next.start, EPSILON * 10)) {
+      continue;
+    }
+
+    if (
+      typeof current.__sourceIndex !== "number" ||
+      typeof next.__sourceIndex !== "number" ||
+      !hasDroppedSourceGap(current.__sourceIndex, next.__sourceIndex, sourceCount, true)
+    ) {
+      continue;
+    }
+
+    const skippedSourceIndices = getSkippedSourceIndices(
+      current.__sourceIndex,
+      next.__sourceIndex,
+      sourceCount,
+      true
+    );
+
+    const gap = distance(current.end, next.start);
+    const minNeighborLen = Math.min(getSegmentLength(current), getSegmentLength(next));
+    if (!Number.isFinite(minNeighborLen) || minNeighborLen <= EPSILON) {
+      continue;
+    }
+
+    let shouldReconnect = gap <= minNeighborLen * 0.1;
+
+    if (!shouldReconnect && skippedSourceIndices.length === 1) {
+      const dropped = Array.isArray(sourceSegments)
+        ? sourceSegments[skippedSourceIndices[0]]
+        : null;
+
+      if (dropped?.type === "line" && dropped?.start && dropped?.end) {
+        const dropDx = dropped.end.x - dropped.start.x;
+        const dropDy = dropped.end.y - dropped.start.y;
+        const dropLen = Math.hypot(dropDx, dropDy);
+        if (dropLen > EPSILON && gap > EPSILON) {
+          const gapDx = next.start.x - current.end.x;
+          const gapDy = next.start.y - current.end.y;
+          const dotDir =
+            (dropDx / dropLen) * (gapDx / gap) +
+            (dropDy / dropLen) * (gapDy / gap);
+
+          // If the remaining closure gap is anti-parallel to a dropped source line,
+          // it is a resurrection artifact of the collapsed segment. Reconnect it
+          // deterministically so the segment cannot reappear at larger distances.
+          const resurrectsDroppedLine = dotDir < -0.5;
+          const moderateGap = gap <= Math.max(dropLen * 0.6, minNeighborLen * 0.4);
+          const hasDirectArcLineJoin = (() => {
+            if (current.type === "line" && next.type === "arc") {
+              const center = getArcCenter(next.arc, next);
+              const radius = getArcRadius(next.arc, next);
+              if (!center || radius == null) return false;
+              const pt = findCircleLineIntersection(center, radius, current, next.start);
+              return isFinitePoint(pt);
+            }
+            if (current.type === "arc" && next.type === "line") {
+              const center = getArcCenter(current.arc, current);
+              const radius = getArcRadius(current.arc, current);
+              if (!center || radius == null) return false;
+              const pt = findCircleLineIntersection(center, radius, next, current.end);
+              return isFinitePoint(pt);
+            }
+            return false;
+          })();
+
+          if (resurrectsDroppedLine && (moderateGap || hasDirectArcLineJoin)) {
+            shouldReconnect = true;
+          }
+        }
+      }
+    }
+
+    if (!shouldReconnect) {
+      continue;
+    }
+
+    if (current.type === "line" && next.type === "arc") {
+      const center = getArcCenter(next.arc, next);
+      const radius = getArcRadius(next.arc, next);
+      const circleLinePoint =
+        center && radius != null
+          ? findCircleLineIntersection(center, radius, current, next.start)
+          : null;
+      const projected = projectPointOntoLine(next.start, current.start, current.end);
+      const joinPoint = circleLinePoint && Number.isFinite(circleLinePoint.x) && Number.isFinite(circleLinePoint.y)
+        ? circleLinePoint
+        : (projected && Number.isFinite(projected.x) && Number.isFinite(projected.y)
+          ? projected
+          : next.start);
+      setSegmentEndpoint(current, "end", joinPoint);
+      setSegmentEndpoint(next, "start", joinPoint);
+    } else if (current.type === "arc" && next.type === "line") {
+      const center = getArcCenter(current.arc, current);
+      const radius = getArcRadius(current.arc, current);
+      const circleLinePoint =
+        center && radius != null
+          ? findCircleLineIntersection(center, radius, next, current.end)
+          : null;
+      const projected = projectPointOntoLine(current.end, next.start, next.end);
+      const joinPoint = circleLinePoint && Number.isFinite(circleLinePoint.x) && Number.isFinite(circleLinePoint.y)
+        ? circleLinePoint
+        : (projected && Number.isFinite(projected.x) && Number.isFinite(projected.y)
+          ? projected
+          : current.end);
+      setSegmentEndpoint(current, "end", joinPoint);
+      setSegmentEndpoint(next, "start", joinPoint);
+    }
+  }
+
+  return finalSegments;
+}
+
 function shouldCollapseArcLineJoin(current, next, epsilon = EPSILON) {
   const currentProbe = cloneSegment(current);
   const nextProbe = cloneSegment(next);
@@ -1811,6 +2006,21 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 lineToArcNoIntersection = true;
                 return false;
               }
+
+              if (wouldReverseOrCollapseLine(current, pt, EPSILON, segments[currentSourceIndex])) {
+                const collapsedSupport = stitchCollapsedLineThroughNeighborArcSupport(
+                  result,
+                  current,
+                  next,
+                  closed,
+                  nextIdx,
+                  pt
+                );
+                if (collapsedSupport) {
+                  return true;
+                }
+              }
+
               stitchJoinAtPoint(current, next, pt);
               syncClosedLoopStart(result, closed, nextIdx, pt);
               return true;
@@ -2325,9 +2535,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
     );
   }
 
-  // Step 4: Filter out any degenerate segments (zero-length lines, zero-sweep arcs)
-  // These can be introduced by join processing or bridge building
-  finalSegments = finalSegments.filter((seg) => {
+  const shouldKeepSegmentAfterDegenerationRules = (seg) => {
     const isDegenerate = isSegmentDegenerated(seg);
     if (isDegenerate) {
       log.debug(
@@ -2364,9 +2572,26 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
         const sourceDir = { x: sourceDx / sourceLen, y: sourceDy / sourceLen };
         const segDir = { x: segDx / segLen, y: segDy / segLen };
-        if (dot(sourceDir, segDir) <= 0) {
+        const dirDot = dot(sourceDir, segDir);
+        if (dirDot <= 0) {
           log.debug(
             `buildOffsetContour: filtering reversed resurrected line from source ${seg.__sourceIndex}`
+          );
+          return false;
+        }
+
+        // Micro-edge collapse guard:
+        // for very short source lines, once offset approaches the collapse zone,
+        // tiny surviving remnants (even if not yet flipped) must be removed.
+        // This enforces monotonic line degeneration and prevents tiny residual
+        // segments from surviving one extra step and then flipping direction.
+        const absD = Math.abs(distance);
+        const isMicroSource = sourceLen <= 0.25;
+        const nearCollapseOffset = sourceLen <= absD * 2 + EPSILON;
+        const tinyResidual = segLen <= 0.05 && segLen <= sourceLen * 0.2;
+        if (isMicroSource && nearCollapseOffset && tinyResidual) {
+          log.debug(
+            `buildOffsetContour: collapsing tiny micro-edge remnant from source ${seg.__sourceIndex}`
           );
           return false;
         }
@@ -2374,7 +2599,11 @@ export function buildOffsetContour(segments, distance, options = {}) {
     }
 
     return true;
-  });
+  };
+
+  // Step 4: Filter out any degenerate segments (zero-length lines, zero-sweep arcs)
+  // These can be introduced by join processing or bridge building
+  finalSegments = finalSegments.filter(shouldKeepSegmentAfterDegenerationRules);
 
   // Step 4b: Enforce monotonic arc degeneration (orientation-inversion check).
   // An arc that has passed through its collapse distance has an inverted orientation:
@@ -2439,8 +2668,51 @@ export function buildOffsetContour(segments, distance, options = {}) {
   // Important: when multiple dropped gaps are present in one open contour,
   // distant bridge zones may be falsely linked by backtrack detection.
   // Keep local trimming for the common single-gap case; skip for multi-gap.
-  if (droppedGapJoinCount <= 1) {
+  if (!closed && droppedGapJoinCount <= 1) {
     finalSegments = trimSelfIntersections(finalSegments);
+  }
+
+  // Step 4d: trimSelfIntersections can introduce tiny reversed lines near
+  // degeneration thresholds. Re-apply strict degeneration/non-resurrection
+  // rules after trim so such lines are removed deterministically.
+  finalSegments = finalSegments.filter(shouldKeepSegmentAfterDegenerationRules);
+
+  // Step 4d.1: if filtering removed a collapsed source segment from a closed
+  // contour, reconnect the surviving neighbors before the engine-level stitcher
+  // sees the gap and inserts a synthetic bridge line.
+  if (closed) {
+    finalSegments = reconnectClosedDroppedGapsAfterFiltering(
+      finalSegments,
+      segments,
+      segments.length
+    );
+  }
+
+  // Step 4e: For closed contours, prune tiny residual line stubs that sit
+  // between much longer neighbors near degeneration thresholds. These stubs
+  // are numerical leftovers of line-collapse and violate monotonic degeneration.
+  if (closed && finalSegments.length >= 3 && Math.abs(distance) > EPSILON) {
+    const tinyLen = Math.max(1e-3, Math.min(0.05, Math.abs(distance) * 0.2));
+    finalSegments = finalSegments.filter((seg, i, arr) => {
+      if (seg.type !== "line") return true;
+      const len = getSegmentLength(seg);
+      if (len > tinyLen) return true;
+
+      const prev = arr[(i - 1 + arr.length) % arr.length];
+      const next = arr[(i + 1) % arr.length];
+      if (!prev || !next) return true;
+
+      const prevLen = getSegmentLength(prev);
+      const nextLen = getSegmentLength(next);
+      if (prevLen > len * 3 && nextLen > len * 3) {
+        log.debug(
+          `buildOffsetContour: pruning tiny closed-contour line stub (len=${len.toFixed(6)})`
+        );
+        return false;
+      }
+
+      return true;
+    });
   }
 
   // Strip internal metadata before returning public segments
