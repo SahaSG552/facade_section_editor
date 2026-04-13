@@ -97,8 +97,20 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false, options = {
                 const rotation = arc.xAxisRotation || 0;
 
                 // large-arc-flag (1 если дуга > 180°)
-                const largeArc =
-                    arc.largeArcFlag !== undefined ? arc.largeArcFlag : 0;
+                // Prefer the stored flag; fall back to computing it from angles
+                // when absent (path parser does not emit largeArcFlag into arc objects).
+                let largeArc;
+                if (arc.largeArcFlag !== undefined) {
+                    largeArc = arc.largeArcFlag;
+                } else if (arc.startAngle != null && arc.endAngle != null) {
+                    let flagDelta = Number(arc.endAngle) - Number(arc.startAngle);
+                    const flagSweep = arc.sweepFlag !== undefined ? arc.sweepFlag : 1;
+                    if (flagSweep === 1 && flagDelta < 0) flagDelta += 2 * Math.PI;
+                    else if (flagSweep === 0 && flagDelta > 0) flagDelta -= 2 * Math.PI;
+                    largeArc = Math.abs(flagDelta) > Math.PI ? 1 : 0;
+                } else {
+                    largeArc = 0;
+                }
 
                 // sweep-flag (направление: 1 = по часовой, 0 = против)
                 // В DXF: isCCW = true означает counter-clockwise (против часовой = 0)

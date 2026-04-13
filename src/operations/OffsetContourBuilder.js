@@ -1488,38 +1488,119 @@ function stitchCollapsedLineThroughNeighborArcSupport(
   return true;
 }
 
-function reconnectClosedDroppedGapsAfterFiltering(finalSegments, sourceSegments, sourceCount) {
+/**
+ * Returns the unit direction vector (start→end) for a segment, or null when
+ * the segment is degenerate (length ≤ EPSILON).
+ *
+ * @param {{start:{x:number,y:number}, end:{x:number,y:number}}} seg
+ * @returns {{x:number,y:number}|null}
+ */
+function segmentUnitDir(seg) {
+  const dx = seg.end.x - seg.start.x;
+  const dy = seg.end.y - seg.start.y;
+  const len = Math.hypot(dx, dy);
+  return len > EPSILON ? { x: dx / len, y: dy / len } : null;
+}
+
+/**
+ * Projects `point` perpendicularly onto the infinite line through `lineStart`
+ * and `lineEnd`. Returns null for degenerate (zero-length) lines.
+ *
+ * @param {{x:number,y:number}} point
+ * @param {{x:number,y:number}} lineStart
+ * @param {{x:number,y:number}} lineEnd
+ * @returns {{x:number,y:number}|null}
+ */
+function projectPointOntoLine(point, lineStart, lineEnd) {
+  if (!point || !lineStart || !lineEnd) return null;
+  const dx = lineEnd.x - lineStart.x;
+  const dy = lineEnd.y - lineStart.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq <= EPSILON * EPSILON) return null;
+  const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lenSq;
+  return { x: lineStart.x + t * dx, y: lineStart.y + t * dy };
+}
+
+/**
+ * Applies a sharp miter join between two adjacent line segments by computing
+ * their infinite-line intersection and snapping both endpoints to it.
+ *
+ * The miter is rejected (function returns false) when:
+ * - no finite intersection exists (parallel or near-parallel lines), or
+ * - the intersection is farther than `maxExtension` from `current.end` or
+ *   `next.start` — this guards against exploding miters at near-parallel angles.
+ *
+ * @param {{start:{x:number,y:number}, end:{x:number,y:number}, type:string}} current
+ * @param {{start:{x:number,y:number}, end:{x:number,y:number}, type:string}} next
+ * @param {number} maxExtension  Maximum allowed distance from each endpoint to
+ *   the computed intersection point.
+ * @returns {boolean}  True when the miter was successfully applied.
+ */
+function applyLineMiterJoin(current, next, maxExtension) {
+  const dC = { x: current.end.x - current.start.x, y: current.end.y - current.start.y };
+  const dN = { x: next.end.x   - next.start.x,     y: next.end.y   - next.start.y   };
+  const pt = lineLineIntersection(current.start, dC, next.start, dN);
+  if (!isFinitePoint(pt)) return false;
+  if (distance(pt, current.end)  > maxExtension) return false;
+  if (distance(pt, next.start)   > maxExtension) return false;
+  setSegmentEndpoint(current, "end",   pt);
+  setSegmentEndpoint(next,    "start", pt);
+  return true;
+}
+
+/**
+ * Repairs gaps in a closed offset contour that arise when one or more source
+ * segments degenerate and are filtered out after the offset loop.
+ *
+ * Three repair strategies are tried in order for each gap (consecutive pair
+ * of surviving segments whose source indices are non-consecutive):
+ *
+ * **Strategy 1 — small gap snap** (`gap ≤ minNeighborLen * 0.1`):
+ * The gap is tiny relative to its neighbors, so the two endpoints are snapped
+ * together with a simple join.
+ *
+ * **Strategy 2 — single-drop anti-parallel resurrection** (`skipped.length === 1`):
+ * Detects when the remaining gap vector runs opposite to the dropped source
+ * line, which indicates a resurrection artifact. Forces a clean snap join so
+ * the dropped segment cannot reappear at larger offsets.
+ *
+ * **Strategy 3 — multi-drop reconstruction** (`skipped.length > 1`):
+ * Considers the immediate source-order predecessor of `next` only:
+ * - *3a*: if that predecessor is a reinsertable line, computes its offset line
+ *   and finds the trim points against `current` and `next` to reinsert it.
+ * - *3b*: if it is non-reinsertable (e.g. a degenerated arc), applies a
+ *   bounded miter join directly between `current` and `next`.
+ *
+ * The function mutates `finalSegments` in place (segments may be spliced in)
+ * and returns the same array reference.
+ *
+ * @param {Object[]} finalSegments   Offset segments surviving the degeneration
+ *   filter.  Each segment may carry a `__sourceIndex` number referencing the
+ *   corresponding source segment.
+ * @param {Object[]|null} sourceSegments  Original (pre-offset) source segments.
+ * @param {number} sourceCount  Length of `sourceSegments`.
+ * @param {number} offsetDistance  Signed offset magnitude; used for the miter
+ *   extension limit and the ±normal probe in segment reinsertion.
+ * @returns {Object[]}  The repaired segment array (same reference as input).
+ */
+function reconnectClosedDroppedGapsAfterFiltering(finalSegments, sourceSegments, sourceCount, offsetDistance) {
   if (!Array.isArray(finalSegments) || finalSegments.length < 2) {
     return finalSegments;
   }
 
-  const projectPointOntoLine = (point, lineStart, lineEnd) => {
-    if (!point || !lineStart || !lineEnd) return null;
-    const dx = lineEnd.x - lineStart.x;
-    const dy = lineEnd.y - lineStart.y;
-    const lenSq = dx * dx + dy * dy;
-    if (lenSq <= EPSILON * EPSILON) return null;
-    const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lenSq;
-    return {
-      x: lineStart.x + t * dx,
-      y: lineStart.y + t * dy,
-    };
-  };
-
   for (let i = 0; i < finalSegments.length; i += 1) {
     const current = finalSegments[i];
-    const next = finalSegments[(i + 1) % finalSegments.length];
-    if (!current?.end || !next?.start) {
-      continue;
-    }
+    const next    = finalSegments[(i + 1) % finalSegments.length];
+    if (!current?.end || !next?.start) continue;
 
-    if (pointsEqual(current.end, next.start, EPSILON * 10)) {
-      continue;
-    }
+    // Skip pairs that are already stitched.
+    if (pointsEqual(current.end, next.start, EPSILON * 10)) continue;
 
+    // Only act when source indices confirm that one or more source segments
+    // were dropped between current and next.
     if (
       typeof current.__sourceIndex !== "number" ||
-      typeof next.__sourceIndex !== "number" ||
+      typeof next.__sourceIndex    !== "number" ||
       !hasDroppedSourceGap(current.__sourceIndex, next.__sourceIndex, sourceCount, true)
     ) {
       continue;
@@ -1532,49 +1613,51 @@ function reconnectClosedDroppedGapsAfterFiltering(finalSegments, sourceSegments,
       true
     );
 
-    const gap = distance(current.end, next.start);
+    const gap            = distance(current.end, next.start);
     const minNeighborLen = Math.min(getSegmentLength(current), getSegmentLength(next));
-    if (!Number.isFinite(minNeighborLen) || minNeighborLen <= EPSILON) {
-      continue;
-    }
+    if (!Number.isFinite(minNeighborLen) || minNeighborLen <= EPSILON) continue;
 
+    // ── Strategy 1: trivially small gap — snap endpoints together ────────
     let shouldReconnect = gap <= minNeighborLen * 0.1;
 
+    // ── Strategy 2: single-drop anti-parallel resurrection ───────────────
     if (!shouldReconnect && skippedSourceIndices.length === 1) {
       const dropped = Array.isArray(sourceSegments)
         ? sourceSegments[skippedSourceIndices[0]]
         : null;
 
       if (dropped?.type === "line" && dropped?.start && dropped?.end) {
-        const dropDx = dropped.end.x - dropped.start.x;
-        const dropDy = dropped.end.y - dropped.start.y;
+        const dropDx  = dropped.end.x - dropped.start.x;
+        const dropDy  = dropped.end.y - dropped.start.y;
         const dropLen = Math.hypot(dropDx, dropDy);
+
         if (dropLen > EPSILON && gap > EPSILON) {
           const gapDx = next.start.x - current.end.x;
           const gapDy = next.start.y - current.end.y;
-          const dotDir =
-            (dropDx / dropLen) * (gapDx / gap) +
-            (dropDy / dropLen) * (gapDy / gap);
 
-          // If the remaining closure gap is anti-parallel to a dropped source line,
-          // it is a resurrection artifact of the collapsed segment. Reconnect it
-          // deterministically so the segment cannot reappear at larger distances.
-          const resurrectsDroppedLine = dotDir < -0.5;
+          // Anti-parallel dot product < −0.5 means the gap vector runs
+          // opposite to the dropped source line — a resurrection artifact.
+          const resurrectsDroppedLine =
+            (dropDx / dropLen) * (gapDx / gap) +
+            (dropDy / dropLen) * (gapDy / gap) < -0.5;
+
           const moderateGap = gap <= Math.max(dropLen * 0.6, minNeighborLen * 0.4);
+
+          // Check whether the surviving arc/line pair has a direct geometric
+          // join available (circle-line intersection), which removes the risk
+          // of a gap being amplified by the snap.
           const hasDirectArcLineJoin = (() => {
             if (current.type === "line" && next.type === "arc") {
               const center = getArcCenter(next.arc, next);
               const radius = getArcRadius(next.arc, next);
               if (!center || radius == null) return false;
-              const pt = findCircleLineIntersection(center, radius, current, next.start);
-              return isFinitePoint(pt);
+              return isFinitePoint(findCircleLineIntersection(center, radius, current, next.start));
             }
             if (current.type === "arc" && next.type === "line") {
               const center = getArcCenter(current.arc, current);
               const radius = getArcRadius(current.arc, current);
               if (!center || radius == null) return false;
-              const pt = findCircleLineIntersection(center, radius, next, current.end);
-              return isFinitePoint(pt);
+              return isFinitePoint(findCircleLineIntersection(center, radius, next, current.end));
             }
             return false;
           })();
@@ -1586,40 +1669,120 @@ function reconnectClosedDroppedGapsAfterFiltering(finalSegments, sourceSegments,
       }
     }
 
-    if (!shouldReconnect) {
-      continue;
+    // ── Strategy 3: multi-drop — reinsert predecessor or direct miter ────
+    if (!shouldReconnect && skippedSourceIndices.length > 1 && Number.isFinite(offsetDistance)) {
+      // Only use the immediate source-order predecessor of `next`.  Using a
+      // further-back segment risks inserting the wrong outward-offset line.
+      const predIdx = (next.__sourceIndex - 1 + sourceCount) % sourceCount;
+
+      if (skippedSourceIndices.includes(predIdx)) {
+        const predSrc = Array.isArray(sourceSegments) ? sourceSegments[predIdx] : null;
+
+        if (predSrc?.type === "line" && predSrc.start && predSrc.end) {
+          // ── 3a: reinsert the dropped line ──────────────────────────────
+          // Probe both ±normal directions of the source segment, compute the
+          // offset line, then intersect it with current and next.
+          const predDir = segmentUnitDir(predSrc);
+          const curDir  = segmentUnitDir(current);
+          const nxtDir  = segmentUnitDir(next);
+
+          if (predDir && curDir && nxtDir) {
+            for (const normalSign of [1, -1]) {
+              // Reference point: source start offset by ±distance along normal.
+              const refPt = {
+                x: predSrc.start.x + (-predDir.y * normalSign) * offsetDistance,
+                y: predSrc.start.y + ( predDir.x * normalSign) * offsetDistance,
+              };
+
+              const joinA = lineLineIntersection(current.start, curDir,  refPt, predDir);
+              if (!isFinitePoint(joinA)) continue;
+              const joinB = lineLineIntersection(refPt,          predDir, next.start, nxtDir);
+              if (!isFinitePoint(joinB)) continue;
+
+              // The reinserted segment must run in the same direction as its source.
+              const newDx = joinB.x - joinA.x;
+              const newDy = joinB.y - joinA.y;
+              if (newDx * predDir.x + newDy * predDir.y <= 0) continue;
+              if (Math.hypot(newDx, newDy) <= EPSILON) continue;
+
+              // Combined endpoint displacement must not exceed 2× the gap — this
+              // prevents inserting a far-off outward-offset line.
+              if (distance(joinA, current.end) + distance(joinB, next.start) > gap * 2.0) continue;
+
+              // Valid: trim current, splice new segment in, update next.
+              setSegmentEndpoint(current, "end", joinA);
+              finalSegments.splice(i + 1, 0, {
+                type: "line",
+                start: { x: joinA.x, y: joinA.y },
+                end:   { x: joinB.x, y: joinB.y },
+                __sourceIndex: predIdx,
+              });
+              setSegmentEndpoint(next, "start", joinB);
+              break;
+            }
+          }
+
+        } else if (current.type === "line" && next.type === "line") {
+          // ── 3b: predecessor is non-reinsertable (e.g. a degenerated arc).
+          // Apply a bounded miter join directly between current and next.
+          applyLineMiterJoin(current, next, Math.abs(offsetDistance) * MITER_LIMIT);
+        }
+      }
     }
+
+    // ── Apply snap join (result of Strategy 1 or 2) ──────────────────────
+    if (!shouldReconnect) continue;
 
     if (current.type === "line" && next.type === "arc") {
       const center = getArcCenter(next.arc, next);
       const radius = getArcRadius(next.arc, next);
-      const circleLinePoint =
-        center && radius != null
-          ? findCircleLineIntersection(center, radius, current, next.start)
-          : null;
+      const circleLinePt = center && radius != null
+        ? findCircleLineIntersection(center, radius, current, next.start)
+        : null;
       const projected = projectPointOntoLine(next.start, current.start, current.end);
-      const joinPoint = circleLinePoint && Number.isFinite(circleLinePoint.x) && Number.isFinite(circleLinePoint.y)
-        ? circleLinePoint
-        : (projected && Number.isFinite(projected.x) && Number.isFinite(projected.y)
-          ? projected
-          : next.start);
-      setSegmentEndpoint(current, "end", joinPoint);
-      setSegmentEndpoint(next, "start", joinPoint);
+      const joinPoint  = isFinitePoint(circleLinePt) ? circleLinePt
+        : isFinitePoint(projected)                   ? projected
+        : next.start;
+      setSegmentEndpoint(current, "end",   joinPoint);
+      setSegmentEndpoint(next,    "start", joinPoint);
+
     } else if (current.type === "arc" && next.type === "line") {
       const center = getArcCenter(current.arc, current);
       const radius = getArcRadius(current.arc, current);
-      const circleLinePoint =
-        center && radius != null
-          ? findCircleLineIntersection(center, radius, next, current.end)
-          : null;
+      const circleLinePt = center && radius != null
+        ? findCircleLineIntersection(center, radius, next, current.end)
+        : null;
       const projected = projectPointOntoLine(current.end, next.start, next.end);
-      const joinPoint = circleLinePoint && Number.isFinite(circleLinePoint.x) && Number.isFinite(circleLinePoint.y)
-        ? circleLinePoint
-        : (projected && Number.isFinite(projected.x) && Number.isFinite(projected.y)
-          ? projected
-          : current.end);
-      setSegmentEndpoint(current, "end", joinPoint);
-      setSegmentEndpoint(next, "start", joinPoint);
+      const joinPoint  = isFinitePoint(circleLinePt) ? circleLinePt
+        : isFinitePoint(projected)                   ? projected
+        : current.end;
+      setSegmentEndpoint(current, "end",   joinPoint);
+      setSegmentEndpoint(next,    "start", joinPoint);
+
+    } else if (current.type === "line" && next.type === "line") {
+      // Compute the actual infinite-line intersection so the contour closes
+      // cleanly without creating a self-intersecting polygon.
+      const d1 = { x: current.end.x - current.start.x, y: current.end.y - current.start.y };
+      const d2 = { x: next.end.x    - next.start.x,    y: next.end.y    - next.start.y    };
+      const joinPoint = lineLineIntersection(current.start, d1, next.start, d2);
+      if (isFinitePoint(joinPoint)) {
+        const len1Sq = d1.x * d1.x + d1.y * d1.y;
+        const len2Sq = d2.x * d2.x + d2.y * d2.y;
+        // t1 / t2: parametric position of the intersection on each segment.
+        // Reject when the intersection lies far beyond either segment's extent
+        // (t < −0.01 or t > 1.01) to avoid extending a segment past its natural
+        // degeneration point.
+        const t1 = len1Sq > EPSILON
+          ? ((joinPoint.x - current.start.x) * d1.x + (joinPoint.y - current.start.y) * d1.y) / len1Sq
+          : 0;
+        const t2 = len2Sq > EPSILON
+          ? ((joinPoint.x - next.start.x) * d2.x + (joinPoint.y - next.start.y) * d2.y) / len2Sq
+          : 0;
+        if (t1 >= -0.01 && t1 <= 1.01 && t2 >= -0.01 && t2 <= 1.01) {
+          setSegmentEndpoint(current, "end",   joinPoint);
+          setSegmentEndpoint(next,    "start", joinPoint);
+        }
+      }
     }
   }
 
@@ -2619,9 +2782,37 @@ export function buildOffsetContour(segments, distance, options = {}) {
     const ex = seg.end.x - center.x, ey = seg.end.y - center.y;
     const cross = sx * ey - sy * ex;
     const sweepFlag = seg.arc.sweepFlag;
-    // sweepFlag=1 (CW in SVG = CCW in standard math): cross must be > 0
-    // sweepFlag=0 (CCW in SVG = CW in standard math): cross must be < 0
-    const inverted = sweepFlag === 1 ? cross < -EPSILON : cross > EPSILON;
+    // Determine whether this arc spans > 180°.
+    //
+    // Trust the STORED largeArcFlag when it is explicitly set (0 or 1).
+    // offsetArc() always computes and stores the correct flag at arc creation time.
+    // After join trimming setSegmentEndpoint() may change endAngle without updating
+    // largeArcFlag — this is intentional: a small arc (largeArcFlag=0) that has been
+    // trimmed so far that its CCW span now exceeds 180° has been inverted; the stored
+    // flag=0 correctly signals "was small, now inverted" and lets the cross-product
+    // test below remove it.
+    //
+    // Fall back to computing the span only if largeArcFlag is absent (uncommon:
+    // arc built without going through offsetArc, e.g. from external input).
+    let isLargeArc;
+    if (seg.arc.largeArcFlag !== undefined) {
+        isLargeArc = seg.arc.largeArcFlag === 1;
+    } else {
+        let spanDelta = Number(seg.arc.endAngle) - Number(seg.arc.startAngle);
+        if (sweepFlag === 1 && spanDelta < 0) spanDelta += 2 * Math.PI;
+        else if (sweepFlag === 0 && spanDelta > 0) spanDelta -= 2 * Math.PI;
+        isLargeArc = Math.abs(spanDelta) > Math.PI;
+    }
+    // For arcs < 180° (isLargeArc=false):
+    //   sweepFlag=1 (CCW in standard math): cross product of (start−center) × (end−center) > 0
+    //   sweepFlag=0 (CW in standard math):  cross < 0
+    // For arcs > 180° (isLargeArc=true) the cross product sign FLIPS because
+    // sin(angle > 180°) < 0.  Expected signs are therefore reversed.
+    //   sweepFlag=1 large arc: cross < 0 expected (not inverted)
+    //   sweepFlag=0 large arc: cross > 0 expected (not inverted)
+    const inverted = isLargeArc
+      ? (sweepFlag === 1 ? cross > EPSILON : cross < -EPSILON)
+      : (sweepFlag === 1 ? cross < -EPSILON : cross > EPSILON);
     if (!inverted) continue;
 
     log.debug(
@@ -2684,7 +2875,8 @@ export function buildOffsetContour(segments, distance, options = {}) {
     finalSegments = reconnectClosedDroppedGapsAfterFiltering(
       finalSegments,
       segments,
-      segments.length
+      segments.length,
+      distance
     );
   }
 
@@ -2713,6 +2905,17 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
       return true;
     });
+
+    // Step 4e.1: Re-run the dropped-gap reconnect after tiny stubs have been
+    // pruned.  Stub removal can disconnect previously-joined neighbors (e.g. a
+    // tiny V3 stub between C and E is removed, leaving a C–E gap that the
+    // first reconnect pass never saw).  A second pass closes those new gaps.
+    finalSegments = reconnectClosedDroppedGapsAfterFiltering(
+      finalSegments,
+      segments,
+      segments.length,
+      distance
+    );
   }
 
   // Strip internal metadata before returning public segments

@@ -656,10 +656,15 @@ export class OffsetEngine {
 
         // Cursor-side resolution: adjust distance sign based on which side of the
         // nearest segment the cursor sits on.
+        // Skip when offsetSignMode === "direct": the caller (e.g. OffsetTool via
+        // _distanceFromPointer) has already computed a correct signed distance that
+        // handles arcs properly. Re-resolving here with chord-based normals would
+        // invert the sign for large arcs (largeArcFlag=1) and other edge cases.
         let adjustedDistance = distance;
         if (
             resolvedOptions.sideResolution === "nearest-segment-normal" &&
             resolvedOptions.cursorPoint &&
+            resolvedOptions.offsetSignMode !== "direct" &&
             segments.length > 0
         ) {
             adjustedDistance = this._resolveCursorSideDistance(

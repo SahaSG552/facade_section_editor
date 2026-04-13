@@ -226,12 +226,21 @@ export function offsetArc(segment, distance) {
         y: center.y + newRadius * Math.sin(endAngle),
     };
 
+    // Compute largeArcFlag from the angular span so downstream serialization
+    // always outputs the correct flag, even when the source arc object lacked it
+    // (the path parser does not set largeArcFlag -- only centerX/Y, radius, etc.).
+    let spanDelta = endAngle - startAngle;
+    if (sweepFlag === 1 && spanDelta < 0) spanDelta += 2 * Math.PI;
+    else if (sweepFlag === 0 && spanDelta > 0) spanDelta -= 2 * Math.PI;
+    const newLargeArcFlag = Math.abs(spanDelta) > Math.PI ? 1 : 0;
+
     const nextArc = {
         ...arc,
         radius: newRadius,
         startAngle,
         endAngle,
         sweepFlag,
+        largeArcFlag: newLargeArcFlag,
     };
 
     if ("center" in arc) {
