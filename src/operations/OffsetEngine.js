@@ -1,6 +1,6 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { buildOffsetContour } from "./OffsetContourBuilder.js";
-import { trimSelfIntersections, trimSelfIntersectionsDetailed } from "./OffsetTrimmer.js";
+import { trimSelfIntersections, trimSelfIntersectionsDetailed, splitFigureEightChain } from "./OffsetTrimmer.js";
 import { capBothSides } from "./OffsetCapper.js";
 import { segmentsToSVGPath } from "../utils/arcApproximation.js";
 import { isSegmentDegenerated } from "./OffsetRules.js";
@@ -656,10 +656,15 @@ export class OffsetEngine {
 
         // Cursor-side resolution: adjust distance sign based on which side of the
         // nearest segment the cursor sits on.
+        // Skip when offsetSignMode === "direct": the caller (e.g. OffsetTool via
+        // _distanceFromPointer) has already computed a correct signed distance that
+        // handles arcs properly. Re-resolving here with chord-based normals would
+        // invert the sign for large arcs (largeArcFlag=1) and other edge cases.
         let adjustedDistance = distance;
         if (
             resolvedOptions.sideResolution === "nearest-segment-normal" &&
             resolvedOptions.cursorPoint &&
+            resolvedOptions.offsetSignMode !== "direct" &&
             segments.length > 0
         ) {
             adjustedDistance = this._resolveCursorSideDistance(
@@ -915,18 +920,22 @@ export class OffsetEngine {
                         resolvedOptions.trimSelfIntersections !== false &&
                         this._hasPotentialSelfIntersection(stitchedSegments, true);
                     const trimmedComponents = shouldTrimSelfIntersections
-                        ? trimSelfIntersectionsDetailed(stitchedSegments)
+                        ? trimSelfIntersectionsDetailed(stitchedSegments, {
+                            exportModule: resolvedOptions.exportModule,
+                            arcTolerance: resolvedOptions.arcTolerance,
+                        })
                         : [];
                     const resolvedContours = trimmedComponents.length > 0
-                        ? trimmedComponents
-                            .filter((component) => {
-                                if (Math.abs(sourceArea) <= EPSILON || Math.abs(component.area) <= EPSILON) {
-                                    return true;
-                                }
-                                return Math.sign(sourceArea) === Math.sign(component.area);
-                            })
-                            .map((component) => component.segments)
+                        ? this._selectResolvedClosedContours(trimmedComponents, sourceContour, sourceArea)
                         : this._splitContours(stitchedSegments);
+
+                    // Collect contours for this source segment, then apply post-processing.
+                    const sourceContourOutput = [];
+                    // Only apply figure-8 splitting and arc-artifact filtering when Paper's
+                    // trimmer was actually used (trimmedComponents.length > 0).  For plain
+                    // _splitContours output the topology is already clean and figure-8 detection
+                    // can false-positive on valid sharp-miter corners.
+                    const usedTrimmer = trimmedComponents.length > 0;
 
                     for (const resolvedContour of resolvedContours) {
                         const normalizedFinalSegments = this._ensureClosedWhenNeeded(resolvedContour, true);
@@ -936,22 +945,48 @@ export class OffsetEngine {
                             continue;
                         }
 
-                        let contourPathData = segmentsToSVGPath(outputSegments, false, { skipArcAutoCorrect: true });
-                        const contourBBox = this._computeBBox(outputSegments);
-                        const contourArea = this._computeSignedArea(outputSegments);
+                        const outputChains = [outputSegments]; // engine-level split disabled for diagnosis
+                        for (const chainSegs of outputChains) {
+                            if (!Array.isArray(chainSegs) || chainSegs.length < 3) continue;
 
-                        if (Math.abs(contourArea) <= EPSILON) {
-                            continue;
+                            let contourPathData = segmentsToSVGPath(chainSegs, false, { skipArcAutoCorrect: true });
+                            const contourBBox = this._computeBBox(chainSegs);
+                            const contourArea = this._computeSignedArea(chainSegs);
+
+                            if (Math.abs(contourArea) <= EPSILON) {
+                                continue;
+                            }
+
+                            sourceContourOutput.push({
+                                segments: chainSegs,
+                                pathData: contourPathData,
+                                closed: true,
+                                orientation: contourArea >= 0 ? "ccw" : "cw",
+                                area: contourArea,
+                                bbox: contourBBox,
+                            });
                         }
+                    }
 
-                        contours.push({
-                            segments: outputSegments,
-                            pathData: contourPathData,
-                            closed: true,
-                            orientation: contourArea >= 0 ? "ccw" : "cw",
-                            area: contourArea,
-                            bbox: contourBBox,
-                        });
+                    // Post-processing: when 3+ output contours come from an arc-bearing source,
+                    // drop any purely-linear contours (no arc segs after sanitization).
+                    // These are crossing-artifact triangles from near-collapse figure-8 topology.
+                    // Only applied when the Paper trimmer was used (same scope as figure-8 guard).
+                    const sourceHasArcs = usedTrimmer && sourceContour.some((s) => s.type === "arc");
+                    const finalForSource =
+                        sourceHasArcs && sourceContourOutput.length >= 3
+                            ? (() => {
+                                const withArcs = sourceContourOutput.filter((c) =>
+                                    c.segments.some((s) => s.type === "arc"),
+                                );
+                                return withArcs.length >= 1 && withArcs.length < sourceContourOutput.length
+                                    ? withArcs
+                                    : sourceContourOutput;
+                            })()
+                            : sourceContourOutput;
+
+                    for (const c of finalForSource) {
+                        contours.push(c);
                     }
                 }
             }
@@ -1283,6 +1318,125 @@ export class OffsetEngine {
         }
 
         return { minX, minY, maxX, maxY };
+    }
+
+    _selectResolvedClosedContours(trimmedComponents, sourceContour, sourceArea) {
+        if (!Array.isArray(trimmedComponents) || trimmedComponents.length === 0) {
+            return [];
+        }
+
+        const sourceHasArcs = Array.isArray(sourceContour)
+            && sourceContour.some((segment) => segment?.type === "arc");
+
+        const signCompatible = trimmedComponents
+            .filter((component) => Array.isArray(component?.segments) && component.segments.length >= 2)
+            .map((component) => {
+                const area = Number.isFinite(component?.area)
+                    ? Number(component.area)
+                    : this._computeSignedArea(component.segments);
+                return {
+                    ...component,
+                    area,
+                    bbox: this._computeBBox(component.segments),
+                    hasArc: component.segments.some((segment) => segment?.type === "arc"),
+                };
+            })
+            .filter((component) => {
+                if (Math.abs(component.area) <= EPSILON) {
+                    return false;
+                }
+                if (Math.abs(sourceArea) <= EPSILON) {
+                    return true;
+                }
+                return Math.sign(sourceArea) === Math.sign(component.area);
+            });
+
+        if (signCompatible.length <= 1) {
+            return signCompatible.map((component) => component.segments);
+        }
+
+        const largestArea = Math.max(...signCompatible.map((component) => Math.abs(component.area)));
+        const largestArcArea = Math.max(
+            0,
+            ...signCompatible
+                .filter((component) => component.hasArc)
+                .map((component) => Math.abs(component.area)),
+        );
+
+        const filtered = signCompatible.filter((component) => {
+            const area = Math.abs(component.area);
+            const nestedInsideLarger = signCompatible.some((other) => {
+                if (other === component || !other.bbox || !component.bbox) {
+                    return false;
+                }
+                if (Math.abs(other.area) <= area * 1.5) {
+                    return false;
+                }
+                return this._isBBoxContained(component.bbox, other.bbox, 1e-6);
+            });
+
+            if (nestedInsideLarger && area < largestArea * 0.75) {
+                return false;
+            }
+
+            if (sourceHasArcs && largestArcArea > 0 && !component.hasArc && area < largestArcArea * 0.35) {
+                const touchingArcNeighborCount = signCompatible.filter((other) => {
+                    if (other === component || !other.hasArc || !other.bbox || !component.bbox) {
+                        return false;
+                    }
+                    return this._bboxesOverlap(component.bbox, other.bbox, 1e-6);
+                }).length;
+
+                if (touchingArcNeighborCount === 1) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+
+        // Secondary pass: when 3+ same-sign components survive, any component
+        // below 25 % of the largest is a crossing-point artifact.  Paper clips
+        // source arcs at crossing nodes so the arc fragments end up in different
+        // child components; this makes bbox-containment unreliable because the
+        // clipped arc no longer reaches its original far endpoint.  A pure area
+        // ratio test is much more robust: genuine lobes (like the symmetric
+        // hourglass case) always appear at ≥ 50 % of each other, while crossing
+        // artifacts are typically ≤ 20 %.
+        if (filtered.length >= 3) {
+            const filteredLargest = Math.max(...filtered.map((c) => Math.abs(c.area)));
+            const areaFiltered = filtered.filter((c) => Math.abs(c.area) >= filteredLargest * 0.25);
+            if (areaFiltered.length > 0) {
+                return areaFiltered.map((c) => c.segments);
+            }
+        }
+
+        const selected = filtered.length > 0 ? filtered : signCompatible;
+        return selected.map((component) => component.segments);
+    }
+
+    _isBBoxContained(inner, outer, tolerance = 1e-6) {
+        if (!inner || !outer) {
+            return false;
+        }
+
+        return inner.minX >= outer.minX - tolerance
+            && inner.maxX <= outer.maxX + tolerance
+            && inner.minY >= outer.minY - tolerance
+            && inner.maxY <= outer.maxY + tolerance;
+    }
+
+    _bboxesOverlap(a, b, tolerance = 1e-6) {
+        if (!a || !b) {
+            return false;
+        }
+
+        return !(
+            a.maxX < b.minX - tolerance
+            || a.minX > b.maxX + tolerance
+            || a.maxY < b.minY - tolerance
+            || a.minY > b.maxY + tolerance
+        );
     }
 
     _mergeBBoxes(boxes) {

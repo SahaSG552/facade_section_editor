@@ -1462,7 +1462,10 @@ export default class OffsetTool extends BaseTool {
 
     _resolveContourEngineDistance(entry, signedDistance) {
         if (!entry?.closed || !Array.isArray(entry.chain) || entry.chain.length === 0) {
-            return signedDistance;
+            // Open contour: OffsetTool convention is positive = toward cursor / outward,
+            // but engine direct mode convention is positive = right-of-traversal = inward
+            // for CCW arcs. Negate to align the two conventions.
+            return -signedDistance;
         }
 
         const area = contourSignedAreaEditor(entry.chain);

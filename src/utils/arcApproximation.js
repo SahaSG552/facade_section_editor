@@ -97,8 +97,40 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false, options = {
                 const rotation = arc.xAxisRotation || 0;
 
                 // large-arc-flag (1 если дуга > 180°)
-                const largeArc =
-                    arc.largeArcFlag !== undefined ? arc.largeArcFlag : 0;
+                // Prefer the stored flag; otherwise derive from angles.
+                // ExportModule arc fitting reports angles in DEGREES, while many
+                // internal arc builders store them in RADIANS. Handle both so a
+                // recovered quarter-circle is not mislabeled as a large arc.
+                let largeArc;
+                if (arc.largeArcFlag !== undefined) {
+                    largeArc = arc.largeArcFlag;
+                } else if (arc.startAngle != null && arc.endAngle != null) {
+                    const rawStart = Number(arc.startAngle);
+                    const rawEnd = Number(arc.endAngle);
+                    const looksLikeDegrees =
+                        Math.abs(rawStart) > Math.PI * 2 + 1e-6 ||
+                        Math.abs(rawEnd) > Math.PI * 2 + 1e-6;
+                    const startAngle = looksLikeDegrees ? (rawStart * Math.PI) / 180 : rawStart;
+                    const endAngle = looksLikeDegrees ? (rawEnd * Math.PI) / 180 : rawEnd;
+
+                    let flagDelta = endAngle - startAngle;
+                    let flagSweep;
+                    if (arc.sweepFlag !== undefined) {
+                        flagSweep = arc.sweepFlag;
+                    } else if (arc.isCCW !== undefined) {
+                        flagSweep = arc.isCCW ? 0 : 1;
+                    } else {
+                        flagSweep = 1;
+                    }
+                    if (invertSweepFlag) {
+                        flagSweep = flagSweep === 1 ? 0 : 1;
+                    }
+                    if (flagSweep === 1 && flagDelta < 0) flagDelta += 2 * Math.PI;
+                    else if (flagSweep === 0 && flagDelta > 0) flagDelta -= 2 * Math.PI;
+                    largeArc = Math.abs(flagDelta) > Math.PI ? 1 : 0;
+                } else {
+                    largeArc = 0;
+                }
 
                 // sweep-flag (направление: 1 = по часовой, 0 = против)
                 // В DXF: isCCW = true означает counter-clockwise (против часовой = 0)

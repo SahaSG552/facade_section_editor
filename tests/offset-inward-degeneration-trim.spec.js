@@ -54,6 +54,74 @@ describe("inward degeneration + trim stability", () => {
     expect(main.segments.some((s) => s.type === "arc")).toBe(true);
   });
 
+  it("inward d=2 produces correct 3-segment triangle with parallel diagonal (no spurious bridge)", async () => {
+    // Source diagonal: L(10,3)→(3,5), direction (-7,2)/sqrt(53)
+    const srcDx = 3 - 10, srcDy = 5 - 3;
+    const srcLen = Math.hypot(srcDx, srcDy);
+    const srcDir = { x: srcDx / srcLen, y: srcDy / srcLen };
+
+    for (const d of [2.0, 2.2]) {
+      const engine = new OffsetEngine({ exportModule });
+      const result = await engine.processPath(SRC_PATH, d, { trimSelfIntersections: false });
+      const c = result.contours[0];
+
+      // Must produce exactly 3 segments — no right-vertical bridge stub
+      expect(c.segments.length).toBe(3);
+
+      // All segments must be lines
+      expect(c.segments.every((s) => s.type === "line")).toBe(true);
+
+      // Find the longest segment — that is the main diagonal
+      const diagSeg = c.segments.reduce((best, s) => {
+        const len = Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y);
+        const bestLen = Math.hypot(best.end.x - best.start.x, best.end.y - best.start.y);
+        return len > bestLen ? s : best;
+      });
+      const dx = diagSeg.end.x - diagSeg.start.x;
+      const dy = diagSeg.end.y - diagSeg.start.y;
+      const diagLen = Math.hypot(dx, dy);
+      const parallelScore = Math.abs(dx / diagLen * srcDir.x + dy / diagLen * srcDir.y);
+      expect(parallelScore).toBeGreaterThan(0.999);
+
+      // Closure gap must be negligible
+      const first = c.segments[0];
+      const last = c.segments[c.segments.length - 1];
+      const closureGap = Math.hypot(last.end.x - first.start.x, last.end.y - first.start.y);
+      expect(closureGap).toBeLessThan(1e-4);
+    }
+  });
+
+  it("inward d=1.7 produces correct 3-segment closed contour (tiny D-stub collapse + E-B miter)", async () => {
+    // At d=1.7: arc degenerates, diagonal A (offset of L2_9) is reversed and
+    // filtered, leaving B(V0), C(H10), D(V3_tiny≈0.018), E(L3_5). Step 4e
+    // prunes D, then the second reconnect pass must miter C and E at their
+    // correct intersection, and miter E and B.
+    // Expected: exactly 3 segments, all lines, zero internal gaps.
+    const engine = new OffsetEngine({ exportModule });
+    const result = await engine.processPath(SRC_PATH, 1.7, { trimSelfIntersections: false });
+    const c = result.contours[0];
+
+    expect(c.segments.length).toBe(3);
+    expect(c.segments.every((s) => s.type === "line")).toBe(true);
+
+    // All consecutive joints must snap closed (no internal crack)
+    for (let i = 0; i < c.segments.length; i++) {
+      const a = c.segments[i];
+      const b = c.segments[(i + 1) % c.segments.length];
+      const gap = Math.hypot(a.end.x - b.start.x, a.end.y - b.start.y);
+      expect(gap).toBeLessThan(1e-4);
+    }
+
+    // Verify the horizontal segment ends near x=8.36 (intersection of H10 and
+    // L3_5 offset lines), not at the raw V3 corner x=8.3.
+    const horizSeg = c.segments.find(
+      (s) => Math.abs(s.start.y - s.end.y) < 0.01 && Math.abs(s.start.y - 1.7) < 0.01
+    );
+    expect(horizSeg).toBeTruthy();
+    const horizRightX = Math.max(horizSeg.start.x, horizSeg.end.x);
+    expect(horizRightX).toBeGreaterThan(8.35); // must extend past x=8.3
+  });
+
   it("sequential inward +0.4 x3 keeps main contour topology (no 3-segment collapse)", async () => {
     const engine = new OffsetEngine({ exportModule });
 
