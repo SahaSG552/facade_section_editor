@@ -33,4 +33,33 @@ describe("Closed contour inward self-intersection splitting", () => {
             expect(directAreas[i]).toBeLessThan(nextAreas[i]);
         }
     });
+
+    it("drops nested same-winding artifact loops while keeping the main resolved contour", () => {
+        const engine = new OffsetEngine({ joinType: "sharp", capType: "flat", exportModule });
+        const outer = [
+            { type: "line", start: { x: 0, y: 0 }, end: { x: 10, y: 0 } },
+            { type: "line", start: { x: 10, y: 0 }, end: { x: 10, y: 10 } },
+            { type: "line", start: { x: 10, y: 10 }, end: { x: 0, y: 10 } },
+            { type: "line", start: { x: 0, y: 10 }, end: { x: 0, y: 0 } },
+        ];
+        const innerArtifact = [
+            { type: "line", start: { x: 3, y: 3 }, end: { x: 4, y: 3 } },
+            { type: "line", start: { x: 4, y: 3 }, end: { x: 4, y: 4 } },
+            { type: "line", start: { x: 4, y: 4 }, end: { x: 3, y: 4 } },
+            { type: "line", start: { x: 3, y: 4 }, end: { x: 3, y: 3 } },
+        ];
+
+        const sourceArea = engine._computeSignedArea(outer);
+        const selected = engine._selectResolvedClosedContours(
+            [
+                { segments: outer, area: engine._computeSignedArea(outer) },
+                { segments: innerArtifact, area: engine._computeSignedArea(innerArtifact) },
+            ],
+            outer,
+            sourceArea,
+        );
+
+        expect(selected).toHaveLength(1);
+        expect(selected[0]).toEqual(outer);
+    });
 });

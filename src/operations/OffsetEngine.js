@@ -929,12 +929,9 @@ export class OffsetEngine {
                         ? this._selectResolvedClosedContours(trimmedComponents, sourceContour, sourceArea)
                         : this._splitContours(stitchedSegments);
 
-                    // Collect contours for this source segment, then apply post-processing.
-                    const sourceContourOutput = [];
-                    // Only apply figure-8 splitting and arc-artifact filtering when Paper's
-                    // trimmer was actually used (trimmedComponents.length > 0).  For plain
-                    // _splitContours output the topology is already clean and figure-8 detection
-                    // can false-positive on valid sharp-miter corners.
+                    // Artifact filtering is now done upstream in _selectResolvedClosedContours
+                    // (MIN_RESOLVED_SEGS=4 drops 3-seg crossing triangles regardless of arc presence).
+                    // The figure-8 split is the only remaining post-pass needed here.
                     const usedTrimmer = trimmedComponents.length > 0;
 
                     for (const resolvedContour of resolvedContours) {
@@ -945,7 +942,13 @@ export class OffsetEngine {
                             continue;
                         }
 
-                        const outputChains = [outputSegments]; // engine-level split disabled for diagnosis
+                        // Final guard: if a figure-8 (pinch-point chain) survived all earlier
+                        // filtering, split it now so every emitted contour is a genuine simple loop.
+                        // Only applied when the Paper trimmer was used (avoids false-positives on
+                        // sharp-miter corners in non-self-intersecting offsets).
+                        const outputChains = usedTrimmer
+                            ? splitFigureEightChain(outputSegments)
+                            : [outputSegments];
                         for (const chainSegs of outputChains) {
                             if (!Array.isArray(chainSegs) || chainSegs.length < 3) continue;
 
@@ -957,7 +960,7 @@ export class OffsetEngine {
                                 continue;
                             }
 
-                            sourceContourOutput.push({
+                            contours.push({
                                 segments: chainSegs,
                                 pathData: contourPathData,
                                 closed: true,
@@ -966,27 +969,6 @@ export class OffsetEngine {
                                 bbox: contourBBox,
                             });
                         }
-                    }
-
-                    // Post-processing: when 3+ output contours come from an arc-bearing source,
-                    // drop any purely-linear contours (no arc segs after sanitization).
-                    // These are crossing-artifact triangles from near-collapse figure-8 topology.
-                    // Only applied when the Paper trimmer was used (same scope as figure-8 guard).
-                    const sourceHasArcs = usedTrimmer && sourceContour.some((s) => s.type === "arc");
-                    const finalForSource =
-                        sourceHasArcs && sourceContourOutput.length >= 3
-                            ? (() => {
-                                const withArcs = sourceContourOutput.filter((c) =>
-                                    c.segments.some((s) => s.type === "arc"),
-                                );
-                                return withArcs.length >= 1 && withArcs.length < sourceContourOutput.length
-                                    ? withArcs
-                                    : sourceContourOutput;
-                            })()
-                            : sourceContourOutput;
-
-                    for (const c of finalForSource) {
-                        contours.push(c);
                     }
                 }
             }
@@ -1328,8 +1310,14 @@ export class OffsetEngine {
         const sourceHasArcs = Array.isArray(sourceContour)
             && sourceContour.some((segment) => segment?.type === "arc");
 
+        // Crossing-point artifacts always form as 3-segment triangles (minimum closed polygon).
+        // Any legitimate offset component from a multi-segment source has at least 4 segments.
+        // Filtering here — before area or bbox checks — cleanly removes these artifacts
+        // regardless of whether they happen to bear arc segments.
+        const MIN_RESOLVED_SEGS = 4;
+
         const signCompatible = trimmedComponents
-            .filter((component) => Array.isArray(component?.segments) && component.segments.length >= 2)
+            .filter((component) => Array.isArray(component?.segments) && component.segments.length >= MIN_RESOLVED_SEGS)
             .map((component) => {
                 const area = Number.isFinite(component?.area)
                     ? Number(component.area)

@@ -13,6 +13,8 @@
  */
 
 import LoggerFactory from "../core/LoggerFactory.js";
+import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
+import { approximatePath } from "../utils/arcApproximation.js";
 import { resolveSelfIntersections, resolveSelfIntersectionsDetailed } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("OffsetTrimmer");
@@ -68,7 +70,7 @@ function computeBezierSteps(x0, y0, x1, y1, x2, y2, x3, y3) {
  * ];
  * const cleanSegments = trimSelfIntersections(dirtySegments);
  */
-export function trimSelfIntersections(segments) {
+export function trimSelfIntersections(segments, options = {}) {
   if (!segments || !Array.isArray(segments) || segments.length === 0) {
     log.warn("trimSelfIntersections: invalid or empty segments input");
     return [];
@@ -98,7 +100,7 @@ export function trimSelfIntersections(segments) {
     );
 
     // 3. Parse result back to segment array
-    const cleanSegments = pathStringToSegments(cleanedPathData);
+    const cleanSegments = pathStringToSegments(cleanedPathData, options);
     if (!cleanSegments || cleanSegments.length === 0) {
       log.warn("trimSelfIntersections: failed to parse cleaned path back to segments");
       return [];
@@ -114,7 +116,99 @@ export function trimSelfIntersections(segments) {
   }
 }
 
-export function trimSelfIntersectionsDetailed(segments) {
+/**
+ * Split a potentially compound SVG path string ("M...Z M...Z") into
+ * individual sub-path strings (["M...Z", "M...Z"]).
+ *
+ * Paper.js emits compound pathData for "pinch-point" topology: two closed
+ * loops that share exactly one vertex (figure-8). Passing that compound string
+ * to pathStringToSegments would merge both loops into a single self-
+ * intersecting chain. Splitting first lets each loop be treated independently.
+ *
+ * @param {string} pathData - Possibly compound SVG path string.
+ * @returns {string[]} Individual sub-path strings.
+ */
+function splitSubpaths(pathData) {
+  if (!pathData || typeof pathData !== "string") return [];
+  const s = pathData.trim();
+  const result = [];
+  let current = "";
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    current += ch;
+    if (ch === "Z" || ch === "z") {
+      // Look ahead past whitespace for the next M/m
+      let j = i + 1;
+      while (j < s.length && /\s/.test(s[j])) j++;
+      if (j < s.length && (s[j] === "M" || s[j] === "m")) {
+        result.push(current.trim());
+        current = "";
+        i = j - 1; // for-loop will do i++
+      }
+    }
+  }
+  if (current.trim()) result.push(current.trim());
+  return result.filter(Boolean);
+}
+
+/**
+ * Compute signed shoelace area for a flat segment chain.
+ * Matches OffsetEngine._computeSignedArea semantics exactly.
+ */
+function signedAreaFromSegments(segs) {
+  if (!Array.isArray(segs) || segs.length === 0) return 0;
+  let area = 0;
+  for (const seg of segs) {
+    if (!seg?.start || !seg?.end) continue;
+    area += seg.start.x * seg.end.y - seg.end.x * seg.start.y;
+  }
+  return area / 2;
+}
+
+/**
+ * Detect and split a figure-8 (pinch-point) segment chain into two independent
+ * closed sub-chains.
+ *
+ * Paper.js resolveCrossings() can represent two loops sharing exactly one vertex
+ * (pinch point) as a SINGLE path that revisits its own start mid-traversal:
+ *   M P0 → ... → L P0 → A/L ... → Z
+ * Rather than the compound "M...Z M...Z" form.
+ *
+ * Solution: scan for intermediate endpoints that equal the chain start.
+ * When found, the chain splits into:
+ *   first = segs[0..i]   (closed loop ending at pinch vertex)
+ *   second = segs[i+1..] (closed loop starting at pinch vertex)
+ *
+ * @param {Object[]} segs - Closed segment chain.
+ * @returns {Object[][]} [segs] if no figure-8, or [firstLoop, secondLoop] if split.
+ */
+export function splitFigureEightChain(segs) {
+  if (!Array.isArray(segs) || segs.length < 4) return [segs];
+  const startPt = segs[0]?.start;
+  if (!startPt) return [segs];
+  const NEAR = 1e-3;
+  for (let i = 1; i < segs.length - 1; i++) {
+    const end = segs[i]?.end;
+    if (!end) continue;
+    if (Math.abs(end.x - startPt.x) <= NEAR && Math.abs(end.y - startPt.y) <= NEAR) {
+      const first = segs.slice(0, i + 1);  // loop closes at segment i
+      const second = segs.slice(i + 1);    // second loop starts from pinch vertex
+      if (first.length >= 3) {
+        // Always return first loop; include second only if it also forms a valid loop.
+        // Even when second is degenerate (<3 segs), returning [first] strips the
+        // degenerate tail so the figure-8 is resolved.
+        if (second.length >= 3) {
+          return [first, second];
+        }
+        return [first]; // second is a degenerate tail — strip it
+      }
+    }
+  }
+  return [segs]; // reference-equal to input → callers can detect "no split"
+}
+
+export function trimSelfIntersectionsDetailed(segments, options = {}) {
   if (!segments || !Array.isArray(segments) || segments.length === 0) {
     log.warn("trimSelfIntersectionsDetailed: invalid or empty segments input");
     return [];
@@ -135,19 +229,78 @@ export function trimSelfIntersectionsDetailed(segments) {
       return [];
     }
 
-    const detailedComponents = resolved.components
-      .map((component) => ({
-        pathData: component.pathData,
-        area: Number(component.area) || 0,
-        clockwise: !!component.clockwise,
-        segments: pathStringToSegments(component.pathData),
-      }))
+    // Paper.js can emit compound pathData ("M...Z M...Z") for "pinch-point"
+    // topology where two loops share exactly one vertex. Passing that compound
+    // string to pathStringToSegments merges both loops into one figure-8 chain.
+    // Expand each Paper component by its sub-paths before segment-parsing.
+    const flatComponents = [];
+    for (const component of resolved.components) {
+      const subpaths = splitSubpaths(component.pathData);
+      if (subpaths.length <= 1) {
+        flatComponents.push({
+          pathData: component.pathData,
+          area: Number(component.area) || 0,
+          clockwise: !!component.clockwise,
+        });
+      } else {
+        log.debug(
+          `[trimSelfIntersectionsDetailed] Expanding compound component (${subpaths.length} sub-paths)`,
+        );
+        for (const sp of subpaths) {
+          const spSegs = pathStringToSegments(sp, options);
+          if (!Array.isArray(spSegs) || spSegs.length === 0) continue;
+          const spArea = signedAreaFromSegments(spSegs);
+          flatComponents.push({
+            pathData: sp,
+            area: spArea,
+            clockwise: spArea < 0,
+          });
+        }
+      }
+    }
+
+    const detailedComponents = flatComponents
+      .map((component) => {
+        const recovered = recoverBezierCurvesToArcs(component.pathData, options);
+        return {
+          pathData: recovered,
+          area: Number(component.area) || 0,
+          clockwise: !!component.clockwise,
+          segments: pathStringToSegments(recovered, options),
+        };
+      })
       .filter((component) => Array.isArray(component.segments) && component.segments.length > 0);
 
+    // Expand any figure-8 (pinch-point) chains where Paper emits a single path
+    // that revisits its own start vertex mid-traversal instead of Z M compound form.
+    const expandedComponents = [];
+    for (const component of detailedComponents) {
+      const subchains = splitFigureEightChain(component.segments);
+      // subchains[0] === component.segments means no split occurred (reference equality).
+      if (subchains.length === 1 && subchains[0] === component.segments) {
+        expandedComponents.push(component);
+      } else {
+        log.debug(
+          `[trimSelfIntersectionsDetailed] Splitting figure-8 chain →${subchains.length} sub-chain(s)`
+        );
+        for (const chain of subchains) {
+          if (chain.length < 3) continue;
+          const chainArea = signedAreaFromSegments(chain);
+          if (Math.abs(chainArea) < 1e-10) continue;
+          expandedComponents.push({
+            ...component,
+            segments: chain,
+            area: chainArea,
+            clockwise: chainArea < 0,
+          });
+        }
+      }
+    }
+
     log.info(
-      `Trimmed ${segments.length} input segments → ${detailedComponents.reduce((sum, c) => sum + c.segments.length, 0)} clean segments`
+      `Trimmed ${segments.length} input segments → ${expandedComponents.reduce((sum, c) => sum + c.segments.length, 0)} clean segments`
     );
-    return detailedComponents;
+    return expandedComponents;
   } catch (error) {
     log.error("trimSelfIntersectionsDetailed failed:", error);
     return [];
@@ -413,7 +566,37 @@ function svgArcToCenter(x1, y1, rx, ry, xAxisRotation, largeArcFlag, sweepFlag, 
  * const segments = pathStringToSegments("M 0 0 L 10 0 L 10 10 Z");
  * // Returns: [{type: "line", start: {x: 0, y: 0}, end: {x: 10, y: 0}}, ...]
  */
-export function pathStringToSegments(pathString) {
+function recoverBezierCurvesToArcs(pathString, options = {}) {
+  if (!pathString || typeof pathString !== "string") {
+    return "";
+  }
+
+  if (!/[CcSsQqTt]/.test(pathString)) {
+    return pathString;
+  }
+
+  const exportModule = options?.exportModule;
+  if (!exportModule?.dxfExporter) {
+    return pathString;
+  }
+
+  try {
+    return (
+      approximatePath(
+        pathString,
+        exportModule,
+        Number.isFinite(options?.arcTolerance)
+          ? options.arcTolerance
+          : ARC_APPROX_TOLERANCE,
+      ) || pathString
+    );
+  } catch (error) {
+    log.warn("recoverBezierCurvesToArcs: approximation failed, falling back to polyline parse", error);
+    return pathString;
+  }
+}
+
+export function pathStringToSegments(pathString, options = {}) {
   if (!pathString || typeof pathString !== "string" || pathString.trim() === "") {
     log.warn("pathStringToSegments: invalid path string");
     return [];
@@ -421,6 +604,7 @@ export function pathStringToSegments(pathString) {
 
   try {
     const segments = [];
+    const parseInput = recoverBezierCurvesToArcs(pathString, options);
     let currentX = 0;
     let currentY = 0;
     let startX = 0;
@@ -430,10 +614,10 @@ export function pathStringToSegments(pathString) {
     // Regex: Extract command letter + following numbers
     const commandRegex = /([MLACHVZmlachvz])([^MLACHVZmlachvz]*)/g;
     const commandMatches = [];
-    let cmdMatch = commandRegex.exec(pathString);
+    let cmdMatch = commandRegex.exec(parseInput);
     while (cmdMatch !== null) {
       commandMatches.push(cmdMatch);
-      cmdMatch = commandRegex.exec(pathString);
+      cmdMatch = commandRegex.exec(parseInput);
     }
 
     commandMatches.forEach((match) => {
