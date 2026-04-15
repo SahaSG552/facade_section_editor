@@ -1,0 +1,101 @@
+/* ============================================================
+   Design Token System — 3-Layer Architecture
+   Layer 1: Primitives (oklch) → Layer 2: Semantic (light-dark) → Layer 3: Component
+   ============================================================ */
+
+:root {
+  color-scheme: light dark;
+
+  /* ----------------------------------------------------------
+     Layer 1 — Primitives
+     Raw color values in oklch color space (perceptually uniform).
+     Do NOT reference these directly in components.
+     ---------------------------------------------------------- */
+
+  /* Neutrals */
+  --prim-white:        oklch(1 0 0);
+  --prim-gray-50:      oklch(0.985 0.002 247);
+  --prim-gray-100:     oklch(0.97 0.003 247);
+  --prim-gray-200:     oklch(0.925 0.005 247);
+  --prim-gray-300:     oklch(0.865 0.007 247);
+  --prim-gray-400:     oklch(0.715 0.01 247);
+  --prim-gray-500:     oklch(0.551 0.012 247);
+  --prim-gray-600:     oklch(0.446 0.012 247);
+  --prim-gray-700:     oklch(0.35 0.011 247);
+  --prim-gray-800:     oklch(0.235 0.01 247);
+  --prim-gray-900:     oklch(0.145 0.014 254);
+  --prim-gray-950:     oklch(0.08 0.015 254);
+  --prim-black:        oklch(0 0 0);
+
+  /* Blues (accent) */
+  --prim-blue-400:     oklch(0.637 0.237 262);
+  --prim-blue-500:     oklch(0.546 0.245 262);
+  --prim-blue-600:     oklch(0.467 0.224 262);
+  --prim-blue-700:     oklch(0.398 0.195 262);
+
+  /* Status */
+  --prim-green-500:    oklch(0.723 0.219 142);
+  --prim-red-500:      oklch(0.637 0.237 25);
+  --prim-yellow-500:   oklch(0.795 0.184 86);
+
+  /* ----------------------------------------------------------
+     Layer 2 — Semantic tokens
+     Use light-dark() for automatic theme resolution.
+     These are the primary tokens referenced by components.
+     ---------------------------------------------------------- */
+
+  /* Backgrounds */
+  --color-background:        light-dark(oklch(1 0 0), oklch(0.145 0.014 254));
+  --color-surface:           light-dark(oklch(0.985 0.002 247), oklch(0.205 0.009 254));
+  --color-surface-raised:    light-dark(oklch(0.97 0.003 247), oklch(0.235 0.01 247));
+
+  /* Text */
+  --color-text-primary:     light-dark(oklch(0 0 0), oklch(0.985 0.002 247));
+  --color-text-secondary:    light-dark(oklch(0.235 0.01 247), oklch(0.715 0.01 247));
+  --color-text-muted:        light-dark(oklch(0.551 0.012 247), oklch(0.551 0.012 247));
+
+  /* Accent / Interactive */
+  --color-accent:            light-dark(oklch(0.546 0.245 262), oklch(0.546 0.245 262));
+  --color-accent-foreground: light-dark(oklch(1 0 0), oklch(1 0 0));
+  --color-accent-hover:      light-dark(oklch(0.467 0.224 262), oklch(0.637 0.237 262));
+  --color-accent-pressed:    light-dark(oklch(0.398 0.195 262), oklch(0.546 0.245 262));
+
+  /* Borders */
+  --color-border:            light-dark(oklch(0.925 0.005 247), oklch(0.235 0.01 247));
+  --color-border-strong:     light-dark(oklch(0.865 0.007 247), oklch(0.35 0.011 247));
+
+  /* Input */
+  --color-input-bg:          light-dark(oklch(0.97 0.003 247), oklch(0.235 0.01 247));
+  --color-input-border:      light-dark(oklch(0.925 0.005 247), oklch(0.35 0.011 247));
+  --color-input-focus-ring:  light-dark(oklch(0.546 0.245 262), oklch(0.546 0.245 262));
+
+  /* Icons */
+  --color-icon:              light-dark(oklch(0.35 0.011 247), oklch(0.715 0.01 247));
+
+  /* Shadows */
+  --shadow-sm:               light-dark(0 1px 2px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.3));
+  --shadow-md:               light-dark(0 4px 6px rgba(0,0,0,0.07), 0 4px 6px rgba(0,0,0,0.4));
+
+  /* ----------------------------------------------------------
+     Layer 3 — Component tokens
+     Aliases that map semantic tokens to specific component uses.
+     ---------------------------------------------------------- */
+
+  /* Panels */
+  --panel-bg:                var(--color-surface);
+  --panel-border:            var(--color-border);
+
+  /* Buttons */
+  --button-bg:               var(--color-surface);
+  --button-hover-bg:         var(--color-surface-raised);
+
+  /* Inputs */
+  --input-bg:                var(--color-input-bg);
+  --input-border:            var(--color-input-border);
+  --input-focus-ring:        var(--color-input-focus-ring);
+
+  /* Radius */
+  --radius:                  12px;
+  --radius-sm:               6px;
+  --radius-lg:               16px;
+}
