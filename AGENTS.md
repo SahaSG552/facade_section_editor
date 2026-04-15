@@ -133,3 +133,46 @@ const isCCW = orient2d(ax, ay, bx, by, cx, cy) > 0;
 import { PaperOffset } from 'paperjs-offset';
 const offsetPath = PaperOffset.offset(path, bitRadius, { join: 'round' });
 ```
+
+---
+
+## LLM Wiki System
+
+This project uses LLM Wiki pattern for knowledge management.
+
+### Structure
+- `raw/` - Source documents (immutable)
+- `.wiki/` - Generated wiki pages
+- `WIKI.md` - Schema and conventions
+
+### Wiki Pages
+- **Entities**: bits.md, operations.md, panels.md, modules.md, libraries.md
+- **Concepts**: offset.md, v-carve.md, pocketing.md, coordinate-systems.md, csg.md, extrusion.md
+- **Sources**: External documentation summaries
+
+### Operations
+
+**Ingest** - Add new source:
+1. Add source to `raw/[category]/`
+2. Use: `skill({ name: "ingest-wiki" })`
+3. Updates index and log automatically
+
+**Query** - Find information:
+1. Start with `.wiki/index.md`
+2. Read relevant pages
+3. Synthesize answer with citations
+
+**Maintain** - Health check:
+1. Use: `skill({ name: "maintain-wiki" })`
+2. Fix: contradictions, orphans, gaps
+3. Log action
+
+### Key Files
+- `.wiki/index.md` - Always read first for knowledge lookup
+- `.wiki/log.md` - Recent activity
+- `WIKI.md` - Full schema
+
+### Wiki Skills
+- `ingest-wiki` - Process new sources
+- `query-wiki` - Find information  
+- `maintain-wiki` - Health check

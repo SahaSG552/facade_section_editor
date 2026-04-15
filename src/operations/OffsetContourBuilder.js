@@ -1633,7 +1633,7 @@ function reconnectClosedDroppedGapsAfterFiltering(finalSegments, sourceSegments,
     if (!Number.isFinite(minNeighborLen) || minNeighborLen <= EPSILON) continue;
 
     // ── Strategy 1: trivially small gap — snap endpoints together ────────
-    let shouldReconnect = gap <= minNeighborLen * 0.1;
+    let shouldReconnect = gap <= minNeighborLen * 0.15;
 
     // ── Strategy 2: single-drop anti-parallel resurrection ───────────────
     if (!shouldReconnect && skippedSourceIndices.length === 1) {
@@ -1785,15 +1785,21 @@ function reconnectClosedDroppedGapsAfterFiltering(finalSegments, sourceSegments,
         const len2Sq = d2.x * d2.x + d2.y * d2.y;
         // t1 / t2: parametric position of the intersection on each segment.
         // Reject when the intersection lies far beyond either segment's extent
-        // (t < −0.01 or t > 1.01) to avoid extending a segment past its natural
-        // degeneration point.
+        // to avoid extending a segment past its natural degeneration point.
+        // When Strategy 1 triggered (shouldReconnect=true for a small gap), allow
+        // a modest backward extension on t2 (up to 50% of the segment) so that
+        // a proper miter closes the seam instead of leaving a residual bridge.
+        // This handles the case where a source line degenerates to a tiny stub
+        // at large offsets: after the stub is pruned, the two survivors meet at
+        // a miter that may be slightly "behind" the next segment's start.
         const t1 = len1Sq > EPSILON
           ? ((joinPoint.x - current.start.x) * d1.x + (joinPoint.y - current.start.y) * d1.y) / len1Sq
           : 0;
         const t2 = len2Sq > EPSILON
           ? ((joinPoint.x - next.start.x) * d2.x + (joinPoint.y - next.start.y) * d2.y) / len2Sq
           : 0;
-        if (t1 >= -0.01 && t1 <= 1.01 && t2 >= -0.01 && t2 <= 1.01) {
+        const t2Min = shouldReconnect ? -1.0 : -0.01;
+        if (t1 >= -0.01 && t1 <= 1.01 && t2 >= t2Min && t2 <= 1.01) {
           setSegmentEndpoint(current, "end",   joinPoint);
           setSegmentEndpoint(next,    "start", joinPoint);
         }
@@ -2040,7 +2046,23 @@ export function buildOffsetContour(segments, distance, options = {}) {
             const dx = pt.x - next.start.x;
             const dy = pt.y - next.start.y;
             const t2 = nextTangent.x * dx + nextTangent.y * dy;
-            if (t2 < -EPSILON) return null; // intersection is behind next → need bridge
+            if (t2 < -EPSILON) {
+              // The intersection is "behind" next.start (opposite its travel direction).
+              // When the dropped source segment was an ARC, the arc pocket geometry
+              // requires a U-bridge — the direct intersection must be rejected.
+              if (droppedArcRadius != null) return null;
+              // When the dropped source segment was a LINE, the two offset lines
+              // naturally extend to meet at this intersection (it is a convex closing
+              // corner that just needs both endpoints pulled to the meeting point).
+              // Allow it provided the rest of next (pt → next.end) still faces
+              // forward, i.e. next won't become inverted after setting its start to pt.
+              const toNextEnd = { x: next.end.x - pt.x, y: next.end.y - pt.y };
+              const toNextEndProj = nextTangent.x * toNextEnd.x + nextTangent.y * toNextEnd.y;
+              if (toNextEndProj <= EPSILON) {
+                return null; // would invert next — fall through to bridge
+              }
+              return pt; // valid extension through the dropped-line gap
+            }
             // When a concave arc collapsed at the exact offset distance the two
             // adjacent lines meet precisely at next.start (t2 ≈ 0). Using the
             // direct intersection here would skip the П-bridge that the arc
@@ -2241,6 +2263,43 @@ export function buildOffsetContour(segments, distance, options = {}) {
             // modifies offsetSegments[0].start but result[0] was already pushed
             // with the original start. Update result[0].start to close the loop.
             syncClosedLoopStart(result, closed, nextIdx, sharpJoin.intersection);
+
+            // Consumed-segment detection: when both the left-side join (applied in
+            // an earlier iteration) and this right-side miter trim past each other,
+            // the current line segment is fully consumed.  Drop it and recompute the
+            // join between the surviving prev→next pair so the contour closes cleanly
+            // without a numerical stub for any offset distance.  This is a geometric
+            // invariant: if forward-dot(end-start, srcDir) < 0, the segment reversed.
+            // Applies only to closed contours: open contours use Step 4c backtrack
+            // trimming instead, which handles open-end segments more carefully.
+            if (closed && current.type === "line") {
+              const cdx = current.end.x - current.start.x;
+              const cdy = current.end.y - current.start.y;
+              const srcDir = segmentUnitDir(segments[currentSourceIndex]);
+              const isConsumed = srcDir
+                ? (cdx * srcDir.x + cdy * srcDir.y < -EPSILON)
+                : (Math.hypot(cdx, cdy) < EPSILON);
+              if (isConsumed) {
+                log.debug(
+                  `buildOffsetContour: consumed line at sourceIndex=${currentSourceIndex} (d=${distance.toFixed(1)}), dropping and re-mitering prev→next`
+                );
+                result.pop();
+                const prev = result.length > 0 ? result[result.length - 1] : null;
+                if (prev && prev.type === "line") {
+                  const pd = { x: prev.end.x - prev.start.x, y: prev.end.y - prev.start.y };
+                  const nd = { x: next.end.x - next.start.x, y: next.end.y - next.start.y };
+                  const remiterPt = lineLineIntersection(prev.start, pd, next.start, nd);
+                  const joinPt = isFinitePoint(remiterPt) ? remiterPt : prev.end;
+                  setSegmentEndpoint(prev, "end", joinPt);
+                  setSegmentEndpoint(next, "start", joinPt);
+                  syncClosedLoopStart(result, closed, nextIdx, joinPt);
+                } else if (prev) {
+                  // prev is arc or mixed type — snap next.start to prev.end
+                  setSegmentEndpoint(next, "start", prev.end);
+                  syncClosedLoopStart(result, closed, nextIdx, prev.end);
+                }
+              }
+            }
           } else {
             // Miter limit exceeded: use diverging-only fallback with strict priority for non-diverging
             const diverging = isDivergingJoin(
@@ -2963,14 +3022,42 @@ export function buildOffsetContour(segments, distance, options = {}) {
     finalSegments = finalSegments.filter((seg, i, arr) => {
       if (seg.type !== "line") return true;
       const len = getSegmentLength(seg);
-      if (len > tinyLen) return true;
 
+      // Always compute neighbors — needed by both the source-aware and the
+      // basic tiny-segment checks below.
       const prev = arr[(i - 1 + arr.length) % arr.length];
       const next = arr[(i + 1) % arr.length];
       if (!prev || !next) return true;
-
       const prevLen = getSegmentLength(prev);
       const nextLen = getSegmentLength(next);
+
+      // Source-aware near-collapse pruning: run BEFORE the tinyLen early-exit
+      // so that it fires for stubs that are above the 0.05 cap but still
+      // well within the source-line collapse regime (e.g. a ~1.1-unit stub
+      // from a 12-unit source line at d=73).
+      const si2 = typeof seg.__sourceIndex === "number" ? seg.__sourceIndex : -1;
+      const srcSeg2 = si2 >= 0 && si2 < segments.length ? segments[si2] : null;
+      if (srcSeg2?.type === "line") {
+        const srcLen2 = Math.hypot(
+          srcSeg2.end.x - srcSeg2.start.x,
+          srcSeg2.end.y - srcSeg2.start.y
+        );
+        if (
+          srcLen2 > EPSILON &&
+          Math.abs(distance) > srcLen2 * 2 &&
+          len < srcLen2 * 0.1 &&
+          len < Math.min(prevLen, nextLen) * 0.15
+        ) {
+          log.debug(
+            `buildOffsetContour: pruning source-collapsed line stub (d/src=${(Math.abs(distance) / srcLen2).toFixed(1)}, len=${len.toFixed(4)})`
+          );
+          return false;
+        }
+      }
+
+      // Keep segments that are large relative to the tiny-stub threshold.
+      if (len > tinyLen) return true;
+
       if (prevLen > len * 3 && nextLen > len * 3) {
         log.debug(
           `buildOffsetContour: pruning tiny closed-contour line stub (len=${len.toFixed(6)})`

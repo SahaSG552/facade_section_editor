@@ -345,4 +345,80 @@ describe("OffsetContourBuilder converging sharp fallback", () => {
     expect(resultD7.every((s) => s.type === "line")).toBe(true);
     expect(resultD7).toHaveLength(1);
   });
+
+  it("connects neighbors via miter when closing source line degenerates at d=70", async () => {
+    // Regression: at d=70 the short closing line (L -3 0, source len≈11.63)
+    // produces only a 0.6-unit offset stub that should be suppressed and the
+    // two neighboring offset lines should close via a clean miter join instead
+    // of leaving a tiny synthetic bridge.
+    const exportModule = new ExportModule();
+    const engine = new OffsetEngine({
+      joinType: "sharp",
+      capType: "flat",
+      exportModule,
+    });
+
+    const path =
+      "M -3 0 L -10 -6 L -23 6 A 8.0111 8.0111 0 0 0 -11 16 L 0 10 L 11.8923 13.1385 A 8.0111 8.0111 0 0 0 21.0615 0.4923 L 5.5077 -7.9385 L -3 0";
+    const result = await engine.processPath(path, 70, {});
+
+    // Must still be a single valid contour.
+    expect(result.contours).toHaveLength(1);
+
+    const contour = result.contours[0];
+    // No tiny closing bridge: expect 5 segments (not 6).
+    expect(contour.segments).toHaveLength(5);
+
+    // All segments must have a chord > 1.0 — the 0.600 stub is gone.
+    const chords = contour.segments.map((s) =>
+      Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y)
+    );
+    expect(Math.min(...chords)).toBeGreaterThan(1.0);
+
+    // Contour must be geometrically closed (last.end ≈ first.start).
+    const first = contour.segments[0];
+    const last = contour.segments[contour.segments.length - 1];
+    const closingGap = Math.hypot(
+      last.end.x - first.start.x,
+      last.end.y - first.start.y
+    );
+    expect(closingGap).toBeLessThan(1e-6);
+  });
+
+  it("suppresses closing bridge across d=73-110 (universal consumed-segment fix)", async () => {
+    // Regression: post-hoc Step-4e pruning failed at d=78+ because the stub
+    // chord grew above the 10%-of-srcLen threshold.  The universal fix detects
+    // a geometrically consumed segment during Step 2 join processing (forward-dot
+    // < 0 after the right-side miter) and drops it immediately, then re-miters
+    // the surviving neighbors.  This works for any offset distance without
+    // hard-coded thresholds.
+    const exportModule = new ExportModule();
+    const engine = new OffsetEngine({
+      joinType: "sharp",
+      capType: "flat",
+      exportModule,
+    });
+
+    const path =
+      "M -3 0 L -10 -6 L -23 6 A 8.0111 8.0111 0 0 0 -11 16 L 0 10 L 11.8923 13.1385 A 8.0111 8.0111 0 0 0 21.0615 0.4923 L 5.5077 -7.9385 L -3 0";
+
+    for (const d of [73, 74, 75, 76, 77, 78, 85, 90, 100, 107, 110]) {
+      const result = await engine.processPath(path, d, {});
+      expect(result.contours, `d=${d} should have 1 contour`).toHaveLength(1);
+      const segs = result.contours[0].segments;
+      // No bridge — must have the same 5-segment clean contour shape as d=70.
+      expect(segs, `d=${d} should have 5 segments`).toHaveLength(5);
+      const chords = segs.map((s) =>
+        Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y)
+      );
+      expect(Math.min(...chords)).toBeGreaterThan(5.0);
+      // Geometrically closed.
+      const first = segs[0];
+      const last  = segs[segs.length - 1];
+      expect(
+        Math.hypot(last.end.x - first.start.x, last.end.y - first.start.y),
+        `d=${d} should be geometrically closed`
+      ).toBeLessThan(1e-6);
+    }
+  });
 });

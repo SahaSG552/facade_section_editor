@@ -1,5 +1,7 @@
 node_modules
 *vscode
+.wiki
+raw
 SVG Animator_files
 dist
 opencode.json.openchamber.backup

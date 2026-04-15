@@ -1,0 +1,12 @@
+# qmd wiki search config
+wiki:
+  path: .wiki
+  index: .wiki/index.md
+port: 8080
+
+search:
+  hybrid: true
+  rerank: true
+
+output:
+  format: markdown
