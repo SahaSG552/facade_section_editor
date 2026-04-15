@@ -613,6 +613,7 @@ function updateArcEndpointAndAngle(arcSegment, endpointKey, point) {
       arcSegment.arc.endAngle = arcSegment.arc.startAngle;
     }
   }
+
 }
 
 function setSegmentEndpoint(segment, endpointKey, point) {
@@ -1181,6 +1182,20 @@ function findCircleLineIntersection(center, radius, lineSegment, referencePoint)
     }
   }
   return best;
+}
+
+function findBestCircleLineJoin(center, radius, lineSegment, referencePoint) {
+  const ptSeg = findCircleLineSegmentIntersection(center, radius, lineSegment, referencePoint);
+  const ptInf = findCircleLineIntersection(center, radius, lineSegment, referencePoint);
+
+  if (ptSeg && ptInf) {
+    const ref = referencePoint || lineSegment.start;
+    const dSeg = distance(ptSeg, ref);
+    const dInf = distance(ptInf, ref);
+    return dInf + EPSILON < dSeg ? ptInf : ptSeg;
+  }
+
+  return ptSeg ?? ptInf;
 }
 
 function findJoinIntersection(current, next) {
@@ -1945,6 +1960,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
     return [];
   }
 
+
   const closed = isClosedContour(segments);
   log.debug(
     `buildOffsetContour: contour is ${closed ? "closed" : "open"}`
@@ -2123,9 +2139,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
               const center = getArcCenter(current.arc, current);
               const radius = getArcRadius(current.arc, current);
               if (!center || radius == null) return false;
-              const pt =
-                findCircleLineSegmentIntersection(center, radius, next, current.end) ??
-                findCircleLineIntersection(center, radius, next, next.start);
+              const pt = findBestCircleLineJoin(center, radius, next, current.end);
               if (!pt) return false;
               stitchJoinAtPoint(current, next, pt);
               // If arc degenerated (start≈end after trimming), remove it from result.
@@ -2155,16 +2169,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
               // segment bounds and can return the interior (wrong) crossing; the infinite-
               // line version returns the exit point which is correct. Use whichever is
               // closer to next.start to get the correct trim anchor.
-              const ptSeg = findCircleLineSegmentIntersection(center, radius, current, next.start);
-              const ptInf = findCircleLineIntersection(center, radius, current, next.start);
-              let pt = null;
-              if (ptSeg && ptInf) {
-                const dSeg = Math.hypot(ptSeg.x - next.start.x, ptSeg.y - next.start.y);
-                const dInf = Math.hypot(ptInf.x - next.start.x, ptInf.y - next.start.y);
-                pt = dSeg <= dInf ? ptSeg : ptInf;
-              } else {
-                pt = ptSeg ?? ptInf;
-              }
+              const pt = findBestCircleLineJoin(center, radius, current, next.start);
               if (!pt) {
                 lineToArcNoIntersection = true;
                 return false;
@@ -2373,9 +2378,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
           const center = getArcCenter(current.arc, current);
           const radius = getArcRadius(current.arc, current);
           if (center && radius != null) {
-            const pt =
-              findCircleLineSegmentIntersection(center, radius, next, current.end) ??
-              findCircleLineIntersection(center, radius, next, next.start);
+            const pt = findBestCircleLineJoin(center, radius, next, current.end);
             if (pt) {
               stitchJoinAtPoint(current, next, pt);
               // If arc degenerated (start≈end after trimming), remove it from result.
@@ -2399,9 +2402,14 @@ export function buildOffsetContour(segments, distance, options = {}) {
           const center = getArcCenter(next.arc, next);
           const radius = getArcRadius(next.arc, next);
           if (center && radius != null) {
-            const pt =
-              findCircleLineSegmentIntersection(center, radius, current, next.start) ??
-              findCircleLineIntersection(center, radius, current, next.start);
+            // Use dual-comparison (same as convex line→arc case) to avoid picking
+            // the ENTRY crossing instead of the correct EXIT crossing near the arc
+            // start.  When the line passes through the arc circle, the segment-
+            // only version returns the closer-to-start entry point (t≈0.69) while
+            // the correct trim is the exit point just past the segment end (t≈1.01).
+            // Comparing both and preferring the one closest to next.start ensures
+            // the correct intersection is used and prevents arc orientation inversion.
+            const pt = findBestCircleLineJoin(center, radius, current, next.start);
             if (pt) {
               stitchJoinAtPoint(current, next, pt);
               syncClosedLoopStart(result, closed, nextIdx, pt);
@@ -2550,8 +2558,53 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
             // Same fix for closed contours: update result[0].start
             syncClosedLoopStart(result, closed, nextIdx, trimJoin.intersection);
+          } else {
+            // Concave sharp fallback: do not leave the segments disconnected.
+            // Prefer a direct geometric intersection, then a single tangent bridge
+            // for non-diverging gaps, and only use U-bridge/arc join as a last resort.
+            const directIntersection = findJoinIntersection(current, next);
+            if (isFinitePoint(directIntersection)) {
+              stitchJoinAtPoint(current, next, directIntersection);
+              collapseArcLineAtNearEndpoint(current, next, directIntersection, EPSILON);
+              syncClosedLoopStart(result, closed, nextIdx, directIntersection);
+            } else {
+              const effectiveInTangent = getTangent(current, "end");
+              const effectiveOutTangent = getTangent(next, "start");
+              const diverging = isDivergingJoin(
+                current.end,
+                next.start,
+                effectiveInTangent,
+                effectiveOutTangent
+              );
+
+              if (!diverging) {
+                const tangent = buildTangentBridge(current, next);
+                if (tangent) {
+                  result.push(tangent);
+                } else {
+                  const originalVertex = original.end;
+                  result.push(
+                    createArcJoin(current.end, next.start, originalVertex, distance)
+                  );
+                }
+              } else {
+                let bridge = buildUShapeBridge(current, next);
+                if (bridge) {
+                  result.push(...bridge);
+                } else {
+                  const tangent = buildTangentBridge(current, next);
+                  if (tangent) {
+                    result.push(tangent);
+                  } else {
+                    const originalVertex = original.end;
+                    result.push(
+                      createArcJoin(current.end, next.start, originalVertex, distance)
+                    );
+                  }
+                }
+              }
+            }
           }
-          // If trim can't apply, leave segments as-is (they'll be handled by downstream logic)
         }
       } else if (cornerType === "tangent") {
         // G1 continuous connection: offset segments may have a gap
@@ -2814,6 +2867,28 @@ export function buildOffsetContour(segments, distance, options = {}) {
       ? (sweepFlag === 1 ? cross > EPSILON : cross < -EPSILON)
       : (sweepFlag === 1 ? cross < -EPSILON : cross > EPSILON);
     if (!inverted) continue;
+
+    // Closed-contour safeguard: a valid outward-growing arc can temporarily look
+    // "inverted" after endpoint trimming even though it has not reached the true
+    // collapse regime. Only prune source-traceable arcs when the offset is in the
+    // shrinking direction and the magnitude has reached or exceeded the collapse
+    // radius. Otherwise preserve the arc and let later stitching/sanitizing keep it.
+    const sourceIndex = typeof seg.__sourceIndex === "number" ? seg.__sourceIndex : -1;
+    const sourceSeg = sourceIndex >= 0 && sourceIndex < segments.length ? segments[sourceIndex] : null;
+    if (closed && sourceSeg?.type === "arc") {
+      const sourceRadius = getArcRadius(sourceSeg.arc, sourceSeg) ?? getArcRadius(seg.arc, seg);
+      if (sourceRadius != null) {
+        const sweepK = sweepFlag === 1 ? -1 : 1;
+        const shrinking = distance * sweepK < 0;
+        const atOrPastCollapse = Math.abs(distance) + EPSILON >= sourceRadius;
+        if (!(shrinking && atOrPastCollapse)) {
+          log.debug(
+            `buildOffsetContour: preserving trimmed outward arc despite apparent inversion (cross=${cross.toFixed(4)}, sweepFlag=${sweepFlag})`
+          );
+          continue;
+        }
+      }
+    }
 
     log.debug(
       `buildOffsetContour: removing orientation-inverted arc (cross=${cross.toFixed(4)}, sweepFlag=${sweepFlag})`

@@ -180,8 +180,15 @@ export function offsetArc(segment, distance) {
     const isDegrees = (v) => Number.isFinite(v) && Math.abs(v) > 2 * Math.PI + 0.01;
 
     let radius = Number(arc.radius);
-    let startAngle = isDegrees(arc.startAngle) ? toRad(arc.startAngle) : Number(arc.startAngle);
-    let endAngle = isDegrees(arc.endAngle) ? toRad(arc.endAngle) : Number(arc.endAngle);
+    // DXF-exporter arcs have centerX/centerY and store angles in degrees [0, 360].
+    // The isDegrees() heuristic fails for angles in [0°, ~6.3°) because those values
+    // numerically overlap the radian range. When centerX is present we are guaranteed
+    // to have the DXF format, so always apply the degrees→radians conversion.
+    // arc.anglesInDegrees === false means a previous offsetArc call already converted
+    // to radians — honour even when centerX/Y keys are still present.
+    const hasDXFAngles = arc.anglesInDegrees !== false && ("centerX" in arc || "centerY" in arc);
+    let startAngle = (hasDXFAngles || isDegrees(arc.startAngle)) ? toRad(arc.startAngle) : Number(arc.startAngle);
+    let endAngle = (hasDXFAngles || isDegrees(arc.endAngle)) ? toRad(arc.endAngle) : Number(arc.endAngle);
 
     // SVG endpoint form: arc.rx present but center is missing.
     // Convert endpoint parametrization → center parametrization.
@@ -243,14 +250,17 @@ export function offsetArc(segment, distance) {
         largeArcFlag: newLargeArcFlag,
     };
 
+    // The output angles are always in radians. Mark this on the arc so that a
+    // subsequent offsetArc call never re-applies degree→radian conversion even
+    // when centerX/centerY keys are still present (they are preserved for
+    // downstream consumers such as the DXF exporter).
+    nextArc.anglesInDegrees = false;
     if ("center" in arc) {
         nextArc.center = { x: center.x, y: center.y };
     }
-
     if ("centerX" in arc) {
         nextArc.centerX = center.x;
     }
-
     if ("centerY" in arc) {
         nextArc.centerY = center.y;
     }

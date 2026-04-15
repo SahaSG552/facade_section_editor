@@ -34,6 +34,7 @@ const log = LoggerFactory.createLogger("NativeSelfIntersectionResolver");
 const CROSS_EPS = 1e-7;  // parametric tolerance for crossing interior check
 const SNAP_GRID = 5e-5;  // coordinate snapping grid for node identity
 const AREA_EPS  = 1e-8;  // minimum loop signed area to keep
+const NESTED_ARTIFACT_AREA_RATIO = 0.02;
 
 // --- low-level helpers --------------------------------------------------------
 
@@ -380,6 +381,127 @@ function signedArea(segs) {
   return area / 2;
 }
 
+function computeBBox(segs) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const seg of segs) {
+    for (const pt of [seg?.start, seg?.end]) {
+      if (!pt) continue;
+      if (pt.x < minX) minX = pt.x;
+      if (pt.y < minY) minY = pt.y;
+      if (pt.x > maxX) maxX = pt.x;
+      if (pt.y > maxY) maxY = pt.y;
+    }
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+    return null;
+  }
+
+  return { minX, minY, maxX, maxY };
+}
+
+function bboxContains(outer, inner, tol = SNAP_GRID * 4) {
+  if (!outer || !inner) return false;
+  return (
+    inner.minX >= outer.minX - tol &&
+    inner.minY >= outer.minY - tol &&
+    inner.maxX <= outer.maxX + tol &&
+    inner.maxY <= outer.maxY + tol
+  );
+}
+
+function representativePoint(segs) {
+  if (!Array.isArray(segs) || segs.length === 0) return null;
+  let sumX = 0;
+  let sumY = 0;
+  let count = 0;
+  for (const seg of segs) {
+    if (!seg?.start) continue;
+    sumX += seg.start.x;
+    sumY += seg.start.y;
+    count += 1;
+  }
+  if (count === 0) return null;
+  return { x: sumX / count, y: sumY / count };
+}
+
+function pointOnSegment(point, a, b, tol = SNAP_GRID * 4) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  if (len2 <= tol * tol) {
+    return Math.hypot(point.x - a.x, point.y - a.y) <= tol;
+  }
+
+  const t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2;
+  if (t < -tol || t > 1 + tol) return false;
+
+  const proj = { x: a.x + t * dx, y: a.y + t * dy };
+  return Math.hypot(point.x - proj.x, point.y - proj.y) <= tol;
+}
+
+function pointInLoopByChord(point, segs, tol = SNAP_GRID * 4) {
+  const vertices = segs.map((seg) => seg?.start).filter(Boolean);
+  if (vertices.length < 3) return false;
+
+  for (let i = 0; i < vertices.length; i += 1) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    if (pointOnSegment(point, a, b, tol)) {
+      return true;
+    }
+  }
+
+  let inside = false;
+  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i, i += 1) {
+    const xi = vertices[i].x;
+    const yi = vertices[i].y;
+    const xj = vertices[j].x;
+    const yj = vertices[j].y;
+
+    const intersects = ((yi > point.y) !== (yj > point.y)) &&
+      (point.x < ((xj - xi) * (point.y - yi)) / ((yj - yi) || Number.EPSILON) + xi);
+
+    if (intersects) inside = !inside;
+  }
+
+  return inside;
+}
+
+function pruneNestedArtifactLoops(contours) {
+  if (!Array.isArray(contours) || contours.length < 2) {
+    return contours;
+  }
+
+  const enriched = contours.map((contour) => ({
+    ...contour,
+    bbox: computeBBox(contour.segments),
+    absArea: Math.abs(contour.area),
+    sign: Math.sign(contour.area),
+  }));
+
+  const kept = enriched.filter((candidate, idx) => {
+    if (candidate.absArea <= AREA_EPS) return false;
+
+    return !enriched.some((other, otherIdx) => {
+      if (otherIdx === idx) return false;
+      if (candidate.sign === 0 || other.sign === 0 || candidate.sign !== other.sign) return false;
+      if (other.absArea <= candidate.absArea) return false;
+      if (candidate.absArea / other.absArea > NESTED_ARTIFACT_AREA_RATIO) return false;
+      if (!bboxContains(other.bbox, candidate.bbox)) return false;
+
+      const probe = representativePoint(candidate.segments);
+      return probe ? pointInLoopByChord(probe, other.segments) : false;
+    });
+  });
+
+  return kept.length > 0 ? kept.map(({ segments, area }) => ({ segments, area })) : contours;
+}
+
 // --- public API ---------------------------------------------------------------
 
 /**
@@ -424,6 +546,8 @@ export function resolveNativeSelfIntersections(segments, sourceArea = 0) {
       const matching = valid.filter(c => Math.sign(c.area) === srcSign);
       if (matching.length > 0) result = matching;
     }
+
+    result = pruneNestedArtifactLoops(result);
 
     log.info(
       `resolveNativeSelfIntersections: -> ${result.length} clean contour(s) ` +

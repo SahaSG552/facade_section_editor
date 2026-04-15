@@ -97,17 +97,27 @@ export function segmentsToSVGPath(segments, invertSweepFlag = false, options = {
                 const rotation = arc.xAxisRotation || 0;
 
                 // large-arc-flag (1 если дуга > 180°)
-                // Prefer the stored flag; fall back to computing it from angles
-                // when absent (path parser does not emit largeArcFlag into arc objects).
+                // Prefer the final angular span when available because join trimming
+                // can move arc endpoints without updating the originally stored flag.
+                // This keeps the serialized SVG on the correct branch instead of the
+                // mirrored inner branch for outward offsets.
                 let largeArc;
-                if (arc.largeArcFlag !== undefined) {
-                    largeArc = arc.largeArcFlag;
-                } else if (arc.startAngle != null && arc.endAngle != null) {
-                    let flagDelta = Number(arc.endAngle) - Number(arc.startAngle);
+                if (arc.startAngle != null && arc.endAngle != null) {
+                    const toRad = (deg) => deg * Math.PI / 180;
+                    const hasDXFAngles = arc.anglesInDegrees !== false && ("centerX" in arc || "centerY" in arc);
+                    let start = Number(arc.startAngle);
+                    let end = Number(arc.endAngle);
+                    if (hasDXFAngles || Math.abs(start) > 2 * Math.PI + 0.01 || Math.abs(end) > 2 * Math.PI + 0.01) {
+                        start = toRad(start);
+                        end = toRad(end);
+                    }
+                    let flagDelta = end - start;
                     const flagSweep = arc.sweepFlag !== undefined ? arc.sweepFlag : 1;
                     if (flagSweep === 1 && flagDelta < 0) flagDelta += 2 * Math.PI;
                     else if (flagSweep === 0 && flagDelta > 0) flagDelta -= 2 * Math.PI;
                     largeArc = Math.abs(flagDelta) > Math.PI ? 1 : 0;
+                } else if (arc.largeArcFlag !== undefined) {
+                    largeArc = arc.largeArcFlag;
                 } else {
                     largeArc = 0;
                 }

@@ -960,8 +960,17 @@ export class OffsetEngine {
                         let contourPathData = segmentsToSVGPath(outputSegments, false, { skipArcAutoCorrect: true });
                         const contourBBox = this._computeBBox(outputSegments);
                         const contourArea = this._computeSignedArea(outputSegments);
+                        const hasDrawableGeometry = outputSegments.some((seg) => {
+                            if (!seg?.start || !seg?.end) return false;
+                            return Math.hypot(seg.end.x - seg.start.x, seg.end.y - seg.start.y) > EPSILON;
+                        });
 
-                        if (Math.abs(contourArea) <= EPSILON) {
+                        // Exact-collapse closed offsets can legitimately reduce to a
+                        // drawable zero-area skeleton (e.g. an L-shape collapsing onto
+                        // its medial support lines). Keep those contours instead of
+                        // returning an empty result; only drop when nothing drawable
+                        // survives after sanitizing.
+                        if (Math.abs(contourArea) <= EPSILON && !hasDrawableGeometry) {
                             continue;
                         }
 

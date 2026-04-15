@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildOffsetContour } from "../src/operations/OffsetContourBuilder.js";
+import OffsetEngine from "../src/operations/OffsetEngine.js";
+import ExportModule from "../src/export/ExportModule.js";
 
 const EPSILON = 1e-6;
 
@@ -54,6 +56,34 @@ describe("OffsetContourBuilder converging sharp fallback", () => {
     expect(next?.type).toBe("line");
     const joinGap = Math.hypot(next.start.x - arc.end.x, next.start.y - arc.end.y);
     expect(joinGap).toBeLessThan(1e-6);
+  });
+
+  it("preserves outward small-arc branches on the reported closed contour", async () => {
+    const exportModule = new ExportModule();
+    const engine = new OffsetEngine({
+      joinType: "sharp",
+      capType: "flat",
+      exportModule,
+    });
+
+    const path = "M -3 0 L -10 -6 L -23 6 A 8.0111 8.0111 0 0 0 -11 16 L 0 10 L 11.8923 13.1385 A 8.0111 8.0111 0 0 0 21.0615 0.4923 L 5.5077 -7.9385 L -3 0";
+    const result = await engine.processPath(path, 1, {});
+
+    expect(result.contours).toHaveLength(1);
+    const contour = result.contours[0];
+    const arcs = contour.segments.filter((s) => s.type === "arc");
+    expect(arcs).toHaveLength(2);
+    // The reported contour must still keep both outward offset arcs in the serialized path.
+    // After endpoint correction, the exact large-arc flag can change with the trimmed span,
+    // so validate the preserved arc radius rather than a stale flag combination.
+    expect(result.pathData).toContain("A 9.011100 9.011100");
+
+    const longestLine = Math.max(
+      ...contour.segments
+        .filter((s) => s.type === "line")
+        .map((s) => Math.hypot(s.end.x - s.start.x, s.end.y - s.start.y))
+    );
+    expect(longestLine).toBeLessThan(40);
   });
 
   it("uses intersection trim first for non-diverging sharp line-arc join when intersection exists", () => {
@@ -127,6 +157,50 @@ describe("OffsetContourBuilder converging sharp fallback", () => {
 
     // Direct arc->line stitch around that corner: no extra join segment in-between.
     expect(arcIndex + 1).toBe(result.length - 1);
+  });
+
+  it("drops the tiny nested artifact contour at large outward offset", async () => {
+    const exportModule = new ExportModule();
+    const engine = new OffsetEngine({
+      joinType: "sharp",
+      capType: "flat",
+      exportModule,
+    });
+
+    const path = "M -3 0 L -10 -6 L -23 6 A 8.0111 8.0111 0 0 0 -11 16 L 0 10 L 11.8923 13.1385 A 8.0111 8.0111 0 0 0 21.0615 0.4923 L 5.5077 -7.9385 L -3 0";
+    const result = await engine.processPath(path, 30, {});
+
+    expect(result.contours).toHaveLength(1);
+    expect(Math.abs(result.contours[0].area)).toBeGreaterThan(1000);
+  });
+
+  it("keeps the second outward arc endpoint on the correct parallel branch", async () => {
+    const exportModule = new ExportModule();
+    const engine = new OffsetEngine({
+      joinType: "sharp",
+      capType: "flat",
+      exportModule,
+    });
+
+    const path = "M -3 0 L -10 -6 L -23 6 A 8.0111 8.0111 0 0 0 -11 16 L 0 10 L 11.8923 13.1385 A 8.0111 8.0111 0 0 0 21.0615 0.4923 L 5.5077 -7.9385 L -3 0";
+    const result = await engine.processPath(path, 1, {});
+
+    expect(result.contours).toHaveLength(1);
+    const contour = result.contours[0];
+    const arcs = contour.segments.filter((s) => s.type === "arc");
+    expect(arcs).toHaveLength(2);
+
+    const secondArc = arcs[1];
+    expect(secondArc.end.x).toBeCloseTo(21.690981, 3);
+    expect(secondArc.end.y).toBeCloseTo(-0.303953, 3);
+
+    const secondArcIndex = contour.segments.findIndex(
+      (s, idx) => s.type === "arc" && idx > contour.segments.findIndex((seg) => seg === arcs[0])
+    );
+    const nextSeg = contour.segments[secondArcIndex + 1];
+    expect(nextSeg?.type).toBe("line");
+    expect(nextSeg.start.x).toBeCloseTo(secondArc.end.x, 6);
+    expect(nextSeg.start.y).toBeCloseTo(secondArc.end.y, 6);
   });
 
   it("keeps arc center stable near collapse and removes arc after collapse", () => {
