@@ -169,7 +169,7 @@ class UIModule extends BaseModule {
         const canvasModule = this.app?.getModule("canvas");
         if (!canvasModule || !canvasModule.canvasManager) return;
 
-        const canvasManager = canvasManager.canvasManager;
+        const canvasManager = canvasModule.canvasManager;
 
         // Update canvas parameters
         const canvas = document.getElementById("canvas");
