@@ -10,6 +10,9 @@
 /* 2. Design tokens — CSS custom properties (primitives, semantic, component) */
 @import url('./vars.css');
 
+/* 3. Tailwind CSS — utility framework with CSS-first config */
+@import url('./tailwind.css');
+
 /* 3. Legacy stylesheet — all component styles (to be split incrementally) */
 @import url('./styles.css');
 

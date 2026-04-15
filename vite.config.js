@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import basicSsl from "@vitejs/plugin-basic-ssl";
+import tailwindcss from "@tailwindcss/vite";
 
 // Detect if running with --host (npm run host) so we only enable HTTPS on the network server.
 // Local `npm run dev` stays on plain HTTP to avoid self-signed cert warnings.
@@ -32,7 +33,7 @@ function stripManifoldWasmBadSourceMap() {
 }
 
 export default defineConfig({
-    plugins: [stripManifoldWasmBadSourceMap(), ...(isHost ? [basicSsl()] : [])],
+    plugins: [tailwindcss(), stripManifoldWasmBadSourceMap(), ...(isHost ? [basicSsl()] : [])],
     resolve: {
         alias: {
             // Provide empty shim for Node.js 'module' package in browser
