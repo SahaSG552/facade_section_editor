@@ -1,6 +1,6 @@
-@import url('./reset.css');
-@import url('./vars.css');
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* Note: reset.css and vars.css are imported by main.css before this file */
 
 :root {
   --background: 0 0% 100%;

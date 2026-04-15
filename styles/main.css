@@ -1,0 +1,17 @@
+/* ============================================================
+   Main CSS Entry Point
+   Imports all stylesheets in correct cascade order.
+   DO NOT add styles directly in this file.
+   ============================================================ */
+
+/* 1. Reset — normalize browser defaults */
+@import url('./reset.css');
+
+/* 2. Design tokens — CSS custom properties (primitives, semantic, component) */
+@import url('./vars.css');
+
+/* 3. Legacy stylesheet — all component styles (to be split incrementally) */
+@import url('./styles.css');
+
+/* 4. Utilities — helper classes (populated during Tailwind integration) */
+@import url('./utilities.css');
