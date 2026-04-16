@@ -4,6 +4,18 @@
  */
 import BaseModule from "../core/BaseModule.js";
 
+/** SVG path data for sun icon (light theme indicator) */
+const SUN_ICON_INNER =
+    '<circle cx="12" cy="12" r="4"></circle>' +
+    '<path d="M12 2v2"></path><path d="M12 20v2"></path>' +
+    '<path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>' +
+    '<path d="M2 12h2"></path><path d="M20 12h2"></path>' +
+    '<path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
+
+/** SVG path data for moon icon (dark theme indicator) */
+const MOON_ICON_INNER =
+    '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
+
 class UIModule extends BaseModule {
     constructor() {
         super("ui");
@@ -21,57 +33,112 @@ class UIModule extends BaseModule {
         // Set up responsive panel behavior
         this.setupResponsivePanels();
 
+        // Listen for theme changes from ThemeService
+        this.setupThemeChangeListener();
+
         return Promise.resolve();
     }
 
     /**
-     * Toggle between light and dark themes
+     * Get the ThemeService module from the app container
+     * @returns {import("./ThemeService.js").default|null}
+     */
+    getThemeService() {
+        return this.app?.getModule("theme") || null;
+    }
+
+    /**
+     * Check if dark theme is currently active
+     * @returns {boolean}
+     */
+    isDarkTheme() {
+        const themeService = this.getThemeService();
+        if (themeService) {
+            return themeService.isDark();
+        }
+        // Fallback: check color-scheme style property
+        return document.documentElement.style.colorScheme === "dark";
+    }
+
+    /**
+     * Update the theme toggle button icon to reflect the current theme
+     * @param {string} theme - Current theme ("light" or "dark")
+     */
+    updateThemeToggleIcon(theme) {
+        const themeToggle = document.getElementById("theme-toggle");
+        if (!themeToggle) return;
+
+        const svg = themeToggle.querySelector("svg");
+        if (!svg) return;
+
+        if (theme === "dark") {
+            svg.innerHTML = MOON_ICON_INNER;
+            themeToggle.title = "Switch to Light Theme";
+        } else {
+            svg.innerHTML = SUN_ICON_INNER;
+            themeToggle.title = "Switch to Dark Theme";
+        }
+    }
+
+    /**
+     * Toggle between light and dark themes via ThemeService
      */
     toggleTheme() {
-        const html = document.documentElement;
-        const themeToggle = document.getElementById("theme-toggle");
-        const svg = themeToggle.querySelector("svg");
-
-        if (html.classList.contains("dark")) {
-            // Switch to light theme
-            html.classList.remove("dark");
-            localStorage.setItem("theme", "light");
-            // Change to sun icon for light theme
-            svg.innerHTML =
-                '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
-            themeToggle.title = "Switch to Dark Theme";
+        const themeService = this.getThemeService();
+        if (themeService) {
+            themeService.toggleTheme();
         } else {
-            // Switch to dark theme
-            html.classList.add("dark");
-            localStorage.setItem("theme", "dark");
-            // Change to moon icon for dark theme
-            svg.innerHTML =
-                '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
-            themeToggle.title = "Switch to Light Theme";
+            // Fallback: direct color-scheme manipulation if ThemeService not available
+            const isDark = this.isDarkTheme();
+            const nextTheme = isDark ? "light" : "dark";
+            document.documentElement.setAttribute("data-theme", nextTheme);
+            document.documentElement.style.colorScheme = nextTheme;
+            localStorage.setItem("theme", nextTheme);
+            this.updateThemeToggleIcon(nextTheme);
         }
     }
 
     /**
      * Initialize theme from localStorage or system preference
+     * Delegates to ThemeService when available, then updates the toggle icon.
      */
     initializeTheme() {
-        const savedTheme = localStorage.getItem("theme");
-        const themeToggle = document.getElementById("theme-toggle");
-        const svg = themeToggle.querySelector("svg");
+        const themeService = this.getThemeService();
+        let currentTheme;
 
-        if (savedTheme === "dark") {
-            document.documentElement.classList.add("dark");
-            // Set moon icon for dark theme
-            svg.innerHTML =
-                '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
-            themeToggle.title = "Switch to Light Theme";
+        if (themeService && themeService.initialized) {
+            // ThemeService already initialized — read its state
+            currentTheme = themeService.getTheme();
         } else {
-            // Default to light theme
-            document.documentElement.classList.remove("dark");
-            // Set sun icon for light theme
-            svg.innerHTML =
-                '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
-            themeToggle.title = "Switch to Dark Theme";
+            // Determine theme ourselves (ThemeService may not be ready yet)
+            const savedTheme = localStorage.getItem("theme");
+            if (savedTheme === "dark" || savedTheme === "light") {
+                currentTheme = savedTheme;
+            } else {
+                currentTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+                    ? "dark"
+                    : "light";
+            }
+            // Apply via color-scheme (the modern way, replaces .dark class)
+            document.documentElement.setAttribute("data-theme", currentTheme);
+            document.documentElement.style.colorScheme = currentTheme;
+        }
+
+        // Update the toggle icon to reflect current theme
+        this.updateThemeToggleIcon(currentTheme);
+    }
+
+    /**
+     * Listen for theme change events from ThemeService
+     * Keeps the toggle icon in sync when theme is changed externally
+     * (e.g., system preference change, or ThemeService.toggleTheme() called)
+     */
+    setupThemeChangeListener() {
+        const themeService = this.getThemeService();
+        if (themeService?.eventBus) {
+            themeService.eventBus.on("theme:changed", ({ theme }) => {
+                this.updateThemeToggleIcon(theme);
+            });
         }
     }
 

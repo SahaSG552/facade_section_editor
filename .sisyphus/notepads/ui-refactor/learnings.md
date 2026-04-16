@@ -35,3 +35,15 @@
 - System preference respected on first visit, manual toggle overrides
 - Build ✅, Tests ✅ (275 passing)
 - Commit: 10383ef
+
+## 2026-04-16 Task 9 Complete
+- Added 18 derived tokens with color-mix(in oklch, ...) for opacity variants
+- Accent opacity: 8%, 15%, 35%, 40%, 50%, 60%, 75%, 80%
+- Text opacity: 25%, 35%, 50%, 70%, 85%
+- Border opacity: 50%
+- Surface hover: 90% surface + 10% text
+- Added --color-destructive, --color-success, --color-warning semantic tokens
+- Replaced all hsl(var(--X) / Y) patterns with derived tokens (20+ replacements)
+- Last pattern replaced: hsl(var(--destructive, 0 72% 51%)) → var(--color-destructive)
+- Build ✅, Tests ✅ (275 passing)
+- Commit: 69ebc2a

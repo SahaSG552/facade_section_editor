@@ -17,5 +17,5 @@
   --breakpoint-2xl: 1536px;
 }
 
-/* Dark mode variant — use .dark class for transition compatibility */
-@custom-variant dark (&:where(.dark, .dark *));
+/* Dark mode variant — matches color-scheme: dark on :root (set by ThemeService) */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));

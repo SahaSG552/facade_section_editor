@@ -968,7 +968,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): add prefers-color-scheme detection + dynamic meta theme-color`
   - Files: `src/ui/ThemeService.js`, `index.html`
 
-- [ ] 9. color-mix() for derived color variants
+- [x] 9. color-mix() for derived color variants
 
   **What to do**:
   - Add derived tokens using `color-mix(in oklch, ...)` to vars.css:
