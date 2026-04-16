@@ -1238,7 +1238,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(responsive): flexible layout with clamp/min/responsive grid`
   - Files: `styles/layout.css`
 
-- [ ] 14. Tailwind responsive utilities + mobile viewport optimization
+- [x] 14. Tailwind responsive utilities + mobile viewport optimization
 
   **What to do**:
   - Apply Tailwind responsive utilities (`sm:`, `md:`, `lg:`, `xl:`) to HTML elements where appropriate

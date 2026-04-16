@@ -848,7 +848,17 @@ html {
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 1000;
+  border: none;
+  padding: 0;
+  margin: 0;
+  max-width: none;
+  max-height: none;
+  color: var(--color-text-primary);
+}
+
+/* Native <dialog> overlay */
+.modal::backdrop {
+  background-color: rgba(0, 0, 0, 0.5);
 }
 
 .modal-content {

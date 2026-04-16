@@ -1711,7 +1711,7 @@ export default class BitsManager {
         const formRows = this.generateFormRows(groupName, defaultValues, variables, false);
         const profilePathHtml = groupName === "profile" ? this.generateProfilePathHtml(defaultValues) : "";
 
-        const modal = document.createElement("div");
+        const modal = document.createElement("dialog");
         modal.className = "modal";
         modal.innerHTML = `
     <div class="modal-content">
@@ -1749,6 +1749,7 @@ export default class BitsManager {
   `;
 
         document.body.appendChild(modal);
+        modal.showModal();
         const form = modal.querySelector("#bit-form");
         const formGrid = modal.querySelector("#bit-form-grid");
 
@@ -2736,13 +2737,15 @@ export default class BitsManager {
                 this.updateCanvasBitsForBitId(updatedBit.id);
             }
 
-            document.body.removeChild(modal);
+            modal.close();
+            modal.remove();
             this.refreshBitGroups();
         });
 
         // Cancel button
         modal.querySelector("#cancel-btn").addEventListener("click", () => {
-            document.body.removeChild(modal);
+            modal.close();
+            modal.remove();
         });
     }
 
