@@ -1,0 +1,24 @@
+{
+  "appId": "com.facade.editor",
+  "appName": "Facade Section Editor",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  },
+  "ios": {
+    "allowsBackForwardNavigationGestures": true
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 3000,
+      "backgroundColor": "#ffffff",
+      "androidBackgroundColor": "#ffffff",
+      "showSpinner": false
+    }
+  }
+}

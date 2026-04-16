@@ -133,6 +133,11 @@ html {
   display: none;
 }
 
+/* Panel hidden state — replaces inline style.display manipulation */
+.panel-hidden {
+  display: none !important;
+}
+
 /* ===== ЛЕВАЯ ПАНЕЛЬ (Tools + Title) ===== */
 #left-panel {
   flex-shrink: 0;

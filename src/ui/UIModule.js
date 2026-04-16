@@ -172,7 +172,7 @@ class UIModule extends BaseModule {
                 // Hide panel
                 leftPanel.classList.remove("overlay-visible");
                 leftPanel.classList.add("collapsed");
-                leftPanel.style.display = "none";
+                leftPanel.classList.add("panel-hidden");
                 // Remove click outside handler
                 if (this.leftPanelClickOutsideHandler) {
                     document.removeEventListener(
@@ -185,7 +185,7 @@ class UIModule extends BaseModule {
                 // Show panel
                 leftPanel.classList.remove("collapsed");
                 leftPanel.classList.add("overlay-visible");
-                leftPanel.style.display = "flex";
+                leftPanel.classList.remove("panel-hidden");
                 // Add click outside handler to close panel
                 this.leftPanelClickOutsideHandler = (e) => {
                     if (
@@ -239,19 +239,20 @@ class UIModule extends BaseModule {
         // Check if panel is currently visible
         const isVisible =
             !rightMenu.classList.contains("collapsed") &&
-            (MEDIA_QUERIES.LG.matches || rightMenu.style.display === "flex");
+            (MEDIA_QUERIES.LG.matches || rightMenu.classList.contains("overlay-visible"));
 
         if (isVisible) {
             // Hide panel
             rightMenu.classList.add("collapsed");
             if (!MEDIA_QUERIES.LG.matches) {
-                rightMenu.style.display = "none";
+                rightMenu.classList.add("panel-hidden");
             }
         } else {
             // Show panel
             rightMenu.classList.remove("collapsed");
             if (!MEDIA_QUERIES.LG.matches) {
-                rightMenu.style.display = "flex";
+                rightMenu.classList.add("overlay-visible");
+                rightMenu.classList.remove("panel-hidden");
             }
         }
 
@@ -315,7 +316,7 @@ class UIModule extends BaseModule {
         // Show left panel when screen is wider than MD breakpoint
         if (MEDIA_QUERIES.MD.matches && leftPanel) {
             leftPanel.classList.remove("collapsed", "overlay-visible");
-            leftPanel.style.display = "";
+            leftPanel.classList.remove("panel-hidden");
             if (this.leftPanelClickOutsideHandler) {
                 document.removeEventListener(
                     "click",
@@ -328,7 +329,7 @@ class UIModule extends BaseModule {
         // Show right menu when screen is wider than LG breakpoint
         if (MEDIA_QUERIES.LG.matches && rightMenu) {
             rightMenu.classList.remove("collapsed", "overlay-visible");
-            rightMenu.style.display = "";
+            rightMenu.classList.remove("panel-hidden");
             if (this.rightPanelClickOutsideHandler) {
                 document.removeEventListener(
                     "click",

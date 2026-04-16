@@ -1349,7 +1349,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(ui): migrate modals to native <dialog>`
   - Files: `index.html`, `src/panel/BitsManager.js`, `styles/components/modal.css`
 
-- [ ] 16. Popover API for tooltips/dropdowns
+- [x] 16. Popover API for tooltips/dropdowns
 
   **What to do**:
   - Add `popover` attribute to tooltip/dropdown elements
@@ -1395,7 +1395,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(ui): add popover API for tooltips/dropdowns`
   - Files: `index.html`, `styles/components/toolbar.css`
 
-- [ ] 17. View Transitions for panel/state changes
+- [x] 17. View Transitions for panel/state changes
 
   **What to do**:
   - Wrap panel toggle and state changes in `document.startViewTransition()`:
