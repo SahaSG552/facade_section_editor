@@ -3,19 +3,6 @@
  * Handles user interface management including themes, panels, and UI state
  */
 import BaseModule from "../core/BaseModule.js";
-import { BREAKPOINTS, MEDIA_QUERIES } from "./breakpoints.js";
-
-/** SVG path data for sun icon (light theme indicator) */
-const SUN_ICON_INNER =
-    '<circle cx="12" cy="12" r="4"></circle>' +
-    '<path d="M12 2v2"></path><path d="M12 20v2"></path>' +
-    '<path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path>' +
-    '<path d="M2 12h2"></path><path d="M20 12h2"></path>' +
-    '<path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
-
-/** SVG path data for moon icon (dark theme indicator) */
-const MOON_ICON_INNER =
-    '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
 
 class UIModule extends BaseModule {
     constructor() {
@@ -34,112 +21,68 @@ class UIModule extends BaseModule {
         // Set up responsive panel behavior
         this.setupResponsivePanels();
 
-        // Listen for theme changes from ThemeService
-        this.setupThemeChangeListener();
-
         return Promise.resolve();
     }
 
     /**
-     * Get the ThemeService module from the app container
-     * @returns {import("./ThemeService.js").default|null}
-     */
-    getThemeService() {
-        return this.app?.getModule("theme") || null;
-    }
-
-    /**
-     * Check if dark theme is currently active
-     * @returns {boolean}
-     */
-    isDarkTheme() {
-        const themeService = this.getThemeService();
-        if (themeService) {
-            return themeService.isDark();
-        }
-        // Fallback: check color-scheme style property
-        return document.documentElement.style.colorScheme === "dark";
-    }
-
-    /**
-     * Update the theme toggle button icon to reflect the current theme
-     * @param {string} theme - Current theme ("light" or "dark")
-     */
-    updateThemeToggleIcon(theme) {
-        const themeToggle = document.getElementById("theme-toggle");
-        if (!themeToggle) return;
-
-        const svg = themeToggle.querySelector("svg");
-        if (!svg) return;
-
-        if (theme === "dark") {
-            svg.innerHTML = MOON_ICON_INNER;
-            themeToggle.title = "Switch to Light Theme";
-        } else {
-            svg.innerHTML = SUN_ICON_INNER;
-            themeToggle.title = "Switch to Dark Theme";
-        }
-    }
-
-    /**
-     * Toggle between light and dark themes via ThemeService
+     * Toggle between light and dark themes
      */
     toggleTheme() {
-        const themeService = this.getThemeService();
-        if (themeService) {
-            themeService.toggleTheme();
+        const html = document.documentElement;
+        const themeToggle = document.getElementById("theme-toggle");
+        const svg = themeToggle.querySelector("svg");
+        const currentTheme = html.getAttribute("data-theme") || "light";
+
+        if (currentTheme === "dark") {
+            // Switch to light theme
+            html.setAttribute("data-theme", "light");
+            localStorage.setItem("theme", "light");
+            // Change to sun icon for light theme
+            svg.innerHTML =
+                '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
+            themeToggle.title = "Switch to Dark Theme";
         } else {
-            // Fallback: direct color-scheme manipulation if ThemeService not available
-            const isDark = this.isDarkTheme();
-            const nextTheme = isDark ? "light" : "dark";
-            document.documentElement.setAttribute("data-theme", nextTheme);
-            document.documentElement.style.colorScheme = nextTheme;
-            localStorage.setItem("theme", nextTheme);
-            this.updateThemeToggleIcon(nextTheme);
+            // Switch to dark theme
+            html.setAttribute("data-theme", "dark");
+            localStorage.setItem("theme", "dark");
+            // Change to moon icon for dark theme
+            svg.innerHTML =
+                '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
+            themeToggle.title = "Switch to Light Theme";
         }
     }
 
     /**
      * Initialize theme from localStorage or system preference
-     * Delegates to ThemeService when available, then updates the toggle icon.
      */
     initializeTheme() {
-        const themeService = this.getThemeService();
-        let currentTheme;
+        const savedTheme = localStorage.getItem("theme");
+        const themeToggle = document.getElementById("theme-toggle");
+        const svg = themeToggle.querySelector("svg");
 
-        if (themeService && themeService.initialized) {
-            // ThemeService already initialized — read its state
-            currentTheme = themeService.getTheme();
-        } else {
-            // Determine theme ourselves (ThemeService may not be ready yet)
-            const savedTheme = localStorage.getItem("theme");
-            if (savedTheme === "dark" || savedTheme === "light") {
-                currentTheme = savedTheme;
-            } else {
-                currentTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-                    ? "dark"
-                    : "light";
-            }
-            // Apply via color-scheme (the modern way, replaces .dark class)
-            document.documentElement.setAttribute("data-theme", currentTheme);
-            document.documentElement.style.colorScheme = currentTheme;
+        // Check localStorage first, then system preference, default to light
+        let theme = savedTheme;
+        if (!theme) {
+            // Check system preference
+            const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+            theme = prefersDark ? "dark" : "light";
         }
 
-        // Update the toggle icon to reflect current theme
-        this.updateThemeToggleIcon(currentTheme);
-    }
+        // Apply theme
+        document.documentElement.setAttribute("data-theme", theme);
+        localStorage.setItem("theme", theme);
 
-    /**
-     * Listen for theme change events from ThemeService
-     * Keeps the toggle icon in sync when theme is changed externally
-     * (e.g., system preference change, or ThemeService.toggleTheme() called)
-     */
-    setupThemeChangeListener() {
-        const themeService = this.getThemeService();
-        if (themeService?.eventBus) {
-            themeService.eventBus.on("theme:changed", ({ theme }) => {
-                this.updateThemeToggleIcon(theme);
-            });
+        // Set icon based on theme
+        if (theme === "dark") {
+            // Set moon icon for dark theme
+            svg.innerHTML =
+                '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
+            themeToggle.title = "Switch to Light Theme";
+        } else {
+            // Set sun icon for light theme
+            svg.innerHTML =
+                '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
+            themeToggle.title = "Switch to Dark Theme";
         }
     }
 
@@ -147,23 +90,8 @@ class UIModule extends BaseModule {
      * Toggle left panel visibility
      */
     toggleLeftPanel() {
-        const doToggle = () => this._doToggleLeftPanel();
-
-        // Use View Transition API if available for smooth panel animation
-        if (document.startViewTransition) {
-            document.startViewTransition(doToggle);
-        } else {
-            doToggle();
-        }
-    }
-
-    /**
-     * Internal implementation of left panel toggle
-     * @private
-     */
-    _doToggleLeftPanel() {
         const leftPanel = document.getElementById("left-panel");
-        const isSmallScreen = !MEDIA_QUERIES.MD.matches;
+        const isSmallScreen = window.innerWidth <= 768;
         const isMobile = this.isMobileDevice();
 
         if (isSmallScreen || isMobile) {
@@ -172,7 +100,7 @@ class UIModule extends BaseModule {
                 // Hide panel
                 leftPanel.classList.remove("overlay-visible");
                 leftPanel.classList.add("collapsed");
-                leftPanel.classList.add("panel-hidden");
+                leftPanel.style.display = "none";
                 // Remove click outside handler
                 if (this.leftPanelClickOutsideHandler) {
                     document.removeEventListener(
@@ -185,7 +113,7 @@ class UIModule extends BaseModule {
                 // Show panel
                 leftPanel.classList.remove("collapsed");
                 leftPanel.classList.add("overlay-visible");
-                leftPanel.classList.remove("panel-hidden");
+                leftPanel.style.display = "flex";
                 // Add click outside handler to close panel
                 this.leftPanelClickOutsideHandler = (e) => {
                     if (
@@ -219,40 +147,24 @@ class UIModule extends BaseModule {
      * Toggle right menu visibility
      */
     toggleRightMenu() {
-        const doToggle = () => this._doToggleRightMenu();
-
-        // Use View Transition API if available for smooth panel animation
-        if (document.startViewTransition) {
-            document.startViewTransition(doToggle);
-        } else {
-            doToggle();
-        }
-    }
-
-    /**
-     * Internal implementation of right menu toggle
-     * @private
-     */
-    _doToggleRightMenu() {
         const rightMenu = document.getElementById("right-menu");
 
         // Check if panel is currently visible
         const isVisible =
             !rightMenu.classList.contains("collapsed") &&
-            (MEDIA_QUERIES.LG.matches || rightMenu.classList.contains("overlay-visible"));
+            (window.innerWidth > 1000 || rightMenu.style.display === "flex");
 
         if (isVisible) {
             // Hide panel
             rightMenu.classList.add("collapsed");
-            if (!MEDIA_QUERIES.LG.matches) {
-                rightMenu.classList.add("panel-hidden");
+            if (window.innerWidth <= 1000) {
+                rightMenu.style.display = "none";
             }
         } else {
             // Show panel
             rightMenu.classList.remove("collapsed");
-            if (!MEDIA_QUERIES.LG.matches) {
-                rightMenu.classList.add("overlay-visible");
-                rightMenu.classList.remove("panel-hidden");
+            if (window.innerWidth <= 1000) {
+                rightMenu.style.display = "flex";
             }
         }
 
@@ -313,10 +225,10 @@ class UIModule extends BaseModule {
         const leftPanel = document.getElementById("left-panel");
         const rightMenu = document.getElementById("right-menu");
 
-        // Show left panel when screen is wider than MD breakpoint
-        if (MEDIA_QUERIES.MD.matches && leftPanel) {
+        // Show left panel when screen is wider than 768px
+        if (window.innerWidth > 768 && leftPanel) {
             leftPanel.classList.remove("collapsed", "overlay-visible");
-            leftPanel.classList.remove("panel-hidden");
+            leftPanel.style.display = "";
             if (this.leftPanelClickOutsideHandler) {
                 document.removeEventListener(
                     "click",
@@ -326,10 +238,10 @@ class UIModule extends BaseModule {
             }
         }
 
-        // Show right menu when screen is wider than LG breakpoint
-        if (MEDIA_QUERIES.LG.matches && rightMenu) {
+        // Show right menu when screen is wider than 1000px
+        if (window.innerWidth > 1000 && rightMenu) {
             rightMenu.classList.remove("collapsed", "overlay-visible");
-            rightMenu.classList.remove("panel-hidden");
+            rightMenu.style.display = "";
             if (this.rightPanelClickOutsideHandler) {
                 document.removeEventListener(
                     "click",
@@ -400,7 +312,7 @@ class UIModule extends BaseModule {
             /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
                 navigator.userAgent
             ) ||
-            (!MEDIA_QUERIES.MD.matches && window.innerHeight <= 1024)
+            (window.innerWidth <= 768 && window.innerHeight <= 1024)
         );
     }
 }
