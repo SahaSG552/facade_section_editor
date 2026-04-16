@@ -1,6 +1,26 @@
 /* ============================================================
-   Layout & Theme Transitions
+   Layout & Transitions
    ============================================================ */
+
+/* View Transition API — smooth panel/state transitions */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.25s;
+  animation-timing-function: ease;
+}
+
+/* Panel-specific view transition names */
+#left-panel {
+  view-transition-name: left-panel;
+}
+
+#right-menu {
+  view-transition-name: right-menu;
+}
+
+#canvas-container {
+  view-transition-name: canvas;
+}
 
 /* Smooth theme transitions for color properties */
 body,

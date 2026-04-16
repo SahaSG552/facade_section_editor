@@ -1289,7 +1289,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(responsive): Tailwind responsive utilities + mobile optimization`
   - Files: `index.html`, `styles/tailwind.css`
 
-- [ ] 15. Migrate modals to native `<dialog>`
+- [x] 15. Migrate modals to native `<dialog>`
 
   **What to do**:
   - Replace `BitsManager.openBitModal` custom modal with `<dialog>` element

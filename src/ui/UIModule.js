@@ -147,6 +147,21 @@ class UIModule extends BaseModule {
      * Toggle left panel visibility
      */
     toggleLeftPanel() {
+        const doToggle = () => this._doToggleLeftPanel();
+
+        // Use View Transition API if available for smooth panel animation
+        if (document.startViewTransition) {
+            document.startViewTransition(doToggle);
+        } else {
+            doToggle();
+        }
+    }
+
+    /**
+     * Internal implementation of left panel toggle
+     * @private
+     */
+    _doToggleLeftPanel() {
         const leftPanel = document.getElementById("left-panel");
         const isSmallScreen = !MEDIA_QUERIES.MD.matches;
         const isMobile = this.isMobileDevice();
@@ -204,6 +219,21 @@ class UIModule extends BaseModule {
      * Toggle right menu visibility
      */
     toggleRightMenu() {
+        const doToggle = () => this._doToggleRightMenu();
+
+        // Use View Transition API if available for smooth panel animation
+        if (document.startViewTransition) {
+            document.startViewTransition(doToggle);
+        } else {
+            doToggle();
+        }
+    }
+
+    /**
+     * Internal implementation of right menu toggle
+     * @private
+     */
+    _doToggleRightMenu() {
         const rightMenu = document.getElementById("right-menu");
 
         // Check if panel is currently visible
