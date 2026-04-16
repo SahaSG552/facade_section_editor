@@ -129,3 +129,93 @@ Wave 1: T1-T2 complete, T3-T4 pending
 
 ### Evidence
 - File: .sisyphus/evidence/task-1-r12-header-validation.txt
+
+## Task 4: POLYLINE+VERTEX+SEQEND writer with bulge
+
+### Implementation Details
+- Updated `writePolyline_R12(vertices, bulges, layerName, isClosed)` to write via `this.writer.writePair` only.
+- Enforced R12 sequence:
+  - POLYLINE: `0/POLYLINE/5/handle/8/layer/66/1/70/flag/10/0/20/0/30/0`
+  - VERTEX (per vertex): `0/VERTEX/5/handle/8/layer/[42/bulge]/10/x/20/y/30/0`
+  - SEQEND: `0/SEQEND/5/handle/8/layer`
+- Added handle allocation with `getNextHandle()` for POLYLINE, every VERTEX, and SEQEND.
+- Kept bulge writing before vertex coordinates and only when bulge is non-zero.
+- Added `this.writer.dxfContent = this.dxfContent` sync at method start to keep writer output bound to current export buffer.
+
+### Verification
+- LSP diagnostics (errors) for `src/export/ExportModule.js`: clean.
+- Test run: `npm run test -- tests/export-polyline-r12.spec.js` (3/3 passing).
+- Build run: `npm run build` passing.
+
+
+## Task 2: writeTables_R12() Implementation - COMPLETED
+
+### Implementation Details
+- **Location**: ExportModule.js, after writeHeader_R12 method (line 230)
+- **Method**: \writeTables_R12(bitsOnCanvas, partFront, offsetContours, panelThickness)\
+- **Structure**: SECTION/TABLES → LAYER → LTYPE → STYLE → APPID → VPORT → VIEW → UCS → ENDSEC
+
+### R12 Tables Implemented
+
+1. **LAYER Table**:
+   - Layer \
+0\ (MANDATORY) with color 7, CONTINUOUS linetype
+   - \Default\ layer for result polygon
+   - \CUT_{panelThickness}MM_OU\ layer for part front
+   - Bit operation layers: \{bitName}_{depthValue}MM_{operation}\
+   - Fractional depth naming: \_5_5\ format (extra _ before value, . replaced with _)
+   - All layers use CONTINUOUS linetype only
+
+2. **LTYPE Table**:
+   - CONTINUOUS linetype only (R12 simplification)
+   - No BYLAYER, BYBLOCK, CENTER, etc.
+   - Group codes: 2/name, 70/flags, 3/description, 72/alignment, 73/elements, 40/length
+
+3. **STYLE Table**:
+   - \Standard\ text style only
+   - Group codes: 2/name, 70/flags, 40/height, 41/width factor, 50/oblique, 71/generation, 42/last height, 3/font, 4/bigfont
+
+4. **APPID Table**:
+   - \ACAD\ application only (R12 minimal)
+   - No Rhino, CSTINVENTORY, PE_URL, AcDbAttr
+
+5. **VPORT Table**:
+   - \*ACTIVE\ viewport with full configuration
+   - View center: 400x295 (matching A4 landscape)
+   - All required group codes for R12 viewport
+
+6. **VIEW Table**:
+   - Empty but present (70=0 for no views)
+   - Required for R12 structure
+
+7. **UCS Table**:
+   - Empty but present (70=0 for no UCS definitions)
+   - Required for R12 structure
+
+### Key R12 Compliance Features
+- ✅ No \100\ group codes (AcDb classes are R13+)
+- ✅ No BLOCK_RECORD table (R13+ only)
+- ✅ No DIMSTYLE table
+- ✅ All handles via getNextHandle() - no hardcoded values
+- ✅ Layer \0\ always present with color 7
+- ✅ CONTINUOUS linetype only (simplification)
+- ✅ Proper depth value formatting for fractional values
+
+### Test Results
+- Test file: tests/export-r12-tables.spec.js
+- Tests: 16 passed (100%)
+- All R12 compliance checks pass
+
+### Verification Checklist
+- ✓ Layer \0\ present with color 7
+- ✓ No BLOCK_RECORD table
+- ✓ No DIMSTYLE table
+- ✓ All handles from getNextHandle()
+- ✓ No duplicate layer names
+- ✓ LTYPE has CONTINUOUS only
+- ✓ All required tables present (LAYER, LTYPE, STYLE, APPID, VPORT, VIEW, UCS)
+- ✓ No 100 group codes (R13+ feature)
+
+### Evidence
+- File: tests/export-r12-tables.spec.js
+- Method: ExportModule.js, writeTables_R12() after line 228

@@ -102,11 +102,11 @@ html {
   font-weight: 500;
   border: none !important;
   border-radius: 0 !important;
-  background: hsl(var(--card));
-  color: hsl(var(--muted-foreground));
+  background: var(--facade-bg-button);
+  color: var(--facade-text-muted);
   cursor: pointer;
   transition: all 0.2s ease;
-  border-right: 1px solid hsl(var(--border)) !important;
+  border-right: 1px solid var(--facade-border-default) !important;
 }
 
 .view-toggle-btn:last-child {
@@ -114,13 +114,13 @@ html {
 }
 
 .view-toggle-btn:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
 }
 
 .view-toggle-btn.active {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background-color: var(--facade-brand);
+  color: #ffffff;
 }
 
 #app-header button {
@@ -135,16 +135,16 @@ html {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
 }
 
 #app-header button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
 }
 
 #app-header button:active {
-  background-color: hsl(var(--secondary));
+  background-color: var(--facade-bg-card);
 }
 
 #theme-toggle {
@@ -172,7 +172,7 @@ html {
 #left-panel {
   flex-shrink: 0;
   width: 90px;
-  background-color: hsl(var(--card));
+  background-color: var(--facade-bg-card);
   display: flex;
   flex-direction: column;
   position: relative;
@@ -200,12 +200,21 @@ html {
 #bits-actions button {
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   flex: 1;
+}
+
+#bits-actions button:hover {
+  background-color: var(--facade-bg-card);
+}
+
+
+#bits-actions button:active {
+  background-color: var(--facade-bg-card);
 }
 
 #bits-actions button:hover {
@@ -322,10 +331,10 @@ html {
   gap: 5px;
   margin-bottom: 10px;
   margin-top: -50px;
-  background-color: hsl(var(--card));
+  background-color: var(--facade-bg-card);
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--facade-border-default);
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -336,9 +345,9 @@ html {
 #zoom-toolbar button {
   padding: 5px 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -348,21 +357,21 @@ html {
 }
 
 #zoom-toolbar button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
 }
 
 #zoom-toolbar button:active {
-  background-color: hsl(var(--secondary));
+  background-color: var(--facade-bg-card);
 }
 
 #zoom-toolbar input {
   width: 40px;
   font-size: 11px;
   padding: 3px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-input);
+  color: var(--facade-text-primary);
   border-radius: var(--radius);
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -389,11 +398,11 @@ html {
 #right-menu {
   flex-shrink: 0;
   width: 500px;
-  background-color: hsl(var(--card));
+  background-color: var(--facade-bg-card);
   padding: 20px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid hsl(var(--border));
+  border-left: 1px solid var(--facade-border-default);
   overflow-y: auto;
   position: relative;
   z-index: 2;
@@ -428,23 +437,23 @@ html {
   display: block;
   margin-bottom: 6px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
   white-space: nowrap;
 }
 
 #part-params input {
   width: 100%;
   box-sizing: border-box;
-  background-color: hsl(var(--input));
-  border: 1px solid hsl(var(--border));
-  color: hsl(var(--foreground));
+  background-color: var(--facade-bg-input);
+  border: 1px solid var(--facade-border-default);
+  color: var(--facade-text-primary);
   border-radius: var(--radius);
   padding: 8px;
 }
 
 #panel-anchor-btn {
-  background-color: hsl(var(--input)) !important;
-  border: 1px solid hsl(var(--border)) !important;
+  background-color: var(--facade-bg-input) !important;
+  border: 1px solid var(--facade-border-default) !important;
   border-radius: var(--radius) !important;
   padding: 8px !important;
   height: 38px;
@@ -499,8 +508,8 @@ html {
 .bit-list {
   display: none;
   position: fixed;
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
+  background-color: var(--facade-bg-card);
+  border: 1px solid var(--facade-border-default);
   padding: 8px;
   z-index: 30;
   min-width: 130px;
@@ -581,8 +590,8 @@ html {
   bottom: -18px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
+  background-color: var(--facade-bg-card);
+  border: 1px solid var(--facade-border-default);
   border-radius: var(--radius);
   padding: 2px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
@@ -625,10 +634,10 @@ html {
 #operations-toolbar {
   display: flex;
   gap: 5px;
-  background-color: hsl(var(--muted));
+  background-color: var(--facade-bg-card);
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--facade-border-default);
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -638,9 +647,9 @@ html {
 #operations-toolbar button {
   padding: 5px 10px;
   font-size: 12px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -650,28 +659,28 @@ html {
 }
 
 #operations-toolbar button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
 }
 
 #operations-toolbar button:active {
-  background-color: hsl(var(--secondary));
+  background-color: var(--facade-bg-card);
 }
 
 #lcs-btn {
   margin-left: 6px;
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
 }
 
 #lcs-btn:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
 }
 
 .lcs-row {
@@ -681,7 +690,7 @@ html {
 /* ===== OPERATIONS LOG ===== */
 #operations-log {
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
   margin: 5px 0;
   min-height: 18px;
   opacity: 1;
@@ -848,9 +857,9 @@ html {
   box-sizing: border-box;
   font-size: 11px;
   padding: 2px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-input);
+  color: var(--facade-text-primary);
   height: 24px;
   border-radius: var(--radius);
 }
@@ -870,8 +879,8 @@ html {
 }
 
 .modal-content {
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -1031,9 +1040,9 @@ html {
   min-width: 35px;
   padding: 0 6px;
   font-size: 12px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   box-sizing: border-box;
@@ -1041,8 +1050,8 @@ html {
 
 #preview-toolbar input[type="color"]:hover,
 #preview-toolbar button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
 }
 
 /* Touch support for mobile devices */
@@ -1073,23 +1082,23 @@ button,
 .modal-content h2 {
   margin-top: 0;
   font-size: 18px;
-  color: hsl(var(--card-foreground));
+  color: var(--facade-text-primary);
 }
 
 .modal-content label {
   display: block;
   margin-bottom: 5px;
   font-size: 14px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
 }
 
 .modal-content input {
   width: 100%;
   padding: 8px;
   margin-bottom: 15px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-input);
+  color: var(--facade-text-primary);
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 14px;
@@ -1110,13 +1119,13 @@ button,
 }
 
 .button-group button[type="button"] {
-  background-color: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-muted);
 }
 
 .button-group button[type="submit"] {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background-color: var(--facade-brand);
+  color: #ffffff;
 }
 
 /* ===== BIT FORM FLEX GRID ===== */
@@ -1137,7 +1146,7 @@ button,
 .bit-form-row label {
   margin-bottom: 0;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1258,7 +1267,7 @@ button,
 
 .profile-path-section .profile-path-header {
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
   margin-bottom: 6px;
 }
 
@@ -1273,8 +1282,8 @@ button,
 
 /* ===== PROFILE EDITOR — Edit button ===== */
 .preview-edit-btn {
-  background-color: hsl(var(--primary)) !important;
-  color: hsl(var(--primary-foreground)) !important;
+  background-color: var(--facade-brand) !important;
+  color: #ffffff !important;
   font-weight: 600;
 }
 
@@ -1326,9 +1335,9 @@ button,
   padding: 0;
   font-size: 14px;
   line-height: 1;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: 4px;
   display: flex;
@@ -1338,14 +1347,14 @@ button,
 }
 
 .editor-tool-btn:hover {
-  background-color: hsl(var(--accent));
-  border-color: hsl(var(--primary) / 0.5);
+  background-color: var(--facade-bg-card);
+  border-color: var(--facade-brand);
 }
 
 .editor-tool-btn.active {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border-color: hsl(var(--primary));
+  background-color: var(--facade-brand);
+  color: #ffffff;
+  border-color: var(--facade-brand);
 }
 
 /* RMB-activated variant of a dual-mode button: amber tint to signal secondary mode */
@@ -1359,9 +1368,9 @@ button,
   height: 24px;
   padding: 0 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--muted-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-muted);
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.1s;
@@ -1371,9 +1380,9 @@ button,
     height: 24px;
     padding: 0 4px;
     font-size: 11px;
-    border: 1px solid hsl(var(--border));
-    background-color: hsl(var(--card));
-    color: hsl(var(--card-foreground));
+    border: 1px solid var(--facade-border-default);
+    background-color: var(--facade-bg-button);
+    color: var(--facade-text-primary);
     cursor: pointer;
     border-radius: 4px;
     width: 52px;
@@ -1381,31 +1390,31 @@ button,
 }
 
 .editor-grid-select:hover {
-    border-color: hsl(var(--accent));
+    border-color: var(--facade-brand);
 }
 
 .editor-snap-btn.active {
-  background-color: hsl(var(--primary) / 0.15);
-  color: hsl(var(--primary));
-  border-color: hsl(var(--primary) / 0.4);
+  background-color: var(--facade-bg-card);
+  color: var(--facade-brand);
+  border-color: var(--facade-brand);
 }
 
 .editor-action-btn {
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: 4px;
   font-weight: 500;
 }
 
 .editor-action-btn.editor-action-primary {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border-color: hsl(var(--primary));
+  background-color: var(--facade-brand);
+  color: #ffffff;
+  border-color: var(--facade-brand);
 }
 
 /* ===== EDITOR CANVAS — selection box (CursorTool drag) ===== */
@@ -2315,9 +2324,9 @@ button,
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   padding: 1px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-input);
+  color: var(--facade-text-primary);
   border-radius: var(--radius);
   outline: none;
   transition: border-color 0.2s;
@@ -2325,11 +2334,11 @@ button,
 }
 
 .path-editor-input:focus {
-  border-color: hsl(var(--primary));
+  border-color: var(--facade-brand);
 }
 
 .path-editor-input::placeholder {
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
   font-size: 9px;
 }
 
@@ -2337,9 +2346,9 @@ button,
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-brand);
+  color: #ffffff;
   cursor: pointer;
   border-radius: var(--radius);
   font-size: 14px;
@@ -2370,13 +2379,13 @@ button,
 
 .path-suggestions-label {
   font-size: 9px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .path-suggestions-label em {
-  color: hsl(var(--primary));
+  color: var(--facade-brand);
   font-style: normal;
   font-weight: 600;
 }
@@ -2385,9 +2394,9 @@ button,
   padding: 1px 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-button);
+  color: var(--facade-text-primary);
   cursor: pointer;
   border-radius: 3px;
   transition: all 0.15s;
@@ -2395,7 +2404,7 @@ button,
 }
 
 .path-suggestion-btn:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--facade-bg-card);
 }
 
 .path-suggestion-btn.cmd-btn {
@@ -2524,8 +2533,8 @@ button,
 }
 
 .custom-field-modal-content {
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  background-color: var(--facade-bg-card);
+  color: var(--facade-text-primary);
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -2547,16 +2556,16 @@ button,
   display: block;
   margin-bottom: 4px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--facade-text-muted);
 }
 
 .custom-field-modal-content input,
 .custom-field-modal-content select {
   width: 100%;
   padding: 8px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--facade-border-default);
+  background-color: var(--facade-bg-input);
+  color: var(--facade-text-primary);
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 13px;

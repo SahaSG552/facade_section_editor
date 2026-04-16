@@ -223,28 +223,9 @@ Wave 3 (Responsive + Integration):
   **References**:
   - CanvasManager.js:378-388 - Hardcoded grid colors
 
-- [ ] 6. **3D Scene background theming** (CONFIRM EXISTING WORK)
-
-  **What to do**: Verify SceneManager reads --scene-background CSS var correctly:
-  - Confirm scene.background uses CSS variable
-  - Add to theme tokens if needed
-
-  **References**:
-  - SceneManager.js:79-80 - CSS var reading
-
-- [ ] 7. **3D Grid theming (SceneManager.js GridHelper)**
-
-  **What to do**: Replace hardcoded GridHelper colors in src/three/SceneManager.js:
-  - 0x888888 → cssVarToThreeColor('--facade-grid-minor', '#888888')
-  - 0xcccccc → cssVarToThreeColor('--facade-grid-major', '#cccccc')
-  - Update grid on theme change via watchTheme callback
-
-  **Must NOT do**: Don't use numeric hex literals for grid colors
-
-  **References**:
-  - SceneManager.js:220-225 - GridHelper hardcoded colors
-
-- [ ] 8. **ViewCubeGizmo theming**
+- [x] 6. **3D Scene background theming** (CONFIRM EXISTING WORK)
+- [x] 7. **3D Grid theming (SceneManager.js GridHelper)**
+- [x] 8. **ViewCubeGizmo theming**
 
   **What to do**: Replace hardcoded colors in src/three/ViewCubeGizmo.js:
   - COLORS object values → CSS var lookups
@@ -255,40 +236,10 @@ Wave 3 (Responsive + Integration):
   - ViewCubeGizmo.js:64-69 - COLORS constant
   - ViewCubeGizmo.js:262-271 - createTextTexture
 
-- [ ] 9. **UI components theming (buttons, panels, tables)**
-
-  **What to do**: Apply theme tokens to existing CSS:
-  - Buttons: background using var(--facade-bg-button)
-  - Inputs: background using var(--facade-bg-input), border using var(--facade-border)
-  - Panels: background using var(--facade-bg-card)
-  - Tables: borders and text colors
-
-  **References**:
-  - styles/styles.css:100-150 - Button styles
-  - styles/styles.css:171-300 - Panel styles
-
-- [ ] 10. **Header + view toggles theming**
-
-  **What to do**: Apply neumorphic/soft style to header and view toggles:
-  - View toggle buttons: inset shadows + animated indicator
-  - Header buttons: background using var(--facade-bg-button)
-  - Use framerlists.btn-inner-* patterns
-
-  **References**:
-  - index.html:31-40 - View toggle structure
-  - framerlists.header-btn-* - Button styles
-
-- [ ] 11. **Right panel theming**
-
-  **What to do**: Apply theme tokens to right menu (operations panel):
-  - Panel background: var(--facade-bg-card)
-  - Input fields: var(--facade-bg-input)
-  - Table headers/rows: proper theming
-
-  **References**:
-  - index.html:118-191 - Right panel structure
-
-- [ ] 12. **Modal dialogs theming**
+- [x] 9. **UI components theming (buttons, panels, tables)**
+- [x] 10. **Header + view toggles theming**
+- [x] 11. **Right panel theming**
+- [x] 12. **Modal dialogs theming**
 
   **What to do**: Apply theming to any modal dialogs:
   - Modal overlay with backdrop blur

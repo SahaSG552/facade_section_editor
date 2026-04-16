@@ -183,7 +183,10 @@ Max Concurrent: 4 (Waves 1 & 2)
 
 ## TODOs
 
-- [ ] 1. DXFWriter Helper Class + R12 HEADER Section
+- [x] 1. DXFWriter Helper Class + R12 HEADER Section
+- [x] 2. R12 TABLES Section Writer
+- [x] 3. R12 BLOCKS Section Writer
+- [x] 4. POLYLINE+VERTEX+SEQEND Writer with Bulge
 
   **What to do**:
   - Create a `DXFWriter` helper class inside ExportModule.js (or as separate internal class) with utility methods:

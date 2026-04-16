@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import LoggerFactory from "../core/LoggerFactory.js";
+import { cssVarToThreeColor, getCssVar, watchTheme } from "../utils/theme.js";
 
 const LOG = LoggerFactory.createLogger("ViewCubeGizmo");
 
@@ -62,10 +63,10 @@ const EDGE_FACES_SIDE = [
 ];
 
 const COLORS = {
-    MAIN: 0xdddddd,
-    HOVER: 0xf2f5ce,
-    OUTLINE: 0xcccccc,
-    TEXT: '#333333'
+    MAIN: "--facade-gizmo-bg",
+    HOVER: "--facade-scene-grid",
+    OUTLINE: "--facade-scene-grid",
+    TEXT: "--facade-gizmo-text"
 };
 
 const ObjectPosition = {
@@ -267,7 +268,7 @@ class ViewCube extends THREE.Object3D {
         context.font = 'bold 64px Arial';
         context.textAlign = 'center';
         context.textBaseline = 'middle';
-        context.fillStyle = COLORS.TEXT;
+        context.fillStyle = getCssVar(COLORS.TEXT, '#333333');
         context.fillText(text, 128, 128);
         
         const texture = new THREE.CanvasTexture(canvas);
@@ -288,7 +289,13 @@ export default class ViewCubeGizmo {
         this.gizmoCamera = new THREE.OrthographicCamera(-2, 2, 2, -2, 0, 4);
         this.gizmoCamera.position.set(0, 0, 2);
         
-        this.cube = new ViewCube(2, 0.2, true, COLORS.MAIN, COLORS.OUTLINE);
+        this.cube = new ViewCube(
+            2,
+            0.2,
+            true,
+            cssVarToThreeColor(COLORS.MAIN).getHex(),
+            cssVarToThreeColor(COLORS.OUTLINE).getHex()
+        );
         this.scene.add(this.cube);
         
         // Add AxesHelper at the corner
@@ -307,12 +314,42 @@ export default class ViewCubeGizmo {
         
         this.hoveredObject = null;
         this.isTransitioning = false;
+        this.unsubscribeTheme = null;
         
         // Bound listeners
         this.boundMouseMove = this.handleMouseMove.bind(this);
         this.boundClick = this.handleMouseClick.bind(this);
         
         this.setupEventListeners();
+        this.unsubscribeTheme = watchTheme(() => {
+            this.applyTheme();
+        });
+    }
+
+    /**
+     * Apply theme colors from CSS variables
+     */
+    applyTheme() {
+        const mainColor = cssVarToThreeColor(COLORS.MAIN);
+        const outlineColor = cssVarToThreeColor(COLORS.OUTLINE);
+
+        this.cube.traverse((child) => {
+            if (child.isMesh && child.material?.color) {
+                child.material.color.copy(mainColor);
+            }
+
+            if (child.isLineSegments && child.material?.color) {
+                child.material.color.copy(outlineColor);
+            }
+        });
+
+        this.cube.traverse((child) => {
+            if (child.isMesh && child.material?.map && child.name) {
+                child.material.map.dispose();
+                child.material.map = this.cube.createTextTexture(child.name);
+                child.material.needsUpdate = true;
+            }
+        });
     }
 
     setupEventListeners() {
@@ -325,6 +362,11 @@ export default class ViewCubeGizmo {
         const dom = this.renderer.domElement;
         dom.removeEventListener('mousemove', this.boundMouseMove);
         dom.removeEventListener('click', this.boundClick);
+
+        if (this.unsubscribeTheme) {
+            this.unsubscribeTheme();
+            this.unsubscribeTheme = null;
+        }
         
         this.cube.dispose();
     }
@@ -423,14 +465,14 @@ export default class ViewCubeGizmo {
                 if (object.parent && object.parent !== this.cube) {
                      object.parent.children.forEach(child => {
                          if (child.name === name && child.isMesh) {
-                             child.material.color.setHex(COLORS.HOVER);
-                         }
+                              child.material.color.copy(cssVarToThreeColor(COLORS.HOVER));
+                          }
                      });
                 } else if (object.parent === this.cube) { // Should not happen for edges/corners but for faces if they were direct
-                     // In this implementation faces are in a group too, so they fall in the first block
-                     object.parent.children.forEach(child => {
+                      // In this implementation faces are in a group too, so they fall in the first block
+                      object.parent.children.forEach(child => {
                         if (child.name === name && child.isMesh) {
-                            child.material.color.setHex(COLORS.HOVER);
+                            child.material.color.copy(cssVarToThreeColor(COLORS.HOVER));
                         }
                     });
                 }
@@ -446,7 +488,7 @@ export default class ViewCubeGizmo {
             // Reset color of all meshes with the hovered name
             this.cube.traverse(child => {
                 if (child.isMesh && child.name === this.hoveredName) {
-                    child.material.color.setHex(COLORS.MAIN);
+                    child.material.color.copy(cssVarToThreeColor(COLORS.MAIN));
                 }
             });
             this.renderer.domElement.style.cursor = 'default';
