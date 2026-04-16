@@ -1014,7 +1014,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): add color-mix() for derived color variants`
   - Files: `styles/vars.css`, `styles/components/buttons.css`
 
-- [ ] 10. SVG UI chrome icons → currentColor + CSS variable theming
+- [x] 10. SVG UI chrome icons → currentColor + CSS variable theming
 
   **What to do**:
   - Identify UI chrome SVGs (theme toggle, panel toggles, toolbar, bit type icons)

@@ -3,6 +3,7 @@
  * Handles user interface management including themes, panels, and UI state
  */
 import BaseModule from "../core/BaseModule.js";
+import { BREAKPOINTS, MEDIA_QUERIES } from "./breakpoints.js";
 
 /** SVG path data for sun icon (light theme indicator) */
 const SUN_ICON_INNER =
@@ -147,7 +148,7 @@ class UIModule extends BaseModule {
      */
     toggleLeftPanel() {
         const leftPanel = document.getElementById("left-panel");
-        const isSmallScreen = window.innerWidth <= 768;
+        const isSmallScreen = !MEDIA_QUERIES.MD.matches;
         const isMobile = this.isMobileDevice();
 
         if (isSmallScreen || isMobile) {
@@ -208,18 +209,18 @@ class UIModule extends BaseModule {
         // Check if panel is currently visible
         const isVisible =
             !rightMenu.classList.contains("collapsed") &&
-            (window.innerWidth > 1000 || rightMenu.style.display === "flex");
+            (MEDIA_QUERIES.LG.matches || rightMenu.style.display === "flex");
 
         if (isVisible) {
             // Hide panel
             rightMenu.classList.add("collapsed");
-            if (window.innerWidth <= 1000) {
+            if (!MEDIA_QUERIES.LG.matches) {
                 rightMenu.style.display = "none";
             }
         } else {
             // Show panel
             rightMenu.classList.remove("collapsed");
-            if (window.innerWidth <= 1000) {
+            if (!MEDIA_QUERIES.LG.matches) {
                 rightMenu.style.display = "flex";
             }
         }
@@ -281,8 +282,8 @@ class UIModule extends BaseModule {
         const leftPanel = document.getElementById("left-panel");
         const rightMenu = document.getElementById("right-menu");
 
-        // Show left panel when screen is wider than 768px
-        if (window.innerWidth > 768 && leftPanel) {
+        // Show left panel when screen is wider than MD breakpoint
+        if (MEDIA_QUERIES.MD.matches && leftPanel) {
             leftPanel.classList.remove("collapsed", "overlay-visible");
             leftPanel.style.display = "";
             if (this.leftPanelClickOutsideHandler) {
@@ -294,8 +295,8 @@ class UIModule extends BaseModule {
             }
         }
 
-        // Show right menu when screen is wider than 1000px
-        if (window.innerWidth > 1000 && rightMenu) {
+        // Show right menu when screen is wider than LG breakpoint
+        if (MEDIA_QUERIES.LG.matches && rightMenu) {
             rightMenu.classList.remove("collapsed", "overlay-visible");
             rightMenu.style.display = "";
             if (this.rightPanelClickOutsideHandler) {
@@ -368,7 +369,7 @@ class UIModule extends BaseModule {
             /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
                 navigator.userAgent
             ) ||
-            (window.innerWidth <= 768 && window.innerHeight <= 1024)
+            (!MEDIA_QUERIES.MD.matches && window.innerHeight <= 1024)
         );
     }
 }

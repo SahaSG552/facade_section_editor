@@ -3,6 +3,7 @@ import {
     distancePtToPt,
     evaluateMathExpression,
 } from "./utils/utils.js";
+import { BREAKPOINTS, MEDIA_QUERIES } from "./ui/breakpoints.js";
 import {
     zoomToBBox,
     calculateElementsBBox,
@@ -3575,8 +3576,8 @@ window.addEventListener("resize", () => {
     const leftPanel = document.getElementById("left-panel");
     const rightMenu = document.getElementById("right-menu");
 
-    // Show left panel when screen is wider than 768px
-    if (window.innerWidth > 768 && leftPanel) {
+    // Show left panel when screen is wider than MD breakpoint
+    if (MEDIA_QUERIES.MD.matches && leftPanel) {
         leftPanel.classList.remove("collapsed", "overlay-visible");
         leftPanel.style.display = ""; // Reset to default display
         if (leftPanelClickOutsideHandler) {
@@ -3585,8 +3586,8 @@ window.addEventListener("resize", () => {
         }
     }
 
-    // Show right menu when screen is wider than 1000px
-    if (window.innerWidth > 1000 && rightMenu) {
+    // Show right menu when screen is wider than LG breakpoint
+    if (MEDIA_QUERIES.LG.matches && rightMenu) {
         rightMenu.classList.remove("collapsed", "overlay-visible");
         rightMenu.style.display = ""; // Reset to default display
         if (rightPanelClickOutsideHandler) {
