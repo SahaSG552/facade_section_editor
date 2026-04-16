@@ -868,7 +868,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): migrate to color-scheme: light dark + light-dark()`
   - Files: `styles/vars.css`, `styles/components/*.css`, `src/ui/ThemeService.js`
 
-- [ ] 7. @property registered variables for smooth theme transitions
+- [x] 7. @property registered variables for smooth theme transitions
 
   **What to do**:
   - Register key CSS custom properties with `@property` to enable smooth transitions:

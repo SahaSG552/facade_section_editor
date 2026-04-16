@@ -19,3 +19,11 @@
 - Opacity variants (hsl(var(--X) / 0.5)) deferred to Task 9 (color-mix)
 - Build ✅, Tests ✅ (275 passing)
 - Commit: f8c6371
+
+## 2026-04-16 Task 7 Complete
+- Registered 16 semantic color tokens with @property (syntax: '<color>', inherits: true)
+- Created styles/layout.css with 0.25s ease transitions for background-color, color, border-color
+- Added prefers-reduced-motion support (0.01ms transitions when user prefers reduced motion)
+- Transitions apply to body, #app-header, .panel, .modal, button, input, select, textarea
+- Build ✅, Tests ✅ (275 passing)
+- Commit: f8d2ce5
