@@ -1,49 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* Note: reset.css and vars.css are imported by main.css before this file */
-
-:root {
-  --background: 0 0% 100%;
-  --foreground: 0 0% 0%;
-  --card: 0 0% 100%;
-  --card-foreground: 0 0% 0%;
-  --primary: 212 100% 50%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 96%;
-  --secondary-foreground: 0 0% 0%;
-  --muted: 0 0% 96%;
-  --muted-foreground: 0 0% 45%;
-  --accent: 0 0% 96%;
-  --accent-foreground: 0 0% 0%;
-  --border: 0 0% 90%;
-  --input: 0 0% 96%;
-  --ring: 212 100% 50%;
-  --radius: 12px;
-}
-
-.dark {
-  --background: 0 0% 9%;
-  --foreground: 0 0% 98%;
-  --card: 0 0% 9%;
-  --card-foreground: 0 0% 98%;
-  --primary: 212 100% 50%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 15%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 15%;
-  --muted-foreground: 0 0% 65%;
-  --accent: 0 0% 15%;
-  --accent-foreground: 0 0% 98%;
-  --border: 0 0% 15%;
-  --input: 0 0% 15%;
-  --ring: 212 100% 50%;
-}
+/* Legacy :root and .dark blocks removed — now using light-dark() tokens from vars.css */
 
 body,
 html {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -52,8 +16,8 @@ html {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  background-color: hsl(var(--card));
-  border-bottom: 1px solid hsl(var(--border));
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   z-index: 100;
   position: relative;
@@ -63,7 +27,7 @@ html {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: hsl(var(--card-foreground));
+  color: var(--color-text-primary);
   flex: 1;
   text-align: center;
 }
@@ -80,7 +44,7 @@ html {
   gap: 0;
   border-radius: var(--radius);
   overflow: hidden;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--color-border);
 }
 
 .view-toggle-btn {
@@ -89,11 +53,11 @@ html {
   font-weight: 500;
   border: none !important;
   border-radius: 0 !important;
-  background: hsl(var(--card));
-  color: hsl(var(--muted-foreground));
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
-  border-right: 1px solid hsl(var(--border)) !important;
+  border-right: 1px solid var(--color-border) !important;
 }
 
 .view-toggle-btn:last-child {
@@ -101,13 +65,13 @@ html {
 }
 
 .view-toggle-btn:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 
 .view-toggle-btn.active {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground);
 }
 
 #app-header button {
@@ -122,16 +86,16 @@ html {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
 }
 
 #app-header button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 
 #app-header button:active {
-  background-color: hsl(var(--secondary));
+  background-color: var(--color-surface-raised);
 }
 
 #theme-toggle {
@@ -159,7 +123,7 @@ html {
 #left-panel {
   flex-shrink: 0;
   width: 90px;
-  background-color: hsl(var(--card));
+  background-color: var(--color-surface);
   display: flex;
   flex-direction: column;
   position: relative;
@@ -172,8 +136,8 @@ html {
   font-size: 13px;
   text-align: center;
   flex-shrink: 0;
-  border-bottom: 1px solid hsl(var(--border));
-  color: hsl(var(--card-foreground));
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
 }
 
 #bits-actions {
@@ -181,22 +145,22 @@ html {
   gap: 5px;
   padding: 5px;
   justify-content: center;
-  border-bottom: 1px solid hsl(var(--border));
+  border-bottom: 1px solid var(--color-border);
 }
 
 #bits-actions button {
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   flex: 1;
 }
 
 #bits-actions button:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
 }
 
 /* Pocket width input styles */
@@ -224,7 +188,7 @@ html {
 
 
 #bits-actions button:active {
-  background-color: hsl(var(--secondary));
+  background-color: var(--color-surface-raised);
 }
 
 /* ===== ЦЕНТРАЛЬНАЯ КОЛОНКА (Canvas) ===== */
@@ -236,7 +200,7 @@ html {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background-color: hsl(var(--muted));
+  background-color: var(--color-surface-raised);
   overflow: hidden;
   padding: 10px;
   position: relative;
@@ -254,13 +218,13 @@ html {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background-color: hsl(var(--background));
+  background-color: var(--color-background);
   overflow: hidden;
   position: relative;
   z-index: 1;
   box-sizing: border-box;
   min-height: 0;
-  border-left: 1px solid hsl(var(--border));
+  border-left: 1px solid var(--color-border);
   width: 100%;
   height: 100%;
 }
@@ -309,10 +273,10 @@ html {
   gap: 5px;
   margin-bottom: 10px;
   margin-top: -50px;
-  background-color: hsl(var(--card));
+  background-color: var(--color-surface);
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--color-border);
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -323,9 +287,9 @@ html {
 #zoom-toolbar button {
   padding: 5px 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -335,21 +299,21 @@ html {
 }
 
 #zoom-toolbar button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 
 #zoom-toolbar button:active {
-  background-color: hsl(var(--secondary));
+  background-color: var(--color-surface-raised);
 }
 
 #zoom-toolbar input {
   width: 40px;
   font-size: 11px;
   padding: 3px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-text-primary);
   border-radius: var(--radius);
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -363,8 +327,8 @@ html {
 }
 
 #canvas {
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
   width: 100%;
   height: 100%;
   flex-shrink: 0;
@@ -376,11 +340,11 @@ html {
 #right-menu {
   flex-shrink: 0;
   width: 500px;
-  background-color: hsl(var(--card));
+  background-color: var(--color-surface);
   padding: 20px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid hsl(var(--border));
+  border-left: 1px solid var(--color-border);
   overflow-y: auto;
   position: relative;
   z-index: 2;
@@ -395,7 +359,7 @@ html {
 #operations h3 {
   margin-top: 0;
   font-size: 14px;
-  color: hsl(var(--card-foreground));
+  color: var(--color-text-primary);
 }
 
 .part-params-grid {
@@ -415,23 +379,23 @@ html {
   display: block;
   margin-bottom: 6px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
 #part-params input {
   width: 100%;
   box-sizing: border-box;
-  background-color: hsl(var(--input));
-  border: 1px solid hsl(var(--border));
-  color: hsl(var(--foreground));
+  background-color: var(--color-input-bg);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
   border-radius: var(--radius);
   padding: 8px;
 }
 
 #panel-anchor-btn {
-  background-color: hsl(var(--input)) !important;
-  border: 1px solid hsl(var(--border)) !important;
+  background-color: var(--color-input-bg) !important;
+  border: 1px solid var(--color-border) !important;
   border-radius: var(--radius) !important;
   padding: 8px !important;
   height: 38px;
@@ -473,7 +437,7 @@ html {
 }
 
 .bit-group:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
   border-radius: 40px;
 }
 
@@ -486,8 +450,8 @@ html {
 .bit-list {
   display: none;
   position: fixed;
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 8px;
   z-index: 30;
   min-width: 130px;
@@ -528,7 +492,7 @@ html {
 }
 
 .bit:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
 }
 
 .bit:last-child {
@@ -568,8 +532,8 @@ html {
   bottom: -18px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
   padding: 2px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
@@ -605,17 +569,17 @@ html {
 #operations-header h3 {
   margin: 0;
   flex-shrink: 0;
-  color: hsl(var(--card-foreground));
+  color: var(--color-text-primary);
 }
 
 /* ===== OPERATIONS TOOLBAR ===== */
 #operations-toolbar {
   display: flex;
   gap: 5px;
-  background-color: hsl(var(--muted));
+  background-color: var(--color-surface-raised);
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--color-border);
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -625,9 +589,9 @@ html {
 #operations-toolbar button {
   padding: 5px 10px;
   font-size: 12px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -637,38 +601,38 @@ html {
 }
 
 #operations-toolbar button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 
 #operations-toolbar button:active {
-  background-color: hsl(var(--secondary));
+  background-color: var(--color-surface-raised);
 }
 
 #lcs-btn {
   margin-left: 6px;
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
 }
 
 #lcs-btn:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 
 .lcs-row {
-  background-color: hsl(var(--muted));
+  background-color: var(--color-surface-raised);
 }
 
 /* ===== OPERATIONS LOG ===== */
 #operations-log {
   font-size: 11px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   margin: 5px 0;
   min-height: 18px;
   opacity: 1;
@@ -700,18 +664,18 @@ html {
 
 #operations th,
 #operations td {
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--color-border);
   padding: 6px;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   word-wrap: break-word;
-  color: hsl(var(--card-foreground));
+  color: var(--color-text-primary);
 }
 
 #operations th {
-  background-color: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-secondary);
   font-weight: bold;
   position: sticky;
   top: 0;
@@ -790,7 +754,7 @@ html {
 
 /* Highlight selected row */
 .selected-bit-row {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
 }
 
 .bit-row-hidden {
@@ -811,11 +775,11 @@ html {
 }
 
 #bits-name-header:hover {
-  color: hsl(var(--accent-foreground));
+  color: var(--color-text-primary);
 }
 
 .table-header-btn:hover {
-  color: hsl(var(--accent-foreground));
+  color: var(--color-text-primary);
 }
 
 .bit-action-btn {
@@ -835,9 +799,9 @@ html {
   box-sizing: border-box;
   font-size: 11px;
   padding: 2px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-text-primary);
   height: 24px;
   border-radius: var(--radius);
 }
@@ -857,8 +821,8 @@ html {
 }
 
 .modal-content {
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -983,11 +947,11 @@ html {
   flex-shrink: 0;
   width: 400px;
   height: 400px;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
-  background-color: hsl(var(--muted));
+  background-color: var(--color-surface-raised);
 }
 
 .bit-preview svg {
@@ -1005,8 +969,8 @@ html {
   gap: 5px;
   height: 30px;
   padding: 3px 5px;
-  border-bottom: 1px solid hsl(var(--border));
-  background-color: hsl(var(--muted));
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-surface-raised);
   flex-shrink: 0;
   z-index: 10;
   position: relative;
@@ -1018,9 +982,9 @@ html {
   min-width: 35px;
   padding: 0 6px;
   font-size: 12px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: var(--radius);
   box-sizing: border-box;
@@ -1028,8 +992,8 @@ html {
 
 #preview-toolbar input[type="color"]:hover,
 #preview-toolbar button:hover {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--accent-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-primary);
 }
 
 /* Touch support for mobile devices */
@@ -1060,23 +1024,23 @@ button,
 .modal-content h2 {
   margin-top: 0;
   font-size: 18px;
-  color: hsl(var(--card-foreground));
+  color: var(--color-text-primary);
 }
 
 .modal-content label {
   display: block;
   margin-bottom: 5px;
   font-size: 14px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
 }
 
 .modal-content input {
   width: 100%;
   padding: 8px;
   margin-bottom: 15px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-text-primary);
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 14px;
@@ -1097,13 +1061,13 @@ button,
 }
 
 .button-group button[type="button"] {
-  background-color: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-secondary);
 }
 
 .button-group button[type="submit"] {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground);
 }
 
 /* ===== BIT FORM FLEX GRID ===== */
@@ -1124,7 +1088,7 @@ button,
 .bit-form-row label {
   margin-bottom: 0;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1153,9 +1117,9 @@ button,
   top: 50%;
   transform: translateY(-50%);
   font-size: 12px;
-  color: hsl(var(--primary));
+  color: var(--color-accent);
   font-family: 'JetBrains Mono', monospace;
-  background: linear-gradient(to right, transparent, hsl(var(--input)) 20%);
+  background: linear-gradient(to right, transparent, var(--color-input-bg) 20%);
   padding: 2px 0 2px 15px;
   pointer-events: none;
   white-space: nowrap;
@@ -1169,7 +1133,7 @@ button,
 
 /* Name field result has different styling */
 .bit-form-row .formula-result.name-result {
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
 }
 
 .bit-form-row .delete-field-btn {
@@ -1178,7 +1142,7 @@ button,
   padding: 0;
   border: none;
   background: transparent;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   cursor: pointer;
   border-radius: 4px;
   display: flex;
@@ -1201,7 +1165,7 @@ button,
 
 .bit-form-row .var-name {
   font-size: 10px;
-  color: hsl(var(--primary));
+  color: var(--color-accent);
   font-family: 'JetBrains Mono', monospace;
   margin-left: 4px;
 }
@@ -1213,9 +1177,9 @@ button,
   gap: 4px;
   padding: 8px;
   margin-top: 8px;
-  border: 1px dashed hsl(var(--border));
+  border: 1px dashed var(--color-border);
   background: transparent;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   cursor: pointer;
   border-radius: var(--radius);
   font-size: 12px;
@@ -1223,9 +1187,9 @@ button,
 }
 
 .add-field-btn:hover {
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary));
-  background-color: hsl(var(--muted));
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background-color: var(--color-surface-raised);
 }
 
 /* Bit form container - wraps form, add button, and profile path */
@@ -1240,12 +1204,12 @@ button,
 .profile-path-section {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid hsl(var(--border));
+  border-top: 1px solid var(--color-border);
 }
 
 .profile-path-section .profile-path-header {
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
 
@@ -1260,8 +1224,8 @@ button,
 
 /* ===== PROFILE EDITOR — Edit button ===== */
 .preview-edit-btn {
-  background-color: hsl(var(--primary)) !important;
-  color: hsl(var(--primary-foreground)) !important;
+  background-color: var(--color-accent) !important;
+  color: var(--color-accent-foreground) !important;
   font-weight: 600;
 }
 
@@ -1284,8 +1248,8 @@ button,
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  border-top: 1px solid hsl(var(--border));
-  background-color: hsl(var(--muted));
+  border-top: 1px solid var(--color-border);
+  background-color: var(--color-surface-raised);
   flex-wrap: wrap;
 }
 
@@ -1298,7 +1262,7 @@ button,
 .editor-toolbar-separator {
   width: 1px;
   height: 20px;
-  background-color: hsl(var(--border));
+  background-color: var(--color-border);
   margin: 0 4px;
   flex-shrink: 0;
 }
@@ -1313,9 +1277,9 @@ button,
   padding: 0;
   font-size: 14px;
   line-height: 1;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: 4px;
   display: flex;
@@ -1325,14 +1289,14 @@ button,
 }
 
 .editor-tool-btn:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
   border-color: hsl(var(--primary) / 0.5);
 }
 
 .editor-tool-btn.active {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border-color: hsl(var(--primary));
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground);
+  border-color: var(--color-accent);
 }
 
 /* RMB-activated variant of a dual-mode button: amber tint to signal secondary mode */
@@ -1346,9 +1310,9 @@ button,
   height: 24px;
   padding: 0 8px;
   font-size: 11px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--muted-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-secondary);
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.1s;
@@ -1358,9 +1322,9 @@ button,
     height: 24px;
     padding: 0 4px;
     font-size: 11px;
-    border: 1px solid hsl(var(--border));
-    background-color: hsl(var(--card));
-    color: hsl(var(--card-foreground));
+    border: 1px solid var(--color-border);
+    background-color: var(--color-surface);
+    color: var(--color-text-primary);
     cursor: pointer;
     border-radius: 4px;
     width: 52px;
@@ -1368,12 +1332,12 @@ button,
 }
 
 .editor-grid-select:hover {
-    border-color: hsl(var(--accent));
+    border-color: var(--color-surface-raised);
 }
 
 .editor-snap-btn.active {
   background-color: hsl(var(--primary) / 0.15);
-  color: hsl(var(--primary));
+  color: var(--color-accent);
   border-color: hsl(var(--primary) / 0.4);
 }
 
@@ -1381,24 +1345,24 @@ button,
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: 4px;
   font-weight: 500;
 }
 
 .editor-action-btn.editor-action-primary {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-  border-color: hsl(var(--primary));
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground);
+  border-color: var(--color-accent);
 }
 
 /* ===== EDITOR CANVAS — selection box (CursorTool drag) ===== */
 .editor-selection-box {
   fill: hsl(var(--primary) / 0.08);
-  stroke: hsl(var(--primary));
+  stroke: var(--color-accent);
   stroke-width: 0.3;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
@@ -1412,7 +1376,7 @@ button,
 
 .editor-mirror-preview {
   fill: none !important;
-  stroke: hsl(var(--primary));
+  stroke: var(--color-accent);
   stroke-width: 0.3;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
@@ -1445,7 +1409,7 @@ button,
 .editor-ghost rect,
 .editor-ghost ellipse,
 .editor-ghost path {
-  stroke: hsl(var(--primary));
+  stroke: var(--color-accent);
   fill: none;
   pointer-events: none;
 }
@@ -1462,7 +1426,7 @@ button,
 
 /* Filled endpoint circles on ghost */
 .editor-ghost-endpoint {
-  fill: hsl(var(--primary));
+  fill: var(--color-accent);
   stroke: none;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
@@ -1527,7 +1491,7 @@ button,
 
 .arc-radius-input:focus {
   outline: none;
-  border-bottom-color: hsl(var(--primary));
+  border-bottom-color: var(--color-accent);
 }
 
 .arc-radius-input.arc-radius-error {
@@ -1551,7 +1515,7 @@ button,
 }
 
 .editor-segment-selected {
-  stroke: hsl(var(--primary));
+  stroke: var(--color-accent);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
@@ -1575,7 +1539,7 @@ button,
 }
 
 .editor-endpoint-selected {
-  fill: hsl(var(--primary));
+  fill: var(--color-accent);
 }
 
 /* Hover states — applied by CursorTool */
@@ -1599,7 +1563,7 @@ button,
 }
 
 .editor-rect-side-selected {
-  stroke: hsl(var(--primary));
+  stroke: var(--color-accent);
   stroke-width: 2.2;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
@@ -1689,7 +1653,7 @@ button,
 
 .profile-path-header {
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   margin-bottom: 2px;
 }
 
@@ -1711,9 +1675,9 @@ button,
   overflow-x: auto;
   overflow-y: auto;
   user-select: none;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  background-color: hsl(var(--input));
+  background-color: var(--color-input-bg);
   padding: 3px;
 }
 
@@ -1731,11 +1695,11 @@ button,
 }
 
 .path-line:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
 }
 
 .path-line-number {
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   font-size: 10px;
   min-width: 16px;
   text-align: right;
@@ -1747,8 +1711,8 @@ button,
 }
 
 .path-line-number:hover {
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground);
 }
 
 .path-line-number:active {
@@ -1760,7 +1724,7 @@ button,
 }
 
 .path-line.drag-over {
-  border-top: 2px solid hsl(var(--primary));
+  border-top: 2px solid var(--color-accent);
 }
 
 /* Selected row (via canvas selection or row click) */
@@ -1833,7 +1797,7 @@ button,
 /* Parameter cell - teal accent */
 .path-cell-param {
   background-color: rgba(42, 157, 143, 0.08);
-  color: hsl(var(--foreground));
+  color: var(--color-text-primary);
   font-size: 11px;
   padding: 1px 5px;
   min-width: 20px;
@@ -1847,8 +1811,8 @@ button,
 .path-cell-param.cell-empty {
   background-color: rgba(0, 0, 0, 0.04);
   border-style: dashed;
-  border-color: hsl(var(--border));
-  color: hsl(var(--muted-foreground));
+  border-color: var(--color-border);
+  color: var(--color-text-secondary);
 }
 
 .path-cell-param.active-edit {
@@ -1934,7 +1898,7 @@ button,
   border: none !important;
   border-radius: 2px !important;
   background: transparent !important;
-  color: hsl(var(--foreground)) !important;
+  color: var(--color-text-primary) !important;
   outline: none !important;
   min-width: none !important;
   max-width: none !important;
@@ -1959,7 +1923,7 @@ button,
   padding: 0;
   border: none;
   background: transparent;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   cursor: pointer;
   border-radius: 3px;
   display: flex;
@@ -1988,9 +1952,9 @@ button,
   gap: 1px;
   overflow-x: auto;
   user-select: none;
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--color-border);
   border-radius: var(--radius);
-  background-color: hsl(var(--input));
+  background-color: var(--color-input-bg);
   padding: 3px;
   position: relative;
 }
@@ -2009,7 +1973,7 @@ button,
 }
 
 .path-shape-element:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
 }
 
 .path-shape-element.path-line-selected {
@@ -2062,13 +2026,13 @@ button,
 }
 
 .path-shape-attr-label {
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   font-size: 10px;
   flex-shrink: 0;
 }
 
 .path-shape-attr-value {
-  color: hsl(var(--foreground));
+  color: var(--color-text-primary);
   font-weight: 600;
 }
 
@@ -2080,7 +2044,7 @@ button,
   padding: 0;
   border: none;
   background: transparent;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   cursor: pointer;
   border-radius: 3px;
   display: flex;
@@ -2176,13 +2140,13 @@ button,
 }
 
 .pe-sub-line-drag-over {
-  border-top: 2px solid hsl(var(--primary));
+  border-top: 2px solid var(--color-accent);
   margin-top: -1px;
 }
 
 .pe-sub-line-drop-end.pe-sub-line-drag-over {
   border-top-color: transparent;
-  border-bottom: 2px solid hsl(var(--primary));
+  border-bottom: 2px solid var(--color-accent);
   margin-top: 0;
 }
 
@@ -2277,11 +2241,11 @@ button,
   opacity: 0.4;
 }
 .pe-elem.pe-elem-drag-over {
-  outline: 1px solid hsl(var(--primary));
+  outline: 1px solid var(--color-accent);
   outline-offset: -1px;
 }
 .pe-elem.pe-elem-drag-over-top {
-  border-top: 2px solid hsl(var(--primary));
+  border-top: 2px solid var(--color-accent);
   margin-top: -1px;
 }
 
@@ -2302,9 +2266,9 @@ button,
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   padding: 1px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-text-primary);
   border-radius: var(--radius);
   outline: none;
   transition: border-color 0.2s;
@@ -2312,11 +2276,11 @@ button,
 }
 
 .path-editor-input:focus {
-  border-color: hsl(var(--primary));
+  border-color: var(--color-accent);
 }
 
 .path-editor-input::placeholder {
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   font-size: 9px;
 }
 
@@ -2324,9 +2288,9 @@ button,
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-accent);
+  color: var(--color-accent-foreground);
   cursor: pointer;
   border-radius: var(--radius);
   font-size: 14px;
@@ -2357,13 +2321,13 @@ button,
 
 .path-suggestions-label {
   font-size: 9px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .path-suggestions-label em {
-  color: hsl(var(--primary));
+  color: var(--color-accent);
   font-style: normal;
   font-weight: 600;
 }
@@ -2372,9 +2336,9 @@ button,
   padding: 1px 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   cursor: pointer;
   border-radius: 3px;
   transition: all 0.15s;
@@ -2382,7 +2346,7 @@ button,
 }
 
 .path-suggestion-btn:hover {
-  background-color: hsl(var(--accent));
+  background-color: var(--color-surface-raised);
 }
 
 .path-suggestion-btn.cmd-btn {
@@ -2511,8 +2475,8 @@ button,
 }
 
 .custom-field-modal-content {
-  background-color: hsl(var(--card));
-  color: hsl(var(--card-foreground));
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -2534,16 +2498,16 @@ button,
   display: block;
   margin-bottom: 4px;
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
+  color: var(--color-text-secondary);
 }
 
 .custom-field-modal-content input,
 .custom-field-modal-content select {
   width: 100%;
   padding: 8px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid var(--color-border);
+  background-color: var(--color-input-bg);
+  color: var(--color-text-primary);
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 13px;

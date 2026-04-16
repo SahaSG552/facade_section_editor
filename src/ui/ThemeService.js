@@ -64,13 +64,6 @@ class ThemeService extends BaseModule {
         // Set color-scheme style property (drives light-dark() CSS function)
         document.documentElement.style.colorScheme = theme;
 
-        // Maintain .dark class for backward compatibility during migration
-        if (theme === ThemeService.THEMES.DARK) {
-            document.documentElement.classList.add("dark");
-        } else {
-            document.documentElement.classList.remove("dark");
-        }
-
         // Persist preference
         localStorage.setItem(ThemeService.THEME_KEY, theme);
 
