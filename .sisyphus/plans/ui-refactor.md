@@ -1180,7 +1180,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(responsive): add container queries for panel components`
   - Files: `styles/components/panels.css`, `styles/components/forms.css`
 
-- [ ] 13. Flexible layout (clamp, min, responsive grid)
+- [x] 13. Flexible layout (clamp, min, responsive grid)
 
   **What to do**:
   - Replace fixed widths with flexible values:

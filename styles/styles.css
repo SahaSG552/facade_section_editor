@@ -2715,3 +2715,55 @@ button,
     padding: 3px;
   }
 }
+
+/* ===== MOBILE TOUCH TARGETS ===== */
+/* Ensure all interactive elements meet the 44px minimum touch target
+   recommended by WCAG 2.2 (Success Criterion 2.5.8 — Target Size). */
+@media (max-width: 1024px) { /* = BREAKPOINTS.LG */
+  #app-header button,
+  #bits-actions button,
+  .bit-action-btn,
+  .editor-tool-btn,
+  .editor-snap-btn,
+  .editor-action-btn,
+  .preview-edit-btn,
+  .view-toggle-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Adjust padding to maintain visual appearance while meeting touch target */
+  #app-header button {
+    padding: 10px 12px;
+  }
+
+  .view-toggle-btn {
+    padding: 10px 14px;
+  }
+
+  /* Operations toolbar buttons */
+  #operations-toolbar button {
+    min-height: 44px;
+    padding: 8px 12px;
+  }
+
+  /* Bit list item — ensure entire row is tappable */
+  .bit {
+    min-height: 44px;
+  }
+}
+
+/* ===== RESPONSIVE TYPOGRAPHY ===== */
+@media (max-width: 640px) { /* = BREAKPOINTS.SM */
+  html {
+    font-size: 14px; /* Slightly smaller base on mobile for more content */
+  }
+
+  #app-header h1 {
+    font-size: 14px;
+  }
+
+  #right-menu h3 {
+    font-size: 13px;
+  }
+}
