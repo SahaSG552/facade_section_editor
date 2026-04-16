@@ -1131,7 +1131,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(responsive): unify breakpoints (CSS + JS single source)`
   - Files: `styles/vars.css`, `styles/components/*.css`, `src/ui/breakpoints.js`, `src/ui/UIModule.js`
 
-- [ ] 12. Container queries for panel components
+- [x] 12. Container queries for panel components
 
   **What to do**:
   - Add `container-type: inline-size` to panel containers (left panel, right menu)

@@ -104,10 +104,24 @@ html {
 }
 
 #app {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: "left canvas right";
   height: calc(100dvh - 60px);
   width: 100%;
   overflow: hidden;
+}
+
+#left-panel {
+  grid-area: left;
+}
+
+#canvas-container {
+  grid-area: canvas;
+}
+
+#right-menu {
+  grid-area: right;
 }
 
 /* Collapsed panels */
@@ -122,7 +136,7 @@ html {
 /* ===== ЛЕВАЯ ПАНЕЛЬ (Tools + Title) ===== */
 #left-panel {
   flex-shrink: 0;
-  width: 90px;
+  width: clamp(60px, 6vw, 90px);
   background-color: var(--color-surface);
   display: flex;
   flex-direction: column;
@@ -341,7 +355,7 @@ html {
 /* ===== ПРАВАЯ КОЛОНКА (Settings) ===== */
 #right-menu {
   flex-shrink: 0;
-  width: 500px;
+  width: clamp(320px, 35vw, 500px);
   background-color: var(--color-surface);
   padding: 20px;
   display: flex;
@@ -2542,7 +2556,7 @@ button,
 
 @media (max-width: 1280px) { /* = BREAKPOINTS.XL */
   #right-menu {
-    width: 400px;
+    width: clamp(280px, 30vw, 400px);
   }
 }
 
@@ -2639,7 +2653,7 @@ button,
     top: 60px;
     left: 0;
     bottom: 0;
-    width: 90px;
+    width: clamp(60px, 6vw, 90px);
     z-index: 50;
     box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
   }
