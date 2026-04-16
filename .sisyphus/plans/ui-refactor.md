@@ -1508,7 +1508,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(style): extract inline styles to CSS classes`
   - Files: `index.html`, `src/ui/UIModule.js`, `src/script.js`, `styles/components/*.css`
 
-- [ ] 19. Capacitor config — populate, forceDarkAllowed, WebView theme test
+- [x] 19. Capacitor config — populate, forceDarkAllowed, WebView theme test
 
   **What to do**:
   - Populate `capacitor.config.json` with proper configuration:
@@ -1569,7 +1569,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(capacitor): populate config + forceDarkAllowed + WebView test`
   - Files: `capacitor.config.json`, `android/app/src/main/AndroidManifest.xml`
 
-- [ ] 20. Three.js scene background theme awareness
+- [x] 20. Three.js scene background theme awareness
 
   **What to do**:
   - In `ThemeService`, emit `theme:changed` event with current theme
