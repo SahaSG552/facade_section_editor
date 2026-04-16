@@ -528,8 +528,8 @@ export default class BitsManager {
         circle.setAttribute("cx", size / 2);
         circle.setAttribute("cy", size / 2);
         circle.setAttribute("r", size / 2 - 1);
-        circle.setAttribute("fill", "white");
-        circle.setAttribute("stroke", "black");
+        circle.setAttribute("fill", "var(--color-surface)");
+        circle.setAttribute("stroke", "var(--color-icon)");
         circle.setAttribute("stroke-width", "2");
         svg.appendChild(circle);
 
@@ -639,12 +639,12 @@ export default class BitsManager {
                     break;
             }
             if (innerShape) {
-                // Use the bit's color if available, otherwise white
+                // Use the bit's color if available, otherwise theme surface color
                 const fillColor = params?.fillColor
                     ? this.getBitFillColor(params, false)
-                    : "white";
+                    : "var(--color-surface)";
                 innerShape.setAttribute("fill", fillColor);
-                innerShape.setAttribute("stroke", "black");
+                innerShape.setAttribute("stroke", "var(--color-icon)");
                 innerShape.setAttribute("stroke-width", "2");
             }
         }
@@ -667,29 +667,29 @@ export default class BitsManager {
         circle.setAttribute("cx", "12");
         circle.setAttribute("cy", "12");
         circle.setAttribute("r", "11");
-        circle.setAttribute("fill", "white");
+        circle.setAttribute("fill", "var(--color-surface)");
         circle.setAttribute("stroke-width", "2");
 
         const path = document.createElementNS(svgNS, "path");
-        path.setAttribute("fill", "black");
+        path.setAttribute("fill", "var(--color-icon)");
 
         switch (action) {
             case "edit":
-                circle.setAttribute("stroke", "green");
+                circle.setAttribute("stroke", "var(--color-success)");
                 path.setAttribute(
                     "d",
                     "M16.293 2.293l3.414 3.414-13 13-3.414-3.414 13-13zM18 10v8h-8v-8h8z",
                 );
                 break;
             case "copy":
-                circle.setAttribute("stroke", "orange");
+                circle.setAttribute("stroke", "var(--color-warning)");
                 path.setAttribute(
                     "d",
                     "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
                 );
                 break;
             case "remove":
-                circle.setAttribute("stroke", "red");
+                circle.setAttribute("stroke", "var(--color-destructive)");
                 path.setAttribute(
                     "d",
                     "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
