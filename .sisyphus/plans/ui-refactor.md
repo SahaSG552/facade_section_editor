@@ -923,7 +923,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): add @property animated theme transitions`
   - Files: `styles/vars.css`, `styles/layout.css`
 
-- [ ] 8. prefers-color-scheme detection + dynamic meta theme-color
+- [x] 8. prefers-color-scheme detection + dynamic meta theme-color
 
   **What to do**:
   - Verify ThemeService.detectTheme() uses matchMedia when no localStorage override

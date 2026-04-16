@@ -27,3 +27,11 @@
 - Transitions apply to body, #app-header, .panel, .modal, button, input, select, textarea
 - Build ✅, Tests ✅ (275 passing)
 - Commit: f8d2ce5
+
+## 2026-04-16 Task 8 Complete
+- Added <meta name="color-scheme" content="light dark"> to index.html
+- Verified ThemeService.detectTheme() uses matchMedia for system preference (already implemented in Task 5)
+- Verified ThemeService.updateMetaThemeColor() updates theme-color dynamically (already implemented in Task 5)
+- System preference respected on first visit, manual toggle overrides
+- Build ✅, Tests ✅ (275 passing)
+- Commit: 10383ef

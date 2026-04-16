@@ -1238,7 +1238,7 @@ button,
 
 /* Canvas gets a subtle active-edit outline so it's clear you're drawing */
 .bit-preview--editing {
-  outline: 2px solid hsl(var(--primary) / 0.35);
+  outline: 2px solid var(--color-accent-35);
   outline-offset: -2px;
 }
 
@@ -1290,7 +1290,7 @@ button,
 
 .editor-tool-btn:hover {
   background-color: var(--color-surface-raised);
-  border-color: hsl(var(--primary) / 0.5);
+  border-color: var(--color-accent-50);
 }
 
 .editor-tool-btn.active {
@@ -1336,9 +1336,9 @@ button,
 }
 
 .editor-snap-btn.active {
-  background-color: hsl(var(--primary) / 0.15);
+  background-color: var(--color-accent-15);
   color: var(--color-accent);
-  border-color: hsl(var(--primary) / 0.4);
+  border-color: var(--color-accent-40);
 }
 
 .editor-action-btn {
@@ -1361,7 +1361,7 @@ button,
 
 /* ===== EDITOR CANVAS — selection box (CursorTool drag) ===== */
 .editor-selection-box {
-  fill: hsl(var(--primary) / 0.08);
+  fill: var(--color-accent-8);
   stroke: var(--color-accent);
   stroke-width: 0.3;
   vector-effect: non-scaling-stroke;
@@ -1389,7 +1389,7 @@ button,
 
 /* ===== EDITOR CANVAS — axis line ===== */
 .editor-axis {
-  stroke: hsl(var(--primary) / 0.4);
+  stroke: var(--color-accent-40);
   stroke-width: 0.3;
   stroke-dasharray: 4 3;
   pointer-events: none;
@@ -1434,7 +1434,7 @@ button,
 
 /* Dashed radius lines from arc center to endpoints */
 .editor-ghost-radius {
-  stroke: hsl(var(--primary) / 0.4);
+  stroke: var(--color-accent-40);
   stroke-width: 0.5;
   stroke-dasharray: 1 1;
   vector-effect: non-scaling-stroke;
@@ -1444,7 +1444,7 @@ button,
 /* Arc center marker (hollow circle) */
 .editor-ghost-center {
   fill: none;
-  stroke: hsl(var(--primary) / 0.75);
+  stroke: var(--color-accent-75);
   stroke-width: 0.5;
   r: 0.07;
   vector-effect: non-scaling-stroke;
@@ -1461,7 +1461,7 @@ button,
   display: flex;
   align-items: baseline;
   gap: 4px;
-  color: hsl(var(--foreground, 0 0% 90%));
+  color: var(--color-text-primary);
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   pointer-events: auto;
@@ -1473,8 +1473,8 @@ button,
   width: 64px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid hsl(var(--foreground, 0 0% 90%) / 0.5);
-  color: hsl(var(--foreground, 0 0% 90%));
+  border-bottom: 1px solid var(--color-text-50);
+  color: var(--color-text-primary);
   padding: 0 2px 1px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
@@ -1495,7 +1495,7 @@ button,
 }
 
 .arc-radius-input.arc-radius-error {
-  border-bottom-color: hsl(var(--destructive, 0 72% 51%));
+  border-bottom-color: var(--color-destructive);
   animation: arc-shake 0.3s ease;
 }
 
@@ -1507,7 +1507,7 @@ button,
 
 /* ===== EDITOR CANVAS — drawn segments ===== */
 .editor-segment {
-  stroke: hsl(var(--foreground) / 0.85);
+  stroke: var(--color-text-85);
   stroke-width: 0.5;
   fill: none;
   vector-effect: non-scaling-stroke;
@@ -1522,20 +1522,20 @@ button,
 
 /* Mirrored (left-half) counterpart — subtler */
 .editor-segment-mirror {
-  stroke: hsl(var(--foreground) / 0.35);
+  stroke: var(--color-text-35);
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
 
 /* Endpoint dots on committed segments */
 .editor-endpoint {
-  fill: hsl(var(--foreground) / 0.7);
+  fill: var(--color-text-70);
   stroke: none;
   vector-effect: non-scaling-stroke;
 }
 
 .editor-endpoint-mirror {
-  fill: hsl(var(--foreground) / 0.25);
+  fill: var(--color-text-25);
 }
 
 .editor-endpoint-selected {
@@ -1544,13 +1544,13 @@ button,
 
 /* Hover states — applied by CursorTool */
 .editor-segment-hover {
-  stroke: hsl(var(--primary) / 0.6);
+  stroke: var(--color-accent-60);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .editor-endpoint-hover {
-  fill: hsl(var(--primary) / 0.8);
+  fill: var(--color-accent-80);
   r: 0.1;           /* slightly larger when hovered */
   vector-effect: non-scaling-stroke;
 }
@@ -1570,7 +1570,7 @@ button,
 }
 
 .editor-segment.editor-rect-side-only {
-  stroke: hsl(var(--foreground) / 0.85);
+  stroke: var(--color-text-85);
   stroke-width: 0.5;
 }
 
@@ -1583,7 +1583,7 @@ button,
 
 /* Dashed guide line from arc center → pt3 control handle */
 .editor-arc-radius-line {
-  stroke: hsl(var(--muted-foreground) / 0.5);
+  stroke: var(--color-text-50);
   stroke-width: 1;
   stroke-dasharray: 3 2;
   vector-effect: non-scaling-stroke;
@@ -1591,7 +1591,7 @@ button,
 
 /* Small dot at the geometric center of a selected arc */
 .editor-arc-center {
-  fill: hsl(var(--muted-foreground) / 0.55);
+  fill: var(--color-text-50);
   stroke: none;
   vector-effect: non-scaling-stroke;
 }
@@ -1729,8 +1729,8 @@ button,
 
 /* Selected row (via canvas selection or row click) */
 .path-line-selected {
-  background-color: hsl(var(--primary) / 0.15) !important;
-  outline: 1px solid hsl(var(--primary) / 0.4);
+  background-color: var(--color-accent-15) !important;
+  outline: 1px solid var(--color-accent-40);
   outline-offset: -1px;
   border-radius: 3px;
 }
@@ -1977,8 +1977,8 @@ button,
 }
 
 .path-shape-element.path-line-selected {
-  background-color: hsl(var(--primary) / 0.15) !important;
-  outline: 1px solid hsl(var(--primary) / 0.4);
+  background-color: var(--color-accent-15) !important;
+  outline: 1px solid var(--color-accent-40);
   outline-offset: -1px;
 }
 
@@ -2080,7 +2080,7 @@ button,
   align-items: center;
   gap: 3px;
   padding: 2px 4px;
-  border-bottom: 1px solid hsl(var(--border) / 0.4);
+  border-bottom: 1px solid var(--color-border-50);
   min-height: 22px;
   box-sizing: border-box;
   border-left: 2px solid transparent;
@@ -2088,18 +2088,18 @@ button,
 }
 
 .pe-elem:hover {
-  background-color: hsl(var(--accent) / 0.35);
+  background-color: var(--color-surface-raised);
 }
 
 /* Active element (suggestions bar reacts to this) */
 .pe-elem.pe-elem-active {
-  background-color: hsl(var(--accent) / 0.5);
+  background-color: var(--color-surface-raised);
 }
 
 /* Selected row highlight */
 .pe-elem.path-line-selected,
 .pe-sub-line.path-line-selected {
-  background-color: hsl(var(--primary) / 0.12);
+  background-color: var(--color-accent-15);
 }
 
 /* Left-border accent by element type */
