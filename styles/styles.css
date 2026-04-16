@@ -128,6 +128,8 @@ html {
   flex-direction: column;
   position: relative;
   z-index: 20;
+  container-type: inline-size;
+  container-name: left-panel;
 }
 
 #bits-title {
@@ -348,6 +350,8 @@ html {
   overflow-y: auto;
   position: relative;
   z-index: 2;
+  container-type: inline-size;
+  container-name: right-menu;
 }
 
 #part-params {
@@ -366,6 +370,19 @@ html {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+/* When right panel is narrow, stack form fields vertically */
+@container right-menu (max-width: 350px) {
+  .part-params-grid {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .param-item {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
 }
 
 .param-item {

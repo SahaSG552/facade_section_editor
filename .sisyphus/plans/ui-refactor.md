@@ -1066,7 +1066,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(svg): migrate UI chrome SVG icons to currentColor`
   - Files: `styles/vars.css`, `index.html`, `src/ui/UIModule.js`, `src/panel/BitsManager.js`
 
-- [ ] 11. Unify breakpoints — single source of truth (CSS + JS)
+- [x] 11. Unify breakpoints — single source of truth (CSS + JS)
 
   **What to do**:
   - Define canonical breakpoints in `src/ui/breakpoints.js`:

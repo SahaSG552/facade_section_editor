@@ -47,3 +47,28 @@
 - Last pattern replaced: hsl(var(--destructive, 0 72% 51%)) → var(--color-destructive)
 - Build ✅, Tests ✅ (275 passing)
 - Commit: 69ebc2a
+
+## 2026-04-16 Bug Fixes
+- Theme toggle was broken: UIModule still used .dark class which was removed in Task 6
+- Fixed by delegating to ThemeService which uses color-scheme + data-theme
+- Added EventBus listener for theme:changed events (keeps toggle icon in sync)
+- Action button SVG icons increased from 12px to 20px (user request)
+- Commit: b15866c
+
+## 2026-04-16 Task 10 Complete
+- Replaced hardcoded fill/stroke in BitsManager SVG icon creation
+- createSVGIcon: fill="white"→var(--color-surface), stroke="black"→var(--color-icon)
+- createActionIcon: fill="white"→var(--color-surface), fill="black"→var(--color-icon)
+- Action strokes: green→var(--color-success), orange→var(--color-warning), red→var(--color-destructive)
+- Placeholder innerShape: default fill white→var(--color-surface), stroke black→var(--color-icon)
+- IMPORTANT: SVG setAttribute with var() works in Chrome 66+, Firefox 63+, Safari 15+ (SVG2)
+- Build ✅, Tests ✅ (275 passing)
+- Commit: 771160b
+
+## 2026-04-16 Task 11 Complete
+- Created src/ui/breakpoints.js with BREAKPOINTS constants + MEDIA_QUERIES matchMedia objects
+- CSS breakpoints unified: 800→768, 500→640, 1200→1280, 1000→1024, 480→640
+- JS replaced window.innerWidth with MEDIA_QUERIES.MD/LG.matches
+- Added sync comments to all CSS @media queries
+- Build ✅, Tests ✅ (275 passing)
+- Commit: 43d8ce4
