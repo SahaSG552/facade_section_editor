@@ -13,8 +13,11 @@
 /* 3. Tailwind CSS — utility framework with CSS-first config */
 @import url('./tailwind.css');
 
-/* 3. Legacy stylesheet — all component styles (to be split incrementally) */
+/* 4. Layout & theme transitions */
+@import url('./layout.css');
+
+/* 5. Legacy stylesheet — all component styles (to be split incrementally) */
 @import url('./styles.css');
 
-/* 4. Utilities — helper classes (populated during Tailwind integration) */
+/* 6. Utilities — helper classes (populated during Tailwind integration) */
 @import url('./utilities.css');

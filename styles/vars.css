@@ -3,6 +3,107 @@
    Layer 1: Primitives (oklch) → Layer 2: Semantic (light-dark) → Layer 3: Component
    ============================================================ */
 
+/* ----------------------------------------------------------
+   @property Registrations
+   Enable smooth CSS transitions for color tokens.
+   ---------------------------------------------------------- */
+
+@property --color-background {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(1 0 0);
+}
+
+@property --color-surface {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.985 0.002 247);
+}
+
+@property --color-surface-raised {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.97 0.003 247);
+}
+
+@property --color-text-primary {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0 0 0);
+}
+
+@property --color-text-secondary {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.235 0.01 247);
+}
+
+@property --color-text-muted {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.551 0.012 247);
+}
+
+@property --color-accent {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.546 0.245 262);
+}
+
+@property --color-accent-foreground {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(1 0 0);
+}
+
+@property --color-accent-hover {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.467 0.224 262);
+}
+
+@property --color-accent-pressed {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.398 0.195 262);
+}
+
+@property --color-border {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.925 0.005 247);
+}
+
+@property --color-border-strong {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.865 0.007 247);
+}
+
+@property --color-input-bg {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.97 0.003 247);
+}
+
+@property --color-input-border {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.925 0.005 247);
+}
+
+@property --color-input-focus-ring {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.546 0.245 262);
+}
+
+@property --color-icon {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: oklch(0.35 0.011 247);
+}
+
 :root {
   color-scheme: light dark;
 

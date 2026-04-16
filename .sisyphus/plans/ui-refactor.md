@@ -808,7 +808,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   - Pre-commit: `npm run build && npm run test`
 
-- [ ] 6. Migrate to color-scheme: light dark + light-dark() theming
+- [x] 6. Migrate to color-scheme: light dark + light-dark() theming
 
   **What to do**:
   - Replace the existing `:root { --background: ... }` + `.dark { --background: ... }` pattern with `color-scheme: light dark` + `light-dark()` throughout all CSS files
