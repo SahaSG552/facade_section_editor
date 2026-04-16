@@ -223,7 +223,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 ## TODOs
 
-- [x] 0.1. Fix UIModule canvasManager bug
+- [ ] 0.1. Fix UIModule canvasManager bug
 
   **What to do**:
   - In `src/ui/UIModule.js`, method `updateCanvasAfterPanelToggle()`, fix the bug at line ~172:
@@ -276,7 +276,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `src/ui/UIModule.js`
   - Pre-commit: `npm run build && npm run test`
 
-- [x] 0.2. Capture visual baseline screenshots
+- [ ] 0.2. Capture visual baseline screenshots
 
   **What to do**:
   - Start the dev server (`npm run dev`)
@@ -346,7 +346,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `.sisyphus/evidence/baseline/` (git add --force)
   - Pre-commit: `npm run build`
 
-- [x] 1. Design token system (vars.css with 3-layer oklch tokens + light-dark())
+- [ ] 1. Design token system (vars.css with 3-layer oklch tokens + light-dark())
 
   **What to do**:
   - Create `styles/vars.css` with 3-layer design token architecture:
@@ -433,7 +433,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `styles/vars.css`, `styles/styles.css` (import only)
   - Pre-commit: `npm run build`
 
-- [x] 2. CSS reset (reset.css)
+- [ ] 2. CSS reset (reset.css)
 
   **What to do**:
   - Create `styles/reset.css` with a minimal modern CSS reset:
@@ -495,7 +495,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `styles/reset.css`, `styles/styles.css`
   - Pre-commit: `npm run build`
 
-- [x] 3. Split styles.css into modular files
+- [ ] 3. Split styles.css into modular files
 
   **What to do**:
   - Split the monolithic `styles/styles.css` (~58KB) into logical modules:
@@ -586,7 +586,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `styles/main.css`, `styles/layout.css`, `styles/components/*.css`, `styles/utilities.css`, `index.html`
   - Pre-commit: `npm run build && npm run test`
 
-- [x] 4. Tailwind CSS v4 setup + integration with CSS vars
+- [ ] 4. Tailwind CSS v4 setup + integration with CSS vars
 
   **What to do**:
   - Install Tailwind CSS v4: `npm install tailwindcss @tailwindcss/vite`
@@ -674,7 +674,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Files: `package.json`, `vite.config.js`, `styles/tailwind.css`, `styles/main.css`
   - Pre-commit: `npm run build`
 
-- [x] 5. ThemeService module (EventBus-based, DI pattern)
+- [ ] 5. ThemeService module (EventBus-based, DI pattern)
 
   **What to do**:
   - Create `src/ui/ThemeService.js` following the existing BaseModule pattern:
@@ -808,7 +808,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   - Pre-commit: `npm run build && npm run test`
 
-- [x] 6. Migrate to color-scheme: light dark + light-dark() theming
+- [ ] 6. Migrate to color-scheme: light dark + light-dark() theming
 
   **What to do**:
   - Replace the existing `:root { --background: ... }` + `.dark { --background: ... }` pattern with `color-scheme: light dark` + `light-dark()` throughout all CSS files
@@ -868,7 +868,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): migrate to color-scheme: light dark + light-dark()`
   - Files: `styles/vars.css`, `styles/components/*.css`, `src/ui/ThemeService.js`
 
-- [x] 7. @property registered variables for smooth theme transitions
+- [ ] 7. @property registered variables for smooth theme transitions
 
   **What to do**:
   - Register key CSS custom properties with `@property` to enable smooth transitions:
@@ -923,7 +923,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): add @property animated theme transitions`
   - Files: `styles/vars.css`, `styles/layout.css`
 
-- [x] 8. prefers-color-scheme detection + dynamic meta theme-color
+- [ ] 8. prefers-color-scheme detection + dynamic meta theme-color
 
   **What to do**:
   - Verify ThemeService.detectTheme() uses matchMedia when no localStorage override
@@ -968,7 +968,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): add prefers-color-scheme detection + dynamic meta theme-color`
   - Files: `src/ui/ThemeService.js`, `index.html`
 
-- [x] 9. color-mix() for derived color variants
+- [ ] 9. color-mix() for derived color variants
 
   **What to do**:
   - Add derived tokens using `color-mix(in oklch, ...)` to vars.css:
@@ -1014,7 +1014,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(theme): add color-mix() for derived color variants`
   - Files: `styles/vars.css`, `styles/components/buttons.css`
 
-- [x] 10. SVG UI chrome icons → currentColor + CSS variable theming
+- [ ] 10. SVG UI chrome icons → currentColor + CSS variable theming
 
   **What to do**:
   - Identify UI chrome SVGs (theme toggle, panel toggles, toolbar, bit type icons)
@@ -1066,7 +1066,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(svg): migrate UI chrome SVG icons to currentColor`
   - Files: `styles/vars.css`, `index.html`, `src/ui/UIModule.js`, `src/panel/BitsManager.js`
 
-- [x] 11. Unify breakpoints — single source of truth (CSS + JS)
+- [ ] 11. Unify breakpoints — single source of truth (CSS + JS)
 
   **What to do**:
   - Define canonical breakpoints in `src/ui/breakpoints.js`:
@@ -1131,7 +1131,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(responsive): unify breakpoints (CSS + JS single source)`
   - Files: `styles/vars.css`, `styles/components/*.css`, `src/ui/breakpoints.js`, `src/ui/UIModule.js`
 
-- [x] 12. Container queries for panel components
+- [ ] 12. Container queries for panel components
 
   **What to do**:
   - Add `container-type: inline-size` to panel containers (left panel, right menu)
@@ -1180,7 +1180,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(responsive): add container queries for panel components`
   - Files: `styles/components/panels.css`, `styles/components/forms.css`
 
-- [x] 13. Flexible layout (clamp, min, responsive grid)
+- [ ] 13. Flexible layout (clamp, min, responsive grid)
 
   **What to do**:
   - Replace fixed widths with flexible values:
@@ -1238,7 +1238,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(responsive): flexible layout with clamp/min/responsive grid`
   - Files: `styles/layout.css`
 
-- [x] 14. Tailwind responsive utilities + mobile viewport optimization
+- [ ] 14. Tailwind responsive utilities + mobile viewport optimization
 
   **What to do**:
   - Apply Tailwind responsive utilities (`sm:`, `md:`, `lg:`, `xl:`) to HTML elements where appropriate
@@ -1289,7 +1289,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(responsive): Tailwind responsive utilities + mobile optimization`
   - Files: `index.html`, `styles/tailwind.css`
 
-- [x] 15. Migrate modals to native `<dialog>`
+- [ ] 15. Migrate modals to native `<dialog>`
 
   **What to do**:
   - Replace `BitsManager.openBitModal` custom modal with `<dialog>` element
@@ -1349,7 +1349,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(ui): migrate modals to native <dialog>`
   - Files: `index.html`, `src/panel/BitsManager.js`, `styles/components/modal.css`
 
-- [x] 16. Popover API for tooltips/dropdowns
+- [ ] 16. Popover API for tooltips/dropdowns
 
   **What to do**:
   - Add `popover` attribute to tooltip/dropdown elements
@@ -1395,7 +1395,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(ui): add popover API for tooltips/dropdowns`
   - Files: `index.html`, `styles/components/toolbar.css`
 
-- [x] 17. View Transitions for panel/state changes
+- [ ] 17. View Transitions for panel/state changes
 
   **What to do**:
   - Wrap panel toggle and state changes in `document.startViewTransition()`:
@@ -1508,7 +1508,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `refactor(style): extract inline styles to CSS classes`
   - Files: `index.html`, `src/ui/UIModule.js`, `src/script.js`, `styles/components/*.css`
 
-- [x] 19. Capacitor config — populate, forceDarkAllowed, WebView theme test
+- [ ] 19. Capacitor config — populate, forceDarkAllowed, WebView theme test
 
   **What to do**:
   - Populate `capacitor.config.json` with proper configuration:
@@ -1569,7 +1569,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Message: `feat(capacitor): populate config + forceDarkAllowed + WebView test`
   - Files: `capacitor.config.json`, `android/app/src/main/AndroidManifest.xml`
 
-- [x] 20. Three.js scene background theme awareness
+- [ ] 20. Three.js scene background theme awareness
 
   **What to do**:
   - In `ThemeService`, emit `theme:changed` event with current theme

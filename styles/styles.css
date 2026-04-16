@@ -1,13 +1,62 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* Note: reset.css and vars.css are imported by main.css before this file */
-/* Legacy :root and .dark blocks removed — now using light-dark() tokens from vars.css */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 0%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 0%;
+  --primary: 212 100% 50%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 0%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 0%;
+  --border: 0 0% 90%;
+  --input: 0 0% 96%;
+  --ring: 212 100% 50%;
+  --radius: 12px;
+  /* Bit outline color - dark in light theme */
+  --bit-outline: #000000;
+  /* Canvas grid color */
+  --grid-color: #000000;
+  /* 3D scene background */
+  --scene-background: #f5f5f5;
+}
+
+.dark {
+  --background: 0 0% 9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 9%;
+  --card-foreground: 0 0% 98%;
+  --primary: 212 100% 50%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 15%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 15%;
+  --muted-foreground: 0 0% 65%;
+  --accent: 0 0% 15%;
+  --accent-foreground: 0 0% 98%;
+  --border: 0 0% 15%;
+  --input: 0 0% 15%;
+  --ring: 212 100% 50%;
+  /* Bit outline color - lighter in dark theme for visibility */
+  --bit-outline: #e0e0e0;
+  /* Canvas grid color - lighter in dark theme */
+  --grid-color: #666666;
+  /* 3D scene background - darker in dark theme */
+  --scene-background: #1a1a1a;
+}
 
 body,
 html {
+  margin: 0;
+  padding: 0;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  background-color: var(--color-background);
-  color: var(--color-text-primary);
+  box-sizing: border-box;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
   -webkit-font-smoothing: antialiased;
 }
 
@@ -16,8 +65,8 @@ html {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  background-color: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  background-color: hsl(var(--card));
+  border-bottom: 1px solid hsl(var(--border));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   z-index: 100;
   position: relative;
@@ -27,7 +76,7 @@ html {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: hsl(var(--card-foreground));
   flex: 1;
   text-align: center;
 }
@@ -44,7 +93,7 @@ html {
   gap: 0;
   border-radius: var(--radius);
   overflow: hidden;
-  border: 1px solid var(--color-border);
+  border: 1px solid hsl(var(--border));
 }
 
 .view-toggle-btn {
@@ -53,11 +102,11 @@ html {
   font-weight: 500;
   border: none !important;
   border-radius: 0 !important;
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   transition: all 0.2s ease;
-  border-right: 1px solid var(--color-border) !important;
+  border-right: 1px solid hsl(var(--border)) !important;
 }
 
 .view-toggle-btn:last-child {
@@ -65,13 +114,13 @@ html {
 }
 
 .view-toggle-btn:hover {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .view-toggle-btn.active {
-  background-color: var(--color-accent);
-  color: var(--color-accent-foreground);
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 #app-header button {
@@ -86,16 +135,16 @@ html {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
 }
 
 #app-header button:hover {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #app-header button:active {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--secondary));
 }
 
 #theme-toggle {
@@ -104,24 +153,10 @@ html {
 }
 
 #app {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  grid-template-areas: "left canvas right";
+  display: flex;
   height: calc(100dvh - 60px);
   width: 100%;
   overflow: hidden;
-}
-
-#left-panel {
-  grid-area: left;
-}
-
-#canvas-container {
-  grid-area: canvas;
-}
-
-#right-menu {
-  grid-area: right;
 }
 
 /* Collapsed panels */
@@ -133,22 +168,15 @@ html {
   display: none;
 }
 
-/* Panel hidden state — replaces inline style.display manipulation */
-.panel-hidden {
-  display: none !important;
-}
-
 /* ===== ЛЕВАЯ ПАНЕЛЬ (Tools + Title) ===== */
 #left-panel {
   flex-shrink: 0;
-  width: clamp(60px, 6vw, 90px);
-  background-color: var(--color-surface);
+  width: 90px;
+  background-color: hsl(var(--card));
   display: flex;
   flex-direction: column;
   position: relative;
   z-index: 20;
-  container-type: inline-size;
-  container-name: left-panel;
 }
 
 #bits-title {
@@ -157,8 +185,8 @@ html {
   font-size: 13px;
   text-align: center;
   flex-shrink: 0;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-primary);
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--card-foreground));
 }
 
 #bits-actions {
@@ -166,22 +194,22 @@ html {
   gap: 5px;
   padding: 5px;
   justify-content: center;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 #bits-actions button {
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   flex: 1;
 }
 
 #bits-actions button:hover {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent));
 }
 
 /* Pocket width input styles */
@@ -209,7 +237,7 @@ html {
 
 
 #bits-actions button:active {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--secondary));
 }
 
 /* ===== ЦЕНТРАЛЬНАЯ КОЛОНКА (Canvas) ===== */
@@ -221,7 +249,7 @@ html {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--muted));
   overflow: hidden;
   padding: 10px;
   position: relative;
@@ -239,13 +267,13 @@ html {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background-color: var(--color-background);
+  background-color: hsl(var(--background));
   overflow: hidden;
   position: relative;
   z-index: 1;
   box-sizing: border-box;
   min-height: 0;
-  border-left: 1px solid var(--color-border);
+  border-left: 1px solid hsl(var(--border));
   width: 100%;
   height: 100%;
 }
@@ -294,10 +322,10 @@ html {
   gap: 5px;
   margin-bottom: 10px;
   margin-top: -50px;
-  background-color: var(--color-surface);
+  background-color: hsl(var(--card));
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid var(--color-border);
+  border: 1px solid hsl(var(--border));
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -308,9 +336,9 @@ html {
 #zoom-toolbar button {
   padding: 5px 8px;
   font-size: 11px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -320,21 +348,21 @@ html {
 }
 
 #zoom-toolbar button:hover {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #zoom-toolbar button:active {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--secondary));
 }
 
 #zoom-toolbar input {
   width: 40px;
   font-size: 11px;
   padding: 3px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-input-bg);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -348,8 +376,8 @@ html {
 }
 
 #canvas {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   width: 100%;
   height: 100%;
   flex-shrink: 0;
@@ -360,17 +388,15 @@ html {
 /* ===== ПРАВАЯ КОЛОНКА (Settings) ===== */
 #right-menu {
   flex-shrink: 0;
-  width: clamp(320px, 35vw, 500px);
-  background-color: var(--color-surface);
+  width: 500px;
+  background-color: hsl(var(--card));
   padding: 20px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--color-border);
+  border-left: 1px solid hsl(var(--border));
   overflow-y: auto;
   position: relative;
   z-index: 2;
-  container-type: inline-size;
-  container-name: right-menu;
 }
 
 #part-params {
@@ -382,26 +408,13 @@ html {
 #operations h3 {
   margin-top: 0;
   font-size: 14px;
-  color: var(--color-text-primary);
+  color: hsl(var(--card-foreground));
 }
 
 .part-params-grid {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-}
-
-/* When right panel is narrow, stack form fields vertically */
-@container right-menu (max-width: 350px) {
-  .part-params-grid {
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .param-item {
-    flex: 1 1 auto;
-    min-width: 0;
-  }
 }
 
 .param-item {
@@ -415,23 +428,23 @@ html {
   display: block;
   margin-bottom: 6px;
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
 #part-params input {
   width: 100%;
   box-sizing: border-box;
-  background-color: var(--color-input-bg);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--input));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   padding: 8px;
 }
 
 #panel-anchor-btn {
-  background-color: var(--color-input-bg) !important;
-  border: 1px solid var(--color-border) !important;
+  background-color: hsl(var(--input)) !important;
+  border: 1px solid hsl(var(--border)) !important;
   border-radius: var(--radius) !important;
   padding: 8px !important;
   height: 38px;
@@ -473,7 +486,7 @@ html {
 }
 
 .bit-group:hover {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent));
   border-radius: 40px;
 }
 
@@ -486,8 +499,8 @@ html {
 .bit-list {
   display: none;
   position: fixed;
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   padding: 8px;
   z-index: 30;
   min-width: 130px;
@@ -528,7 +541,7 @@ html {
 }
 
 .bit:hover {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent));
 }
 
 .bit:last-child {
@@ -568,8 +581,8 @@ html {
   bottom: -18px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   padding: 2px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
@@ -583,8 +596,8 @@ html {
 }
 
 .action-icons svg {
-  width: 20px;
-  height: 20px;
+  width: 12px;
+  height: 12px;
   margin: 0 2px;
   cursor: pointer;
   pointer-events: auto;
@@ -605,17 +618,17 @@ html {
 #operations-header h3 {
   margin: 0;
   flex-shrink: 0;
-  color: var(--color-text-primary);
+  color: hsl(var(--card-foreground));
 }
 
 /* ===== OPERATIONS TOOLBAR ===== */
 #operations-toolbar {
   display: flex;
   gap: 5px;
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--muted));
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid var(--color-border);
+  border: 1px solid hsl(var(--border));
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -625,9 +638,9 @@ html {
 #operations-toolbar button {
   padding: 5px 10px;
   font-size: 12px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -637,38 +650,38 @@ html {
 }
 
 #operations-toolbar button:hover {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #operations-toolbar button:active {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--secondary));
 }
 
 #lcs-btn {
   margin-left: 6px;
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
 }
 
 #lcs-btn:hover {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .lcs-row {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--muted));
 }
 
 /* ===== OPERATIONS LOG ===== */
 #operations-log {
   font-size: 11px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   margin: 5px 0;
   min-height: 18px;
   opacity: 1;
@@ -700,18 +713,18 @@ html {
 
 #operations th,
 #operations td {
-  border: 1px solid var(--color-border);
+  border: 1px solid hsl(var(--border));
   padding: 6px;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
   word-wrap: break-word;
-  color: var(--color-text-primary);
+  color: hsl(var(--card-foreground));
 }
 
 #operations th {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-secondary);
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
   font-weight: bold;
   position: sticky;
   top: 0;
@@ -790,7 +803,7 @@ html {
 
 /* Highlight selected row */
 .selected-bit-row {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent));
 }
 
 .bit-row-hidden {
@@ -811,11 +824,11 @@ html {
 }
 
 #bits-name-header:hover {
-  color: var(--color-text-primary);
+  color: hsl(var(--accent-foreground));
 }
 
 .table-header-btn:hover {
-  color: var(--color-text-primary);
+  color: hsl(var(--accent-foreground));
 }
 
 .bit-action-btn {
@@ -835,9 +848,9 @@ html {
   box-sizing: border-box;
   font-size: 11px;
   padding: 2px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-input-bg);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   height: 24px;
   border-radius: var(--radius);
 }
@@ -853,22 +866,12 @@ html {
   display: flex;
   justify-content: center;
   align-items: center;
-  border: none;
-  padding: 0;
-  margin: 0;
-  max-width: none;
-  max-height: none;
-  color: var(--color-text-primary);
-}
-
-/* Native <dialog> overlay */
-.modal::backdrop {
-  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
 }
 
 .modal-content {
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -885,9 +888,7 @@ html {
 }
 
 /* Adaptive modal layout for narrow screens */
-/* Breakpoints: SM=640px, MD=768px, LG=1024px, XL=1280px, 2XL=1536px */
-/* Keep in sync with src/ui/breakpoints.js */
-@media (max-width: 768px) { /* = BREAKPOINTS.MD */
+@media (max-width: 800px) {
   .modal-content {
     width: 95vw;
   }
@@ -934,7 +935,7 @@ html {
   }
 }
 
-@media (max-width: 640px) { /* = BREAKPOINTS.SM */
+@media (max-width: 500px) {
   .modal-content {
     padding: 12px;
     width: 100vw;
@@ -995,11 +996,11 @@ html {
   flex-shrink: 0;
   width: 400px;
   height: 400px;
-  border: 1px solid var(--color-border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--muted));
 }
 
 .bit-preview svg {
@@ -1017,8 +1018,8 @@ html {
   gap: 5px;
   height: 30px;
   padding: 3px 5px;
-  border-bottom: 1px solid var(--color-border);
-  background-color: var(--color-surface-raised);
+  border-bottom: 1px solid hsl(var(--border));
+  background-color: hsl(var(--muted));
   flex-shrink: 0;
   z-index: 10;
   position: relative;
@@ -1030,9 +1031,9 @@ html {
   min-width: 35px;
   padding: 0 6px;
   font-size: 12px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   box-sizing: border-box;
@@ -1040,8 +1041,8 @@ html {
 
 #preview-toolbar input[type="color"]:hover,
 #preview-toolbar button:hover {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 /* Touch support for mobile devices */
@@ -1072,23 +1073,23 @@ button,
 .modal-content h2 {
   margin-top: 0;
   font-size: 18px;
-  color: var(--color-text-primary);
+  color: hsl(var(--card-foreground));
 }
 
 .modal-content label {
   display: block;
   margin-bottom: 5px;
   font-size: 14px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
 }
 
 .modal-content input {
   width: 100%;
   padding: 8px;
   margin-bottom: 15px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-input-bg);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 14px;
@@ -1109,13 +1110,13 @@ button,
 }
 
 .button-group button[type="button"] {
-  background-color: var(--color-surface-raised);
-  color: var(--color-text-secondary);
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .button-group button[type="submit"] {
-  background-color: var(--color-accent);
-  color: var(--color-accent-foreground);
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 /* ===== BIT FORM FLEX GRID ===== */
@@ -1136,7 +1137,7 @@ button,
 .bit-form-row label {
   margin-bottom: 0;
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1165,9 +1166,9 @@ button,
   top: 50%;
   transform: translateY(-50%);
   font-size: 12px;
-  color: var(--color-accent);
+  color: hsl(var(--primary));
   font-family: 'JetBrains Mono', monospace;
-  background: linear-gradient(to right, transparent, var(--color-input-bg) 20%);
+  background: linear-gradient(to right, transparent, hsl(var(--input)) 20%);
   padding: 2px 0 2px 15px;
   pointer-events: none;
   white-space: nowrap;
@@ -1181,7 +1182,7 @@ button,
 
 /* Name field result has different styling */
 .bit-form-row .formula-result.name-result {
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
 }
 
 .bit-form-row .delete-field-btn {
@@ -1190,7 +1191,7 @@ button,
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   border-radius: 4px;
   display: flex;
@@ -1213,7 +1214,7 @@ button,
 
 .bit-form-row .var-name {
   font-size: 10px;
-  color: var(--color-accent);
+  color: hsl(var(--primary));
   font-family: 'JetBrains Mono', monospace;
   margin-left: 4px;
 }
@@ -1225,9 +1226,9 @@ button,
   gap: 4px;
   padding: 8px;
   margin-top: 8px;
-  border: 1px dashed var(--color-border);
+  border: 1px dashed hsl(var(--border));
   background: transparent;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   font-size: 12px;
@@ -1235,9 +1236,9 @@ button,
 }
 
 .add-field-btn:hover {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background-color: var(--color-surface-raised);
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  background-color: hsl(var(--muted));
 }
 
 /* Bit form container - wraps form, add button, and profile path */
@@ -1252,12 +1253,12 @@ button,
 .profile-path-section {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid hsl(var(--border));
 }
 
 .profile-path-section .profile-path-header {
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   margin-bottom: 6px;
 }
 
@@ -1272,8 +1273,8 @@ button,
 
 /* ===== PROFILE EDITOR — Edit button ===== */
 .preview-edit-btn {
-  background-color: var(--color-accent) !important;
-  color: var(--color-accent-foreground) !important;
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
   font-weight: 600;
 }
 
@@ -1286,7 +1287,7 @@ button,
 
 /* Canvas gets a subtle active-edit outline so it's clear you're drawing */
 .bit-preview--editing {
-  outline: 2px solid var(--color-accent-35);
+  outline: 2px solid hsl(var(--primary) / 0.35);
   outline-offset: -2px;
 }
 
@@ -1296,8 +1297,8 @@ button,
   align-items: center;
   gap: 4px;
   padding: 4px 8px;
-  border-top: 1px solid var(--color-border);
-  background-color: var(--color-surface-raised);
+  border-top: 1px solid hsl(var(--border));
+  background-color: hsl(var(--muted));
   flex-wrap: wrap;
 }
 
@@ -1310,7 +1311,7 @@ button,
 .editor-toolbar-separator {
   width: 1px;
   height: 20px;
-  background-color: var(--color-border);
+  background-color: hsl(var(--border));
   margin: 0 4px;
   flex-shrink: 0;
 }
@@ -1325,9 +1326,9 @@ button,
   padding: 0;
   font-size: 14px;
   line-height: 1;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: 4px;
   display: flex;
@@ -1337,14 +1338,14 @@ button,
 }
 
 .editor-tool-btn:hover {
-  background-color: var(--color-surface-raised);
-  border-color: var(--color-accent-50);
+  background-color: hsl(var(--accent));
+  border-color: hsl(var(--primary) / 0.5);
 }
 
 .editor-tool-btn.active {
-  background-color: var(--color-accent);
-  color: var(--color-accent-foreground);
-  border-color: var(--color-accent);
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
 }
 
 /* RMB-activated variant of a dual-mode button: amber tint to signal secondary mode */
@@ -1358,9 +1359,9 @@ button,
   height: 24px;
   padding: 0 8px;
   font-size: 11px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-secondary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.1s;
@@ -1370,9 +1371,9 @@ button,
     height: 24px;
     padding: 0 4px;
     font-size: 11px;
-    border: 1px solid var(--color-border);
-    background-color: var(--color-surface);
-    color: var(--color-text-primary);
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
     cursor: pointer;
     border-radius: 4px;
     width: 52px;
@@ -1380,37 +1381,37 @@ button,
 }
 
 .editor-grid-select:hover {
-    border-color: var(--color-surface-raised);
+    border-color: hsl(var(--accent));
 }
 
 .editor-snap-btn.active {
-  background-color: var(--color-accent-15);
-  color: var(--color-accent);
-  border-color: var(--color-accent-40);
+  background-color: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.4);
 }
 
 .editor-action-btn {
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: 4px;
   font-weight: 500;
 }
 
 .editor-action-btn.editor-action-primary {
-  background-color: var(--color-accent);
-  color: var(--color-accent-foreground);
-  border-color: var(--color-accent);
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
 }
 
 /* ===== EDITOR CANVAS — selection box (CursorTool drag) ===== */
 .editor-selection-box {
-  fill: var(--color-accent-8);
-  stroke: var(--color-accent);
+  fill: hsl(var(--primary) / 0.08);
+  stroke: hsl(var(--primary));
   stroke-width: 0.3;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
@@ -1424,7 +1425,7 @@ button,
 
 .editor-mirror-preview {
   fill: none !important;
-  stroke: var(--color-accent);
+  stroke: hsl(var(--primary));
   stroke-width: 0.3;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
@@ -1437,7 +1438,7 @@ button,
 
 /* ===== EDITOR CANVAS — axis line ===== */
 .editor-axis {
-  stroke: var(--color-accent-40);
+  stroke: hsl(var(--primary) / 0.4);
   stroke-width: 0.3;
   stroke-dasharray: 4 3;
   pointer-events: none;
@@ -1457,7 +1458,7 @@ button,
 .editor-ghost rect,
 .editor-ghost ellipse,
 .editor-ghost path {
-  stroke: var(--color-accent);
+  stroke: hsl(var(--primary));
   fill: none;
   pointer-events: none;
 }
@@ -1474,7 +1475,7 @@ button,
 
 /* Filled endpoint circles on ghost */
 .editor-ghost-endpoint {
-  fill: var(--color-accent);
+  fill: hsl(var(--primary));
   stroke: none;
   pointer-events: none;
   vector-effect: non-scaling-stroke;
@@ -1482,7 +1483,7 @@ button,
 
 /* Dashed radius lines from arc center to endpoints */
 .editor-ghost-radius {
-  stroke: var(--color-accent-40);
+  stroke: hsl(var(--primary) / 0.4);
   stroke-width: 0.5;
   stroke-dasharray: 1 1;
   vector-effect: non-scaling-stroke;
@@ -1492,7 +1493,7 @@ button,
 /* Arc center marker (hollow circle) */
 .editor-ghost-center {
   fill: none;
-  stroke: var(--color-accent-75);
+  stroke: hsl(var(--primary) / 0.75);
   stroke-width: 0.5;
   r: 0.07;
   vector-effect: non-scaling-stroke;
@@ -1509,7 +1510,7 @@ button,
   display: flex;
   align-items: baseline;
   gap: 4px;
-  color: var(--color-text-primary);
+  color: hsl(var(--foreground, 0 0% 90%));
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
   pointer-events: auto;
@@ -1521,8 +1522,8 @@ button,
   width: 64px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--color-text-50);
-  color: var(--color-text-primary);
+  border-bottom: 1px solid hsl(var(--foreground, 0 0% 90%) / 0.5);
+  color: hsl(var(--foreground, 0 0% 90%));
   padding: 0 2px 1px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
@@ -1539,11 +1540,11 @@ button,
 
 .arc-radius-input:focus {
   outline: none;
-  border-bottom-color: var(--color-accent);
+  border-bottom-color: hsl(var(--primary));
 }
 
 .arc-radius-input.arc-radius-error {
-  border-bottom-color: var(--color-destructive);
+  border-bottom-color: hsl(var(--destructive, 0 72% 51%));
   animation: arc-shake 0.3s ease;
 }
 
@@ -1555,7 +1556,7 @@ button,
 
 /* ===== EDITOR CANVAS — drawn segments ===== */
 .editor-segment {
-  stroke: var(--color-text-85);
+  stroke: hsl(var(--foreground) / 0.85);
   stroke-width: 0.5;
   fill: none;
   vector-effect: non-scaling-stroke;
@@ -1563,42 +1564,42 @@ button,
 }
 
 .editor-segment-selected {
-  stroke: var(--color-accent);
+  stroke: hsl(var(--primary));
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 
 /* Mirrored (left-half) counterpart — subtler */
 .editor-segment-mirror {
-  stroke: var(--color-text-35);
+  stroke: hsl(var(--foreground) / 0.35);
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
 
 /* Endpoint dots on committed segments */
 .editor-endpoint {
-  fill: var(--color-text-70);
+  fill: hsl(var(--foreground) / 0.7);
   stroke: none;
   vector-effect: non-scaling-stroke;
 }
 
 .editor-endpoint-mirror {
-  fill: var(--color-text-25);
+  fill: hsl(var(--foreground) / 0.25);
 }
 
 .editor-endpoint-selected {
-  fill: var(--color-accent);
+  fill: hsl(var(--primary));
 }
 
 /* Hover states — applied by CursorTool */
 .editor-segment-hover {
-  stroke: var(--color-accent-60);
+  stroke: hsl(var(--primary) / 0.6);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .editor-endpoint-hover {
-  fill: var(--color-accent-80);
+  fill: hsl(var(--primary) / 0.8);
   r: 0.1;           /* slightly larger when hovered */
   vector-effect: non-scaling-stroke;
 }
@@ -1611,14 +1612,14 @@ button,
 }
 
 .editor-rect-side-selected {
-  stroke: var(--color-accent);
+  stroke: hsl(var(--primary));
   stroke-width: 2.2;
   vector-effect: non-scaling-stroke;
   pointer-events: none;
 }
 
 .editor-segment.editor-rect-side-only {
-  stroke: var(--color-text-85);
+  stroke: hsl(var(--foreground) / 0.85);
   stroke-width: 0.5;
 }
 
@@ -1631,7 +1632,7 @@ button,
 
 /* Dashed guide line from arc center → pt3 control handle */
 .editor-arc-radius-line {
-  stroke: var(--color-text-50);
+  stroke: hsl(var(--muted-foreground) / 0.5);
   stroke-width: 1;
   stroke-dasharray: 3 2;
   vector-effect: non-scaling-stroke;
@@ -1639,7 +1640,7 @@ button,
 
 /* Small dot at the geometric center of a selected arc */
 .editor-arc-center {
-  fill: var(--color-text-50);
+  fill: hsl(var(--muted-foreground) / 0.55);
   stroke: none;
   vector-effect: non-scaling-stroke;
 }
@@ -1701,7 +1702,7 @@ button,
 
 .profile-path-header {
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   margin-bottom: 2px;
 }
 
@@ -1723,9 +1724,9 @@ button,
   overflow-x: auto;
   overflow-y: auto;
   user-select: none;
-  border: 1px solid var(--color-border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
-  background-color: var(--color-input-bg);
+  background-color: hsl(var(--input));
   padding: 3px;
 }
 
@@ -1743,11 +1744,11 @@ button,
 }
 
 .path-line:hover {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent));
 }
 
 .path-line-number {
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   font-size: 10px;
   min-width: 16px;
   text-align: right;
@@ -1759,8 +1760,8 @@ button,
 }
 
 .path-line-number:hover {
-  background-color: var(--color-accent);
-  color: var(--color-accent-foreground);
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 .path-line-number:active {
@@ -1772,13 +1773,13 @@ button,
 }
 
 .path-line.drag-over {
-  border-top: 2px solid var(--color-accent);
+  border-top: 2px solid hsl(var(--primary));
 }
 
 /* Selected row (via canvas selection or row click) */
 .path-line-selected {
-  background-color: var(--color-accent-15) !important;
-  outline: 1px solid var(--color-accent-40);
+  background-color: hsl(var(--primary) / 0.15) !important;
+  outline: 1px solid hsl(var(--primary) / 0.4);
   outline-offset: -1px;
   border-radius: 3px;
 }
@@ -1845,7 +1846,7 @@ button,
 /* Parameter cell - teal accent */
 .path-cell-param {
   background-color: rgba(42, 157, 143, 0.08);
-  color: var(--color-text-primary);
+  color: hsl(var(--foreground));
   font-size: 11px;
   padding: 1px 5px;
   min-width: 20px;
@@ -1859,8 +1860,8 @@ button,
 .path-cell-param.cell-empty {
   background-color: rgba(0, 0, 0, 0.04);
   border-style: dashed;
-  border-color: var(--color-border);
-  color: var(--color-text-secondary);
+  border-color: hsl(var(--border));
+  color: hsl(var(--muted-foreground));
 }
 
 .path-cell-param.active-edit {
@@ -1946,7 +1947,7 @@ button,
   border: none !important;
   border-radius: 2px !important;
   background: transparent !important;
-  color: var(--color-text-primary) !important;
+  color: hsl(var(--foreground)) !important;
   outline: none !important;
   min-width: none !important;
   max-width: none !important;
@@ -1971,7 +1972,7 @@ button,
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   border-radius: 3px;
   display: flex;
@@ -2000,9 +2001,9 @@ button,
   gap: 1px;
   overflow-x: auto;
   user-select: none;
-  border: 1px solid var(--color-border);
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
-  background-color: var(--color-input-bg);
+  background-color: hsl(var(--input));
   padding: 3px;
   position: relative;
 }
@@ -2021,12 +2022,12 @@ button,
 }
 
 .path-shape-element:hover {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent));
 }
 
 .path-shape-element.path-line-selected {
-  background-color: var(--color-accent-15) !important;
-  outline: 1px solid var(--color-accent-40);
+  background-color: hsl(var(--primary) / 0.15) !important;
+  outline: 1px solid hsl(var(--primary) / 0.4);
   outline-offset: -1px;
 }
 
@@ -2074,13 +2075,13 @@ button,
 }
 
 .path-shape-attr-label {
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   font-size: 10px;
   flex-shrink: 0;
 }
 
 .path-shape-attr-value {
-  color: var(--color-text-primary);
+  color: hsl(var(--foreground));
   font-weight: 600;
 }
 
@@ -2092,7 +2093,7 @@ button,
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   border-radius: 3px;
   display: flex;
@@ -2128,7 +2129,7 @@ button,
   align-items: center;
   gap: 3px;
   padding: 2px 4px;
-  border-bottom: 1px solid var(--color-border-50);
+  border-bottom: 1px solid hsl(var(--border) / 0.4);
   min-height: 22px;
   box-sizing: border-box;
   border-left: 2px solid transparent;
@@ -2136,18 +2137,18 @@ button,
 }
 
 .pe-elem:hover {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent) / 0.35);
 }
 
 /* Active element (suggestions bar reacts to this) */
 .pe-elem.pe-elem-active {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent) / 0.5);
 }
 
 /* Selected row highlight */
 .pe-elem.path-line-selected,
 .pe-sub-line.path-line-selected {
-  background-color: var(--color-accent-15);
+  background-color: hsl(var(--primary) / 0.12);
 }
 
 /* Left-border accent by element type */
@@ -2188,13 +2189,13 @@ button,
 }
 
 .pe-sub-line-drag-over {
-  border-top: 2px solid var(--color-accent);
+  border-top: 2px solid hsl(var(--primary));
   margin-top: -1px;
 }
 
 .pe-sub-line-drop-end.pe-sub-line-drag-over {
   border-top-color: transparent;
-  border-bottom: 2px solid var(--color-accent);
+  border-bottom: 2px solid hsl(var(--primary));
   margin-top: 0;
 }
 
@@ -2289,11 +2290,11 @@ button,
   opacity: 0.4;
 }
 .pe-elem.pe-elem-drag-over {
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid hsl(var(--primary));
   outline-offset: -1px;
 }
 .pe-elem.pe-elem-drag-over-top {
-  border-top: 2px solid var(--color-accent);
+  border-top: 2px solid hsl(var(--primary));
   margin-top: -1px;
 }
 
@@ -2314,9 +2315,9 @@ button,
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   padding: 1px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-input-bg);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   outline: none;
   transition: border-color 0.2s;
@@ -2324,11 +2325,11 @@ button,
 }
 
 .path-editor-input:focus {
-  border-color: var(--color-accent);
+  border-color: hsl(var(--primary));
 }
 
 .path-editor-input::placeholder {
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   font-size: 9px;
 }
 
@@ -2336,9 +2337,9 @@ button,
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-accent);
-  color: var(--color-accent-foreground);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   font-size: 14px;
@@ -2369,13 +2370,13 @@ button,
 
 .path-suggestions-label {
   font-size: 9px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .path-suggestions-label em {
-  color: var(--color-accent);
+  color: hsl(var(--primary));
   font-style: normal;
   font-weight: 600;
 }
@@ -2384,9 +2385,9 @@ button,
   padding: 1px 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
   cursor: pointer;
   border-radius: 3px;
   transition: all 0.15s;
@@ -2394,7 +2395,7 @@ button,
 }
 
 .path-suggestion-btn:hover {
-  background-color: var(--color-surface-raised);
+  background-color: hsl(var(--accent));
 }
 
 .path-suggestion-btn.cmd-btn {
@@ -2523,8 +2524,8 @@ button,
 }
 
 .custom-field-modal-content {
-  background-color: var(--color-surface);
-  color: var(--color-text-primary);
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -2546,16 +2547,16 @@ button,
   display: block;
   margin-bottom: 4px;
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: hsl(var(--muted-foreground));
 }
 
 .custom-field-modal-content input,
 .custom-field-modal-content select {
   width: 100%;
   padding: 8px;
-  border: 1px solid var(--color-border);
-  background-color: var(--color-input-bg);
-  color: var(--color-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 13px;
@@ -2566,16 +2567,13 @@ button,
 }
 
 /* ===== RESPONSIVE DESIGN ===== */
-/* Breakpoints: SM=640px, MD=768px, LG=1024px, XL=1280px, 2XL=1536px */
-/* Keep in sync with src/ui/breakpoints.js */
-
-@media (max-width: 1280px) { /* = BREAKPOINTS.XL */
+@media (max-width: 1200px) {
   #right-menu {
-    width: clamp(280px, 30vw, 400px);
+    width: 400px;
   }
 }
 
-@media (max-width: 1024px) { /* = BREAKPOINTS.LG */
+@media (max-width: 1000px) {
   #right-menu.collapsed {
     display: none !important;
   }
@@ -2647,7 +2645,7 @@ button,
   }
 }
 
-@media (max-width: 768px) { /* = BREAKPOINTS.MD */
+@media (max-width: 768px) {
   #left-panel.collapsed {
     display: none !important;
   }
@@ -2668,7 +2666,7 @@ button,
     top: 60px;
     left: 0;
     bottom: 0;
-    width: clamp(60px, 6vw, 90px);
+    width: 90px;
     z-index: 50;
     box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
   }
@@ -2706,7 +2704,7 @@ button,
   }
 }
 
-@media (max-width: 640px) { /* = BREAKPOINTS.SM */
+@media (max-width: 480px) {
   /* Extra small screens - make zoom toolbar even more compact */
   #zoom-toolbar button {
     padding: 3px 5px;
@@ -2728,57 +2726,5 @@ button,
   #zoom-toolbar {
     gap: 3px;
     padding: 3px;
-  }
-}
-
-/* ===== MOBILE TOUCH TARGETS ===== */
-/* Ensure all interactive elements meet the 44px minimum touch target
-   recommended by WCAG 2.2 (Success Criterion 2.5.8 — Target Size). */
-@media (max-width: 1024px) { /* = BREAKPOINTS.LG */
-  #app-header button,
-  #bits-actions button,
-  .bit-action-btn,
-  .editor-tool-btn,
-  .editor-snap-btn,
-  .editor-action-btn,
-  .preview-edit-btn,
-  .view-toggle-btn {
-    min-height: 44px;
-    min-width: 44px;
-  }
-
-  /* Adjust padding to maintain visual appearance while meeting touch target */
-  #app-header button {
-    padding: 10px 12px;
-  }
-
-  .view-toggle-btn {
-    padding: 10px 14px;
-  }
-
-  /* Operations toolbar buttons */
-  #operations-toolbar button {
-    min-height: 44px;
-    padding: 8px 12px;
-  }
-
-  /* Bit list item — ensure entire row is tappable */
-  .bit {
-    min-height: 44px;
-  }
-}
-
-/* ===== RESPONSIVE TYPOGRAPHY ===== */
-@media (max-width: 640px) { /* = BREAKPOINTS.SM */
-  html {
-    font-size: 14px; /* Slightly smaller base on mobile for more content */
-  }
-
-  #app-header h1 {
-    font-size: 14px;
-  }
-
-  #right-menu h3 {
-    font-size: 13px;
   }
 }

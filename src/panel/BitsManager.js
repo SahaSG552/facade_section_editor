@@ -8,6 +8,7 @@ import {
 } from "../data/bitsStore.js";
 import CanvasManager from "../canvas/CanvasManager.js";
 import { evaluateMathExpression } from "../utils/utils.js";
+import { getCssVar } from "../utils/theme.js";
 import {
     VARIABLE_TOKEN_RE_GLOBAL,
     VARIABLE_TOKEN_TEST_RE,
@@ -460,7 +461,9 @@ function parseEvaluatedPathRows(pathStr) {
     const rows = [];
     const commandRe = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
     let cx = 0, cy = 0, subX = 0, subY = 0, m;
-    while ((m = commandRe.exec(pathStr)) !== null) {
+    while (true) {
+        m = commandRe.exec(pathStr);
+        if (m === null) break;
         const cmd = m[1].toUpperCase();
         const args = m[2].trim().split(/[\s,]+/).filter(Boolean).map(Number).filter(n => !isNaN(n));
         if (cmd === 'M') {
@@ -528,8 +531,8 @@ export default class BitsManager {
         circle.setAttribute("cx", size / 2);
         circle.setAttribute("cy", size / 2);
         circle.setAttribute("r", size / 2 - 1);
-        circle.setAttribute("fill", "var(--color-surface)");
-        circle.setAttribute("stroke", "var(--color-icon)");
+        circle.setAttribute("fill", getCssVar("--facade-icon-bg", "#ffffff"));
+        circle.setAttribute("stroke", getCssVar("--facade-icon-stroke", "#000000"));
         circle.setAttribute("stroke-width", "2");
         svg.appendChild(circle);
 
@@ -639,12 +642,15 @@ export default class BitsManager {
                     break;
             }
             if (innerShape) {
-                // Use the bit's color if available, otherwise theme surface color
+                // Use the bit's color if available, otherwise theme default
                 const fillColor = params?.fillColor
                     ? this.getBitFillColor(params, false)
-                    : "var(--color-surface)";
+                    : getCssVar(
+                        "--facade-bit-fill-default",
+                        "rgba(204, 204, 204, 0.3)",
+                    );
                 innerShape.setAttribute("fill", fillColor);
-                innerShape.setAttribute("stroke", "var(--color-icon)");
+                innerShape.setAttribute("stroke", "var(--bit-outline, #000000)");
                 innerShape.setAttribute("stroke-width", "2");
             }
         }
@@ -667,29 +673,29 @@ export default class BitsManager {
         circle.setAttribute("cx", "12");
         circle.setAttribute("cy", "12");
         circle.setAttribute("r", "11");
-        circle.setAttribute("fill", "var(--color-surface)");
+        circle.setAttribute("fill", getCssVar("--facade-icon-bg", "#ffffff"));
         circle.setAttribute("stroke-width", "2");
 
         const path = document.createElementNS(svgNS, "path");
-        path.setAttribute("fill", "var(--color-icon)");
+        path.setAttribute("fill", getCssVar("--facade-icon-stroke", "#000000"));
 
         switch (action) {
             case "edit":
-                circle.setAttribute("stroke", "var(--color-success)");
+                circle.setAttribute("stroke", getCssVar("--facade-action-green", "#2e7d32"));
                 path.setAttribute(
                     "d",
                     "M16.293 2.293l3.414 3.414-13 13-3.414-3.414 13-13zM18 10v8h-8v-8h8z",
                 );
                 break;
             case "copy":
-                circle.setAttribute("stroke", "var(--color-warning)");
+                circle.setAttribute("stroke", getCssVar("--facade-action-orange", "#ef6c00"));
                 path.setAttribute(
                     "d",
                     "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
                 );
                 break;
             case "remove":
-                circle.setAttribute("stroke", "var(--color-destructive)");
+                circle.setAttribute("stroke", getCssVar("--facade-action-red", "#c62828"));
                 path.setAttribute(
                     "d",
                     "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
@@ -887,7 +893,7 @@ export default class BitsManager {
                             }
                         }
                         part.setAttribute("fill", fillColor);
-                        part.setAttribute("stroke", "black");
+                        part.setAttribute("stroke", "var(--bit-outline, #000000)");
                         part.setAttribute("stroke-width", strokeWidth);
                         part.classList.add("bit-shape");
                         parts.push(part);
@@ -921,7 +927,7 @@ export default class BitsManager {
         }
 
         if (bitShape) {
-            bitShape.setAttribute("stroke", "black");
+            bitShape.setAttribute("stroke", "var(--bit-outline, #000000)");
             bitShape.setAttribute("stroke-width", strokeWidth);
             bitShape.classList.add("bit-shape");
             group.appendChild(bitShape);
@@ -940,8 +946,8 @@ export default class BitsManager {
             shankShape.setAttribute("y", y - bit.totalLength);
             shankShape.setAttribute("width", bit.shankDiameter);
             shankShape.setAttribute("height", shankLength);
-            shankShape.setAttribute("fill", "rgba(64, 64, 64, 0.1)");
-            shankShape.setAttribute("stroke", "black");
+            shankShape.setAttribute("fill", getCssVar("--facade-shank-fill", "rgba(64, 64, 64, 0.1)"));
+            shankShape.setAttribute("stroke", getCssVar("--facade-shank-stroke", "#000000"));
             shankShape.setAttribute("stroke-width", strokeWidth);
             shankShape.classList.add("shank-shape");
             group.appendChild(shankShape);
@@ -953,7 +959,12 @@ export default class BitsManager {
     // Get the fill color for a bit with proper opacity
     getBitFillColor(bit, isSelected = false) {
         const baseColor = bit.fillColor;
-        if (!baseColor) return "rgba(204, 204, 204, 0.3)"; // Default gray
+        if (!baseColor) {
+            return getCssVar(
+                "--facade-bit-fill",
+                getCssVar("--facade-bit-fill-default", "rgba(204, 204, 204, 0.3)"),
+            );
+        }
 
         // Parse the base color to extract RGB values
         let r, g, b;
@@ -1711,7 +1722,7 @@ export default class BitsManager {
         const formRows = this.generateFormRows(groupName, defaultValues, variables, false);
         const profilePathHtml = groupName === "profile" ? this.generateProfilePathHtml(defaultValues) : "";
 
-        const modal = document.createElement("dialog");
+        const modal = document.createElement("div");
         modal.className = "modal";
         modal.innerHTML = `
     <div class="modal-content">
@@ -1749,7 +1760,6 @@ export default class BitsManager {
   `;
 
         document.body.appendChild(modal);
-        modal.showModal();
         const form = modal.querySelector("#bit-form");
         const formGrid = modal.querySelector("#bit-form-grid");
 
@@ -2022,7 +2032,9 @@ export default class BitsManager {
             const bitShapes = previewBitsLayer?.querySelectorAll(".bit-shape");
             const shankShape = previewBitsLayer?.querySelector(".shank-shape");
             if (bitShapes?.length) {
-                bitShapes.forEach((shape) => shape.setAttribute("stroke-width", thickness));
+                bitShapes.forEach((shape) => {
+                    shape.setAttribute("stroke-width", thickness);
+                });
             }
             if (shankShape) shankShape.setAttribute("stroke-width", thickness);
 
@@ -2737,15 +2749,13 @@ export default class BitsManager {
                 this.updateCanvasBitsForBitId(updatedBit.id);
             }
 
-            modal.close();
-            modal.remove();
+            document.body.removeChild(modal);
             this.refreshBitGroups();
         });
 
         // Cancel button
         modal.querySelector("#cancel-btn").addEventListener("click", () => {
-            modal.close();
-            modal.remove();
+            document.body.removeChild(modal);
         });
     }
 

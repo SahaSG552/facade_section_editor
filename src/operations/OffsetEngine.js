@@ -93,6 +93,27 @@ function getTangencyMeasure(centerToLine, radius, k, d) {
     return Math.abs(centerToLine - d) - (radius + k * d);
 }
 
+function countArcSegments(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return 0;
+    let count = 0;
+    for (const seg of segments) {
+        if (seg?.type === "arc" && seg.arc) count += 1;
+    }
+    return count;
+}
+
+function findSingleArcIndex(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return -1;
+    let arcIndex = -1;
+    for (let i = 0; i < segments.length; i += 1) {
+        const seg = segments[i];
+        if (seg?.type !== "arc" || !seg.arc) continue;
+        if (arcIndex !== -1) return -1;
+        arcIndex = i;
+    }
+    return arcIndex;
+}
+
 function lineDirection(segment) {
     if (!segment?.start || !segment?.end) return null;
     const dx = segment.end.x - segment.start.x;
@@ -434,6 +455,56 @@ export class OffsetEngine {
         // the break point is mathematically frozen before bridge logic.
         while (passes < MAX_DEGENERATION_SPLITS && Math.abs(remainingDistance) > EPSILON) {
             const splitDistance = this._findNextSplitDistance(workingContour, remainingDistance);
+            if (splitDistance == null) {
+                return buildOffsetContour(workingContour, remainingDistance, buildOptions);
+            }
+
+            const partial = buildOffsetContour(workingContour, splitDistance, buildOptions);
+            if (!Array.isArray(partial) || partial.length === 0) {
+                return partial;
+            }
+
+            workingContour = partial;
+            remainingDistance -= splitDistance;
+            passes += 1;
+        }
+
+        return buildOffsetContour(workingContour, remainingDistance, buildOptions);
+    }
+
+    /**
+     * Build closed-contour offset with splits ONLY at arc-line separation
+     * thresholds (not at arc-collapse).  For closed contours, arc-collapse is
+     * handled in a single buildOffsetContour pass via the droppedGap bridge
+     * logic.  The bridge is shifted by the "extra" distance (|d| − arcRadius)
+     * to match the open-contour result produced by the stepwise split path.
+     *
+     * Arc-line separation splits are needed so the arc endpoint is "frozen"
+     * at the equatorial (maximum-sweep) position before bridge logic runs —
+     * making the closed-contour П-bridge geometry identical to what the
+     * open-contour split path produces.
+     *
+     * @param {Array<Object>} sourceContour - Input closed contour segments.
+     * @param {number} distance - Signed offset distance.
+     * @param {OffsetEngineOptions} resolvedOptions - Resolved options.
+     * @returns {Array<Object>} Offset segments.
+     */
+    _buildClosedOffsetWithSeparationSplit(sourceContour, distance, resolvedOptions) {
+        let workingContour = sourceContour;
+        let remainingDistance = distance;
+        let passes = 0;
+
+        const buildOptions = {
+            joinType: resolvedOptions.joinType,
+            capType: resolvedOptions.capType,
+        };
+
+        while (passes < MAX_DEGENERATION_SPLITS && Math.abs(remainingDistance) > EPSILON) {
+            // Only split at arc-line separation — NOT at arc-collapse.
+            const splitDistance = this._findArcLineSeparationSplitDistance(
+                workingContour,
+                remainingDistance
+            );
             if (splitDistance == null) {
                 return buildOffsetContour(workingContour, remainingDistance, buildOptions);
             }
@@ -844,6 +915,17 @@ export class OffsetEngine {
                         ? this._buildOpenOffsetMonotonic(buildSegs, buildDistance, resolvedOptions)
                         : this._buildOpenOffsetWithDegenerationSplits(buildSegs, buildDistance, resolvedOptions);
 
+                    if (
+                        useMonotonicOpenBuild &&
+                        this._shouldFallbackOpenMonotonicArcLoss(buildSegs, buildDistance, offsetSegments)
+                    ) {
+                        offsetSegments = this._buildClosedOffsetWithSeparationSplit(
+                            buildSegs,
+                            buildDistance,
+                            resolvedOptions
+                        );
+                    }
+
                     if (needsNormalization && Array.isArray(offsetSegments) && offsetSegments.length > 0) {
                         offsetSegments = reverseContourForOffset(offsetSegments);
                     }
@@ -854,7 +936,30 @@ export class OffsetEngine {
 
                     const stitchedSegments = this._stitchSegments(offsetSegments, false);
                     const normalizedFinalSegments = this._ensureClosedWhenNeeded(stitchedSegments, sourceClosed);
-                    const outputSegments = this._sanitizeSegmentsForOutput(normalizedFinalSegments);
+                    let outputSegments = this._sanitizeSegmentsForOutput(normalizedFinalSegments);
+
+                    if (
+                        useMonotonicOpenBuild &&
+                        this._shouldFallbackOpenMonotonicArcLoss(buildSegs, buildDistance, outputSegments)
+                    ) {
+                        let fallbackSegments = this._buildClosedOffsetWithSeparationSplit(
+                            buildSegs,
+                            buildDistance,
+                            resolvedOptions
+                        );
+
+                        if (needsNormalization && Array.isArray(fallbackSegments) && fallbackSegments.length > 0) {
+                            fallbackSegments = reverseContourForOffset(fallbackSegments);
+                        }
+
+                        if (!Array.isArray(fallbackSegments) || fallbackSegments.length === 0) {
+                            continue;
+                        }
+
+                        const fbStitched = this._stitchSegments(fallbackSegments, false);
+                        const fbNormalized = this._ensureClosedWhenNeeded(fbStitched, sourceClosed);
+                        outputSegments = this._sanitizeSegmentsForOutput(fbNormalized);
+                    }
 
                     if (!Array.isArray(outputSegments) || outputSegments.length === 0) {
                         continue;
@@ -877,12 +982,18 @@ export class OffsetEngine {
                         bbox: contourBBox,
                     });
                 } else {
-                    // Closed contour: single-sided offset with join processing
+                    // Closed contour: single-sided offset with join processing.
+                    // Use the same split-based builder as open contours so that arc
+                    // degeneration thresholds (arc-line tangency) are handled with the
+                    // same iterative split mechanism.  This ensures the arc endpoint
+                    // stays at the equatorial (maximum-sweep) position when a П-bridge
+                    // is needed, exactly matching open-contour behavior.
                     const sourceArea = this._computeSignedArea(sourceContour);
-                    const offsetSegments = buildOffsetContour(sourceContour, distance, {
-                        joinType: resolvedOptions.joinType,
-                        capType: resolvedOptions.capType,
-                    });
+                    const offsetSegments = this._buildClosedOffsetWithSeparationSplit(
+                        sourceContour,
+                        distance,
+                        resolvedOptions
+                    );
 
                     if (!Array.isArray(offsetSegments) || offsetSegments.length === 0) {
                         continue;
@@ -890,10 +1001,11 @@ export class OffsetEngine {
 
                     if (offsetMode === "two-sides-no-close") {
                         // Closed path two-sides-no-close: also build inward offset and return both.
-                        const innerSegments = buildOffsetContour(sourceContour, -distance, {
-                            joinType: resolvedOptions.joinType,
-                            capType: resolvedOptions.capType,
-                        });
+                        const innerSegments = this._buildClosedOffsetWithSeparationSplit(
+                            sourceContour,
+                            -distance,
+                            resolvedOptions
+                        );
 
                         for (const side of [offsetSegments, innerSegments]) {
                             if (!Array.isArray(side) || side.length === 0) continue;
@@ -1010,6 +1122,56 @@ export class OffsetEngine {
             log.error("processSegments failed", error);
             return this._emptyResult();
         }
+    }
+
+    /**
+     * Guardrail for direct-mode monotonic open offsets.
+     *
+     * In some line-arc-line topologies monotonic micro-steps can accidentally
+     * collapse an arc that should still have positive radius at the target
+     * distance. When that happens, fall back to split-based open construction.
+     *
+     * @param {Array<Object>} sourceSegments
+     * @param {number} distance
+     * @param {Array<Object>} monotonicSegments
+     * @returns {boolean}
+     */
+    _shouldFallbackOpenMonotonicArcLoss(sourceSegments, distance, monotonicSegments) {
+        if (!Array.isArray(sourceSegments) || sourceSegments.length === 0) return false;
+        if (!Array.isArray(monotonicSegments)) return false;
+
+        // Narrow scope: known regression shape is open line-arc-line (3 segments)
+        // with negative direct distance.
+        if (sourceSegments.length !== 3) return false;
+        if (!(distance < -EPSILON)) return false;
+
+        // Only handle the known bad topology narrowly: single arc in open line-arc-line.
+        const arcIndex = findSingleArcIndex(sourceSegments);
+        if (arcIndex <= 0 || arcIndex >= sourceSegments.length - 1) return false;
+
+        const prev = sourceSegments[arcIndex - 1];
+        const next = sourceSegments[arcIndex + 1];
+        if (prev?.type !== "line" || next?.type !== "line") return false;
+
+        // Current fallback is only validated for horizontal-chord concave arcs
+        // (the U-like topology from production regressions).
+        const arcSeg = sourceSegments[arcIndex];
+        if (!arcSeg?.start || !arcSeg?.end) return false;
+        if (Math.abs(arcSeg.start.y - arcSeg.end.y) > 1e-6) return false;
+
+        // If monotonic output still has an arc, nothing to fix.
+        if (countArcSegments(monotonicSegments) > 0) return false;
+
+        const arc = arcSeg;
+        const radius = getArcRadiusFromSegment(arc);
+        if (!(radius > EPSILON)) return false;
+
+        const sweepFlag = arc?.arc?.sweepFlag;
+        const k = sweepFlag === 1 ? -1 : 1;
+        const projectedRadius = radius + k * distance;
+
+        // Arc is expected to survive at this distance, so losing it is a bug.
+        return projectedRadius > EPSILON;
     }
 
     _resolveOptions(options = {}) {

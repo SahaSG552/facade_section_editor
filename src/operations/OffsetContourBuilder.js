@@ -2105,7 +2105,164 @@ export function buildOffsetContour(segments, distance, options = {}) {
         );
 
         if (!diverging) {
-          // Non-diverging but no intersection: try tangent bridge before U-bridge
+          // Non-diverging but no intersection: try tangent bridge before U-bridge.
+          //
+          // Special case — anti-parallel walls with a collapsed concave arc:
+          //
+          // When the source contour is processed in a single pass (as closed
+          // contours are), the arc-line separation and subsequent arc collapse are
+          // not split into separate passes.  The open-contour monotonic path
+          // accumulates "connector" segments between the wall and the shrinking arc
+          // at each tiny step; those connectors shift in the inTangent direction by
+          // the full remaining distance after arc-line separation (|d| − |d_sep|).
+          //
+          // To reproduce this in a single pass we compute |d_sep| analytically from
+          // the source arc and source wall, then:
+          //   wall_ext  = projection of (arcCenter − wallEnd) onto inTangent
+          //               = how far the wall must extend to reach arc-center level
+          //   bridgeLeg = |distance| − |d_sep|
+          //               = how far the leg extends above arc-center level
+          //
+          // The resulting П-bridge has:
+          //   p0/p3 = wall ends extended to arc-center level
+          //   p1/p2 = leg tops at arc-center-level + bridgeLeg
+          if (droppedArcRadius != null) {
+            const isAntiParallel = dot(inTangent, outTangent) < -0.5;
+            if (isAntiParallel) {
+              // Compute arc-line separation distance from the source arc/line pair.
+              let bridgeBuilt = false;
+              const arcSourceIndex = skippedForArcCheck[0];
+              const srcArc = segments[arcSourceIndex];
+
+              // currentSourceIndex can point to a non-line in some collapsed-gap
+              // topologies. Probe neighboring source indices around the dropped arc
+              // and choose the line best aligned with inTangent.
+              const lineCandidateIndices = [
+                currentSourceIndex,
+                nextSourceIndex,
+                (arcSourceIndex - 1 + segments.length) % segments.length,
+                (arcSourceIndex + 1) % segments.length,
+              ];
+
+              /** @type {Object|null} */
+              let srcLine = null;
+              let bestAlignment = -Infinity;
+              for (const idx of lineCandidateIndices) {
+                const cand = segments[idx];
+                if (!cand || cand.type !== "line") continue;
+                const rawDir = {
+                  x: cand.end.x - cand.start.x,
+                  y: cand.end.y - cand.start.y,
+                };
+                const dir = normalize(rawDir);
+                if (!dir) continue;
+                const alignment = Math.abs(dot(dir, inTangent));
+                if (alignment > bestAlignment) {
+                  bestAlignment = alignment;
+                  srcLine = cand;
+                }
+              }
+
+              if (srcArc?.arc && srcLine?.type === "line") {
+                const arcCenter = getArcCenter(srcArc.arc, srcArc);
+                if (arcCenter) {
+                  const rawDir = {
+                    x: srcLine.end.x - srcLine.start.x,
+                    y: srcLine.end.y - srcLine.start.y,
+                  };
+                  const lineDir = normalize(rawDir);
+                  if (lineDir) {
+                    const lineNormal = { x: -lineDir.y, y: lineDir.x };
+                    const s = lineNormal.x * (arcCenter.x - srcLine.start.x)
+                            + lineNormal.y * (arcCenter.y - srcLine.start.y);
+                    const k = srcArc.arc.sweepFlag === 1 ? -1 : 1;
+                    const denom = 1 + k; // 2 for k=1; 0 for k=-1 (degenerate)
+                    if (Math.abs(denom) > EPSILON) {
+                      const dSep = (s - droppedArcRadius) / denom;
+                      // Apply only when separation occurs before arc collapse AND
+                      // the sign matches the offset direction.
+                      if (
+                        Math.sign(dSep) === Math.sign(distance) &&
+                        Math.abs(dSep) < Math.abs(distance) - EPSILON
+                      ) {
+                        // Distance from arc endpoint (current.end) to arc center
+                        // projected along inTangent.
+                        const wallExt = dot(
+                          { x: arcCenter.x - current.end.x,
+                            y: arcCenter.y - current.end.y },
+                          inTangent,
+                        );
+                        const bridgeLeg = Math.abs(distance) - Math.abs(dSep);
+                        if (wallExt > -EPSILON && bridgeLeg > EPSILON) {
+                          const we = Math.max(0, wallExt);
+                          // p0, p3: wall ends extended to arc-center level.
+                          const p0 = {
+                            x: current.end.x + inTangent.x * we,
+                            y: current.end.y + inTangent.y * we,
+                          };
+                          const p3 = {
+                            x: next.start.x - outTangent.x * we,
+                            y: next.start.y - outTangent.y * we,
+                          };
+                          // p1, p2: leg tops.
+                          const p1 = {
+                            x: p0.x + inTangent.x * bridgeLeg,
+                            y: p0.y + inTangent.y * bridgeLeg,
+                          };
+                          const p2 = {
+                            x: p3.x - outTangent.x * bridgeLeg,
+                            y: p3.y - outTangent.y * bridgeLeg,
+                          };
+                          // Extend walls.
+                          setSegmentEndpoint(current, "end", p0);
+                          setSegmentEndpoint(next, "start", p3);
+                          // П-bridge: right leg + bridge top + left leg.
+                          if (Math.hypot(p1.x - p0.x, p1.y - p0.y) > EPSILON) {
+                            result.push({ type: "line", start: clonePoint(p0), end: clonePoint(p1) });
+                          }
+                          if (Math.hypot(p2.x - p1.x, p2.y - p1.y) > EPSILON) {
+                            result.push({ type: "line", start: clonePoint(p1), end: clonePoint(p2) });
+                          }
+                          if (Math.hypot(p3.x - p2.x, p3.y - p2.y) > EPSILON) {
+                            result.push({ type: "line", start: clonePoint(p2), end: clonePoint(p3) });
+                          }
+                          bridgeBuilt = true;
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+              if (bridgeBuilt) {
+                continue;
+              }
+              // Fallback: extend by simple over-collapse amount (no arc center
+              // data available), then fall through to buildTangentBridge.
+              const extra = Math.max(0, Math.abs(distance) - droppedArcRadius);
+              if (extra > EPSILON) {
+                const p0 = {
+                  x: current.end.x + inTangent.x * extra,
+                  y: current.end.y + inTangent.y * extra,
+                };
+                const p3 = {
+                  x: next.start.x - outTangent.x * extra,
+                  y: next.start.y - outTangent.y * extra,
+                };
+                const bridgeLen = Math.hypot(p3.x - p0.x, p3.y - p0.y);
+                if (bridgeLen > EPSILON) {
+                  setSegmentEndpoint(current, "end", p0);
+                  setSegmentEndpoint(next, "start", p3);
+                  result.push({
+                    type: "line",
+                    start: clonePoint(p0),
+                    end: clonePoint(p3),
+                  });
+                  continue;
+                }
+              }
+            }
+          }
+
           const tangent = buildTangentBridge(current, next);
           if (tangent) {
             result.push(tangent);
@@ -2155,6 +2312,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
           // This gives the correct trim point even when the arc end angle needs to be updated
           // (e.g., when the offset arc's sweep grows beyond the original angular range).
           let lineToArcNoIntersection = false;
+          let arcToLineNoIntersection = false;
           let lineToArcRadius = null;
           const arcLineTrimmed = (() => {
             if (current.type === "arc" && next.type === "line") {
@@ -2162,7 +2320,7 @@ export function buildOffsetContour(segments, distance, options = {}) {
               const radius = getArcRadius(current.arc, current);
               if (!center || radius == null) return false;
               const pt = findBestCircleLineJoin(center, radius, next, current.end);
-              if (!pt) return false;
+              if (!pt) { arcToLineNoIntersection = true; return false; }
               stitchJoinAtPoint(current, next, pt);
               // If arc degenerated (start≈end after trimming), remove it from result.
               // Use a practical chord tolerance (1e-3) to handle floating-point center imprecision.
@@ -2222,17 +2380,17 @@ export function buildOffsetContour(segments, distance, options = {}) {
             continue;
           }
 
-          // Pre-collapse anti-parallel line->arc case: near-separating geometry where
-          // the arc has not collapsed yet, but line/arc already lose intersection.
-          // Use sharp tangent bridge legs for orientation-invariant behavior.
+          // Anti-parallel line→arc case where the arc circle no longer intersects the
+          // adjacent offset line.  This is the symmetric counterpart of
+          // arcToLineNoIntersection: the arc has shrunk/moved away from the wall.
+          // Build a П-bridge from the wall end to the arc start.
+          // NOTE: No isPreCollapse guard here — the arc is still alive (step 1 would
+          // have removed it if radius ≤ 0), and the bridge is needed regardless of
+          // whether |distance| is larger or smaller than the current arc radius.
           if (lineToArcNoIntersection) {
             const isAntiParallel = dot(inTangent, outTangent) < -0.5;
-            const isPreCollapse =
-              typeof lineToArcRadius === "number" &&
-              Number.isFinite(lineToArcRadius) &&
-              Math.abs(distance) + EPSILON < lineToArcRadius;
 
-            if (isAntiParallel && isPreCollapse) {
+            if (isAntiParallel) {
               const sharpBridge = buildSharpTangentBridge(
                 current,
                 next,
@@ -2244,6 +2402,34 @@ export function buildOffsetContour(segments, distance, options = {}) {
                 result.push(...sharpBridge);
                 continue;
               }
+            }
+          }
+
+          // Arc→line convex case where the arc circle no longer intersects the line
+          // (the arc has shrunk / moved away from the adjacent offset line).
+          // This is the symmetric counterpart of lineToArcNoIntersection above.
+          // Build a П-bridge from the arc end to the line start without touching
+          // the arc endpoint (which would move it off the circle).
+          if (arcToLineNoIntersection) {
+            const isAntiParallel = dot(inTangent, outTangent) < -0.5;
+            if (isAntiParallel) {
+              const sharpBridge = buildSharpTangentBridge(
+                current,
+                next,
+                inTangent,
+                outTangent,
+                distance
+              );
+              if (sharpBridge.length > 0) {
+                result.push(...sharpBridge);
+                continue;
+              }
+            }
+            // Non-anti-parallel arc→line gap: use tangent bridge
+            const tangentBridge = buildTangentBridge(current, next);
+            if (tangentBridge) {
+              result.push(tangentBridge);
+              continue;
             }
           }
 
@@ -2481,7 +2667,6 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
         if (!concaveTrimmed) {
           // When the arc's circle genuinely doesn't intersect the adjacent line, the segments
-          // are diverging: the arc has shrunk past the point where it can meet the line.
           // In this case, build a bridge instead of forcing a tangent-line intersection
           // (which would produce an incorrect join point outside the actual geometry).
           if (circleLineIntersectionFailed) {
@@ -2602,6 +2787,18 @@ export function buildOffsetContour(segments, distance, options = {}) {
               }
               continue;
             }
+            // Non-diverging after bridge-angle snap: build a short connector between
+            // the snapped arc-circle point and the foot-of-perpendicular on the line,
+            // then continue.  Do NOT fall through to trimJoin — its tangent parameters
+            // were computed before snapping and would double-snap the arc endpoint to a
+            // geometrically inconsistent position (the most visible symptom: the arc end
+            // gets yanked to a point like (-13, 15.58) instead of the intended (-11, 29.8)
+            // for outward offset of a closed CW contour with a concave CCW arc).
+            {
+              const bridgeConnector = buildTangentBridge(current, next);
+              if (bridgeConnector) { result.push(bridgeConnector); }
+            }
+            continue;
           }
 
           const trimJoin = computeSharpJoin(
@@ -2708,22 +2905,25 @@ export function buildOffsetContour(segments, distance, options = {}) {
 
               // Mirror-invariant anti-parallel policy:
               // - line->arc and arc->line should behave symmetrically;
-              // - only apply while the arc is shrinking and has not collapsed yet,
-              //   otherwise keep legacy branches for post-collapse processing.
-              let isShrinkingPreCollapseArc = false;
+              // - only apply while the arc is shrinking; the arc's existence in
+              //   offsetSegments guarantees newRadius > 0 (step 1 would have
+              //   dropped it otherwise), so no additional "pre-collapse" guard is
+              //   needed here.  The former `preCollapse = |d| <= arcRadius` check
+              //   was overly conservative: in multi-pass scenarios the remaining
+              //   distance can exceed the already-reduced arc radius while the arc
+              //   is still geometrically alive, causing the bridge to be skipped.
+              let isShrinkingArc = false;
               if (isLineToArc || isArcToLine) {
                 const arcSeg = isLineToArc ? next : current;
                 const arcRadius = getArcRadiusFromSegment(arcSeg);
                 if (arcRadius != null) {
                   const sweepFlag = arcSeg.arc?.sweepFlag === 1 ? 1 : 0;
                   const k = sweepFlag === 1 ? -1 : 1;
-                  const shrinking = distance * k < 0;
-                  const preCollapse = Math.abs(distance) <= arcRadius + EPSILON;
-                  isShrinkingPreCollapseArc = shrinking && preCollapse;
+                  isShrinkingArc = distance * k < 0;
                 }
               }
 
-              if (isAntiParallel && isShrinkingPreCollapseArc && (isLineToArc || isArcToLine)) {
+              if (isAntiParallel && isShrinkingArc && (isLineToArc || isArcToLine)) {
                 const antiParallelBridge = buildSharpTangentBridge(
                   current,
                   next,

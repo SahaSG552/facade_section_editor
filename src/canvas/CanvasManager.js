@@ -1,4 +1,5 @@
 import { fitToBounds, zoomToSVGElement } from "./zoomUtils.js";
+import { getCssVar, watchTheme } from "../utils/theme.js";
 
 /**
  * GridRenderer — draws an SVG pattern-based grid anchored to a specific point.
@@ -154,6 +155,7 @@ class CanvasManager {
         this.lastMouseX = 0;
         this.lastMouseY = 0;
         this.gridEnabled = this.config.enableGrid;
+        this.unwatchTheme = null;
         this.lastFitRequest = null;
 
         // Создание слоев
@@ -216,6 +218,12 @@ class CanvasManager {
         if (this.config.enableGrid) {
             this.drawGrid();
         }
+
+        this.unwatchTheme = watchTheme(() => {
+            if (this.gridEnabled) {
+                this.drawGrid();
+            }
+        });
 
         // Инициализация событий мыши если включены
         if (this.config.enableMouseEvents) {
@@ -375,7 +383,7 @@ class CanvasManager {
         new GridRenderer(this.svgNS, defs, this.gridLayer, {
             id: `grid-${ns}`,
             size: effectiveGridSize,
-            color: "#e0e0e0",
+            color: getCssVar("--facade-grid-minor", "#e0e0e0"),
             thickness,
             gridAnchorX: anchorX,
             gridAnchorY: anchorY,
@@ -385,7 +393,7 @@ class CanvasManager {
         new GridRenderer(this.svgNS, defs, this.gridLayer, {
             id: `aux-grid-${ns}`,
             size: effectiveGridSize * 10,
-            color: "#5f5959ff",
+            color: getCssVar("--facade-grid-major", "#5f5959"),
             thickness: thickness * 2,
             gridAnchorX: anchorX,
             gridAnchorY: anchorY,

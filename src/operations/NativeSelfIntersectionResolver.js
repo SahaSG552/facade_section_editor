@@ -18,7 +18,8 @@
  *        next[endIdxB] = (endIdxA+1) % N
  *      This splits a figure-eight into two separate closed loops at the crossing.
  *   5. Trace all cycles using the modified next[] table.
- *   6. Filter by signed area: keep only loops whose sign matches sourceArea.
+ *   6. Prefer loops whose signed area matches sourceArea, with a narrow
+ *      exception for a single detached opposite-sign loop.
  *
  * Why "swap" works:
  *   A closed self-intersecting contour visits each crossing twice (once per lobe).
@@ -540,14 +541,33 @@ export function resolveNativeSelfIntersections(segments, sourceArea = 0) {
       return null;
     }
 
+    const prunedAll = pruneNestedArtifactLoops(valid);
     let result = valid;
     if (Math.abs(sourceArea) > AREA_EPS) {
       const srcSign = Math.sign(sourceArea);
       const matching = valid.filter(c => Math.sign(c.area) === srcSign);
-      if (matching.length > 0) result = matching;
+
+      if (matching.length > 0) {
+        // Standard behavior: keep source-sign loops only.
+        result = matching;
+      }
     }
 
     result = pruneNestedArtifactLoops(result);
+
+    // Narrow preservation rule for detached loop survival:
+    // when source-sign filtering leaves exactly one contour, but the fully
+    // pruned loop set is exactly two mixed-sign contours (1+1), keep both.
+    // This preserves legitimate detached loops without reintroducing the
+    // multi-corner artifacts seen in legacy round-join cases.
+    if (Math.abs(sourceArea) > AREA_EPS && result.length === 1 && prunedAll.length === 2) {
+      const srcSign = Math.sign(sourceArea);
+      const same = prunedAll.filter(c => Math.sign(c.area) === srcSign).length;
+      const opposite = prunedAll.filter(c => Math.sign(c.area) !== 0 && Math.sign(c.area) !== srcSign).length;
+      if (same === 1 && opposite === 1) {
+        result = prunedAll;
+      }
+    }
 
     log.info(
       `resolveNativeSelfIntersections: -> ${result.length} clean contour(s) ` +

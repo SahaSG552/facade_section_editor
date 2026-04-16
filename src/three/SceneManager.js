@@ -74,7 +74,12 @@ export default class SceneManager {
 
         // Create scene
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0xf5f5f5);
+
+        // Get theme-aware background color from CSS variable
+        const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--scene-background').trim() || '#f5f5f5';
+        this.scene.background = new THREE.Color(bgColor);
+        this.targetBackgroundColor = new THREE.Color(bgColor);
+        this.currentBackgroundColor = new THREE.Color(bgColor);
 
         // Helper for touch interactions: prevent browser scrolling/zooming on the 3D container
         if (this.container) {
