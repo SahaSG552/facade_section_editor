@@ -74,352 +74,11 @@ class ExportModule extends BaseModule {
  * Exports SVG elements to DXF format for CAD systems
  */
 
-/**
- * DXFWriter helper class for writing DXF group code pairs
- * Encapsulates common DXF writing patterns
- */
-class DXFWriter {
-    constructor(dxfContent, handleCounter) {
-        this.dxfContent = dxfContent;
-        this.handleCounter = handleCounter;
-    }
-
-    /**
-     * Write a single group code + value pair
-     * @param {number} code - DXF group code
-     * @param {string|number} value - Value to write
-     */
-    writePair(code, value) {
-        this.dxfContent.push(code.toString());
-        this.dxfContent.push(value.toString());
-    }
-
-    /**
-     * Write section start: 0/SECTION/2/name
-     * @param {string} name - Section name (HEADER, TABLES, BLOCKS, ENTITIES, OBJECTS)
-     */
-    writeSectionStart(name) {
-        this.writePair(0, "SECTION");
-        this.writePair(2, name);
-    }
-
-    /**
-     * Write section end: 0/ENDSEC
-     */
-    writeSectionEnd() {
-        this.writePair(0, "ENDSEC");
-    }
-
-    /**
-     * Write entity start: 0/type/5/handle/8/layer
-     * @param {string} type - Entity type (LINE, ARC, CIRCLE, POLYLINE, etc.)
-     * @param {string} handle - Hexadecimal handle
-     * @param {string} layer - Layer name
-     */
-    writeEntityStart(type, handle, layer) {
-        this.writePair(0, type);
-        this.writePair(5, handle);
-        this.writePair(8, layer);
-    }
-
-    /**
-     * Get next unique handle for entities
-     * @returns {string} Hexadecimal handle
-     */
-    getNextHandle() {
-        const handle = this.handleCounter.toString(16).toUpperCase();
-        this.handleCounter++;
-        return handle;
-    }
-}
-
 class DXFExporter {
     constructor() {
         this.dxfContent = [];
-        this.handleCounter = 0x10; // Start handles from 16 (0x10) for R12
+        this.handleCounter = 0x100; // Start handles from 256
         this.log = LoggerFactory.createLogger("DXFExporter");
-        this.writer = new DXFWriter(this.dxfContent, this.handleCounter);
-    }
-
-    /**
-     * Get next unique handle for entities
-     * @returns {string} Hexadecimal handle
-     */
-    getNextHandle() {
-        const handle = this.writer.getNextHandle();
-        this.handleCounter = this.writer.handleCounter; // Sync counter
-        return handle;
-    }
-
-    /**
-     * Write DXF header section (R12 format - AC1009)
-     * R12-compliant HEADER with minimal variables for CAM compatibility
-     */
-    writeHeader_R12() {
-        this.writer.writeSectionStart("HEADER");
-
-        // Version - R12 (AC1009)
-        this.writer.writePair(9, "$ACADVER");
-        this.writer.writePair(1, "AC1009");
-
-        // Codepage - International (not Cyrillic)
-        this.writer.writePair(9, "$DWGCODEPAGE");
-        this.writer.writePair(3, "ANSI_1252");
-
-        // Current layer
-        this.writer.writePair(9, "$CLAYER");
-        this.writer.writePair(8, "0");
-
-        // Current linetype
-        this.writer.writePair(9, "$CELTYPE");
-        this.writer.writePair(6, "BYLAYER");
-
-        // Current linetype scale
-        this.writer.writePair(9, "$CELTSCALE");
-        this.writer.writePair(40, 1);
-
-        // Insert units (4 = millimeters)
-        this.writer.writePair(9, "$INSUNITS");
-        this.writer.writePair(70, 4);
-
-        // Extents min (placeholder - will be calculated in Task 11)
-        this.writer.writePair(9, "$EXTMIN");
-        this.writer.writePair(10, 0);
-        this.writer.writePair(20, 0);
-        this.writer.writePair(30, 0);
-
-        // Extents max (placeholder - will be calculated in Task 11)
-        this.writer.writePair(9, "$EXTMAX");
-        this.writer.writePair(10, 0);
-        this.writer.writePair(20, 0);
-        this.writer.writePair(30, 0);
-
-        // Limits min (A4 landscape defaults)
-        this.writer.writePair(9, "$LIMMIN");
-        this.writer.writePair(10, 0);
-        this.writer.writePair(20, 0);
-
-        // Limits max (A4 landscape: 420x297 mm)
-        this.writer.writePair(9, "$LIMMAX");
-        this.writer.writePair(10, 420);
-        this.writer.writePair(20, 297);
-
-        // Handle seed (enable handles in R12)
-        this.writer.writePair(9, "$HANDLING");
-        this.writer.writePair(70, 1);
-
-        // Text size
-        this.writer.writePair(9, "$TEXTSIZE");
-        this.writer.writePair(40, 0.18);
-
-        // Text style
-        this.writer.writePair(9, "$TEXTSTYLE");
-        this.writer.writePair(7, "Standard");
-
-        // Linetype scale
-        this.writer.writePair(9, "$LTSCALE");
-        this.writer.writePair(40, 1);
-
-        // Measurement (0 = English, 1 = Metric)
-        this.writer.writePair(9, "$MEASUREMENT");
-        this.writer.writePair(70, 1);
-
-        this.writer.writeSectionEnd();
-    }
-
-    /**
-     * Write DXF TABLES section (R12 format - AC1009)
-     * R12-compliant TABLES with LAYER, LTYPE, STYLE, APPID, VPORT, VIEW, and UCS tables
-     * 
-     * @param {Array} bitsOnCanvas - Array of bit objects from the canvas
-     * @param {SVGElement} partFront - The part front SVG rectangle element
-     * @param {Array} offsetContours - Array of offset contour objects
-     * @param {number} panelThickness - Panel thickness for layer naming
-     */
-    writeTables_R12(bitsOnCanvas, partFront, offsetContours, panelThickness) {
-        this.writer.writeSectionStart("TABLES");
-
-        // ===== LAYER TABLE =====
-        this.writer.writePair(0, "TABLE");
-        this.writer.writePair(2, "LAYER");
-        this.writer.writePair(70, 0); // Layer count (placeholder - R12 doesn't strictly enforce this)
-
-        // Layer "0" (MANDATORY default layer)
-        this.writer.writePair(0, "LAYER");
-        this.writer.writePair(5, this.getNextHandle());
-        this.writer.writePair(2, "0"); // Layer name
-        this.writer.writePair(70, 0); // Standard flags
-        this.writer.writePair(62, 7); // Color 7 (white/black)
-        this.writer.writePair(6, "CONTINUOUS"); // Linetype
-
-        // Default layer for result polygon
-        this.writer.writePair(0, "LAYER");
-        this.writer.writePair(5, this.getNextHandle());
-        this.writer.writePair(2, "Default");
-        this.writer.writePair(70, 0);
-        this.writer.writePair(62, 7); // Color 7
-        this.writer.writePair(6, "CONTINUOUS");
-
-        // CUT layer for part front
-        if (partFront) {
-            const cutLayerName = `CUT_${panelThickness}MM_OU`;
-            this.writer.writePair(0, "LAYER");
-            this.writer.writePair(5, this.getNextHandle());
-            this.writer.writePair(2, cutLayerName);
-            this.writer.writePair(70, 0);
-            this.writer.writePair(62, 7); // Color 7
-            this.writer.writePair(6, "CONTINUOUS");
-        }
-
-        // Offset contour layers (bit operation layers)
-        if (offsetContours && offsetContours.length > 0) {
-            offsetContours.forEach((offset) => {
-                const bit = bitsOnCanvas[offset.bitIndex];
-                if (bit) {
-                    // Use depth from offset if available (for VC multi-pass), otherwise use bit.y
-                    let depthValue = offset.depth !== undefined && offset.depth !== null
-                        ? offset.depth
-                        : bit.y;
-
-                    // Format depth value: if fractional, add extra _ before value, replace decimal with _
-                    let yValue = depthValue?.toString() || "0";
-                    if (depthValue % 1 !== 0) {
-                        yValue = `_${yValue.replace(".", "_")}`;
-                    } else {
-                        yValue = `${depthValue}`;
-                    }
-
-                    const layerName = `${bit.name}_${yValue}MM_${bit.operation}`;
-
-                    // Get color index from bit
-                    const colorIndex = this.colorToDXFIndex(bit.color);
-                    const aciColor = typeof colorIndex === "object" 
-                        ? this.rgbToACI(colorIndex.r, colorIndex.g, colorIndex.b)
-                        : (colorIndex || 7);
-
-                    this.writer.writePair(0, "LAYER");
-                    this.writer.writePair(5, this.getNextHandle());
-                    this.writer.writePair(2, layerName);
-                    this.writer.writePair(70, 0);
-                    this.writer.writePair(62, aciColor);
-                    this.writer.writePair(6, "CONTINUOUS");
-                }
-            });
-        }
-
-        this.writer.writePair(0, "ENDTAB");
-
-        // ===== LTYPE TABLE (Linetype) =====
-        this.writer.writePair(0, "TABLE");
-        this.writer.writePair(2, "LTYPE");
-        this.writer.writePair(70, 1); // One linetype (CONTINUOUS only for R12 simplicity)
-
-        // CONTINUOUS linetype
-        this.writer.writePair(0, "LTYPE");
-        this.writer.writePair(5, this.getNextHandle());
-        this.writer.writePair(2, "CONTINUOUS");
-        this.writer.writePair(70, 0); // Standard flags
-        this.writer.writePair(3, "Solid line"); // Description
-        this.writer.writePair(72, 65); // Alignment code
-        this.writer.writePair(73, 0); // Number of dash/dot/gap elements
-        this.writer.writePair(40, 0.0); // Total pattern length
-
-        this.writer.writePair(0, "ENDTAB");
-
-        // ===== STYLE TABLE (Text style) =====
-        this.writer.writePair(0, "TABLE");
-        this.writer.writePair(2, "STYLE");
-        this.writer.writePair(70, 1); // One text style
-
-        // Standard text style
-        this.writer.writePair(0, "STYLE");
-        this.writer.writePair(5, this.getNextHandle());
-        this.writer.writePair(2, "Standard"); // Style name
-        this.writer.writePair(70, 0); // Standard flags
-        this.writer.writePair(40, 0.0); // Fixed text height (0 = not fixed)
-        this.writer.writePair(41, 1.0); // Width factor
-        this.writer.writePair(50, 0.0); // Oblique angle
-        this.writer.writePair(71, 0); // Text generation flags
-        this.writer.writePair(42, 2.5); // Last height used
-        this.writer.writePair(3, "txt"); // Primary font file name
-        this.writer.writePair(4, ""); // Bigfont file name
-
-        this.writer.writePair(0, "ENDTAB");
-
-        // ===== APPID TABLE (Application ID) =====
-        this.writer.writePair(0, "TABLE");
-        this.writer.writePair(2, "APPID");
-        this.writer.writePair(70, 1); // One application (ACAD only)
-
-        // ACAD application
-        this.writer.writePair(0, "APPID");
-        this.writer.writePair(5, this.getNextHandle());
-        this.writer.writePair(2, "ACAD"); // Application name
-        this.writer.writePair(70, 0); // Standard flags
-
-        this.writer.writePair(0, "ENDTAB");
-
-        // ===== VPORT TABLE (Viewport) =====
-        this.writer.writePair(0, "TABLE");
-        this.writer.writePair(2, "VPORT");
-        this.writer.writePair(70, 1); // One viewport
-
-        // *ACTIVE viewport (minimal configuration)
-        this.writer.writePair(0, "VPORT");
-        this.writer.writePair(5, this.getNextHandle());
-        this.writer.writePair(2, "*ACTIVE"); // Viewport name
-        this.writer.writePair(70, 0); // Standard flags
-        this.writer.writePair(10, 0.0); // Lower-left corner X
-        this.writer.writePair(20, 0.0); // Lower-left corner Y
-        this.writer.writePair(11, 1.0); // Upper-right corner X
-        this.writer.writePair(21, 1.0); // Upper-right corner Y
-        this.writer.writePair(12, 400.0); // View center point X
-        this.writer.writePair(22, 295.0); // View center point Y
-        this.writer.writePair(13, 0.0); // Snap base point X
-        this.writer.writePair(23, 0.0); // Snap base point Y
-        this.writer.writePair(14, 1.0); // Snap spacing X
-        this.writer.writePair(24, 1.0); // Snap spacing Y
-        this.writer.writePair(15, 1.0); // Grid spacing X
-        this.writer.writePair(25, 1.0); // Grid spacing Y
-        this.writer.writePair(16, 0.0); // View direction from target point X
-        this.writer.writePair(26, 0.0); // View direction from target point Y
-        this.writer.writePair(36, 1.0); // View direction from target point Z
-        this.writer.writePair(17, 0.0); // View target point X
-        this.writer.writePair(27, 0.0); // View target point Y
-        this.writer.writePair(37, 0.0); // View target point Z
-        this.writer.writePair(40, 200.0); // View height
-        this.writer.writePair(41, 2.0); // Viewport aspect ratio
-        this.writer.writePair(42, 50.0); // Lens length
-        this.writer.writePair(43, 0.0); // Front clipping plane offset
-        this.writer.writePair(44, 0.0); // Back clipping plane offset
-        this.writer.writePair(50, 0.0); // Snap rotation angle
-        this.writer.writePair(51, 0.0); // View twist angle
-        this.writer.writePair(71, 0); // View mode
-        this.writer.writePair(72, 1000); // Circle zoom percent
-        this.writer.writePair(73, 1); // Fast zoom setting
-        this.writer.writePair(74, 1); // UCSICON setting
-        this.writer.writePair(75, 0); // Snap on/off
-        this.writer.writePair(76, 0); // Grid on/off
-        this.writer.writePair(77, 0); // Snap style
-        this.writer.writePair(78, 0); // Snap isopair
-
-        this.writer.writePair(0, "ENDTAB");
-
-        // ===== VIEW TABLE (empty but present) =====
-        this.writer.writePair(0, "TABLE");
-        this.writer.writePair(2, "VIEW");
-        this.writer.writePair(70, 0); // No views
-
-        this.writer.writePair(0, "ENDTAB");
-
-        // ===== UCS TABLE (empty but present) =====
-        this.writer.writePair(0, "TABLE");
-        this.writer.writePair(2, "UCS");
-        this.writer.writePair(70, 0); // No UCS definitions
-
-        this.writer.writePair(0, "ENDTAB");
-
-        this.writer.writeSectionEnd();
     }
 
     /**
@@ -1882,71 +1541,6 @@ class DXFExporter {
     /**
      * Write DXF blocks section (empty)
      */
-    /**
-     * Write BLOCKS section for DXF R12
-     * R12 requires *MODEL_SPACE and *PAPER_SPACE blocks
-     * No ABViewer-specific blocks or entities inside blocks
-     */
-    writeBlocks_R12() {
-        this.dxfContent.push("0");
-        this.dxfContent.push("SECTION");
-        this.dxfContent.push("2");
-        this.dxfContent.push("BLOCKS");
-
-        // *MODEL_SPACE block
-        this.dxfContent.push("0");
-        this.dxfContent.push("BLOCK");
-        this.dxfContent.push("5");
-        this.dxfContent.push(this.getNextHandle());
-        this.dxfContent.push("8");
-        this.dxfContent.push("0"); // Layer
-        this.dxfContent.push("2");
-        this.dxfContent.push("*MODEL_SPACE");
-        this.dxfContent.push("70");
-        this.dxfContent.push("0"); // Flags
-        this.dxfContent.push("10");
-        this.dxfContent.push("0");
-        this.dxfContent.push("20");
-        this.dxfContent.push("0");
-        this.dxfContent.push("30");
-        this.dxfContent.push("0");
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("ENDBLK");
-        this.dxfContent.push("5");
-        this.dxfContent.push(this.getNextHandle());
-        this.dxfContent.push("8");
-        this.dxfContent.push("0"); // Layer
-
-        // *PAPER_SPACE block
-        this.dxfContent.push("0");
-        this.dxfContent.push("BLOCK");
-        this.dxfContent.push("5");
-        this.dxfContent.push(this.getNextHandle());
-        this.dxfContent.push("8");
-        this.dxfContent.push("0"); // Layer
-        this.dxfContent.push("2");
-        this.dxfContent.push("*PAPER_SPACE");
-        this.dxfContent.push("70");
-        this.dxfContent.push("0"); // Flags
-        this.dxfContent.push("10");
-        this.dxfContent.push("0");
-        this.dxfContent.push("20");
-        this.dxfContent.push("0");
-        this.dxfContent.push("30");
-        this.dxfContent.push("0");
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("ENDBLK");
-        this.dxfContent.push("5");
-        this.dxfContent.push(this.getNextHandle());
-        this.dxfContent.push("8");
-        this.dxfContent.push("0"); // Layer
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("ENDSEC");
-    }
-
     writeBlocks() {
         this.dxfContent.push("0");
         this.dxfContent.push("SECTION");
@@ -3255,7 +2849,7 @@ class DXFExporter {
                     startX = currentX;
                     startY = currentY;
                     break;
-                case "L": { // Line to
+                case "L": // Line to
                     let lineEndX, lineEndY;
                     if (command.isRelative) {
                         lineEndX = currentX + command.x;
@@ -3276,8 +2870,7 @@ class DXFExporter {
                     currentX = lineEndX;
                     currentY = lineEndY;
                     break;
-                }
-                case "H": { // Horizontal line
+                case "H": // Horizontal line
                     let hEndX;
                     if (command.isRelative) {
                         hEndX = currentX + command.x;
@@ -3293,8 +2886,7 @@ class DXFExporter {
 
                     currentX = hEndX;
                     break;
-                }
-                case "V": { // Vertical line
+                case "V": // Vertical line
                     let vEndY;
                     if (command.isRelative) {
                         vEndY = invertRelativeY
@@ -3312,8 +2904,7 @@ class DXFExporter {
 
                     currentY = vEndY;
                     break;
-                }
-                case "C": { // Cubic Bezier curve - сохраняем как кривую!
+                case "C": // Cubic Bezier curve - сохраняем как кривую!
                     let cEndX, cEndY, cX1, cY1, cX2, cY2;
 
                     if (command.isRelative) {
@@ -3353,8 +2944,7 @@ class DXFExporter {
                     currentX = cEndX;
                     currentY = cEndY;
                     break;
-                }
-                case "S": { // Smooth cubic Bezier curve
+                case "S": // Smooth cubic Bezier curve
                     let sEndX, sEndY, sX1, sX2, sY1, sY2;
 
                     // Первая контрольная точка отражается от предыдущей
@@ -3395,8 +2985,7 @@ class DXFExporter {
                     currentX = sEndX;
                     currentY = sEndY;
                     break;
-                }
-                case "Q": { // Quadratic Bezier curve - конвертируем в кубическую
+                case "Q": // Quadratic Bezier curve - конвертируем в кубическую
                     let qEndX, qEndY, qX1, qY1;
 
                     if (command.isRelative) {
@@ -3437,8 +3026,7 @@ class DXFExporter {
                     currentX = qEndX;
                     currentY = qEndY;
                     break;
-                }
-                case "T": { // Smooth quadratic Bezier curve
+                case "T": // Smooth quadratic Bezier curve
                     let tEndX, tEndY, tX1, tY1;
 
                     // Контрольная точка отражается от предыдущей
@@ -3479,8 +3067,7 @@ class DXFExporter {
                     currentX = tEndX;
                     currentY = tEndY;
                     break;
-                }
-                case "A": { // Arc to
+                case "A": // Arc to
                     const arcStartX = currentX;
                     const arcStartY = currentY;
                     let arcEndX, arcEndY;
@@ -3560,8 +3147,7 @@ class DXFExporter {
                     currentX = arcEndX;
                     currentY = arcEndY;
                     break;
-                }
-                case "Z": { // Close path
+                case "Z": // Close path
                     // If we're not at the start point, draw a line to close
                     // Use tolerance to avoid adding zero-length lines
                     const tolerance = ARC_RADIUS_TOLERANCE;
@@ -3578,7 +3164,6 @@ class DXFExporter {
                     currentX = startX;
                     currentY = startY;
                     break;
-                }
             }
 
             lastCommand = command.type;
@@ -3595,9 +3180,9 @@ class DXFExporter {
     parseSVGPathCommands(d) {
         const commands = [];
         const regex = /([MLHVCSQTAZmlhvcsqtaz])([^MLHVCSQTAZmlhvcsqtaz]*)/g;
-        let match = regex.exec(d);
+        let match;
 
-        while (match !== null) {
+        while ((match = regex.exec(d)) !== null) {
             const commandChar = match[1]; // Сохраняем оригинальный регистр!
             const type = commandChar.toUpperCase();
             const isRelative = commandChar !== type; // lowercase = относительные координаты
@@ -3714,8 +3299,6 @@ class DXFExporter {
                     });
                     break;
             }
-
-            match = regex.exec(d);
         }
 
         return commands;
@@ -4623,9 +4206,9 @@ class DXFExporter {
         const hasBezier = segments.some((s) => s.type === "bezier");
 
         if (!hasBezier) {
-            // Only lines and arcs - use R12 POLYLINE with VERTEX bulges
+            // Only lines and arcs - use LWPOLYLINE with bulge (closed contour)
             this.log.debug(
-                "Path has no bezier curves - using R12 POLYLINE with bulge"
+                "Path has no bezier curves - using LWPOLYLINE with bulge"
             );
             this.writePolylineWithBulge(segments, layerName);
         } else {
@@ -4762,13 +4345,13 @@ class DXFExporter {
     }
 
     /**
-     * Write path with only lines and arcs as DXF R12 POLYLINE with bulge values
+     * Write path with only lines and arcs as LWPOLYLINE with bulge values
      */
     writePolylineWithBulge(segments, layerName) {
         if (segments.length === 0) return;
 
         this.log.debug(
-            `[Polyline] Writing R12 POLYLINE with ${segments.length} segments to layer ${layerName}`
+            `[Polyline] Writing LWPOLYLINE with ${segments.length} segments to layer ${layerName}`
         );
 
         // Filter out degenerate segments (zero-length lines)
@@ -4796,8 +4379,6 @@ class DXFExporter {
                 } degenerate segments, now ${validSegments.length} segments`
             );
         }
-
-        if (validSegments.length === 0) return;
 
         const vertices = [];
         const bulges = [];
@@ -4902,10 +4483,38 @@ class DXFExporter {
             );
         }
 
-        this.writePolyline_R12(vertices, bulges, layerName, isClosed);
+        // Экспортируем LWPOLYLINE
+        const handle = this.getNextHandle();
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("LWPOLYLINE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
+        this.dxfContent.push("8");
+        this.dxfContent.push(layerName);
+        this.dxfContent.push("370"); // Lineweight
+        this.dxfContent.push("-1"); // BYLAYER
+        this.dxfContent.push("6"); // Linetype name
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbPolyline");
+        this.dxfContent.push("38"); // Elevation
+        this.dxfContent.push("0");
+        this.dxfContent.push("90");
+        this.dxfContent.push(vertices.length.toString());
+        this.dxfContent.push("70");
+        this.dxfContent.push(isClosed ? "1" : "0");
 
         for (let i = 0; i < vertices.length; i++) {
+            this.dxfContent.push("10");
+            this.dxfContent.push(vertices[i].x.toString());
+            this.dxfContent.push("20");
+            this.dxfContent.push(vertices[i].y.toString());
             if (bulges[i] !== 0) {
+                this.dxfContent.push("42");
+                this.dxfContent.push(bulges[i].toString());
                 this.log.debug(
                     `[Polyline] Vertex ${i}: (${vertices[i].x.toFixed(
                         2
@@ -4922,59 +4531,7 @@ class DXFExporter {
             }
         }
 
-        this.log.debug(`[Polyline] ✓ POLYLINE(VERTEX/SEQEND) written`);
-    }
-
-    /**
-     * Write DXF R12 polyline using POLYLINE + VERTEX + SEQEND
-     * @param {Array<{x:number,y:number}>} vertices - Polyline vertices
-     * @param {Array<number>} bulges - Bulge values per vertex
-     * @param {string} layerName - Layer name
-     * @param {boolean} isClosed - Closed polyline flag (70)
-     */
-    writePolyline_R12(vertices, bulges, layerName, isClosed) {
-        if (!vertices || vertices.length === 0) return;
-
-        // Keep writer target array synchronized with current export buffer
-        this.writer.dxfContent = this.dxfContent;
-
-        const polylineHandle = this.getNextHandle();
-
-        // POLYLINE entity header: 0/POLYLINE/5/handle/8/layer/66/1/70/flag/10/0/20/0/30/0
-        this.writer.writePair(0, "POLYLINE");
-        this.writer.writePair(5, polylineHandle);
-        this.writer.writePair(8, layerName);
-        this.writer.writePair(66, 1); // Vertices follow
-        this.writer.writePair(70, isClosed ? 1 : 0);
-        this.writer.writePair(10, 0);
-        this.writer.writePair(20, 0);
-        this.writer.writePair(30, 0);
-
-        // VERTEX entities: 0/VERTEX/5/handle/8/layer/[42/bulge]/10/x/20/y/30/0
-        for (let i = 0; i < vertices.length; i++) {
-            const vertex = vertices[i];
-            const bulge = bulges[i] ?? 0;
-            const vertexHandle = this.getNextHandle();
-
-            this.writer.writePair(0, "VERTEX");
-            this.writer.writePair(5, vertexHandle);
-            this.writer.writePair(8, layerName);
-
-            if (bulge !== 0) {
-                // Bulge must be written before coordinates for this vertex
-                this.writer.writePair(42, bulge);
-            }
-
-            this.writer.writePair(10, vertex.x);
-            this.writer.writePair(20, vertex.y);
-            this.writer.writePair(30, 0);
-        }
-
-        // SEQEND terminator: 0/SEQEND/5/handle/8/layer
-        const seqendHandle = this.getNextHandle();
-        this.writer.writePair(0, "SEQEND");
-        this.writer.writePair(5, seqendHandle);
-        this.writer.writePair(8, layerName);
+        this.log.debug(`[Polyline] ✓ LWPOLYLINE written`);
     }
 
     /**
@@ -5048,90 +4605,7 @@ class DXFExporter {
     }
 
     /**
-     * Write line as DXF R12 LINE entity
-     * @param {Object} start - Start point {x, y}
-     * @param {Object} end - End point {x, y}
-     * @param {string} layerName - Layer name
-     */
-    writeLine_R12(start, end, layerName) {
-        const handle = this.getNextHandle();
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("LINE");
-        this.dxfContent.push("5");
-        this.dxfContent.push(handle);
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("10"); // Start X
-        this.dxfContent.push(start.x.toString());
-        this.dxfContent.push("20"); // Start Y
-        this.dxfContent.push(start.y.toString());
-        this.dxfContent.push("30"); // Start Z
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("11"); // End X
-        this.dxfContent.push(end.x.toString());
-        this.dxfContent.push("21"); // End Y
-        this.dxfContent.push(end.y.toString());
-        this.dxfContent.push("31"); // End Z
-        this.dxfContent.push("0.0");
-    }
-
-    /**
-     * Write arc as DXF R12 ARC entity
-     * @param {Object} arc - Arc parameters {centerX, centerY, radius, startAngle, endAngle}
-     * @param {string} layerName - Layer name
-     */
-    writeArc_R12(arc, layerName) {
-        const handle = this.getNextHandle();
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("ARC");
-        this.dxfContent.push("5");
-        this.dxfContent.push(handle);
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("10"); // Center X
-        this.dxfContent.push(arc.centerX.toString());
-        this.dxfContent.push("20"); // Center Y
-        this.dxfContent.push(arc.centerY.toString());
-        this.dxfContent.push("30"); // Center Z
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("40"); // Radius
-        this.dxfContent.push(arc.radius.toString());
-        this.dxfContent.push("50"); // Start angle (degrees)
-        this.dxfContent.push(arc.startAngle.toString());
-        this.dxfContent.push("51"); // End angle (degrees)
-        this.dxfContent.push(arc.endAngle.toString());
-    }
-
-    /**
-     * Write circle as DXF R12 CIRCLE entity
-     * @param {number} cx - Center X coordinate
-     * @param {number} cy - Center Y coordinate
-     * @param {number} radius - Circle radius
-     * @param {string} layerName - Layer name
-     */
-    writeCircle_R12(cx, cy, radius, layerName) {
-        const handle = this.getNextHandle();
-
-        this.dxfContent.push("0");
-        this.dxfContent.push("CIRCLE");
-        this.dxfContent.push("5");
-        this.dxfContent.push(handle);
-        this.dxfContent.push("8");
-        this.dxfContent.push(layerName);
-        this.dxfContent.push("10"); // Center X
-        this.dxfContent.push(cx.toString());
-        this.dxfContent.push("20"); // Center Y
-        this.dxfContent.push(cy.toString());
-        this.dxfContent.push("30"); // Center Z
-        this.dxfContent.push("0.0");
-        this.dxfContent.push("40"); // Radius
-        this.dxfContent.push(radius.toString());
-    }
-
-    /**
-     * Write group of line/arc segments as DXF R12 POLYLINE with bulge
+     * Write group of line/arc segments as LWPOLYLINE with bulge
      */
     writePolylineGroup(segments, layerName) {
         if (segments.length === 0) return;
@@ -5193,7 +4667,41 @@ class DXFExporter {
             bulges.pop();
         }
 
-        this.writePolyline_R12(vertices, bulges, layerName, isClosed);
+        // Write LWPOLYLINE entity
+        const handle = this.getNextHandle();
+
+        this.dxfContent.push("0");
+        this.dxfContent.push("LWPOLYLINE");
+        this.dxfContent.push("5");
+        this.dxfContent.push(handle);
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbEntity");
+        this.dxfContent.push("8");
+        this.dxfContent.push(layerName);
+        this.dxfContent.push("370"); // Lineweight
+        this.dxfContent.push("-1"); // BYLAYER
+        this.dxfContent.push("6"); // Linetype name
+        this.dxfContent.push("BYLAYER");
+        this.dxfContent.push("100");
+        this.dxfContent.push("AcDbPolyline");
+        this.dxfContent.push("38"); // Elevation
+        this.dxfContent.push("0");
+        this.dxfContent.push("90");
+        this.dxfContent.push(vertices.length.toString());
+        this.dxfContent.push("70");
+        this.dxfContent.push(isClosed ? "1" : "0"); // Closed flag
+
+        // Vertices with bulges
+        for (let i = 0; i < vertices.length; i++) {
+            this.dxfContent.push("10"); // X
+            this.dxfContent.push(vertices[i].x.toString());
+            this.dxfContent.push("20"); // Y
+            this.dxfContent.push(vertices[i].y.toString());
+            if (bulges[i] !== 0) {
+                this.dxfContent.push("42"); // Bulge
+                this.dxfContent.push(bulges[i].toString());
+            }
+        }
     }
 
     /**
@@ -5342,6 +4850,10 @@ class DXFExporter {
     }
 
     /**
+     * Get next unique handle for entities
+     * @returns {string} Hexadecimal handle
+     */
+    /**
      * Convert RGB color to AutoCAD Color Index (ACI)
      * Uses simple approximation to 256-color palette
      */
@@ -5377,6 +4889,12 @@ class DXFExporter {
         }
 
         return closestIndex;
+    }
+
+    getNextHandle() {
+        const handle = this.handleCounter.toString(16).toUpperCase();
+        this.handleCounter++;
+        return handle;
     }
 
     /**

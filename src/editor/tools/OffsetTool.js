@@ -845,12 +845,13 @@ export default class OffsetTool extends BaseTool {
      * @param {number} d - Target signed distance
      * @returns {Object|null} Snapshot object or null if none found
      */
-    getSnapshotForOffset(d) {
+    getSnapshotForOffset(d, sourceId = null) {
         const array = d >= 0 ? this._snapshots.positive : this._snapshots.negative;
         const absDist = Math.abs(d);
         
         let bestSnapshot = null;
         for (const snap of array) {
+            if (sourceId != null && snap.sourceId !== sourceId) continue;
             if (Math.abs(snap.offset) <= absDist) {
                 if (!bestSnapshot || Math.abs(snap.offset) > Math.abs(bestSnapshot.offset)) {
                     bestSnapshot = snap;
@@ -868,10 +869,25 @@ export default class OffsetTool extends BaseTool {
      * @param {Array} segments - Parsed segment array
      * @param {Object} topology - Topology information {bridgeCount, degenerateCount, removedBySanitize}
      */
-    captureSnapshot(offset, pathData, segments, topology) {
-        const sign = offset >= 0 ? 'positive' : 'negative';
-        const snapshot = { offset, pathData, segments, topology };
-        this._snapshots[sign].push(snapshot);
+    captureSnapshot(offset, pathData, segments, topology, sourceId = null) {
+        const sign = offset >= 0 ? "positive" : "negative";
+        const snapshot = { offset, pathData, segments, topology, sourceId };
+        const store = this._snapshots[sign];
+
+        const existingIdx = store.findIndex((snap) =>
+            snap.sourceId === sourceId && Math.abs(snap.offset - offset) <= 1e-6,
+        );
+        if (existingIdx >= 0) {
+            store[existingIdx] = snapshot;
+            return;
+        }
+
+        store.push(snapshot);
+
+        // Keep memory bounded: preserve nearest history while avoiding unbounded growth.
+        if (store.length > 512) {
+            store.splice(0, store.length - 512);
+        }
     }
 
     /**
@@ -1090,6 +1106,11 @@ export default class OffsetTool extends BaseTool {
 
     _startDynamicPhase(pos, e) {
         this._phase = "dynamic";
+        this.clearSnapshots();
+        for (const entry of this._sourceEntries) {
+            if (entry.kind !== "contour" || !entry.closed) continue;
+            this.captureSnapshot(0, entry.pathData, entry.chain ?? [], null, entry.sourceId);
+        }
         this._signedDistance = this._distanceFromPointer(pos ?? { x: 0, y: 0 });
         this._showPopup(e, pos ?? { x: 0, y: 0 });
         this._refreshPreview();
@@ -1428,20 +1449,35 @@ export default class OffsetTool extends BaseTool {
                 }
 
                 const previewDistance = dist * this._offsetDirection;
-                const engineDistance = this._resolveContourEngineDistance(entry, previewDistance);
-                const candidate = buildOffsetCandidate(
-                    entry,
-                    engineDistance,
-                    this._exportModule,
-                    vars,
-                    this._offsetCalculator,
-                    {
-                        sideResolution: "nearest-segment-normal",
-                        cursorPoint: this._cursorPoint,
-                    },
-                );
+                let candidate = null;
+                if (entry.closed) {
+                    candidate = this._buildContourCandidateFromSnapshots(entry, previewDistance, vars);
+                } else {
+                    const engineDistance = this._resolveContourEngineDistance(entry, previewDistance);
+                    candidate = buildOffsetCandidate(
+                        entry,
+                        engineDistance,
+                        this._exportModule,
+                        vars,
+                        this._offsetCalculator,
+                        {
+                            sideResolution: "nearest-segment-normal",
+                            cursorPoint: this._cursorPoint,
+                        },
+                    );
+                }
 
                 if (candidate) {
+                    if (entry.closed) {
+                        this.captureSnapshot(
+                            previewDistance,
+                            candidate.pathData,
+                            candidate.segments,
+                            null,
+                            entry.sourceId,
+                        );
+                    }
+
                     this._previewPaths.push({
                         sourceId: entry.sourceId,
                         distance: previewDistance,
@@ -1458,6 +1494,86 @@ export default class OffsetTool extends BaseTool {
 
         this._publishOffsetDebugInfo();
         this._renderGhost();
+    }
+
+    _buildContourCandidateFromSnapshots(entry, previewDistance, vars) {
+        if (!entry?.closed) {
+            const engineDistance = this._resolveContourEngineDistance(entry, previewDistance);
+            return buildOffsetCandidate(
+                entry,
+                engineDistance,
+                this._exportModule,
+                vars,
+                this._offsetCalculator,
+                {
+                    sideResolution: "nearest-segment-normal",
+                    cursorPoint: this._cursorPoint,
+                },
+            );
+        }
+
+        const runtimeOptions = {
+            sideResolution: "nearest-segment-normal",
+            cursorPoint: this._cursorPoint,
+        };
+
+        const baseSnapshot = this.getSnapshotForOffset(previewDistance, entry.sourceId);
+        let workingPath = baseSnapshot?.pathData ?? entry.pathData;
+        let workingSegments = baseSnapshot?.segments ?? entry.chain ?? [];
+        let currentOffset = Number.isFinite(baseSnapshot?.offset) ? baseSnapshot.offset : 0;
+
+        const remaining0 = previewDistance - currentOffset;
+        if (Math.abs(remaining0) <= 1e-9) {
+            return {
+                pathData: workingPath,
+                allowClose: !!entry.closed,
+                segments: sanitizeParsedContourSegments(workingSegments),
+            };
+        }
+
+        const stepSign = Math.sign(remaining0);
+        if (stepSign === 0) return null;
+
+        // Keep sequential topology continuity even on large jumps by stepping
+        // through intermediate offsets.
+        while (Math.abs(previewDistance - currentOffset) > 1e-9) {
+            const rest = previewDistance - currentOffset;
+            const step = stepSign * Math.min(1, Math.abs(rest));
+
+            const stagedEntry = {
+                ...entry,
+                pathData: workingPath,
+            };
+            const engineStep = this._resolveContourEngineDistance(entry, step);
+            const staged = buildOffsetCandidate(
+                stagedEntry,
+                engineStep,
+                this._exportModule,
+                vars,
+                this._offsetCalculator,
+                runtimeOptions,
+            );
+
+            if (!staged) return null;
+
+            currentOffset += step;
+            workingPath = staged.pathData;
+            workingSegments = staged.segments;
+
+            this.captureSnapshot(
+                currentOffset,
+                workingPath,
+                workingSegments,
+                null,
+                entry.sourceId,
+            );
+        }
+
+        return {
+            pathData: workingPath,
+            allowClose: !!entry.closed,
+            segments: sanitizeParsedContourSegments(workingSegments),
+        };
     }
 
     _resolveContourEngineDistance(entry, signedDistance) {

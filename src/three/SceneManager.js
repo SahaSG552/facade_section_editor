@@ -3,7 +3,6 @@ import { WebGLRenderer } from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import LoggerFactory from "../core/LoggerFactory.js";
 import ViewCubeGizmo from "./ViewCubeGizmo.js";
-import { cssVarToThreeColor, getCssVar, watchTheme } from "../utils/theme.js";
 
 
 
@@ -55,7 +54,6 @@ export default class SceneManager {
         this.transitionDuration = 500; // ms
         this.transitionStartTime = 0;
         this.startQuaternion = new THREE.Quaternion();
-        this.unsubscribeTheme = null;
 
         this.log.info("Created");
 
@@ -77,8 +75,11 @@ export default class SceneManager {
         // Create scene
         this.scene = new THREE.Scene();
 
-        // Initialize theme colors for scene and background transition
-        this.applySceneTheme(true);
+        // Get theme-aware background color from CSS variable
+        const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--scene-background').trim() || '#f5f5f5';
+        this.scene.background = new THREE.Color(bgColor);
+        this.targetBackgroundColor = new THREE.Color(bgColor);
+        this.currentBackgroundColor = new THREE.Color(bgColor);
 
         // Helper for touch interactions: prevent browser scrolling/zooming on the 3D container
         if (this.container) {
@@ -116,7 +117,6 @@ export default class SceneManager {
             this.renderer.setPixelRatio(window.devicePixelRatio);
             this.renderer.shadowMap.enabled = true;
             this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            this.renderer.setClearColor(getCssVar("--facade-scene-background"));
             this.container.appendChild(this.renderer.domElement);
             await this.renderer.init();
         } else {
@@ -129,7 +129,6 @@ export default class SceneManager {
             this.renderer.setPixelRatio(window.devicePixelRatio);
             this.renderer.shadowMap.enabled = true;
             this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            this.renderer.setClearColor(getCssVar("--facade-scene-background"));
             this.container.appendChild(this.renderer.domElement);
         }
 
@@ -152,11 +151,6 @@ export default class SceneManager {
 
         // Add grid helper
         this.addGridHelper();
-
-        // Watch CSS theme changes and update scene colors dynamically
-        this.unsubscribeTheme = watchTheme(() => {
-            this.applySceneTheme(false);
-        });
 
         // Handle window resize
         window.addEventListener("resize", this.onWindowResize.bind(this));
@@ -223,49 +217,15 @@ export default class SceneManager {
     addGridHelper() {
         const gridSize = 1000;
         const gridDivisions = 50;
-        const gridColor = cssVarToThreeColor("--facade-scene-grid");
         this.gridHelper = new THREE.GridHelper(
             gridSize,
             gridDivisions,
-            gridColor,
-            gridColor
+            0x888888,
+            0xcccccc
         );
         this.gridHelper.position.y = 0;
         this.scene.add(this.gridHelper);
         this.log.info("Grid helper added");
-    }
-
-    /**
-     * Apply scene-related theme colors from CSS variables
-     * @param {boolean} immediate - Whether to apply background immediately
-     */
-    applySceneTheme(immediate = false) {
-        const sceneBgColor = cssVarToThreeColor("--facade-scene-background");
-        this.targetBackgroundColor.copy(sceneBgColor);
-
-        if (immediate) {
-            this.currentBackgroundColor.copy(sceneBgColor);
-            if (this.scene) {
-                this.scene.background = sceneBgColor.clone();
-            }
-        }
-
-        if (this.renderer) {
-            this.renderer.setClearColor(getCssVar("--facade-scene-background"));
-        }
-
-        if (this.gridHelper) {
-            const gridColor = cssVarToThreeColor("--facade-scene-grid");
-            const materials = Array.isArray(this.gridHelper.material)
-                ? this.gridHelper.material
-                : [this.gridHelper.material];
-
-            materials.forEach((material) => {
-                if (material?.color) {
-                    material.color.copy(gridColor);
-                }
-            });
-        }
     }
 
     toggleGrid() {
@@ -487,11 +447,6 @@ export default class SceneManager {
         if (this.resizeObserver) {
             this.resizeObserver.disconnect();
             this.resizeObserver = null;
-        }
-
-        if (this.unsubscribeTheme) {
-            this.unsubscribeTheme();
-            this.unsubscribeTheme = null;
         }
 
         this.log.info("Disposed");

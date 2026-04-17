@@ -31,11 +31,10 @@ class UIModule extends BaseModule {
         const html = document.documentElement;
         const themeToggle = document.getElementById("theme-toggle");
         const svg = themeToggle.querySelector("svg");
-        const currentTheme = html.getAttribute("data-theme") || "light";
 
-        if (currentTheme === "dark") {
+        if (html.classList.contains("dark")) {
             // Switch to light theme
-            html.setAttribute("data-theme", "light");
+            html.classList.remove("dark");
             localStorage.setItem("theme", "light");
             // Change to sun icon for light theme
             svg.innerHTML =
@@ -43,7 +42,7 @@ class UIModule extends BaseModule {
             themeToggle.title = "Switch to Dark Theme";
         } else {
             // Switch to dark theme
-            html.setAttribute("data-theme", "dark");
+            html.classList.add("dark");
             localStorage.setItem("theme", "dark");
             // Change to moon icon for dark theme
             svg.innerHTML =
@@ -60,25 +59,15 @@ class UIModule extends BaseModule {
         const themeToggle = document.getElementById("theme-toggle");
         const svg = themeToggle.querySelector("svg");
 
-        // Check localStorage first, then system preference, default to light
-        let theme = savedTheme;
-        if (!theme) {
-            // Check system preference
-            const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-            theme = prefersDark ? "dark" : "light";
-        }
-
-        // Apply theme
-        document.documentElement.setAttribute("data-theme", theme);
-        localStorage.setItem("theme", theme);
-
-        // Set icon based on theme
-        if (theme === "dark") {
+        if (savedTheme === "dark") {
+            document.documentElement.classList.add("dark");
             // Set moon icon for dark theme
             svg.innerHTML =
                 '<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path>';
             themeToggle.title = "Switch to Light Theme";
         } else {
+            // Default to light theme
+            document.documentElement.classList.remove("dark");
             // Set sun icon for light theme
             svg.innerHTML =
                 '<circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path>';
@@ -180,7 +169,7 @@ class UIModule extends BaseModule {
         const canvasModule = this.app?.getModule("canvas");
         if (!canvasModule || !canvasModule.canvasManager) return;
 
-        const canvasManager = canvasModule.canvasManager;
+        const canvasManager = canvasManager.canvasManager;
 
         // Update canvas parameters
         const canvas = document.getElementById("canvas");

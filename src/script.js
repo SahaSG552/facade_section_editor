@@ -3849,5 +3849,8 @@ log.info("  window.getBitLogs().extrusions() - Get all 3D extrusion events");
 log.info("  window.getBitLogs().export() - Export events as JSON");
 log.info("  window.getBitLogs().clear() - Clear all bit events");
 
+// Initialize theme toggle
+import('./ui/ThemeToggleInit.js');
+
 // Call initialize function when the page loads
 window.addEventListener("load", initializeModularSystem);

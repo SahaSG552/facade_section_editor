@@ -1,8 +1,20 @@
 {
-  "active_plan": "E:\\Работа\\Programming\\JavaScript\\Projects\\facade_section_editor\\.sisyphus\\plans\\dxf-r12-export.md",
-  "started_at": "2026-04-16T23:00:00.000Z",
-  "session_ids": [],
-  "plan_name": "dxf-r12-export",
+  "active_plan": "E:\\Работа\\Programming\\JavaScript\\Projects\\facade_section_editor\\.sisyphus\\plans\\offset-open-curve-modes-fix.md",
+  "started_at": "2026-04-02T17:01:53.627Z",
+  "session_ids": [
+    "ses_2b295330bffeKPEFPBbUOZpGSz",
+    "ses_2b0d786edffeub8l6L3QXT2od7",
+    "ses_2b0d2eed5ffesPM9rn9GN8rDf7",
+    "ses_2b0d3370effel60f1Dy0ESLmRW",
+    "ses_2b0cf5aecffea9QgWtwvUyAvdx",
+    "ses_2b0cf3a9effeAuR1uZRWCJ4oEj",
+    "ses_2b0cf71a4ffeJvsPgdw1sA480K",
+    "ses_2b0c2a198ffeTFrhP7gBQWtCbo",
+    "ses_2b0b387cdffezXx7I9JQHS9AS0",
+    "ses_29e75b19dffekd2T6soMCb5Rmr",
+    "ses_26f1f05ceffe1OYrJfuCkRny78"
+  ],
+  "plan_name": "offset-open-curve-modes-fix",
   "agent": "atlas",
   "task_sessions": {
     "todo:1": {
@@ -62,8 +74,6 @@
   },
   "session_origins": {
     "ses_29e75b19dffekd2T6soMCb5Rmr": "direct",
-    "ses_26f1f05ceffe1OYrJfuCkRny78": "direct",
-    "ses_2690d715dffeDBUwqC9xia88uo": "direct",
-    "ses_268f46a55ffeYgTQBE0ky1TLTx": "direct"
+    "ses_26f1f05ceffe1OYrJfuCkRny78": "direct"
   }
 }

@@ -1,6 +1,225 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+/* Breakpoint definitions for reference */
 :root {
+  --breakpoint-xs: 320px;
+  --breakpoint-sm: 480px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+  --color-color-blue-50: 210 40% 98%;
+  --color-color-blue-100: 210 40% 90%;
+  --color-color-blue-200: 211 35% 80%;
+  --color-color-blue-300: 212 30% 65%;
+  --color-color-blue-400: 212 35% 55%;
+  --color-color-blue-500: 212 100% 50%;
+  --color-color-blue-600: 212 100% 45%;
+  --color-color-blue-700: 212 100% 40%;
+  --color-color-blue-800: 212 100% 35%;
+  --color-color-blue-900: 210 60% 15%;
+  --color-color-gray-50: 0 0% 98%;
+  --color-color-gray-100: 0 0% 96%;
+  --color-color-gray-200: 0 0% 90%;
+  --color-color-gray-300: 0 0% 80%;
+  --color-color-gray-400: 0 0% 65%;
+  --color-color-gray-500: 0 0% 50%;
+  --color-color-gray-600: 0 0% 45%;
+  --color-color-gray-700: 0 0% 35%;
+  --color-color-gray-800: 0 0% 15%;
+  --color-color-gray-900: 0 0% 9%;
+  --color-color-gray-950: 0 0% 5%;
+  --color-color-red-50: 0 85% 98%;
+  --color-color-red-100: 0 85% 92%;
+  --color-color-red-200: 0 75% 85%;
+  --color-color-red-300: 0 70% 70%;
+  --color-color-red-400: 0 75% 60%;
+  --color-color-red-500: 0 80% 55%;
+  --color-color-red-600: 0 85% 50%;
+  --color-color-red-700: 0 90% 45%;
+  --color-color-red-800: 0 85% 40%;
+  --color-color-red-900: 0 70% 35%;
+  --color-color-green-50: 140 60% 96%;
+  --color-color-green-100: 140 55% 88%;
+  --color-color-green-200: 140 50% 78%;
+  --color-color-green-300: 140 45% 65%;
+  --color-color-green-400: 140 50% 50%;
+  --color-color-green-500: 140 55% 45%;
+  --color-color-green-600: 140 60% 40%;
+  --color-color-green-700: 140 65% 35%;
+  --color-color-green-800: 140 60% 30%;
+  --color-color-green-900: 140 50% 25%;
+  --color-color-yellow-50: 45 100% 96%;
+  --color-color-yellow-100: 45 100% 88%;
+  --color-color-yellow-200: 45 95% 78%;
+  --color-color-yellow-300: 45 90% 65%;
+  --color-color-yellow-400: 45 90% 55%;
+  --color-color-yellow-500: 40 95% 50%;
+  --color-color-yellow-600: 38 90% 45%;
+  --color-color-yellow-700: 35 85% 40%;
+  --color-color-yellow-800: 32 80% 35%;
+  --color-color-yellow-900: 30 70% 30%;
+  --color-color-canvas-gridLight: 0 0% 0%;
+  --color-color-canvas-gridDark: 0 0% 40%;
+  --color-color-canvas-bitOutlineLight: 0 0% 0%;
+  --color-color-canvas-bitOutlineDark: 0 0% 88%;
+  --color-color-canvas-sceneBgLight: 0 0% 96%;
+  --color-color-canvas-sceneBgDark: 0 0% 10%;
+  --color-color-canvas-symmetryAxis: 212 60% 45%;
+  --color-color-path-commandBg: 0 75% 55%;
+  --color-color-path-commandHover: 0 70% 60%;
+  --color-color-path-modCommandBg: 40 90% 50%;
+  --color-color-path-modCommandHover: 38 85% 55%;
+  --color-color-path-paramBg: 170 50% 55%;
+  --color-color-path-paramHover: 168 45% 60%;
+  --color-color-path-deleteColor: 35 85% 40%;
+  --color-space-xs: 4px;
+  --color-space-sm: 8px;
+  --color-space-md: 16px;
+  --color-space-lg: 24px;
+  --color-space-xl: 32px;
+  --color-space-2xl: 48px;
+  --color-space-3xl: 64px;
+  --color-font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --color-font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --color-font-size-xs: 10px;
+  --color-font-size-sm: 11px;
+  --color-font-size-base: 12px;
+  --color-font-size-lg: 13px;
+  --color-font-size-xl: 14px;
+  --color-font-size-2xl: 16px;
+  --color-font-size-3xl: 18px;
+  --color-font-weight-normal: 400;
+  --color-font-weight-medium: 500;
+  --color-font-weight-semibold: 600;
+  --color-font-weight-bold: 700;
+  --color-font-lineHeight-tight: 1.2;
+  --color-font-lineHeight-normal: 1.5;
+  --color-font-lineHeight-relaxed: 1.75;
+  --color-radius-none: 0px;
+  --color-radius-sm: 4px;
+  --color-radius-md: 8px;
+  --color-radius-lg: 12px;
+  --color-radius-xl: 16px;
+  --color-radius-full: 9999px;
+  --color-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --color-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --color-shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
+  --color-shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
+  --color-shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --color-opacity-disabled: 0.5;
+  --color-opacity-overlay: 0.5;
+  --color-opacity-hover: 0.08;
+  --color-opacity-active: 0.12;
+  --color-opacity-selected: 0.16;
+  --color-opacity-subtle: 0.04;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 12px;
+  --font-size-lg: 13px;
+  --font-size-xl: 14px;
+  --font-size-2xl: 16px;
+  --font-size-3xl: 18px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-lineHeight-tight: 1.2;
+  --font-lineHeight-normal: 1.5;
+  --font-lineHeight-relaxed: 1.75;
+  --radius-none: 0px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
+  --shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --opacity-disabled: 0.5;
+  --opacity-overlay: 0.5;
+  --opacity-hover: 0.08;
+  --opacity-active: 0.12;
+  --opacity-selected: 0.16;
+  --opacity-subtle: 0.04;
+  --color-bg-default: 0 0% 98%;
+  --color-bg-surface: 0 0% 96%;
+  --color-bg-elevated: 0 0% 90%;
+  --color-bg-inverse: 0 0% 9%;
+  --color-text-primary: 0 0% 9%;
+  --color-text-secondary: 0 0% 45%;
+  --color-text-muted: 0 0% 50%;
+  --color-text-inverse: 0 0% 98%;
+  --color-text-onAction: 0 0% 98%;
+  --color-border-default: 0 0% 90%;
+  --color-border-emphasis: 0 0% 80%;
+  --color-border-inverse: 0 0% 45%;
+  --color-action-primary: 212 100% 50%;
+  --color-action-primaryHover: 212 100% 45%;
+  --color-action-primaryActive: 212 100% 40%;
+  --color-action-secondary: transparent;
+  --color-action-secondaryBorder: 0 0% 80%;
+  --color-action-secondaryHover: 0 0% 96%;
+  --color-action-ghost: transparent;
+  --color-action-ghostHover: 0 0% 96%;
+  --color-state-focus: 212 100% 50%;
+  --color-state-focusRing: 212 100% 50%;
+  --color-state-error: 0 80% 55%;
+  --color-state-errorBg: 0 80% 92%;
+  --color-state-success: 140 55% 45%;
+  --color-state-successBg: 140 55% 88%;
+  --color-state-warning: 40 95% 50%;
+  --color-state-warningBg: 45 100% 88%;
+  --color-canvas-grid: 0 0% 0%;
+  --color-canvas-bitOutline: 0 0% 0%;
+  --color-canvas-sceneBackground: 0 0% 96%;
+  --color-canvas-symmetryAxis: 212 60% 45%;
+  --color-path-command-bg: 0 75% 55%;
+  --color-path-command-hover: 0 70% 60%;
+  --color-path-modCommand-bg: 40 90% 50%;
+  --color-path-modCommand-hover: 38 85% 55%;
+  --color-path-param-bg: 170 50% 55%;
+  --color-path-param-hover: 168 45% 60%;
+  --color-path-delete: 35 85% 40%;
+  --spacing-component-paddingSm: 4px;
+  --spacing-component-paddingMd: 8px;
+  --spacing-component-paddingLg: 16px;
+  --spacing-component-gapSm: 4px;
+  --spacing-component-gapMd: 8px;
+  --spacing-component-gapLg: 16px;
+  --spacing-layout-panelPadding: 16px;
+  --spacing-layout-sectionGap: 24px;
+  --spacing-layout-headerPadding: 8px 24px;
+  --typography-body-size: 12px;
+  --typography-body-lineHeight: 1.5;
+  --typography-body-weight: 400;
+  --typography-heading-size: 18px;
+  --typography-heading-lineHeight: 1.2;
+  --typography-heading-weight: 600;
+  --typography-label-size: 11px;
+  --typography-label-weight: 500;
+  --typography-caption-size: 10px;
+  --typography-caption-weight: 400;
+  --shadow-semantic-card: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-semantic-dropdown: 0 2px 10px rgba(0, 0, 0, 0.15);
+  --shadow-semantic-modal: 0 4px 20px rgba(0, 0, 0, 0.2);
+  --shadow-semantic-tooltip: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --radius-semantic-sm: 4px;
+  --radius-semantic-md: 8px;
+  --radius-semantic-lg: 12px;
+  --radius-semantic-full: 9999px;
+  /* Legacy aliases for backward compatibility */
   --background: 0 0% 100%;
   --foreground: 0 0% 0%;
   --card: 0 0% 100%;
@@ -17,15 +236,224 @@
   --input: 0 0% 96%;
   --ring: 212 100% 50%;
   --radius: 12px;
-  /* Bit outline color - dark in light theme */
   --bit-outline: #000000;
-  /* Canvas grid color */
   --grid-color: #000000;
-  /* 3D scene background */
   --scene-background: #f5f5f5;
 }
 
-.dark {
+[data-theme="dark"] {
+  --color-color-blue-50: 210 40% 98%;
+  --color-color-blue-100: 210 40% 90%;
+  --color-color-blue-200: 211 35% 80%;
+  --color-color-blue-300: 212 30% 65%;
+  --color-color-blue-400: 212 35% 55%;
+  --color-color-blue-500: 212 100% 50%;
+  --color-color-blue-600: 212 100% 45%;
+  --color-color-blue-700: 212 100% 40%;
+  --color-color-blue-800: 212 100% 35%;
+  --color-color-blue-900: 210 60% 15%;
+  --color-color-gray-50: 0 0% 98%;
+  --color-color-gray-100: 0 0% 96%;
+  --color-color-gray-200: 0 0% 90%;
+  --color-color-gray-300: 0 0% 80%;
+  --color-color-gray-400: 0 0% 65%;
+  --color-color-gray-500: 0 0% 50%;
+  --color-color-gray-600: 0 0% 45%;
+  --color-color-gray-700: 0 0% 35%;
+  --color-color-gray-800: 0 0% 15%;
+  --color-color-gray-900: 0 0% 9%;
+  --color-color-gray-950: 0 0% 5%;
+  --color-color-red-50: 0 85% 98%;
+  --color-color-red-100: 0 80% 92%;
+  --color-color-red-200: 0 75% 85%;
+  --color-color-red-300: 0 70% 70%;
+  --color-color-red-400: 0 75% 60%;
+  --color-color-red-500: 0 80% 55%;
+  --color-color-red-600: 0 85% 50%;
+  --color-color-red-700: 0 90% 45%;
+  --color-color-red-800: 0 85% 40%;
+  --color-color-red-900: 0 70% 35%;
+  --color-color-green-50: 140 60% 96%;
+  --color-color-green-100: 140 55% 88%;
+  --color-color-green-200: 140 50% 78%;
+  --color-color-green-300: 140 45% 65%;
+  --color-color-green-400: 140 50% 50%;
+  --color-color-green-500: 140 55% 45%;
+  --color-color-green-600: 140 60% 40%;
+  --color-color-green-700: 140 65% 35%;
+  --color-color-green-800: 140 60% 30%;
+  --color-color-green-900: 140 50% 25%;
+  --color-color-yellow-50: 45 100% 96%;
+  --color-color-yellow-100: 45 100% 88%;
+  --color-color-yellow-200: 45 95% 78%;
+  --color-color-yellow-300: 45 90% 65%;
+  --color-color-yellow-400: 45 90% 55%;
+  --color-color-yellow-500: 40 95% 50%;
+  --color-color-yellow-600: 38 90% 45%;
+  --color-color-yellow-700: 35 85% 40%;
+  --color-color-yellow-800: 32 80% 35%;
+  --color-color-yellow-900: 30 70% 30%;
+  --color-color-canvas-gridLight: 0 0% 0%;
+  --color-color-canvas-gridDark: 0 0% 40%;
+  --color-color-canvas-bitOutlineLight: 0 0% 0%;
+  --color-color-canvas-bitOutlineDark: 0 0% 88%;
+  --color-color-canvas-sceneBgLight: 0 0% 96%;
+  --color-color-canvas-sceneBgDark: 0 0% 10%;
+  --color-color-canvas-symmetryAxis: 212 60% 45%;
+  --color-color-path-commandBg: 0 75% 55%;
+  --color-color-path-commandHover: 0 70% 60%;
+  --color-color-path-modCommandBg: 40 90% 50%;
+  --color-color-path-modCommandHover: 38 85% 55%;
+  --color-color-path-paramBg: 170 50% 55%;
+  --color-color-path-paramHover: 168 45% 60%;
+  --color-color-path-deleteColor: 35 85% 40%;
+  --color-space-xs: 4px;
+  --color-space-sm: 8px;
+  --color-space-md: 16px;
+  --color-space-lg: 24px;
+  --color-space-xl: 32px;
+  --color-space-2xl: 48px;
+  --color-space-3xl: 64px;
+  --color-font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --color-font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --color-font-size-xs: 10px;
+  --color-font-size-sm: 11px;
+  --color-font-size-base: 12px;
+  --color-font-size-lg: 13px;
+  --color-font-size-xl: 14px;
+  --color-font-size-2xl: 16px;
+  --color-font-size-3xl: 18px;
+  --color-font-weight-normal: 400;
+  --color-font-weight-medium: 500;
+  --color-font-weight-semibold: 600;
+  --color-font-weight-bold: 700;
+  --color-font-lineHeight-tight: 1.2;
+  --color-font-lineHeight-normal: 1.5;
+  --color-font-lineHeight-relaxed: 1.75;
+  --color-radius-none: 0px;
+  --color-radius-sm: 4px;
+  --color-radius-md: 8px;
+  --color-radius-lg: 12px;
+  --color-radius-xl: 16px;
+  --color-radius-full: 9999px;
+  --color-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --color-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --color-shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
+  --color-shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
+  --color-shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --color-opacity-disabled: 0.5;
+  --color-opacity-overlay: 0.5;
+  --color-opacity-hover: 0.08;
+  --color-opacity-active: 0.12;
+  --color-opacity-selected: 0.16;
+  --color-opacity-subtle: 0.04;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 12px;
+  --font-size-lg: 13px;
+  --font-size-xl: 14px;
+  --font-size-2xl: 16px;
+  --font-size-3xl: 18px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-lineHeight-tight: 1.2;
+  --font-lineHeight-normal: 1.5;
+  --font-lineHeight-relaxed: 1.75;
+  --radius-none: 0px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
+  --shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --opacity-disabled: 0.5;
+  --opacity-overlay: 0.5;
+  --opacity-hover: 0.08;
+  --opacity-active: 0.12;
+  --opacity-selected: 0.16;
+  --opacity-subtle: 0.04;
+  --color-bg-default: 0 0% 9%;
+  --color-bg-surface: 0 0% 15%;
+  --color-bg-elevated: 0 0% 35%;
+  --color-bg-inverse: 0 0% 98%;
+  --color-text-primary: 0 0% 98%;
+  --color-text-secondary: 0 0% 65%;
+  --color-text-muted: 0 0% 50%;
+  --color-text-inverse: 0 0% 9%;
+  --color-text-onAction: 0 0% 9%;
+  --color-border-default: 0 0% 35%;
+  --color-border-emphasis: 0 0% 45%;
+  --color-border-inverse: 0 0% 80%;
+  --color-action-primary: 212 100% 50%;
+  --color-action-primaryHover: 212 100% 45%;
+  --color-action-primaryActive: 212 100% 40%;
+  --color-action-secondary: transparent;
+  --color-action-secondaryBorder: 0 0% 80%;
+  --color-action-secondaryHover: 0 0% 15%;
+  --color-action-ghost: transparent;
+  --color-action-ghostHover: 0 0% 15%;
+  --color-state-focus: 212 100% 50%;
+  --color-state-focusRing: 212 100% 50%;
+  --color-state-error: 0 80% 55%;
+  --color-state-errorBg: 0 80% 92%;
+  --color-state-success: 140 55% 45%;
+  --color-state-successBg: 140 55% 88%;
+  --color-state-warning: 40 95% 50%;
+  --color-state-warningBg: 45 100% 88%;
+  --color-canvas-grid: 0 0% 40%;
+  --color-canvas-bitOutline: 0 0% 88%;
+  --color-canvas-sceneBackground: 0 0% 10%;
+  --color-canvas-symmetryAxis: 212 60% 45%;
+  --color-path-command-bg: 0 75% 60%;
+  --color-path-command-hover: 0 70% 70%;
+  --color-path-modCommand-bg: 45 90% 55%;
+  --color-path-modCommand-hover: 45 90% 65%;
+  --color-path-param-bg: 140 50% 50%;
+  --color-path-param-hover: 140 45% 65%;
+  --color-path-delete: 35 85% 40%;
+  --spacing-component-paddingSm: 4px;
+  --spacing-component-paddingMd: 8px;
+  --spacing-component-paddingLg: 16px;
+  --spacing-component-gapSm: 4px;
+  --spacing-component-gapMd: 8px;
+  --spacing-component-gapLg: 16px;
+  --spacing-layout-panelPadding: 16px;
+  --spacing-layout-sectionGap: 24px;
+  --spacing-layout-headerPadding: 8px 24px;
+  --typography-body-size: 12px;
+  --typography-body-lineHeight: 1.5;
+  --typography-body-weight: 400;
+  --typography-heading-size: 18px;
+  --typography-heading-lineHeight: 1.2;
+  --typography-heading-weight: 600;
+  --typography-label-size: 11px;
+  --typography-label-weight: 500;
+  --typography-caption-size: 10px;
+  --typography-caption-weight: 400;
+  --shadow-semantic-card: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-semantic-dropdown: 0 2px 10px rgba(0, 0, 0, 0.15);
+  --shadow-semantic-modal: 0 4px 20px rgba(0, 0, 0, 0.2);
+  --shadow-semantic-tooltip: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --radius-semantic-sm: 4px;
+  --radius-semantic-md: 8px;
+  --radius-semantic-lg: 12px;
+  --radius-semantic-full: 9999px;
+  /* Legacy aliases for backward compatibility */
   --background: 0 0% 9%;
   --foreground: 0 0% 98%;
   --card: 0 0% 9%;
@@ -41,11 +469,8 @@
   --border: 0 0% 15%;
   --input: 0 0% 15%;
   --ring: 212 100% 50%;
-  /* Bit outline color - lighter in dark theme for visibility */
   --bit-outline: #e0e0e0;
-  /* Canvas grid color - lighter in dark theme */
   --grid-color: #666666;
-  /* 3D scene background - darker in dark theme */
   --scene-background: #1a1a1a;
 }
 
@@ -102,11 +527,11 @@ html {
   font-weight: 500;
   border: none !important;
   border-radius: 0 !important;
-  background: var(--facade-bg-button);
-  color: var(--facade-text-muted);
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   transition: all 0.2s ease;
-  border-right: 1px solid var(--facade-border-default) !important;
+  border-right: 1px solid hsl(var(--border)) !important;
 }
 
 .view-toggle-btn:last-child {
@@ -114,13 +539,13 @@ html {
 }
 
 .view-toggle-btn:hover {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .view-toggle-btn.active {
-  background-color: var(--facade-brand);
-  color: #ffffff;
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 #app-header button {
@@ -135,16 +560,16 @@ html {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 #app-header button:hover {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #app-header button:active {
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--secondary));
 }
 
 #theme-toggle {
@@ -172,7 +597,7 @@ html {
 #left-panel {
   flex-shrink: 0;
   width: 90px;
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--card));
   display: flex;
   flex-direction: column;
   position: relative;
@@ -200,21 +625,12 @@ html {
 #bits-actions button {
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   flex: 1;
-}
-
-#bits-actions button:hover {
-  background-color: var(--facade-bg-card);
-}
-
-
-#bits-actions button:active {
-  background-color: var(--facade-bg-card);
 }
 
 #bits-actions button:hover {
@@ -331,10 +747,10 @@ html {
   gap: 5px;
   margin-bottom: 10px;
   margin-top: -50px;
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--card));
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid var(--facade-border-default);
+  border: 1px solid hsl(var(--border));
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -345,9 +761,9 @@ html {
 #zoom-toolbar button {
   padding: 5px 8px;
   font-size: 11px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -357,21 +773,21 @@ html {
 }
 
 #zoom-toolbar button:hover {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #zoom-toolbar button:active {
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--secondary));
 }
 
 #zoom-toolbar input {
   width: 40px;
   font-size: 11px;
   padding: 3px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-input);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   box-sizing: border-box;
   flex: 0 0 auto;
@@ -398,11 +814,11 @@ html {
 #right-menu {
   flex-shrink: 0;
   width: 500px;
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--card));
   padding: 20px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--facade-border-default);
+  border-left: 1px solid hsl(var(--border));
   overflow-y: auto;
   position: relative;
   z-index: 2;
@@ -437,23 +853,23 @@ html {
   display: block;
   margin-bottom: 6px;
   font-size: 12px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
 }
 
 #part-params input {
   width: 100%;
   box-sizing: border-box;
-  background-color: var(--facade-bg-input);
-  border: 1px solid var(--facade-border-default);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--input));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   padding: 8px;
 }
 
 #panel-anchor-btn {
-  background-color: var(--facade-bg-input) !important;
-  border: 1px solid var(--facade-border-default) !important;
+  background-color: hsl(var(--input)) !important;
+  border: 1px solid hsl(var(--border)) !important;
   border-radius: var(--radius) !important;
   padding: 8px !important;
   height: 38px;
@@ -508,8 +924,8 @@ html {
 .bit-list {
   display: none;
   position: fixed;
-  background-color: var(--facade-bg-card);
-  border: 1px solid var(--facade-border-default);
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   padding: 8px;
   z-index: 30;
   min-width: 130px;
@@ -590,8 +1006,8 @@ html {
   bottom: -18px;
   left: 50%;
   transform: translateX(-50%);
-  background-color: var(--facade-bg-card);
-  border: 1px solid var(--facade-border-default);
+  background-color: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius);
   padding: 2px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
@@ -634,10 +1050,10 @@ html {
 #operations-toolbar {
   display: flex;
   gap: 5px;
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--muted));
   padding: 5px;
   border-radius: var(--radius);
-  border: 1px solid var(--facade-border-default);
+  border: 1px solid hsl(var(--border));
   width: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -647,9 +1063,9 @@ html {
 #operations-toolbar button {
   padding: 5px 10px;
   font-size: 12px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   flex: 0 0 auto;
@@ -659,28 +1075,28 @@ html {
 }
 
 #operations-toolbar button:hover {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 #operations-toolbar button:active {
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--secondary));
 }
 
 #lcs-btn {
   margin-left: 6px;
   padding: 4px 8px;
   font-size: 11px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
 }
 
 #lcs-btn:hover {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 .lcs-row {
@@ -690,7 +1106,7 @@ html {
 /* ===== OPERATIONS LOG ===== */
 #operations-log {
   font-size: 11px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
   margin: 5px 0;
   min-height: 18px;
   opacity: 1;
@@ -857,9 +1273,9 @@ html {
   box-sizing: border-box;
   font-size: 11px;
   padding: 2px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-input);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   height: 24px;
   border-radius: var(--radius);
 }
@@ -879,8 +1295,8 @@ html {
 }
 
 .modal-content {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -1040,9 +1456,9 @@ html {
   min-width: 35px;
   padding: 0 6px;
   font-size: 12px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   box-sizing: border-box;
@@ -1050,8 +1466,8 @@ html {
 
 #preview-toolbar input[type="color"]:hover,
 #preview-toolbar button:hover {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--accent));
+  color: hsl(var(--accent-foreground));
 }
 
 /* Touch support for mobile devices */
@@ -1082,23 +1498,23 @@ button,
 .modal-content h2 {
   margin-top: 0;
   font-size: 18px;
-  color: var(--facade-text-primary);
+  color: hsl(var(--card-foreground));
 }
 
 .modal-content label {
   display: block;
   margin-bottom: 5px;
   font-size: 14px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 .modal-content input {
   width: 100%;
   padding: 8px;
   margin-bottom: 15px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-input);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 14px;
@@ -1119,13 +1535,13 @@ button,
 }
 
 .button-group button[type="button"] {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-muted);
+  background-color: hsl(var(--muted));
+  color: hsl(var(--muted-foreground));
 }
 
 .button-group button[type="submit"] {
-  background-color: var(--facade-brand);
-  color: #ffffff;
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }
 
 /* ===== BIT FORM FLEX GRID ===== */
@@ -1146,7 +1562,7 @@ button,
 .bit-form-row label {
   margin-bottom: 0;
   font-size: 12px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1267,7 +1683,7 @@ button,
 
 .profile-path-section .profile-path-header {
   font-size: 12px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
   margin-bottom: 6px;
 }
 
@@ -1282,8 +1698,8 @@ button,
 
 /* ===== PROFILE EDITOR — Edit button ===== */
 .preview-edit-btn {
-  background-color: var(--facade-brand) !important;
-  color: #ffffff !important;
+  background-color: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
   font-weight: 600;
 }
 
@@ -1335,9 +1751,9 @@ button,
   padding: 0;
   font-size: 14px;
   line-height: 1;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: 4px;
   display: flex;
@@ -1347,14 +1763,14 @@ button,
 }
 
 .editor-tool-btn:hover {
-  background-color: var(--facade-bg-card);
-  border-color: var(--facade-brand);
+  background-color: hsl(var(--accent));
+  border-color: hsl(var(--primary) / 0.5);
 }
 
 .editor-tool-btn.active {
-  background-color: var(--facade-brand);
-  color: #ffffff;
-  border-color: var(--facade-brand);
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
 }
 
 /* RMB-activated variant of a dual-mode button: amber tint to signal secondary mode */
@@ -1368,9 +1784,9 @@ button,
   height: 24px;
   padding: 0 8px;
   font-size: 11px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-muted);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
   cursor: pointer;
   border-radius: 4px;
   transition: all 0.1s;
@@ -1380,9 +1796,9 @@ button,
     height: 24px;
     padding: 0 4px;
     font-size: 11px;
-    border: 1px solid var(--facade-border-default);
-    background-color: var(--facade-bg-button);
-    color: var(--facade-text-primary);
+    border: 1px solid hsl(var(--border));
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
     cursor: pointer;
     border-radius: 4px;
     width: 52px;
@@ -1390,31 +1806,31 @@ button,
 }
 
 .editor-grid-select:hover {
-    border-color: var(--facade-brand);
+    border-color: hsl(var(--accent));
 }
 
 .editor-snap-btn.active {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-brand);
-  border-color: var(--facade-brand);
+  background-color: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.4);
 }
 
 .editor-action-btn {
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   cursor: pointer;
   border-radius: 4px;
   font-weight: 500;
 }
 
 .editor-action-btn.editor-action-primary {
-  background-color: var(--facade-brand);
-  color: #ffffff;
-  border-color: var(--facade-brand);
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
 }
 
 /* ===== EDITOR CANVAS — selection box (CursorTool drag) ===== */
@@ -2324,9 +2740,9 @@ button,
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   padding: 1px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-input);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   outline: none;
   transition: border-color 0.2s;
@@ -2334,11 +2750,11 @@ button,
 }
 
 .path-editor-input:focus {
-  border-color: var(--facade-brand);
+  border-color: hsl(var(--primary));
 }
 
 .path-editor-input::placeholder {
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
   font-size: 9px;
 }
 
@@ -2346,9 +2762,9 @@ button,
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-brand);
-  color: #ffffff;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
   cursor: pointer;
   border-radius: var(--radius);
   font-size: 14px;
@@ -2379,13 +2795,13 @@ button,
 
 .path-suggestions-label {
   font-size: 9px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .path-suggestions-label em {
-  color: var(--facade-brand);
+  color: hsl(var(--primary));
   font-style: normal;
   font-weight: 600;
 }
@@ -2394,9 +2810,9 @@ button,
   padding: 1px 5px;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-button);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--card));
+  color: hsl(var(--foreground));
   cursor: pointer;
   border-radius: 3px;
   transition: all 0.15s;
@@ -2404,7 +2820,7 @@ button,
 }
 
 .path-suggestion-btn:hover {
-  background-color: var(--facade-bg-card);
+  background-color: hsl(var(--accent));
 }
 
 .path-suggestion-btn.cmd-btn {
@@ -2533,8 +2949,8 @@ button,
 }
 
 .custom-field-modal-content {
-  background-color: var(--facade-bg-card);
-  color: var(--facade-text-primary);
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
   padding: 20px;
   border-radius: var(--radius);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -2556,16 +2972,16 @@ button,
   display: block;
   margin-bottom: 4px;
   font-size: 12px;
-  color: var(--facade-text-muted);
+  color: hsl(var(--muted-foreground));
 }
 
 .custom-field-modal-content input,
 .custom-field-modal-content select {
   width: 100%;
   padding: 8px;
-  border: 1px solid var(--facade-border-default);
-  background-color: var(--facade-bg-input);
-  color: var(--facade-text-primary);
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
   border-radius: var(--radius);
   box-sizing: border-box;
   font-size: 13px;

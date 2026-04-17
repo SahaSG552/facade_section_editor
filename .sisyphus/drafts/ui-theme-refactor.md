@@ -10,11 +10,7 @@
 - Референс из видео: Browser APIs (CSS variables, color-mix, @layer, native features)
 
 ## Technical Decisions
-- **Формат токенов**: ГИБРИДНЫЙ — hex для основных цветов, color-mix() для деривативных
-- **Механизм темы**: [data-theme="dark"] (framerlists) вместо .dark класса
-- **Стиль контролов**: НЕОМОРФНЫЙ (framerlists) — inner border + составные тени + animated indicator
-- **Приоритет**: СНАЧАЛА ТЕМИЗАЦИЯ, потом responsive
-- **Scope**: ВСЕ компоненты — header, left panel, center canvas, 3D canvas, right panel, modals, SVG bit icons
+- (pending user input)
 
 ## Research Findings
 
@@ -85,39 +81,3 @@
 ## Scope Boundaries
 - INCLUDE: CSS theming, dark/light mode, SVG color adaptation, 3D canvas theming, responsive layout
 - EXCLUDE: (pending user input)
-
----
-
-## Additional Reference: Gravity UI (suggested by user)
-
-### What Gravity UI Offers
-- **@gravity-ui/uikit-themer** — npm пакет для манипуляции темами
-- **50+ React компонентов** — кнопки, модалки, таблицы, селекты, и т.д.
-- **Система токенов**:
-  - Base colors: --g-color-base-background, --g-color-base-brand, --g-color-base-text
-  - Private colors: вычисляются из base colors (brand palette)
-  - Utility colors: blue, green, red, yellow, orange, purple, cold-gray
-  - Typography: текстовые варианты с font-size, line-height, font-weight
-  - Border radius: s, m, l + "inner" variants
-- **Theme Provider**: `<ThemeProvider theme="light">` или "dark"
-- **SSR support**: генерирует CSS классы на сервере, избегает "flash"
-- **Quick Theme Creator**: онлайн инструмент для создания тем на основе бренд-цветов
-
-### Применимые паттерны для нашего проекта
-1. **Private colors concept**: использовать color-mix() для генерации палитры из одного brand color
-2. **CSS variable naming**: --g-* префикс (или свой, напр. --facade-*)
-3. **Border radius system**: primary radius + inner radius (primary - 3px)
-4. **Component states**: hover, active, disabled, selected, focus через CSS переменные
-
-### Вопрос о Gravity UI → ОТВЕТ
-Пользователь спросил: сложно ли переписать на gravity-ui?
-
-**Ответ: ДА, это большая сложная задача.**
-- Gravity UI требует React
-- Проект на vanilla JS — нужен полный переписывание архитектуры
-- Это месяцы работы
-
-**Решение: Вдохновиться подходом, но реализовать своё.**
-- Паттерны именования CSS переменных
-- color-mix() для палитры
-- Border-radius система
