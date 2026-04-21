@@ -2025,6 +2025,18 @@ export function buildOffsetContour(segments, distance, options = {}) {
           );
         }
 
+        // For open contours with a dropped concave arc: connect endpoints with
+        // a straight segment instead of building a П/U-bridge. The bridge is
+        // only appropriate for closed contours (where the collapsed arc forms
+        // an enclosed pocket). Open contours should close the gap directly.
+        if (!closed && droppedArcRadius != null) {
+          const gapLen = Math.hypot(next.start.x - current.end.x, next.start.y - current.end.y);
+          if (gapLen > EPSILON) {
+            result.push({ type: "line", start: clonePoint(current.end), end: clonePoint(next.start) });
+          }
+          continue;
+        }
+
         // Priority rule: prefer a direct intersection over a bridge, but only when
         // the intersection lies "in front of" both segments (t-parameters >= 0).
         // When the intersection is behind next.start (t2 < 0), the two offset
@@ -2391,6 +2403,13 @@ export function buildOffsetContour(segments, distance, options = {}) {
             const isAntiParallel = dot(inTangent, outTangent) < -0.5;
 
             if (isAntiParallel) {
+              // For open contours the П-bridge wraps around and creates a
+              // spurious closing segment back to the path start. Use a simple
+              // straight connector instead so the path stays open.
+              if (!closed) {
+                const tangent = buildTangentBridge(current, next);
+                if (tangent) { result.push(tangent); continue; }
+              }
               const sharpBridge = buildSharpTangentBridge(
                 current,
                 next,
@@ -2413,6 +2432,13 @@ export function buildOffsetContour(segments, distance, options = {}) {
           if (arcToLineNoIntersection) {
             const isAntiParallel = dot(inTangent, outTangent) < -0.5;
             if (isAntiParallel) {
+              // For open contours the П-bridge wraps around and creates a
+              // spurious closing segment back to the path start. Use a simple
+              // straight connector instead so the path stays open.
+              if (!closed) {
+                const tangent = buildTangentBridge(current, next);
+                if (tangent) { result.push(tangent); continue; }
+              }
               const sharpBridge = buildSharpTangentBridge(
                 current,
                 next,

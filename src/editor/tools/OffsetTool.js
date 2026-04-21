@@ -444,7 +444,7 @@ function buildOffsetCandidate(
         useArcApproximation,
         arcTolerance: ARC_APPROX_TOLERANCE,
         exportModule,
-        trimSelfIntersections: allowClose,
+        trimSelfIntersections: true,
         forceReverseOutput: false,
     };
 

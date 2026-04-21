@@ -1,79 +1,12 @@
 {
-  "active_plan": "E:\\Работа\\Programming\\JavaScript\\Projects\\facade_section_editor\\.sisyphus\\plans\\offset-open-curve-modes-fix.md",
-  "started_at": "2026-04-02T17:01:53.627Z",
+  "active_plan": "E:\\Работа\\Programming\\JavaScript\\Projects\\facade_section_editor\\.sisyphus\\plans\\offset-degeneration-remediation.md",
+  "started_at": "2026-04-21T11:26:45.565Z",
   "session_ids": [
-    "ses_2b295330bffeKPEFPBbUOZpGSz",
-    "ses_2b0d786edffeub8l6L3QXT2od7",
-    "ses_2b0d2eed5ffesPM9rn9GN8rDf7",
-    "ses_2b0d3370effel60f1Dy0ESLmRW",
-    "ses_2b0cf5aecffea9QgWtwvUyAvdx",
-    "ses_2b0cf3a9effeAuR1uZRWCJ4oEj",
-    "ses_2b0cf71a4ffeJvsPgdw1sA480K",
-    "ses_2b0c2a198ffeTFrhP7gBQWtCbo",
-    "ses_2b0b387cdffezXx7I9JQHS9AS0",
-    "ses_29e75b19dffekd2T6soMCb5Rmr",
-    "ses_26f1f05ceffe1OYrJfuCkRny78"
+    "ses_2546e3ecaffePWldtbLFMPKmbT"
   ],
-  "plan_name": "offset-open-curve-modes-fix",
-  "agent": "atlas",
-  "task_sessions": {
-    "todo:1": {
-      "task_key": "todo:1",
-      "task_label": "1",
-      "task_title": "RED: Single-line topology invariants",
-      "session_id": "ses_2b0d786edffeub8l6L3QXT2od7",
-      "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-04-02T17:08:21.804Z"
-    },
-    "todo:2": {
-      "task_key": "todo:2",
-      "task_label": "2",
-      "task_title": "RED: Mode routing contract tests",
-      "session_id": "ses_2b0d3370effel60f1Dy0ESLmRW",
-      "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-04-02T17:13:46.151Z"
-    },
-    "todo:4": {
-      "task_key": "todo:4",
-      "task_label": "4",
-      "task_title": "RED: Degenerate/continuity invariants",
-      "session_id": "ses_2b0cf71a4ffeJvsPgdw1sA480K",
-      "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-04-02T17:24:36.447Z"
-    },
-    "todo:7": {
-      "task_key": "todo:7",
-      "task_label": "7",
-      "task_title": "Fix OffsetEngine stitching/topology consistency",
-      "session_id": "ses_2b0c2a198ffeTFrhP7gBQWtCbo",
-      "agent": "Sisyphus-Junior",
-      "category": "ultrabrain",
-      "updated_at": "2026-04-02T17:41:19.963Z"
-    },
-    "todo:8": {
-      "task_key": "todo:8",
-      "task_label": "8",
-      "task_title": "Harden capBothSides semantics",
-      "session_id": "ses_2b0b387cdffezXx7I9JQHS9AS0",
-      "agent": "Sisyphus-Junior",
-      "category": "deep",
-      "updated_at": "2026-04-02T17:47:28.308Z"
-    },
-    "todo:9": {
-      "task_key": "todo:9",
-      "task_label": "9",
-      "task_title": "Implement explicit offsetMode routing in Engine",
-      "session_id": "ses_29e101fdbffezUWBrpeAqKIn6p",
-      "agent": "Sisyphus-Junior",
-      "category": "quick",
-      "updated_at": "2026-04-06T08:40:25.689Z"
-    }
-  },
   "session_origins": {
-    "ses_29e75b19dffekd2T6soMCb5Rmr": "direct",
-    "ses_26f1f05ceffe1OYrJfuCkRny78": "direct"
-  }
+    "ses_2546e3ecaffePWldtbLFMPKmbT": "direct"
+  },
+  "plan_name": "offset-degeneration-remediation",
+  "agent": "atlas"
 }

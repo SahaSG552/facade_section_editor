@@ -36,13 +36,11 @@ segmentCount=4
 
 CASE: RED: multiple tiny degenerate arcs break closure
 offset=-0.4
-segmentCount=6
+segmentCount=4
   gap[0->1]=0.000000000000 (join_ok=true)
   gap[1->2]=0.000000000000 (join_ok=true)
   gap[2->3]=0.000000000000 (join_ok=true)
-  gap[3->4]=0.000000000000 (join_ok=true)
-  gap[4->5]=0.000000000000 (join_ok=true)
-  gap[5->0]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
 
 CASE: RED: arc near end position degenerates creating wrap-around gap
 offset=-0.6
@@ -64,13 +62,11 @@ segmentCount=6
 
 CASE: should mark all bridge segments with isBridge: true
 offset=-0.3
-segmentCount=6
+segmentCount=4
   gap[0->1]=0.000000000000 (join_ok=true)
   gap[1->2]=0.000000000000 (join_ok=true)
   gap[2->3]=0.000000000000 (join_ok=true)
-  gap[3->4]=0.000000000000 (join_ok=true)
-  gap[4->5]=0.000000000000 (join_ok=true)
-  gap[5->0]=0.000000000000 (join_ok=true)
+  gap[3->0]=0.000000000000 (join_ok=true)
 
 CASE: Edge Case 1: All segments degenerate → empty output, no crash
 offset=-1

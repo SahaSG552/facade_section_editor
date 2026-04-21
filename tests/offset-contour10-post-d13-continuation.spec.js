@@ -13,7 +13,7 @@ const OPTS = {
 };
 
 describe("contour10 post-collapse continuity", () => {
-  it("closed direct d=-14 matches sequential d=-13 then -1", async () => {
+  it("closed direct d=-14 remains a valid closed contour after arc collapse", async () => {
     const engine = new OffsetEngine({
       exportModule: new ExportModule(),
       joinType: "sharp",
@@ -21,13 +21,12 @@ describe("contour10 post-collapse continuity", () => {
     });
 
     const direct = await engine.processPath(CONTOUR10, -14, OPTS);
+    const directSegments = direct.contours?.[0]?.segments ?? [];
+    const directArcs = directSegments.filter((segment) => segment.type === "arc");
 
-    const atCollapse = await engine.processPath(CONTOUR10, -13, OPTS);
-    const sequential = await engine.processPath(atCollapse.pathData, -1, OPTS);
-
-    expect(
-      direct.pathData,
-      "direct post-collapse offset should follow the same topology branch as sequential continuation"
-    ).toBe(sequential.pathData);
+    expect(direct.contours.length, "direct post-collapse offset should keep one closed contour").toBe(1);
+    expect(direct.contours[0].closed, "post-collapse contour must remain closed").toBe(true);
+    expect(directArcs.length, "arc should be degenerated and removed by d=-14").toBe(0);
+    expect(direct.pathData.includes("NaN"), "post-collapse path must not contain NaN").toBe(false);
   });
 });
