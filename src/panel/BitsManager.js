@@ -2590,7 +2590,11 @@ export default class BitsManager {
                 onChange: (path) => {
                     updateBitPreview();
                 },
-                variableValues: getVariableValues()
+                variableValues: getVariableValues(),
+                getViewportCenter: () => ({
+                    x: Number(previewCanvasManager?.panX ?? 0),
+                    y: Number(previewCanvasManager?.panY ?? 0),
+                }),
             });
 
             // Set initial path - prefer rawProfilePath (has formulas), fallback to profilePath

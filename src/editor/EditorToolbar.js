@@ -1,5 +1,6 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { addUnifiedPressListener } from "../ui/pressEvents.js";
+import { getShortcutKeyId, hasCommandModifier, matchesShortcut } from "./keyboardShortcuts.js";
 
 const log = LoggerFactory.createLogger("EditorToolbar");
 
@@ -20,7 +21,7 @@ const _saved = {
  * @property {string}   label    - Display label / tooltip text
  * @property {string}   icon     - SVG icon markup or Unicode glyph
  * @property {string}   group    - "draw" | "edit"
- * @property {string}   [key]    - Optional keyboard shortcut (single key)
+ * @property {string}   [key]    - Optional physical Latin keyboard shortcut (single key)
  */
 
 /** @type {ToolDefinition[]} */
@@ -50,6 +51,13 @@ const TOOL_DEFINITIONS = [
     { id: "bool", label: "Boolean", icon: "⊔", group: "edit" },
     { id: "aux", label: "Aux Line", icon: "⋯", group: "edit" },
 ];
+
+/** @type {Map<string, ToolDefinition>} */
+const TOOL_SHORTCUTS = new Map(
+    TOOL_DEFINITIONS
+        .filter((tool) => typeof tool.key === "string" && tool.key.trim())
+        .map((tool) => [tool.key.toLowerCase(), tool])
+);
 
 /**
  * EditorToolbar — builds and manages the editor tool palette.
@@ -316,14 +324,14 @@ export default class EditorToolbar {
             // Don't intercept events in input fields
             if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
 
-            if (e.key === "Enter") { this.onDone?.(); return; }
-            if (e.key === "Escape" && this._activeTool !== "cursor") {
+            if (matchesShortcut(e, "Enter")) { this.onDone?.(); return; }
+            if (matchesShortcut(e, "Escape") && this._activeTool !== "cursor") {
                 if (this.onToolChange) this.onToolChange("cursor");
                 return;
             }
-            if (e.key === "z" && (e.ctrlKey || e.metaKey)) { /* handled by ProfileEditor */ return; }
+            if (hasCommandModifier(e) && matchesShortcut(e, "z")) { /* handled by ProfileEditor */ return; }
 
-            if (!e.ctrlKey && !e.metaKey && e.key === "u") {
+            if (!hasCommandModifier(e) && matchesShortcut(e, "u")) {
                 const groupDef = TOOL_DEFINITIONS.find(t => t.lmbTool === "group" && t.rmbTool === "ungroup");
                 if (groupDef && this.onToolChange) {
                     this.onToolChange("ungroup");
@@ -331,7 +339,7 @@ export default class EditorToolbar {
                 }
             }
 
-            const def = TOOL_DEFINITIONS.find(t => t.key === e.key && !e.ctrlKey && !e.metaKey);
+            const def = !hasCommandModifier(e) ? TOOL_SHORTCUTS.get(getShortcutKeyId(e)) : null;
             if (def && this.onToolChange) {
                 // For dual-mode buttons the keyboard shortcut fires the LMB (primary) tool.
                 this.onToolChange(def.lmbTool ?? def.id);

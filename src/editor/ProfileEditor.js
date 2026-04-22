@@ -14,6 +14,7 @@ import CircleTool from "./tools/CircleTool.js";
 import RectTool from "./tools/RectTool.js";
 import EllipseTool from "./tools/EllipseTool.js";
 import OffsetTool from "./tools/OffsetTool.js";
+import { getShortcutKeyId, matchesCommandShortcut, hasCommandModifier, matchesShortcut } from "./keyboardShortcuts.js";
 import { isSegmentDegenerated } from "../operations/OffsetRules.js";
 import { evaluateMathExpression } from "../utils/utils.js";
 import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
@@ -1455,6 +1456,15 @@ export default class ProfileEditor {
         this._debugLastTsByAction = new Map();
         /** @type {number} */
         this._debugLastTrimSeq = 0;
+
+        /** @type {HTMLElement|null} */
+        this._statusLogEl = null;
+        /** @type {number|null} */
+        this._statusFadeTimer = null;
+        /** @type {string} */
+        this._lastToolHintKey = '';
+        /** @type {number} */
+        this._lastSelectionCount = 0;
     }
 
     /** @returns {HTMLTextAreaElement|null} @private */
@@ -1506,6 +1516,265 @@ export default class ProfileEditor {
             }
         }
         el.scrollTop = el.scrollHeight;
+    }
+
+    /** @param {HTMLElement|null} host @private */
+    _ensureStatusLog(host) {
+        if (!host) return;
+        if (this._statusLogEl && this._statusLogEl.isConnected) return;
+        const existing = host.querySelector('#editor-status-log');
+        if (existing) {
+            this._statusLogEl = existing;
+            return;
+        }
+        const el = document.createElement('div');
+        el.id = 'editor-status-log';
+        el.className = 'editor-status-log';
+        el.textContent = '';
+        host.appendChild(el);
+        this._statusLogEl = el;
+    }
+
+    /** @private */
+    _resetStatusFade() {
+        if (this._statusFadeTimer !== null) {
+            window.clearTimeout(this._statusFadeTimer);
+            this._statusFadeTimer = null;
+        }
+    }
+
+    /**
+     * @param {string} message
+     * @param {{tone?:'info'|'warn', timeoutMs?:number, persist?:boolean}} [options]
+     * @private
+     */
+    _showStatus(message, options = {}) {
+        const el = this._statusLogEl;
+        if (!el) return;
+        const text = String(message ?? '').trim();
+        if (!text) return;
+
+        const tone = options?.tone === 'warn' ? 'warn' : 'info';
+        const timeoutMs = Number.isFinite(Number(options?.timeoutMs)) ? Number(options.timeoutMs) : 2200;
+        const persist = options?.persist === true;
+
+        this._resetStatusFade();
+        el.classList.remove('fade-out', 'editor-status-log--warn');
+        if (tone === 'warn') el.classList.add('editor-status-log--warn');
+        el.textContent = text;
+
+        if (persist) return;
+
+        this._statusFadeTimer = window.setTimeout(() => {
+            if (!this._statusLogEl) return;
+            this._statusLogEl.classList.add('fade-out');
+            window.setTimeout(() => {
+                if (!this._active) return;
+                this._refreshToolHint(true);
+            }, 520);
+        }, Math.max(250, timeoutMs));
+    }
+
+    /** @param {{x:number,y:number}|null|undefined} a @param {{x:number,y:number}|null|undefined} b @returns {boolean} @private */
+    _pointNear(a, b) {
+        if (!a || !b) return false;
+        const ax = Number(a.x);
+        const ay = Number(a.y);
+        const bx = Number(b.x);
+        const by = Number(b.y);
+        if (![ax, ay, bx, by].every(Number.isFinite)) return false;
+        return Math.hypot(ax - bx, ay - by) <= 1e-6;
+    }
+
+    /** @param {Array<object>} contourSegs @returns {boolean} @private */
+    _isClosedContour(contourSegs) {
+        if (!Array.isArray(contourSegs) || contourSegs.length === 0) return false;
+        const first = contourSegs[0]?.data?.start ?? null;
+        const last = contourSegs[contourSegs.length - 1]?.data?.end ?? null;
+        return this._pointNear(first, last);
+    }
+
+    /** @returns {{open:number, closed:number, total:number}} @private */
+    _selectionCurveCounts() {
+        if (!this.state) return { open: 0, closed: 0, total: 0 };
+
+        const byId = new Map((this.state.segments ?? []).map((s) => [s.id, s]));
+        const selectedContourIds = new Set();
+        const selectedShapeIds = new Set();
+
+        for (const id of (this.state.selectedIds ?? [])) {
+            if (typeof id !== 'string') continue;
+            if (id.startsWith('m:')) {
+                const cid = Number(id.slice(2));
+                if (Number.isFinite(cid)) selectedContourIds.add(cid);
+                continue;
+            }
+            const seg = byId.get(id);
+            if (!seg) continue;
+            if (seg.type === 'line' || seg.type === 'arc') {
+                const cid = Number(seg?.contourId);
+                if (Number.isFinite(cid)) selectedContourIds.add(cid);
+                continue;
+            }
+            if (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse') {
+                selectedShapeIds.add(String(seg.id));
+            }
+        }
+
+        let open = 0;
+        let closed = selectedShapeIds.size;
+        for (const cid of selectedContourIds) {
+            const contourSegs = (this.state.segments ?? []).filter((s) =>
+                (s.type === 'line' || s.type === 'arc') && Number(s?.contourId) === cid,
+            );
+            if (contourSegs.length === 0) continue;
+            if (this._isClosedContour(contourSegs)) closed += 1;
+            else open += 1;
+        }
+
+        return { open, closed, total: open + closed };
+    }
+
+    /** @returns {string} @private */
+    _selectionSummaryText() {
+        const counts = this._selectionCurveCounts();
+        if (counts.total <= 0) return '';
+        if (counts.open > 0 && counts.closed === 0) {
+            return `${counts.open} open curve${counts.open === 1 ? '' : 's'} selected`;
+        }
+        if (counts.closed > 0 && counts.open === 0) {
+            return `${counts.closed} closed curve${counts.closed === 1 ? '' : 's'} selected`;
+        }
+        return `${counts.open} open, ${counts.closed} closed curves selected`;
+    }
+
+    /** @returns {{message:string,key:string}|null} @private */
+    _describeToolHint() {
+        const tool = this._currentTool;
+        const toolId = String(this._currentToolId ?? '');
+        if (!toolId) return null;
+
+        const mode = String(tool?._mode ?? '');
+        const phase = String(tool?._phase ?? '');
+        const hasSel = (this.state?.selectedIds?.size ?? 0) > 0;
+        const selFlag = hasSel ? '1' : '0';
+        const key = `${toolId}|${mode}|${phase}|${tool?._startPoint ? 'active' : 'idle'}|${selFlag}`;
+
+        // ─── Drawing tools ────────────────────────────────────────────────
+        if (toolId === 'cursor') {
+            return { key, message: 'Cursor: select objects with LMB/drag. Ctrl/Shift adds to selection.' };
+        }
+        if (toolId === 'line') {
+            return {
+                key,
+                message: tool?._startPoint
+                    ? 'Line: pick next point. RMB finishes polyline. Esc cancels.'
+                    : 'Line: pick first point to start polyline.',
+            };
+        }
+        if (toolId === 'arc' || toolId === 'arc3pt') {
+            const phaseNum = Number(tool?._phase ?? 0);
+            if (phaseNum <= 0) return { key, message: 'Arc: pick first point.' };
+            if (phaseNum === 1) return { key, message: 'Arc: pick second point.' };
+            return { key, message: 'Arc: pick third point or Enter to confirm radius.' };
+        }
+        if (toolId.startsWith('circle')) {
+            const phaseNum = Number(tool?._phase ?? 0);
+            if (phaseNum <= 0) return { key, message: 'Circle: pick first point/center.' };
+            if (phaseNum === 1) return { key, message: 'Circle: pick radius point or second point.' };
+            return { key, message: 'Circle: pick third point to finish.' };
+        }
+        if (toolId.startsWith('rect')) {
+            const phaseNum = Number(tool?._phase ?? 0);
+            if (phaseNum <= 0) return { key, message: 'Rectangle: pick first point/center.' };
+            if (phaseNum === 1) return { key, message: 'Rectangle: pick opposite corner or width.' };
+            return { key, message: 'Rectangle: pick height point to finish.' };
+        }
+        if (toolId.startsWith('ellipse')) {
+            const phaseNum = Number(tool?._phase ?? 0);
+            if (phaseNum <= 0) return { key, message: 'Ellipse: pick center.' };
+            if (phaseNum === 1) return { key, message: 'Ellipse: pick first radius.' };
+            return { key, message: 'Ellipse: pick second radius and finish.' };
+        }
+
+        // ─── Transform tools ─────────────────────────────────────────────
+        if (toolId === 'move') {
+            if (mode === 'selecting') {
+                return { key, message: hasSel
+                    ? 'Move: RMB to confirm selection, Esc to cancel.'
+                    : 'Move: Select objects. RMB to confirm, Esc to cancel.' };
+            }
+            if (mode === 'pick-from') return { key, message: 'Move: Pick source point. LMB to set.' };
+            if (mode === 'pick-to')   return { key, message: 'Move: Pick destination. Hold Ctrl to copy. LMB to apply.' };
+        }
+        if (toolId === 'rotate') {
+            if (mode === 'selecting') {
+                return { key, message: hasSel
+                    ? 'Rotate: RMB to confirm selection, Esc to cancel.'
+                    : 'Rotate: Select objects. RMB to confirm, Esc to cancel.' };
+            }
+            if (mode === 'pick-center') return { key, message: 'Rotate: Pick rotation center. LMB to set.' };
+            if (mode === 'pick-ref')    return { key, message: 'Rotate: Pick reference point. LMB to set direction.' };
+            if (mode === 'pick-to')     return { key, message: 'Rotate: Pick target point. Hold Ctrl to copy. LMB to apply.' };
+        }
+        if (toolId === 'mirror' || toolId === 'symmetry') {
+            const label = toolId === 'symmetry' ? 'Symmetry' : 'Mirror';
+            if (phase === 'selecting') {
+                return { key, message: hasSel
+                    ? `${label}: RMB to confirm selection, Esc to cancel.`
+                    : `${label}: Select objects. RMB to confirm, Esc to cancel.` };
+            }
+            if (phase === 'pick-axis-start') return { key, message: `${label}: Pick axis start point. LMB to place.` };
+            if (phase === 'pick-axis-end') {
+                const copyHint = toolId === 'mirror' ? ' Hold Ctrl to copy.' : '';
+                return { key, message: `${label}: Pick axis end point.${copyHint} LMB to apply.` };
+            }
+        }
+        if (toolId === 'flip') {
+            if (phase === 'selecting') {
+                return { key, message: hasSel
+                    ? 'Flip: RMB to preview direction, Esc to cancel.'
+                    : 'Flip: Select objects. RMB to preview, Esc to cancel.' };
+            }
+            if (phase === 'preview') return { key, message: 'Flip: RMB to apply, Esc to adjust selection.' };
+        }
+        if (toolId === 'fillet') {
+            return { key, message: 'Fillet: Click a corner to apply fillet. Esc to exit.' };
+        }
+        if (toolId === 'filletCorners') {
+            if (phase === 'selection') {
+                return { key, message: hasSel
+                    ? 'Fillet corners: RMB to confirm selection, Esc to cancel.'
+                    : 'Fillet corners: Select segments. RMB to confirm, Esc to cancel.' };
+            }
+            if (phase === 'pick-radius') return { key, message: 'Fillet corners: Move cursor or type radius. Enter to apply.' };
+            if (phase === 'confirm')     return { key, message: 'Fillet corners: Enter to commit, Esc to adjust.' };
+        }
+        if (toolId === 'offset' || toolId === 'offsetMultiple' || toolId === 'clipperOffset' || toolId === 'clipperOffsetMultiple') {
+            const label = toolId.startsWith('clipper') ? 'Offset (Clipper)' : 'Offset';
+            if (phase === 'selecting') {
+                return { key, message: hasSel
+                    ? `${label}: RMB to confirm selection, Esc to cancel.`
+                    : `${label}: Select objects. RMB to confirm, Esc to cancel.` };
+            }
+            if (phase === 'pickReference') return { key, message: `${label}: Pick offset side/reference point. LMB to set.` };
+            if (phase === 'dynamic')       return { key, message: `${label}: Move cursor to set distance. LMB to confirm.` };
+            if (phase === 'confirming')    return { key, message: `${label}: RMB to apply, Esc to adjust distance.` };
+        }
+
+        return { key, message: 'Use LMB to progress, RMB to confirm, Esc to cancel current tool.' };
+    }
+
+    /** @param {boolean} [force=false] @private */
+    _refreshToolHint(force = false) {
+        const hint = this._describeToolHint();
+        if (!hint) return;
+        const selectionText = this._selectionSummaryText();
+        const message = selectionText ? `${hint.message} ${selectionText}` : hint.message;
+        const renderKey = `${hint.key}|${selectionText}`;
+        if (!force && renderKey === this._lastToolHintKey) return;
+        this._lastToolHintKey = renderKey;
+        this._showStatus(message, { persist: true });
     }
 
     // ─── Public API ──────────────────────────────────────────────────────────
@@ -1595,6 +1864,9 @@ export default class ProfileEditor {
         this.state.onSelectionChange = () => {
             this.editorCanvas.renderAllSegments(this.state.segments);
             this._syncPathEditorSelectionOnly();
+            const count = Number(this.state?.selectedIds?.size ?? 0);
+            this._lastSelectionCount = count;
+            this._refreshToolHint(true);
         };
 
         // 6. Initial render.
@@ -1631,6 +1903,7 @@ export default class ProfileEditor {
 
         // 8. Mount toolbar
         const previewContainer = modal.querySelector("#bit-preview");
+        this._ensureStatusLog(previewContainer);
         this.toolbar = new EditorToolbar(previewContainer, {
             onToolChange: (toolId) => {
                 if (toolId === "group") {
@@ -1659,6 +1932,7 @@ export default class ProfileEditor {
                 this.toolbar.setActiveTool(toolId);
                 this._activateTool(toolId);
                 if (toolId !== "cursor") this._lastDrawToolId = toolId;
+                this._refreshToolHint(true);
             },
             onDone: () => this.exit(true),
             onCancel: () => this.exit(false),
@@ -1680,6 +1954,7 @@ export default class ProfileEditor {
 
         // 11. Activate canvas mouse events for the current tool
         this._activateTool("cursor");
+        this._refreshToolHint(true);
     }
 
     /**
@@ -1774,6 +2049,7 @@ export default class ProfileEditor {
             this._pathEditor.onDeactivate = this._origPathEditorOnDeactivate ?? null;
             this._pathEditor.onDeleteSymmetryGroup = this._origPathEditorOnDeleteSymmetryGroup ?? null;
             this._pathEditor.onConvertSymmetryGroup = this._origPathEditorOnConvertSymmetryGroup ?? null;
+            this._pathEditor.onStatusMessage = null;
             this.state.activeContourId = null;
             this.state.insertAfterSegId = null;
             this._pathEditor.setShapeElements([]);
@@ -1816,6 +2092,10 @@ export default class ProfileEditor {
         this._initialSyncDone = false;
         this._entryElementsSnapshot = [];
         this._entryVariableValues = {};
+        this._lastSelectionCount = 0;
+        this._lastToolHintKey = '';
+        this._resetStatusFade();
+        this._statusLogEl = null;
 
         // Restore keyboard
         if (this._keyHandler) {
@@ -1875,6 +2155,10 @@ export default class ProfileEditor {
         this._origPathEditorOnDeactivate = pathEditor.onDeactivate;
         this._origPathEditorOnDeleteSymmetryGroup = pathEditor.onDeleteSymmetryGroup ?? null;
         this._origPathEditorOnConvertSymmetryGroup = pathEditor.onConvertSymmetryGroup ?? null;
+        pathEditor.onStatusMessage = (message, meta = {}) => {
+            const tone = meta?.tone === 'warn' ? 'warn' : 'info';
+            this._showStatus(String(message ?? ''), { tone });
+        };
 
         pathEditor.onElementOrderChange = (order) => {
             if (!Array.isArray(order) || !this.state) return;
@@ -2656,6 +2940,7 @@ export default class ProfileEditor {
         this._currentTool = tool;
         this._currentToolId = toolId;
         this._bindCanvasEvents(tool);
+        this._refreshToolHint(true);
     }
 
     /**
@@ -2751,6 +3036,7 @@ export default class ProfileEditor {
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             this._lastPoint = snapped;
             tool.onPointerDown(snapped, e);
+            this._refreshToolHint();
         };
         cm._editorMouseMove = (e) => {
             // While CanvasManager is panning (right-button drag), don't feed SVG
@@ -2765,6 +3051,7 @@ export default class ProfileEditor {
             const raw = ecvs.screenToSVG(e);
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             tool.onPointerUp(snapped, e);
+            this._refreshToolHint();
         };
         cm._editorDblClick = (e) => {
             const raw = ecvs.screenToSVG(e);
@@ -2787,6 +3074,7 @@ export default class ProfileEditor {
             const raw = ecvs.screenToSVG(e);
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             this._currentTool.onConfirm(snapped, e);
+            this._refreshToolHint();
         };
 
         // TODO(editor-touch-interaction): Rework editor touch gesture arbitration with
@@ -2800,6 +3088,7 @@ export default class ProfileEditor {
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             this._lastPoint = snapped;
             tool.onPointerDown(snapped, e);
+            this._refreshToolHint();
             e.preventDefault();
         };
 
@@ -2821,6 +3110,7 @@ export default class ProfileEditor {
             const snapped = ecvs.snap(raw, this._lastPoint, e);
             tool.onPointerUp(snapped, e);
             activeTouchId = null;
+            this._refreshToolHint();
             e.preventDefault();
         };
 
@@ -2864,9 +3154,48 @@ export default class ProfileEditor {
     _registerKeyboard() {
         this._keyHandler = (e) => {
             if (!this._active) return;
-            if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+            const targetTag = String(e?.target?.tagName ?? '').toUpperCase();
+            const isTextInput = targetTag === 'INPUT' || targetTag === 'TEXTAREA';
 
-            if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+            const shortcutKey = getShortcutKeyId(e);
+            if (matchesCommandShortcut(e, 'c') || matchesCommandShortcut(e, 'v')) {
+                if (!this._pathEditor || isTextInput) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (shortcutKey === 'c') {
+                    this._syncPathEditorSelectionOnly();
+                    Promise.resolve()
+                        .then(() => this._pathEditor.copySelectionToClipboard?.())
+                        .then((result) => {
+                            if (result?.ok) return;
+                            if (Number(this.state?.selectedIds?.size ?? 0) <= 0) return;
+                            // Retry once after forcing row-highlight sync for keyboard-only selections.
+                            this._pathEditor?.setSelectedElements?.(this.state.selectedIds, { expandGroups: true });
+                            return this._pathEditor.copySelectionToClipboard?.();
+                        })
+                        .catch(() => {
+                            this._showStatus('Copy failed', { tone: 'warn' });
+                        });
+                } else if (e.altKey) {
+                    // Ctrl+Alt+V — paste plain: all formula/variable tokens evaluated to numbers.
+                    Promise.resolve()
+                        .then(() => this._pathEditor.pasteClipboardPayloadPlain?.({ centered: !!e.shiftKey }))
+                        .catch(() => {
+                            this._showStatus('Paste (plain) failed', { tone: 'warn' });
+                        });
+                } else {
+                    Promise.resolve()
+                        .then(() => this._pathEditor.pasteClipboardPayload?.({ centered: !!e.shiftKey }))
+                        .catch(() => {
+                            this._showStatus('Paste failed', { tone: 'warn' });
+                        });
+                }
+                return;
+            }
+
+            if (isTextInput) return;
+
+            if (matchesCommandShortcut(e, "z")) {
                 e.preventDefault();
                 if (e.shiftKey) this.state.redo(); else this.state.undo();
                 return;
@@ -2874,7 +3203,7 @@ export default class ProfileEditor {
             // Escape while cursor tool is active: clear selection (no operation in progress).
             // For other tools, Escape is handled by the toolbar (switches to cursor) or by
             // their own onKeyDown (e.g. MoveTool restores original positions).
-            if (e.key === "Escape" && this._currentToolId === "cursor") {
+            if (matchesShortcut(e, "Escape") && this._currentToolId === "cursor") {
                 // Let the tool cancel any active operation (e.g. pt3 drag) before
                 // falling back to the generic "clear selection" behaviour.
                 if (this._currentTool?.hasActiveCommand()) {
@@ -2885,12 +3214,18 @@ export default class ProfileEditor {
                 return;
             }
             // Delegate remaining keys to the active tool
-            if (this._currentTool?.onKeyDown(e)) e.preventDefault();
+            if (this._currentTool?.onKeyDown(e)) {
+                e.preventDefault();
+                this._refreshToolHint();
+            }
         };
         this._keyUpHandler = (e) => {
             if (!this._active) return;
             if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
-            if (this._currentTool?.onKeyUp(e)) e.preventDefault();
+            if (this._currentTool?.onKeyUp(e)) {
+                e.preventDefault();
+                this._refreshToolHint();
+            }
         };
         window.addEventListener("keydown", this._keyHandler);
         window.addEventListener("keyup", this._keyUpHandler);
@@ -2919,6 +3254,8 @@ export default class ProfileEditor {
         } else {
             previewToolbar?.classList.remove("editor-mode-hidden");
             previewEl?.classList.remove("bit-preview--editing");
+            const status = previewEl?.querySelector?.('#editor-status-log');
+            status?.remove?.();
         }
     }
 }

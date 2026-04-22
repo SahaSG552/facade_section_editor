@@ -12,6 +12,7 @@
  */
 
 import { evaluateMathExpression } from "../utils/utils.js";
+import { matchesCommandShortcut } from "../editor/keyboardShortcuts.js";
 import { VARIABLE_TOKEN_RE_GLOBAL } from "../utils/variableTokens.js";
 import {
     isShapeYAttr,
@@ -40,6 +41,36 @@ const SVG_COMMAND_DEFS = {
 
 /** Set of valid SVG path commands (both uppercase and lowercase) */
 const SVG_COMMANDS = new Set([...Object.keys(SVG_COMMAND_DEFS), ...Object.keys(SVG_COMMAND_DEFS).map(c => c.toLowerCase())]);
+
+/**
+ * @typedef {object} ClipboardBounds
+ * @property {number} minX
+ * @property {number} minY
+ * @property {number} maxX
+ * @property {number} maxY
+ * @property {number} centerX
+ * @property {number} centerY
+ */
+
+/**
+ * @typedef {object} ClipboardPayload
+ * @property {string} format
+ * @property {number} version
+ * @property {string} copiedAt
+ * @property {Array<object>} elements
+ * @property {Array<object>} [plainElements]
+ * @property {ClipboardBounds|null} [bounds]
+ * @property {ClipboardBounds|null} [plainBounds]
+ * @property {{activeElemId?:string|null}} [source]
+ */
+
+/**
+ * @typedef {object} ClipboardPasteResult
+ * @property {boolean} ok
+ * @property {number} pastedCount
+ * @property {boolean} [centered]
+ * @property {string} [reason]
+ */
 
 /**
  * PathEditor — unified element-based SVG path / shape editor.
@@ -102,6 +133,8 @@ export default class PathEditor {
     * @param {Function}           [options.onToPathRequest]     — (segIds:string[], MouseEvent)
     * @param {Function}           [options.onElementOrderChange] — (order) top-level reorder callback
     * @param {Function}           [options.onConvertSymmetryGroup] — (groupId:number)
+    * @param {Function}           [options.onStatusMessage] — (message:string, meta?:object)
+    * @param {Function}           [options.getViewportCenter] — () => {x:number,y:number}
      */
     constructor(options = {}) {
         this.container             = options.container;
@@ -128,6 +161,10 @@ export default class PathEditor {
         this.onElementOrderChange  = options.onElementOrderChange  || null;
         /** @type {((groupId:number)=>void)|null} */
         this.onConvertSymmetryGroup = options.onConvertSymmetryGroup || null;
+        /** @type {((message:string, meta?:object)=>void)|null} */
+        this.onStatusMessage = options.onStatusMessage || null;
+        /** @type {(() => {x:number,y:number})|null} */
+        this.getViewportCenter = options.getViewportCenter || null;
         /** @type {((e:MouseEvent)=>void)|null} Called when user clicks on the empty elements container background */
         this.onDeactivate          = options.onDeactivate          || null;
 
@@ -181,6 +218,10 @@ export default class PathEditor {
         this._dragState = null;
         /** @type {number} monotonic group id allocator for UI structure nodes */
         this._nextGroupId = 1;
+        /** @type {string} */
+        this._lastClipboardPayloadText = '';
+        /** @type {number} */
+        this._nextClipboardContourId = Date.now();
 
         // ── Inline edit state ─────────────────────────────────────────────
         this.activeEditLineData  = null;
@@ -200,6 +241,7 @@ export default class PathEditor {
     init() {
         this.element = document.createElement('div');
         this.element.className = 'path-editor-container';
+        this.element.tabIndex = 0;
         this.element.innerHTML = `
             <div class="path-editor-elements"></div>
             <div class="path-editor-input-area">
@@ -216,6 +258,9 @@ export default class PathEditor {
         this.addBtn            = this.element.querySelector('.path-editor-add-btn');
         this.suggestionsEl     = this.element.querySelector('.path-editor-suggestions');
         this._bindEvents();
+        this.element.addEventListener('mousedown', () => {
+            this.element?.focus?.();
+        });
         // Click on the empty elements area (not on a row) → deactivate + fire onDeactivate
         this.elementsContainer.addEventListener('mousedown', (e) => {
             if (e.target === this.elementsContainer) {
@@ -280,6 +325,12 @@ export default class PathEditor {
 
     /** @private */
     _bindEvents() {
+        this.element.addEventListener('keydown', (e) => {
+            this._handleClipboardKeydown(e);
+        });
+        this.element.addEventListener('paste', (e) => {
+            this._handleClipboardPaste(e);
+        });
         this.input.addEventListener('keydown', (e) => {
             e.stopPropagation();
             if (e.key === 'Enter') { e.preventDefault(); this._tryAddFromInput(); }
@@ -1761,6 +1812,7 @@ export default class PathEditor {
      * @private
      */
     _applyTopLevelSelection(rowEl, clickedRef, e) {
+        const before = this._captureSelectionSummary();
         const isAlreadySelected = rowEl.classList.contains('path-line-selected');
         if (e?.ctrlKey || e?.metaKey) {
             if (isAlreadySelected) {
@@ -1802,6 +1854,7 @@ export default class PathEditor {
         }
         this._lastSelectedElemRef = clickedRef;
         this._expandSelectionToGroups();
+        this._announceSelectionSummary(before);
     }
 
     /**
@@ -1890,6 +1943,902 @@ export default class PathEditor {
             if (parentElem.lines[i]?._elem?.classList.contains('path-line-selected')) out.push(i);
         }
         return out.sort((a, b) => a - b);
+    }
+
+    /** @returns {boolean} @private */
+    _hasClipboardSelection() {
+        if (this._getSelectedTopLevelRows().length > 0) return true;
+        return this._collectSelectedLineRefs().length > 0;
+    }
+
+    /** @param {string} message @param {object} [meta] @private */
+    _emitStatus(message, meta = {}) {
+        if (typeof this.onStatusMessage !== 'function') return;
+        const text = String(message ?? '').trim();
+        if (!text) return;
+        this.onStatusMessage(text, meta);
+    }
+
+    /** @param {number} n @param {string} one @param {string} many @returns {string} @private */
+    _plural(n, one, many) {
+        return Number(n) === 1 ? one : many;
+    }
+
+    /** @returns {{total:number, open:number, closed:number}} @private */
+    _selectionCounts() {
+        let open = 0;
+        let closed = 0;
+        const selectedTopRefs = new Set(this._getSelectedTopLevelRows().map((r) => r.ref));
+
+        for (const { elem } of this._getSelectedTopLevelRows()) {
+            if (elem?.type === 'path' || elem?.type === 'polyline') {
+                const hasClose = Array.isArray(elem?.lines)
+                    && elem.lines.some((line) => this.parseLine(String(line?.text ?? ''))?.cmdUpper === 'Z');
+                if (hasClose) closed += 1;
+                else open += 1;
+                continue;
+            }
+            if (elem?.type === 'circle' || elem?.type === 'ellipse' || elem?.type === 'rect') {
+                closed += 1;
+            }
+        }
+
+        for (const elem of this._elements) {
+            if (elem?.type !== 'path' && elem?.type !== 'polyline') continue;
+            const topRef = this._getTopLevelRef(elem);
+            if (topRef && selectedTopRefs.has(topRef)) continue;
+            const indices = this._collectSelectedLineIndices(elem);
+            if (indices.length > 0) open += 1;
+        }
+
+        return { total: open + closed, open, closed };
+    }
+
+    /** @returns {{total:number, open:number, closed:number}} @private */
+    _captureSelectionSummary() {
+        return this._selectionCounts();
+    }
+
+    /** @param {{total:number, open:number, closed:number}} before @private */
+    _announceSelectionSummary(before) {
+        const prev = before ?? { total: 0, open: 0, closed: 0 };
+        const next = this._selectionCounts();
+        if (next.total <= 0) {
+            if (prev.total > 0) this._emitStatus('Selection cleared');
+            return;
+        }
+
+        const added = Math.max(0, next.total - prev.total);
+        const removed = Math.max(0, prev.total - next.total);
+        if (added > 0 && removed === 0) {
+            if (next.open > 0 && next.closed === 0) {
+                this._emitStatus(`${added} ${this._plural(added, 'open curve', 'open curves')} added to selection`);
+                return;
+            }
+            if (next.closed > 0 && next.open === 0) {
+                this._emitStatus(`${added} ${this._plural(added, 'closed curve', 'closed curves')} added to selection`);
+                return;
+            }
+            this._emitStatus(`${added} ${this._plural(added, 'object', 'objects')} added to selection`);
+            return;
+        }
+
+        if (removed > 0 && added === 0) {
+            this._emitStatus(`${removed} ${this._plural(removed, 'object', 'objects')} removed from selection`);
+            return;
+        }
+
+        const details = [];
+        if (next.open > 0) details.push(`${next.open} open`);
+        if (next.closed > 0) details.push(`${next.closed} closed`);
+        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
+        this._emitStatus(`${next.total} ${this._plural(next.total, 'object', 'objects')} selected${suffix}`);
+    }
+
+    /** @param {KeyboardEvent} e @private */
+    _handleClipboardKeydown(e) {
+        if (matchesCommandShortcut(e, 'c')) {
+            if (!this._hasClipboardSelection()) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this._copySelectionToClipboard();
+            return;
+        }
+        if (matchesCommandShortcut(e, 'v')) {
+            e.preventDefault();
+            e.stopPropagation();
+            this._pasteClipboardPayload({ centered: !!e.shiftKey });
+        }
+    }
+
+    /** @param {ClipboardEvent} e @private */
+    _handleClipboardPaste(e) {
+        const target = e?.target;
+        if (target === this.input || target === this.activeEditInput) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this._pasteClipboardPayload({ centered: !!(e.shiftKey && (e.ctrlKey || e.metaKey)), clipboardEvent: e });
+    }
+
+    /** @returns {{x:number,y:number}} @private */
+    _getCurrentViewportCenter() {
+        if (typeof this.getViewportCenter === 'function') {
+            const center = this.getViewportCenter();
+            const x = Number(center?.x);
+            const y = Number(center?.y);
+            if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
+        }
+        return { x: 0, y: 0 };
+    }
+
+    /** @returns {Promise<{ok:boolean, copiedCount:number, reason?:string}>} @private */
+    async _copySelectionToClipboard() {
+        const elements = this._collectClipboardElementsFromSelection();
+        if (!Array.isArray(elements) || elements.length === 0) {
+            this._emitStatus('Nothing selected to copy', { tone: 'warn' });
+            return { ok: false, reason: 'empty-selection', copiedCount: 0 };
+        }
+        const payload = this._buildClipboardPayload(elements);
+        const text = JSON.stringify(payload);
+        this._lastClipboardPayloadText = text;
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+            }
+        } catch (_) {
+            // Keep internal fallback payload when system clipboard is unavailable.
+        }
+        this._emitStatus(`${elements.length} ${this._plural(elements.length, 'object', 'objects')} copied`);
+        return { ok: true, copiedCount: elements.length };
+    }
+
+    /**
+     * Read plain text clipboard payload either from an explicit paste event,
+     * the system clipboard, or the internal fallback snapshot.
+     * @param {ClipboardEvent|null} clipboardEvent
+     * @returns {Promise<string>}
+     * @private
+     */
+    async _readClipboardPayloadText(clipboardEvent = null) {
+        let text = '';
+        if (clipboardEvent?.clipboardData) {
+            text = String(clipboardEvent.clipboardData.getData('text/plain') ?? '');
+        }
+        if (text.trim()) return text;
+        try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard?.readText) {
+                text = String(await navigator.clipboard.readText());
+            }
+        } catch (_) {
+            text = String(this._lastClipboardPayloadText ?? '');
+        }
+        return text;
+    }
+
+    /**
+     * Resolve the appropriate element snapshot set for a paste action.
+     * Regular paste keeps formulas; plain paste prefers copy-time evaluated data.
+     * @param {ClipboardPayload} payload
+     * @param {boolean} plain
+     * @returns {{elements:Array<object>, bounds:ClipboardBounds|null}}
+     * @private
+     */
+    _resolveClipboardPasteSource(payload, plain) {
+        const elements = plain
+            ? (Array.isArray(payload?.plainElements)
+                ? payload.plainElements
+                : this._stripFormulasFromElements(payload?.elements ?? []))
+            : (payload?.elements ?? []);
+        const bounds = plain
+            ? (payload?.plainBounds ?? this._computeElementsBounds(elements))
+            : (payload?.bounds ?? null);
+        return { elements, bounds };
+    }
+
+    /**
+     * @param {{centered?:boolean, clipboardEvent?:ClipboardEvent|null, plain?:boolean}} [options]
+     * @returns {Promise<ClipboardPasteResult>}
+     * @private
+     */
+    async _pasteClipboardPayload({ centered = false, clipboardEvent = null, plain = false } = {}) {
+        const text = await this._readClipboardPayloadText(clipboardEvent);
+        const payload = this._parseClipboardPayload(text);
+        if (!payload) {
+            this._emitStatus('Nothing to paste', { tone: 'warn' });
+            return { ok: false, reason: 'empty-clipboard', pastedCount: 0 };
+        }
+
+        const source = this._resolveClipboardPasteSource(payload, plain);
+
+        let incoming = this._sanitizeIncomingElementsSnapshot(source.elements);
+        if (!Array.isArray(incoming) || incoming.length === 0) {
+            this._emitStatus('Nothing to paste', { tone: 'warn' });
+            return { ok: false, reason: 'invalid-payload', pastedCount: 0 };
+        }
+
+        const translated = centered
+            ? this._translateElementsToViewportCenter(incoming, source.bounds)
+            : incoming;
+        this._insertClipboardElements(translated);
+        const action = centered ? 'pasted in center' : 'pasted';
+        const suffix = plain ? ' (plain)' : '';
+        this._emitStatus(`${translated.length} ${this._plural(translated.length, 'object', 'objects')} ${action}${suffix}`);
+        return { ok: true, pastedCount: translated.length, centered };
+    }
+
+    /** @param {string} text @returns {ClipboardPayload|null} @private */
+    _parseClipboardPayload(text) {
+        const src = String(text ?? '').trim();
+        if (!src) return null;
+        try {
+            const parsed = JSON.parse(src);
+            if (Array.isArray(parsed)) return { elements: parsed };
+            if (!parsed || typeof parsed !== 'object') return null;
+            if (parsed.format !== 'facade-section-editor/path-elements') return null;
+            if (!Array.isArray(parsed.elements)) return null;
+            return parsed;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    /** @returns {Array<object>} @private */
+    _collectClipboardElementsFromSelection() {
+        const topRows = this._getSelectedTopLevelRows();
+        const selectedRefSet = new Set(topRows.map(r => r.ref));
+        const selectedElems = new Set();
+
+        const includeElemAndDescendants = (elem) => {
+            if (!elem) return;
+            selectedElems.add(elem);
+            if (elem.type !== 'group') return;
+            const gid = Number(elem.groupId);
+            if (!Number.isFinite(gid)) return;
+            for (const item of this._elements) {
+                const parent = this._resolveParentGroupById(item);
+                if (Number(parent?.groupId) !== gid) continue;
+                includeElemAndDescendants(item);
+            }
+        };
+
+        for (const row of topRows) includeElemAndDescendants(row.elem);
+
+        const out = [];
+        for (const elem of this._elements) {
+            if (!selectedElems.has(elem)) continue;
+            out.push(this._snapshotElementForClipboard(elem));
+        }
+
+        const selectedLineFragments = this._collectSelectedLineFragmentsExcludingTopLevel(selectedRefSet);
+        out.push(...selectedLineFragments);
+        return out;
+    }
+
+    /** @param {Set<string>} selectedTopRefs @returns {Array<object>} @private */
+    _collectSelectedLineFragmentsExcludingTopLevel(selectedTopRefs) {
+        const coveredLineRefs = new Set();
+        for (const { elem } of this._getAllTopLevelRows()) {
+            const ref = this._getTopLevelRef(elem);
+            if (!selectedTopRefs.has(ref)) continue;
+            if (elem.type !== 'path' && elem.type !== 'polyline') continue;
+            for (const line of (elem.lines ?? [])) {
+                const lineRef = this._getSelectableLineId(line, elem);
+                if (lineRef) coveredLineRefs.add(lineRef);
+            }
+        }
+
+        const fragments = [];
+        for (const elem of this._elements) {
+            if (elem.type !== 'path' && elem.type !== 'polyline') continue;
+            const selectedIndices = [];
+            for (let i = 0; i < (elem.lines?.length ?? 0); i++) {
+                const line = elem.lines[i];
+                if (!line?._elem?.classList.contains('path-line-selected')) continue;
+                const lineRef = this._getSelectableLineId(line, elem);
+                if (!lineRef || coveredLineRefs.has(lineRef)) continue;
+                const parsed = this.parseLine(String(line.text ?? ''));
+                const cmd = parsed?.cmdUpper;
+                if (!cmd || cmd === 'M' || cmd === 'Z') continue;
+                selectedIndices.push(i);
+            }
+            if (selectedIndices.length === 0) continue;
+
+            const geometries = this._evaluatePathLineGeometry(elem.lines ?? []);
+            const groups = this._groupConnectedLineIndices(selectedIndices, geometries);
+            for (const group of groups) {
+                const fragment = this._buildPathFragmentSnapshot(elem, group, geometries);
+                if (fragment) fragments.push(fragment);
+            }
+        }
+        return fragments;
+    }
+
+    /** @param {object} elem @returns {object} @private */
+    _snapshotElementForClipboard(elem) {
+        const transforms = Array.isArray(elem?.transforms)
+            ? elem.transforms.map(t => ({
+                type: String(t?.type ?? '').toUpperCase(),
+                raw: String(t?.raw ?? ''),
+                params: Array.isArray(t?.params) ? [...t.params] : [],
+            }))
+            : [];
+
+        if (elem.type === 'group') {
+            return {
+                type: 'group',
+                groupId: Number(elem.groupId),
+                guid: String(elem?.guid ?? ''),
+                name: String(elem.name ?? ''),
+                expanded: elem?.expanded !== false,
+                parentGroupId: this._optId(elem?.parentGroupId),
+                transforms,
+                linkType: elem?.linkType ?? null,
+                sourceGroupId: (elem?.sourceGroupId != null && Number.isFinite(Number(elem.sourceGroupId)))
+                    ? Number(elem.sourceGroupId) : null,
+                sourceGroupGuid: String(elem?.sourceGroupGuid ?? ''),
+                axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
+            };
+        }
+        if (elem.type === 'path' || elem.type === 'polyline') {
+            const out = {
+                type: elem.isSymmetry ? 'symmetry' : elem.type,
+                contourId: Number(elem.contourId),
+                segIds: Array.isArray(elem.segIds) ? [...elem.segIds] : [],
+                lines: (elem.lines ?? []).map((line) => ({
+                    text: String(line?.text ?? '').trim(),
+                    segId: line?.segId ?? null,
+                    lineGuid: String(line?.lineGuid ?? this._newGuid()),
+                })),
+                transforms,
+                groupId: this._optId(elem?.groupId ?? elem?.parentGroupId),
+                parentGroupId: this._optId(elem?.parentGroupId),
+            };
+            if (elem.isSymmetry) {
+                out.parentContourId = this._optId(elem?.parentContourId);
+                out.axis = elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null;
+            }
+            return out;
+        }
+
+        return {
+            type: elem.type,
+            segId: elem.segId ?? null,
+            data: { ...(elem.data ?? {}) },
+            transforms,
+            groupId: this._optId(elem?.groupId ?? elem?.parentGroupId),
+            parentContourId: this._optId(elem?.parentContourId),
+            parentGroupId: this._optId(elem?.parentGroupId),
+            linkType: elem?.linkType ?? null,
+            axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
+        };
+    }
+
+    /**
+     * Build clipboard payload with both formula-preserving and plain evaluated variants.
+     * The plain variant must be computed in the source editor so formulas don't resolve
+     * against variable values from another window during Ctrl+Alt+V.
+    * @param {Array<object>} elements
+    * @returns {ClipboardPayload}
+     * @private
+     */
+    _buildClipboardPayload(elements) {
+        const plainElements = this._stripFormulasFromElements(elements);
+        return {
+            format: 'facade-section-editor/path-elements',
+            version: 1,
+            copiedAt: new Date().toISOString(),
+            elements,
+            plainElements,
+            bounds: this._computeElementsBounds(elements),
+            plainBounds: this._computeElementsBounds(plainElements),
+            source: {
+                activeElemId: this._activeElemId,
+            },
+        };
+    }
+
+    /**
+     * Strip formula tokens from all elements — evaluate all variable/math expressions
+     * to their current numeric values. Used for "plain paste" (Ctrl+Alt+V).
+     * @param {Array<object>} elements
+     * @returns {Array<object>}
+     * @private
+     */
+    _stripFormulasFromElements(elements) {
+        if (!Array.isArray(elements)) return elements;
+        return elements.map(elem => {
+            if (!elem || typeof elem !== 'object') return elem;
+            if (elem.type === 'path' || elem.type === 'polyline') {
+                return {
+                    ...elem,
+                    lines: (elem.lines ?? []).map(line => ({
+                        ...line,
+                        text: this.evaluateLine(String(line.text ?? '')),
+                    })),
+                };
+            }
+            if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
+                const data = { ...(elem.data ?? {}) };
+                delete data._expr;
+                return { ...elem, data };
+            }
+            return elem;
+        });
+    }
+
+    /** @param {Array<{x:number,y:number}>|null} a @param {Array<{x:number,y:number}>|null} b @returns {boolean} @private */
+    _isNearPoint(a, b) {
+        if (!a || !b) return false;
+        const ax = Number(a.x), ay = Number(a.y), bx = Number(b.x), by = Number(b.y);
+        if (![ax, ay, bx, by].every(Number.isFinite)) return false;
+        return Math.hypot(ax - bx, ay - by) <= 1e-6;
+    }
+
+    /** @param {Array<object>} lines @returns {Array<object|null>} @private */
+    _evaluatePathLineGeometry(lines) {
+        const geoms = [];
+        let cx = 0;
+        let cy = 0;
+        let sx = 0;
+        let sy = 0;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const parsed = this.parseLine(String(line?.text ?? ''));
+            if (!parsed) {
+                geoms.push(null);
+                continue;
+            }
+            const cmd = parsed.cmdUpper;
+            const tokens = parsed.params.map((token) => Number(this.evaluateToken(String(token))));
+            const start = { x: cx, y: cy };
+
+            if (cmd === 'M') {
+                if (tokens.length >= 2 && Number.isFinite(tokens[0]) && Number.isFinite(tokens[1])) {
+                    cx = tokens[0];
+                    cy = tokens[1];
+                    sx = cx;
+                    sy = cy;
+                    geoms.push({ cmd, start: { x: cx, y: cy }, end: { x: cx, y: cy } });
+                } else {
+                    geoms.push(null);
+                }
+                continue;
+            }
+
+            if (cmd === 'Z') {
+                geoms.push({ cmd, start, end: { x: sx, y: sy } });
+                cx = sx;
+                cy = sy;
+                continue;
+            }
+
+            if (cmd === 'H' && tokens.length >= 1 && Number.isFinite(tokens[0])) {
+                cx = tokens[tokens.length - 1];
+                geoms.push({ cmd, start, end: { x: cx, y: cy } });
+                continue;
+            }
+            if (cmd === 'V' && tokens.length >= 1 && Number.isFinite(tokens[0])) {
+                cy = tokens[tokens.length - 1];
+                geoms.push({ cmd, start, end: { x: cx, y: cy } });
+                continue;
+            }
+
+            if (tokens.length >= 2) {
+                const ex = tokens[tokens.length - 2];
+                const ey = tokens[tokens.length - 1];
+                if (Number.isFinite(ex) && Number.isFinite(ey)) {
+                    cx = ex;
+                    cy = ey;
+                    geoms.push({ cmd, start, end: { x: ex, y: ey } });
+                    continue;
+                }
+            }
+            geoms.push(null);
+        }
+        return geoms;
+    }
+
+    /** @param {number[]} indices @param {Array<object|null>} geometries @returns {number[][]} @private */
+    _groupConnectedLineIndices(indices, geometries) {
+        const sorted = [...new Set(indices)].sort((a, b) => a - b);
+        if (sorted.length === 0) return [];
+        const groups = [];
+        let current = [sorted[0]];
+        for (let i = 1; i < sorted.length; i++) {
+            const prevIdx = sorted[i - 1];
+            const nextIdx = sorted[i];
+            const prevGeom = geometries[prevIdx];
+            const nextGeom = geometries[nextIdx];
+            const connected = prevGeom && nextGeom && this._isNearPoint(prevGeom.end, nextGeom.start);
+            if (connected) current.push(nextIdx);
+            else {
+                groups.push(current);
+                current = [nextIdx];
+            }
+        }
+        groups.push(current);
+        return groups;
+    }
+
+    /** @param {number} n @returns {number} @private */
+    _round6(n) {
+        return Number(Number(n).toFixed(6));
+    }
+
+    /** @returns {number} @private */
+    _allocateTempContourId() {
+        if (!Number.isFinite(Number(this._nextClipboardContourId))) {
+            this._nextClipboardContourId = Date.now();
+        }
+        this._nextClipboardContourId += 1;
+        return Number(this._nextClipboardContourId);
+    }
+
+    /** @param {object} parentElem @param {number[]} indices @param {Array<object|null>} geometries @returns {object|null} @private */
+    _buildPathFragmentSnapshot(parentElem, indices, geometries) {
+        if (!Array.isArray(indices) || indices.length === 0) return null;
+        const firstGeom = geometries[indices[0]];
+        if (!firstGeom?.start) return null;
+
+        const mText = `M ${this._round6(firstGeom.start.x)} ${this._round6(firstGeom.start.y)}`;
+        const lines = [{ text: mText, segId: null, lineGuid: this._newGuid() }];
+        for (const idx of indices) {
+            const line = parentElem.lines?.[idx];
+            if (!line) continue;
+            lines.push({
+                text: String(line.text ?? '').trim(),
+                segId: line.segId ?? null,
+                lineGuid: this._newGuid(),
+            });
+        }
+        const segIds = lines.map(l => l.segId).filter(Boolean);
+        return {
+            type: parentElem.type === 'path' ? 'path' : 'polyline',
+            contourId: this._allocateTempContourId(),
+            segIds,
+            lines,
+            transforms: Array.isArray(parentElem.transforms)
+                ? parentElem.transforms.map(t => ({
+                    type: String(t?.type ?? '').toUpperCase(),
+                    raw: String(t?.raw ?? ''),
+                    params: Array.isArray(t?.params) ? [...t.params] : [],
+                }))
+                : [],
+            groupId: null,
+            parentGroupId: null,
+            parentContourId: null,
+        };
+    }
+
+    /** @param {Array<object>} elements @returns {{minX:number,maxX:number,minY:number,maxY:number,centerX:number,centerY:number}|null} @private */
+    _computeElementsBounds(elements) {
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+
+        const pushPoint = (x, y) => {
+            if (!Number.isFinite(Number(x)) || !Number.isFinite(Number(y))) return;
+            const px = Number(x);
+            const py = Number(y);
+            minX = Math.min(minX, px);
+            minY = Math.min(minY, py);
+            maxX = Math.max(maxX, px);
+            maxY = Math.max(maxY, py);
+        };
+
+        for (const elem of (elements ?? [])) {
+            if (elem?.type === 'circle') {
+                const cx = Number(elem?.data?.center?.x);
+                const cy = Number(elem?.data?.center?.y);
+                const r = Math.abs(Number(elem?.data?.radius));
+                if (Number.isFinite(cx) && Number.isFinite(cy) && Number.isFinite(r)) {
+                    pushPoint(cx - r, cy - r);
+                    pushPoint(cx + r, cy + r);
+                }
+                continue;
+            }
+            if (elem?.type === 'rect') {
+                const x = Number(elem?.data?.x);
+                const y = Number(elem?.data?.y);
+                const w = Number(elem?.data?.w);
+                const h = Number(elem?.data?.h);
+                pushPoint(x, y);
+                pushPoint(x + w, y + h);
+                continue;
+            }
+            if (elem?.type === 'ellipse') {
+                const cx = Number(elem?.data?.cx);
+                const cy = Number(elem?.data?.cy);
+                const rx = Math.abs(Number(elem?.data?.rx));
+                const ry = Math.abs(Number(elem?.data?.ry));
+                pushPoint(cx - rx, cy - ry);
+                pushPoint(cx + rx, cy + ry);
+                continue;
+            }
+            if (elem?.type === 'path' || elem?.type === 'polyline' || elem?.type === 'symmetry') {
+                const geoms = this._evaluatePathLineGeometry(elem.lines ?? []);
+                for (const g of geoms) {
+                    if (!g) continue;
+                    pushPoint(g.start?.x, g.start?.y);
+                    pushPoint(g.end?.x, g.end?.y);
+                }
+            }
+        }
+
+        if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+            return null;
+        }
+        return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            centerX: (minX + maxX) / 2,
+            centerY: (minY + maxY) / 2,
+        };
+    }
+
+    /** @param {Array<object>} elements @param {object|null} sourceBounds @returns {Array<object>} @private */
+    _translateElementsToViewportCenter(elements, sourceBounds = null) {
+        const bounds = sourceBounds ?? this._computeElementsBounds(elements);
+        if (!bounds) return elements;
+        const center = this._getCurrentViewportCenter();
+        const dx = Number(center.x) - Number(bounds.centerX);
+        const dy = Number(center.y) - Number(bounds.centerY);
+        if (!Number.isFinite(dx) || !Number.isFinite(dy) || (Math.abs(dx) <= 1e-9 && Math.abs(dy) <= 1e-9)) {
+            return elements;
+        }
+        return elements.map((elem) => this._translateElementSnapshot(elem, dx, dy));
+    }
+
+    /** @param {string} token @param {number} delta @returns {string} @private */
+    _shiftParamToken(token, delta) {
+        const src = String(token ?? '').trim();
+        if (!src || !Number.isFinite(delta) || Math.abs(delta) <= 1e-12) return src;
+        const numericLiteral = /^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/.test(src);
+        if (numericLiteral) {
+            return String(this._round6(Number(src) + delta));
+        }
+        return `(${src})${delta >= 0 ? '+' : '-'}${this._round6(Math.abs(delta))}`;
+    }
+
+    /** @param {string} text @param {number} dx @param {number} dy @returns {string} @private */
+    _translateLineText(text, dx, dy) {
+        const parsed = this.parseLine(String(text ?? ''));
+        if (!parsed) return String(text ?? '');
+        const cmdUpper = parsed.cmdUpper;
+        if (cmdUpper === 'Z') return parsed.cmd;
+        const def = SVG_COMMAND_DEFS[cmdUpper] ?? { args: [] };
+        const shifted = parsed.params.map((token, idx) => {
+            const arg = def.args[idx] ?? '';
+            if (arg.startsWith('x')) return this._shiftParamToken(token, dx);
+            if (arg.startsWith('y')) return this._shiftParamToken(token, dy);
+            return String(token ?? '').trim();
+        });
+        return shifted.length > 0 ? `${parsed.cmd} ${shifted.join(' ')}` : parsed.cmd;
+    }
+
+    /** @param {object} elem @param {number} dx @param {number} dy @returns {object} @private */
+    _translateElementSnapshot(elem, dx, dy) {
+        if (!elem || typeof elem !== 'object') return elem;
+        const out = JSON.parse(JSON.stringify(elem));
+        if (out.type === 'circle') {
+            if (out.data?.center) {
+                out.data.center.x = Number(out.data.center.x ?? 0) + dx;
+                out.data.center.y = Number(out.data.center.y ?? 0) + dy;
+            }
+            if (out.data?.pt3) {
+                out.data.pt3.x = Number(out.data.pt3.x ?? 0) + dx;
+                out.data.pt3.y = Number(out.data.pt3.y ?? 0) + dy;
+            }
+            if (out.data?._expr?.cx) out.data._expr.cx = this._shiftParamToken(out.data._expr.cx, dx);
+            if (out.data?._expr?.cy) out.data._expr.cy = this._shiftParamToken(out.data._expr.cy, dy);
+            return out;
+        }
+        if (out.type === 'rect') {
+            out.data = { ...(out.data ?? {}) };
+            out.data.x = Number(out.data.x ?? 0) + dx;
+            out.data.y = Number(out.data.y ?? 0) + dy;
+            if (out.data?._expr?.x) out.data._expr.x = this._shiftParamToken(out.data._expr.x, dx);
+            if (out.data?._expr?.y) out.data._expr.y = this._shiftParamToken(out.data._expr.y, dy);
+            return out;
+        }
+        if (out.type === 'ellipse') {
+            out.data = { ...(out.data ?? {}) };
+            out.data.cx = Number(out.data.cx ?? 0) + dx;
+            out.data.cy = Number(out.data.cy ?? 0) + dy;
+            if (out.data?._expr?.cx) out.data._expr.cx = this._shiftParamToken(out.data._expr.cx, dx);
+            if (out.data?._expr?.cy) out.data._expr.cy = this._shiftParamToken(out.data._expr.cy, dy);
+            return out;
+        }
+        if (out.type === 'path' || out.type === 'polyline' || out.type === 'symmetry') {
+            out.lines = (out.lines ?? []).map((line) => ({
+                ...line,
+                text: this._translateLineText(String(line?.text ?? ''), dx, dy),
+            }));
+            return out;
+        }
+        return out;
+    }
+
+    /** @param {Array<object>} incoming @returns {Array<object>} @private */
+    _sanitizeIncomingElementsSnapshot(incoming) {
+        if (!Array.isArray(incoming) || incoming.length === 0) return [];
+        const cloned = JSON.parse(JSON.stringify(incoming));
+
+        const usedSegIds = new Set();
+        const usedContourIds = new Set();
+        const usedGroupIds = new Set();
+        const usedGroupGuids = new Set();
+
+        for (const elem of this._elements) {
+            if (elem?.segId) usedSegIds.add(String(elem.segId));
+            if (Array.isArray(elem?.segIds)) elem.segIds.forEach((sid) => sid && usedSegIds.add(String(sid)));
+            if (Array.isArray(elem?.lines)) elem.lines.forEach((line) => line?.segId && usedSegIds.add(String(line.segId)));
+            if (elem?.type === 'path' || elem?.type === 'polyline') usedContourIds.add(Number(elem.contourId));
+            if (elem?.type === 'group') {
+                usedGroupIds.add(Number(elem.groupId));
+                const guid = String(elem?.guid ?? '').trim();
+                if (guid) usedGroupGuids.add(guid);
+            }
+        }
+
+        let nextSeg = 1;
+        while (usedSegIds.has(`seg-${nextSeg}`) || usedSegIds.has(`line-${nextSeg}`)) nextSeg++;
+        let nextContour = 1;
+        while (usedContourIds.has(nextContour)) nextContour++;
+        let nextGroup = 1;
+        while (usedGroupIds.has(nextGroup)) nextGroup++;
+
+        const allocSeg = (candidate, prefix = 'seg') => {
+            const c = String(candidate ?? '').trim();
+            if (c && !usedSegIds.has(c)) {
+                usedSegIds.add(c);
+                return c;
+            }
+            let id = `${prefix}-${nextSeg++}`;
+            while (usedSegIds.has(id)) id = `${prefix}-${nextSeg++}`;
+            usedSegIds.add(id);
+            return id;
+        };
+        const allocContour = (candidate) => {
+            const c = Number(candidate);
+            if (Number.isFinite(c) && !usedContourIds.has(c)) {
+                usedContourIds.add(c);
+                return c;
+            }
+            let id = nextContour++;
+            while (usedContourIds.has(id)) id = nextContour++;
+            usedContourIds.add(id);
+            return id;
+        };
+        const allocGroup = (candidate) => {
+            const c = Number(candidate);
+            if (Number.isFinite(c) && !usedGroupIds.has(c)) {
+                usedGroupIds.add(c);
+                return c;
+            }
+            let id = nextGroup++;
+            while (usedGroupIds.has(id)) id = nextGroup++;
+            usedGroupIds.add(id);
+            return id;
+        };
+        const allocGuid = (candidate) => {
+            const c = String(candidate ?? '').trim();
+            if (c && !usedGroupGuids.has(c)) {
+                usedGroupGuids.add(c);
+                return c;
+            }
+            let guid = `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+            while (usedGroupGuids.has(guid)) {
+                guid = `group-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+            }
+            usedGroupGuids.add(guid);
+            return guid;
+        };
+
+        const groupIdRemap = new Map();
+        const groupGuidRemap = new Map();
+        for (const elem of cloned) {
+            if (elem?.type !== 'group') continue;
+            const oldId = Number(elem.groupId);
+            if (!Number.isFinite(oldId)) continue;
+            groupIdRemap.set(oldId, allocGroup(oldId));
+            groupGuidRemap.set(oldId, allocGuid(elem.guid));
+        }
+
+        const contourIdRemap = new Map();
+        for (const elem of cloned) {
+            if (!(elem?.type === 'path' || elem?.type === 'polyline' || elem?.type === 'symmetry')) continue;
+            const oldId = Number(elem.contourId);
+            if (!Number.isFinite(oldId)) continue;
+            contourIdRemap.set(oldId, allocContour(oldId));
+        }
+
+        const mapGroupId = (value) => {
+            const n = Number(value);
+            return Number.isFinite(n) ? (groupIdRemap.get(n) ?? null) : null;
+        };
+        const mapContourId = (value) => {
+            const n = Number(value);
+            return Number.isFinite(n) ? (contourIdRemap.get(n) ?? null) : null;
+        };
+
+        return cloned.map((elem) => {
+            if (!elem || typeof elem !== 'object') return elem;
+            if (elem.type === 'group') {
+                return {
+                    ...elem,
+                    groupId: groupIdRemap.get(Number(elem.groupId)) ?? allocGroup(elem.groupId),
+                    guid: groupGuidRemap.get(Number(elem.groupId)) ?? allocGuid(elem.guid),
+                    parentGroupId: mapGroupId(elem?.parentGroupId),
+                    sourceGroupId: mapGroupId(elem?.sourceGroupId),
+                    sourceGroupGuid: (() => {
+                        const srcOld = Number(elem?.sourceGroupId);
+                        if (Number.isFinite(srcOld) && groupGuidRemap.has(srcOld)) return groupGuidRemap.get(srcOld);
+                        return String(elem?.sourceGroupGuid ?? '').trim();
+                    })(),
+                    name: String(elem?.name ?? ''),
+                };
+            }
+            if (elem.type === 'circle' || elem.type === 'rect' || elem.type === 'ellipse') {
+                return {
+                    ...elem,
+                    segId: allocSeg(elem.segId, 'seg'),
+                    groupId: mapGroupId(elem?.groupId ?? elem?.parentGroupId),
+                    parentContourId: mapContourId(elem?.parentContourId),
+                    parentGroupId: mapGroupId(elem?.parentGroupId),
+                    linkType: String(elem?.linkType ?? '') === 'symmetry' ? 'symmetry' : null,
+                    axis: elem?.axis ? JSON.parse(JSON.stringify(elem.axis)) : null,
+                };
+            }
+            if (elem.type === 'path' || elem.type === 'polyline' || elem.type === 'symmetry') {
+                const contourId = contourIdRemap.get(Number(elem.contourId)) ?? allocContour(elem.contourId);
+                const lines = Array.isArray(elem.lines)
+                    ? elem.lines.map((line) => ({
+                        ...(line ?? {}),
+                        segId: line?.segId != null ? allocSeg(line?.segId, 'line') : null,
+                        lineGuid: String(line?.lineGuid ?? this._newGuid()),
+                    }))
+                    : [];
+                let segIds = Array.isArray(elem.segIds)
+                    ? elem.segIds.map((sid) => allocSeg(sid, 'line'))
+                    : [];
+                if (lines.length > 0) segIds = lines.map((line) => line.segId).filter(Boolean);
+                return {
+                    ...elem,
+                    contourId,
+                    lines,
+                    segIds: [...new Set(segIds)],
+                    parentContourId: mapContourId(elem?.parentContourId),
+                    parentGroupId: mapGroupId(elem?.parentGroupId),
+                    groupId: mapGroupId(elem?.groupId ?? elem?.parentGroupId),
+                };
+            }
+            return { ...elem };
+        });
+    }
+
+    /** @param {Array<object>} elements @private */
+    _insertClipboardElements(elements) {
+        if (!Array.isArray(elements) || elements.length === 0) return;
+        const selectedRowElems = this._getSelectedTopLevelRows().map(r => r.elem);
+        const selectedIndices = selectedRowElems
+            .map((elem) => this._elements.indexOf(elem))
+            .filter((idx) => idx >= 0);
+        const insertAt = selectedIndices.length > 0
+            ? (Math.max(...selectedIndices) + 1)
+            : this._elements.length;
+        this._elements.splice(insertAt, 0, ...elements);
+        this._pruneEmptyGroups();
+        this._renderElements();
+        // Fire onChange FIRST: imports new contour content + group structure into state.
+        // _emitTopLevelOrder fires onElementOrderChange which triggers a state notification
+        // that calls setElements() — if that happens before onChange the new group children
+        // are not yet in state and the group gets pruned as empty.
+        this._fireOnChange();
+        this._emitTopLevelOrder();
     }
 
     /**
@@ -2351,6 +3300,7 @@ export default class PathEditor {
 
         // ── Click → visual select + canvas callback + track active sub-line ──
         lineEl.addEventListener('click', (e) => {
+            const before = this._captureSelectionSummary();
             if (e.target.closest('.path-cell') || e.target.closest('.path-line-delete')) return;
             const isAlreadySelected = lineEl.classList.contains('path-line-selected');
 
@@ -2389,6 +3339,7 @@ export default class PathEditor {
                 const selectedRefs = this._collectSelectedLineRefs();
                 this.onLineClick(lineRef, e, selectedRefs);
             }
+            this._announceSelectionSummary(before);
         });
         return lineEl;
     }
@@ -4898,6 +5849,14 @@ export default class PathEditor {
     clearLineSelection()   { this.clearAllSelection(); }
     /** Alias for clearAllSelection */
     clearShapeSelection()  { this.clearAllSelection(); }
+    /** @returns {boolean} */
+    hasClipboardSelection() { return this._hasClipboardSelection(); }
+    /** @returns {Promise<{ok:boolean, copiedCount:number}>} */
+    async copySelectionToClipboard() { return this._copySelectionToClipboard(); }
+    /** @param {{centered?:boolean}} [options] @returns {Promise<{ok:boolean, pastedCount:number}>} */
+    async pasteClipboardPayload(options = {}) { return this._pasteClipboardPayload({ centered: !!options?.centered }); }
+    /** Paste with all formula/variable tokens evaluated to plain numbers. @param {{centered?:boolean}} [options] */
+    async pasteClipboardPayloadPlain(options = {}) { return this._pasteClipboardPayload({ centered: !!options?.centered, plain: true }); }
     /** @deprecated No equivalent in new design */
     setMirrorStartIndex(_n) { /* no-op */ }
 
