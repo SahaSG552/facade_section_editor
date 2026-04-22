@@ -48,6 +48,7 @@ git clone <this-repo> threejs-mastery
 ## 💡 Usage Examples
 
 The skill automatically activates when you:
+
 - Work with Three.js code
 - Ask about 3D graphics
 - Mention WebGPU, shaders, or rendering
@@ -56,30 +57,35 @@ The skill automatically activates when you:
 ### Example Prompts
 
 **"Create a WebGPU renderer with fallback"**
+
 ```
 Copilot will provide complete code with feature detection,
 initialization, and WebGL2 fallback
 ```
 
 **"Set up a particle system"**
+
 ```
 Generates optimized particle system with proper geometry
 and animation loop
 ```
 
 **"Optimize my Three.js scene for mobile"**
+
 ```
 Provides specific optimizations: pixel ratio, shadows,
 LOD, texture compression
 ```
 
 **"Create a React Three Fiber component"**
+
 ```
 Generates R3F component with hooks, proper refs,
 and performance patterns
 ```
 
 **"Add post-processing bloom effect"**
+
 ```
 Sets up EffectComposer with UnrealBloomPass and
 proper configuration
@@ -96,7 +102,9 @@ threejs-mastery/
 ```
 
 ### SKILL.md
+
 Core skill containing:
+
 - Essential learning resources (official docs, courses)
 - Modern architecture patterns (2026)
 - WebGPU setup with fallback
@@ -108,7 +116,9 @@ Core skill containing:
 - Production checklist
 
 ### examples.md
+
 Ready-to-use code snippets:
+
 - Basic scene setup
 - GLTF model loading
 - Particle systems
@@ -122,8 +132,9 @@ Ready-to-use code snippets:
 ### Scripts
 
 **performance-profiler.ts** - Monitor your app:
+
 ```typescript
-import { PerformanceProfiler } from './performance-profiler';
+import { PerformanceProfiler } from "./performance-profiler";
 
 const profiler = new PerformanceProfiler(renderer, scene);
 
@@ -131,14 +142,15 @@ function animate() {
   profiler.begin();
   renderer.render(scene, camera);
   profiler.end();
-  
+
   // Check stats
   const stats = profiler.getStats();
-  console.log('FPS:', stats.fps);
+  console.log("FPS:", stats.fps);
 }
 ```
 
 **asset-optimizer.js** - Optimize assets:
+
 ```bash
 node asset-optimizer.js --input ./public/assets --output ./dist/assets
 ```
@@ -146,7 +158,9 @@ node asset-optimizer.js --input ./public/assets --output ./dist/assets
 ## 🎯 Skill Features
 
 ### Automatic Activation
+
 The skill triggers when you:
+
 - Import Three.js (`import * as THREE`)
 - Mention WebGPU, shaders, or 3D terms
 - Work with .tsx/.jsx files using R3F
@@ -154,7 +168,9 @@ The skill triggers when you:
 - Request material or lighting setup
 
 ### Code Quality
+
 All generated code includes:
+
 - ✅ TypeScript types
 - ✅ Error handling
 - ✅ Memory cleanup
@@ -163,6 +179,7 @@ All generated code includes:
 - ✅ WebGPU + WebGL2 fallback
 
 ### Best Practices (2026)
+
 - WebGPU as default
 - PBR materials (MeshPhysicalMaterial)
 - Proper texture compression
@@ -184,7 +201,9 @@ The skill teaches progressively:
 ## 🔧 Configuration
 
 ### Enable Skill
+
 In VS Code settings.json:
+
 ```json
 {
   "chat.useAgentSkills": true
@@ -192,7 +211,9 @@ In VS Code settings.json:
 ```
 
 ### Skill Locations
+
 Copilot checks these locations:
+
 1. `~/.claude/skills/` (user-level)
 2. `.claude/skills/` (workspace-level)
 3. `.github/skills/` (repository-level)
@@ -200,18 +221,23 @@ Copilot checks these locations:
 ## 🌟 Tips for Best Results
 
 ### Be Specific
+
 ❌ "Make a 3D scene"
 ✅ "Create a Three.js scene with WebGPU renderer, orbital camera, and PBR materials"
 
 ### Mention Context
+
 ❌ "Optimize performance"
 ✅ "Optimize my Three.js scene for mobile devices using LOD and instancing"
 
 ### Use Code Context
+
 Select existing code before asking questions - Copilot will use it as context
 
 ### Follow-up Questions
+
 Ask for clarification or alternatives:
+
 - "Show alternative using React Three Fiber"
 - "Add error handling"
 - "Optimize for mobile"
@@ -219,6 +245,7 @@ Ask for clarification or alternatives:
 ## 📊 What to Expect
 
 ### Code Quality
+
 - Production-ready patterns
 - TypeScript definitions
 - Error boundaries
@@ -226,7 +253,9 @@ Ask for clarification or alternatives:
 - Performance optimizations
 
 ### Performance Targets
+
 Generated code aims for:
+
 - 60 FPS on target hardware
 - <100 draw calls
 - <500MB memory usage
@@ -251,6 +280,7 @@ Generated code aims for:
 ### Wrong Patterns
 
 The skill teaches 2026 best practices:
+
 - WebGPU (not WebGL1)
 - MeshPhysicalMaterial (not MeshLambertMaterial)
 - TypeScript (not plain JS)
@@ -259,6 +289,7 @@ The skill teaches 2026 best practices:
 ## 🔄 Updates
 
 The skill reflects Three.js state as of January 2026:
+
 - Three.js r170+
 - WebGPU stable
 - React Three Fiber v9+
@@ -267,21 +298,25 @@ The skill reflects Three.js state as of January 2026:
 ## 📚 Additional Resources
 
 ### Official Documentation
+
 - Three.js Docs: https://threejs.org/docs/
 - WebGPU Fundamentals: https://webgpufundamentals.org/
 - React Three Fiber: https://docs.pmnd.rs/react-three-fiber/
 
 ### Courses
+
 - Three.js Journey (Bruno Simon): https://threejs-journey.com/
 - Discover Three.js: https://discoverthreejs.com/
 
 ### Community
+
 - Three.js Discourse: https://discourse.threejs.org/
 - GitHub Discussions: https://github.com/mrdoob/three.js/discussions
 
 ## 🤝 Contributing
 
 Found improvements?
+
 1. Fork the repository
 2. Add to SKILL.md or examples.md
 3. Test with Copilot
@@ -294,6 +329,7 @@ MIT License - Use freely in your projects
 ## 🆘 Support
 
 Issues? Questions?
+
 1. Check examples.md for code snippets
 2. Review SKILL.md for patterns
 3. Ask Copilot: "Explain this Three.js pattern"

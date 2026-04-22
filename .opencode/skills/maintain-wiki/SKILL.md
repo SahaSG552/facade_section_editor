@@ -18,6 +18,7 @@ Health-check and maintain wiki consistency.
 ## Workflow
 
 ### 1. Scan wiki pages
+
 - Read `.wiki/index.md` to see all pages
 - Look for inconsistencies
 - Check timestamps
@@ -27,23 +28,28 @@ Health-check and maintain wiki consistency.
 Check for:
 
 **Contradictions:**
+
 - Same topic in multiple places with different info
 - Outdated claims that newer sources contradict
 
 **Orphans:**
+
 - Pages with no inbound links
 - Pages not referenced by any other page
 
 **Gaps:**
+
 - Concepts mentioned but no page exists
 - Missing cross-references between related pages
 
 **Stale:**
+
 - Pages not updated in long time
 - Broken links
 - Outdated information
 
 ### 3. Fix Issues
+
 - Update contradictory pages
 - Add orphan pages to relevant indexes
 - Create pages for missing concepts
@@ -51,6 +57,7 @@ Check for:
 - Add cross-references
 
 ### 4. Log Action
+
 ```
 ## [[date]] lint | Health check
 - Fixed: issues found
@@ -60,6 +67,7 @@ Check for:
 ## Example
 
 ### Full Lint Pass
+
 > "run lint on the wiki"
 
 1. Read index and scan all pages
@@ -70,6 +78,7 @@ Check for:
 6. Log in `.wiki/log.md`
 
 ### Quick Fix
+
 > "check if coordinate-systems.md is current"
 
 1. Read coordinate-systems.md
@@ -79,12 +88,12 @@ Check for:
 
 ## Key Checks
 
-| Check | How |
-|-------|-----|
-| Contradictions | Compare related pages |
-| Orphans | Look for pages with no links |
-| Gaps | Search for undefined terms |
-| Stale | Check dates in frontmatter |
+| Check          | How                          |
+| -------------- | ---------------------------- |
+| Contradictions | Compare related pages        |
+| Orphans        | Look for pages with no links |
+| Gaps           | Search for undefined terms   |
+| Stale          | Check dates in frontmatter   |
 
 ## Rules
 

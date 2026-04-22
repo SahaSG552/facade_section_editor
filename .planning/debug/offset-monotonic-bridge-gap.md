@@ -35,7 +35,7 @@ started: discovered after prior fixes for arc degeneration / stitch resurrection
   implication: The source line is not removed in initial offset generation; it is lost or bypassed during downstream collapse/join consolidation.
 
 - timestamp: 2026-04-13T00:00:00Z
-  checked: OffsetContourBuilder dropped-gap branch and OffsetEngine._stitchSegments
+  checked: OffsetContourBuilder dropped-gap branch and OffsetEngine.\_stitchSegments
   found: Builder has an explicit dropped-source-gap path keyed off skipped source indices, while engine stitching only snaps tiny closed gaps and otherwise inserts a synthetic line for any remaining closure gap.
   implication: If the builder exits with a real gap after handling a collapsed source feature, the visible reappearing segment is expected downstream and the root fix point is in builder join/collapse logic, not in engine stitching.
 
@@ -61,7 +61,7 @@ started: discovered after prior fixes for arc degeneration / stitch resurrection
 
 ## Resolution
 
-root_cause: Closed-contour convex line->arc processing around source line 0 consumes that line from both sides into a reversed residual segment: join 5->0 trims its start to the previous miter, then join 0->1 trims its end to the arc-circle intersection beyond the line's original end. The strict non-resurrection rule later removes this reversed line, but the builder never reconnects the surviving previous line and next arc, leaving a real closure gap. Engine _stitchSegments then materializes that gap as a line once it grows beyond the closed-gap snap threshold.
-fix: Best fix point is OffsetContourBuilder's convex sharp current.type === "line" && next.type === "arc" branch: detect when the chosen trim point would reverse or fully consume the current line, and collapse/stitch across that line immediately (using previous-segment support or an equivalent local restitch) instead of creating a reversed line that gets deleted later. Avoid fixing this in OffsetEngine._stitchSegments; that would only hide the symptom and weaken useful gap handling elsewhere.
+root_cause: Closed-contour convex line->arc processing around source line 0 consumes that line from both sides into a reversed residual segment: join 5->0 trims its start to the previous miter, then join 0->1 trims its end to the arc-circle intersection beyond the line's original end. The strict non-resurrection rule later removes this reversed line, but the builder never reconnects the surviving previous line and next arc, leaving a real closure gap. Engine \_stitchSegments then materializes that gap as a line once it grows beyond the closed-gap snap threshold.
+fix: Best fix point is OffsetContourBuilder's convex sharp current.type === "line" && next.type === "arc" branch: detect when the chosen trim point would reverse or fully consume the current line, and collapse/stitch across that line immediately (using previous-segment support or an equivalent local restitch) instead of creating a reversed line that gets deleted later. Avoid fixing this in OffsetEngine.\_stitchSegments; that would only hide the symptom and weaken useful gap handling elsewhere.
 verification: Static code-path analysis plus runtime probes at d=-11.5/-12/-13 confirm the exact join points, reversed residual line direction, and transition from engine snap to synthetic bridge insertion.
 files_changed: []

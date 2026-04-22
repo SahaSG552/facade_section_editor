@@ -3,4 +3,3 @@
 This file tracks problems, gotchas, and edge cases discovered during implementation.
 
 ---
-

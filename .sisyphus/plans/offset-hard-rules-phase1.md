@@ -5,6 +5,7 @@
 > **Quick Summary**: Внедрить 3 критичных правила в offset pipeline: (0) параллельность сегментов через U-bridges вместо arc join fallback, (1) защита арочных центров от auto-correct при сериализации, (3) П-образные бриджи при failed sharp joins.
 >
 > **Deliverables**:
+>
 > - `segmentsToSVGPath` с флагом `skipArcAutoCorrect` (Rule 1)
 > - `OffsetEngine` использует новую сериализацию для оффсетных результатов
 > - `OffsetContourBuilder` заменяет `createArcJoin` fallback на `buildUShapeBridge` (Rule 3)
@@ -19,10 +20,13 @@
 ## Context
 
 ### Original Request
+
 Хочу добавить несколько жёстких правил для оффсет инструмента. Phase 1: Rules 0, 1, 3 — параллельность сегментов, защита арочных центров, П-образные бриджи.
 
 ### Interview Summary
+
 **Key Discussions**:
+
 - Поэтапное внедрение: начинаем с критичных правил (0, 1, 3), остальные в следующих фазах
 - Тесты после реализации (не TDD)
 - Arc auto-correct: отдельная функция сериализации без auto-correct
@@ -30,6 +34,7 @@
 - buildUShapeBridge (3 сегмента) вместо buildTangentBridge
 
 **Research Findings**:
+
 - `buildUShapeBridge` и `buildTangentBridge` существуют в `OffsetRules.js` но НИГДЕ не импортируются в production
 - `OffsetContourBuilder` не импортирует ничего из `OffsetRules.js`
 - `createArcJoin` вызывается в 2 местах: (1) sharp fallback, (2) round join mode — менять только (1)
@@ -37,7 +42,9 @@
 - `ARC_RADIUS_TOLERANCE = 0.01mm` — автокоррекция срабатывает при `rx < chordLength/2 - 0.01`
 
 ### Metis Review
+
 **Identified Gaps** (addressed):
+
 - buildUShapeBridge возвращает массив, не один сегмент — решено: `result.push(...bridge)`
 - buildUShapeBridge может вернуть null — решено: fallback chain с createArcJoin
 - Concave corners не затрагиваем — только convex sharp fallback
@@ -49,9 +56,11 @@
 ## Work Objectives
 
 ### Core Objective
+
 Обеспечить инвариант параллельности оффсетных сегментов и защитить арочные центры от искажений при сериализации.
 
 ### Concrete Deliverables
+
 - `src/utils/arcApproximation.js` — `segmentsToSVGPath` с опцией `skipArcAutoCorrect`
 - `src/operations/OffsetEngine.js` — передача `{ skipArcAutoCorrect: true }` при сериализации
 - `src/operations/OffsetContourBuilder.js` — импорт `buildUShapeBridge`, замена fallback
@@ -60,12 +69,14 @@
 - `tests/offset-rule0-parallelism.spec.js` — тесты Rule 0
 
 ### Definition of Done
+
 - [ ] `npm run test` — все существующие тесты проходят, новые тесты для Rules 0, 1, 3 добавлены
 - [ ] `npm run build` — production build без ошибок
 - [ ] Визуальная проверка: оффсет контура с аркой+линией (из примера пользователя) показывает параллельные сегменты
 - [ ] **Tangent connection fix**: арка→линия с касательным соединением создаёт бридж, а не разрыв
 
 ### Must Have
+
 - U-bridge при failed sharp join на convex corners
 - Skip arc auto-correct для оффсетных результатов сериализации
 - Fallback chain: U-bridge → tangent bridge → createArcJoin (last resort)
@@ -74,6 +85,7 @@
 - Concave corners НЕ меняются (trim, не bridging)
 
 ### Must NOT Have (Guardrails)
+
 - НЕТ изменений в `OffsetCurveEvaluator.js` — математика оффсета корректна
 - НЕТ изменений в `OffsetCapper.js` или `OffsetTrimmer.js`
 - НЕТ новых join типов или конфигурационных опций для бриджей
@@ -90,12 +102,14 @@
 > **ZERO HUMAN INTERVENTION** - ALL verification is agent-executed.
 
 ### Test Decision
+
 - **Infrastructure exists**: YES
 - **Automated tests**: Tests-after (не TDD)
 - **Framework**: Vitest
 - **Agent-Executed QA**: ALWAYS (mandatory for all tasks)
 
 ### QA Policy
+
 Каждый task включает agent-executed QA сценарии с конкретными шагами, селекторами, ассертами и evidence paths.
 
 ---
@@ -364,6 +378,7 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
   - [ ] approximatePath продолжает использовать auto-correct
 
   **QA Scenarios**:
+
   ```
   Scenario: OffsetEngine не применяет auto-correct к аркам
     Tool: Bash (Vitest)
@@ -413,6 +428,7 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
   - [ ] Покрытие: default behavior, skip flag, OffsetEngine integration, approximatePath regression
 
   **QA Scenarios**:
+
   ```
   Scenario: Все тесты Rule 1 проходят
     Tool: Bash (Vitest)
@@ -467,6 +483,7 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
   - [ ] Concave: без изменений
 
   **QA Scenarios**:
+
   ```
   Scenario: Все тесты Rule 3 проходят
     Tool: Bash (Vitest)
@@ -512,7 +529,38 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
   - `src/operations/OffsetContourBuilder.js:251-293` — join logic
   - Пользовательский пример контура (из запроса):
     ```json
-    [{"type":"polyline","contourId":4,"segIds":["seg-1","seg-2","seg-3"],"lines":[{"text":"M 10 10","segId":"m:4","lineGuid":"14de877b-fa98-4e74-9612-8ae88a1c8dec"},{"text":"L 2 10","segId":"seg-1","lineGuid":"2238baa2-407a-433d-9e5e-b0c62e2f7b88"},{"text":"A 2 2 0 0 1 0 8","segId":"seg-2","lineGuid":"64f79632-70c6-47b6-a5d4-587099b02689"},{"text":"L 0 16","segId":"seg-3","lineGuid":"9fe8b025-58af-4a30-b659-cf5038f88729"}],"transforms":[],"groupId":null,"parentGroupId":null}]
+    [
+      {
+        "type": "polyline",
+        "contourId": 4,
+        "segIds": ["seg-1", "seg-2", "seg-3"],
+        "lines": [
+          {
+            "text": "M 10 10",
+            "segId": "m:4",
+            "lineGuid": "14de877b-fa98-4e74-9612-8ae88a1c8dec"
+          },
+          {
+            "text": "L 2 10",
+            "segId": "seg-1",
+            "lineGuid": "2238baa2-407a-433d-9e5e-b0c62e2f7b88"
+          },
+          {
+            "text": "A 2 2 0 0 1 0 8",
+            "segId": "seg-2",
+            "lineGuid": "64f79632-70c6-47b6-a5d4-587099b02689"
+          },
+          {
+            "text": "L 0 16",
+            "segId": "seg-3",
+            "lineGuid": "9fe8b025-58af-4a30-b659-cf5038f88729"
+          }
+        ],
+        "transforms": [],
+        "groupId": null,
+        "parentGroupId": null
+      }
+    ]
     ```
 
   **Acceptance Criteria**:
@@ -523,6 +571,7 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
   - [ ] Пример пользователя: сегменты параллельны
 
   **QA Scenarios**:
+
   ```
   Scenario: Все тесты Rule 0 проходят
     Tool: Bash (Vitest)
@@ -581,6 +630,7 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
   - [ ] Concave и convex handling НЕ изменились
 
   **QA Scenarios**:
+
   ```
   Scenario: Tangent connection arc→line создаёт bridge
     Tool: Bash (Vitest)
@@ -611,20 +661,20 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
 > 4 review agents run in PARALLEL. ALL must APPROVE.
 
 - [x] F1. **Plan Compliance Audit** — `oracle`
-  Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns. Check evidence files exist. Compare deliverables against plan.
-  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
+      Read the plan end-to-end. For each "Must Have": verify implementation exists. For each "Must NOT Have": search codebase for forbidden patterns. Check evidence files exist. Compare deliverables against plan.
+      Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
 - [x] F2. **Code Quality Review** — `unspecified-high`
-  Run `tsc --noEmit` + linter + `npm run test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop.
-  Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
+      Run `tsc --noEmit` + linter + `npm run test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop.
+      Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
 - [x] F3. **Real Manual QA** — `unspecified-high`
-  Start from clean state. Execute EVERY QA scenario from EVERY task. Test cross-task integration. Test edge cases. Save to `.sisyphus/evidence/final-qa/`.
-  Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
+      Start from clean state. Execute EVERY QA scenario from EVERY task. Test cross-task integration. Test edge cases. Save to `.sisyphus/evidence/final-qa/`.
+      Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
 - [x] F4. **Scope Fidelity Check** — `deep`
-  For each task: read "What to do", read actual diff. Verify 1:1. Check "Must NOT do" compliance. Detect cross-task contamination. Flag unaccounted changes.
-  Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
+      For each task: read "What to do", read actual diff. Verify 1:1. Check "Must NOT do" compliance. Detect cross-task contamination. Flag unaccounted changes.
+      Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
 ---
 
@@ -641,6 +691,7 @@ Max Concurrent: 3 (Wave 1), 3 (Wave 2)
 ## Success Criteria
 
 ### Verification Commands
+
 ```bash
 npm run test                                              # Full suite — zero regressions
 npx vitest run tests/offset-rules.spec.js                # Existing bridge tests pass
@@ -652,6 +703,7 @@ npm run build                                             # Production build
 ```
 
 ### Final Checklist
+
 - [ ] All "Must Have" present
 - [ ] All "Must NOT Have" absent
 - [ ] All tests pass (existing + new)

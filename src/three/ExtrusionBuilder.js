@@ -1751,9 +1751,13 @@ export default class ExtrusionBuilder {
                 window?.app?.container?.get?.("export");
 
             const basePath = String(svgPathString ?? "").trim();
+            const normalizedJoin =
+                cornerStyle === "round" ? "round" : "sharp";
             const offsetOptions = {
                 offsetSignMode: "direct",
-                join: cornerStyle === "round" ? "round" : cornerStyle,
+                // CustomOffsetProcessor accepts only "sharp" | "round" joins.
+                // Treat miter/bevel requests as sharp to preserve hard corners.
+                join: normalizedJoin,
                 cap: "butt",
                 limit: 10,
                 useArcApproximation: true,
@@ -2519,7 +2523,7 @@ export default class ExtrusionBuilder {
 
             // Lathe transformations
             invertLatheProfile: isBottom && !isExtension, // Invert Y in lathe profile for bottom side, but not for extensions (already inverted)
-            invertLatheNormals: isBottom || (isExtension && !isBottom), // Invert lathe body winding for bottom or top extensions
+            invertLatheNormals: isBottom, // Invert lathe body winding only for bottom side
 
             // Cap winding (simplified - caps always use base winding for lathe)
             invertExtrusionCaps: !isBottom, // TOP needs inverted caps

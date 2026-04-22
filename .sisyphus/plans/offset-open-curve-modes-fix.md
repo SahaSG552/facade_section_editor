@@ -5,6 +5,7 @@
 > **Quick Summary**: Исправляем критический дефект open-curve offset (лишний 12-сегментный контур для одной линии) и вводим явные режимы оффсета с TAB-переключением.
 >
 > **Deliverables**:
+>
 > - Стабильная open-curve pipeline без паразитных контуров/дегенератов
 > - Режимы offset:
 >   - Open contour: `one-sided` (default), `two-sides-no-close`, `two-sides-round-caps`, `two-sides-flat-caps`
@@ -21,15 +22,18 @@
 ## Context
 
 ### Original Request
+
 Пользователь сообщил критическую регрессию: offset для одной линии даёт «ужасный» результат с лишним контуром и множеством сегментов. Плюс требуется режимная модель поведения оффсета с TAB-переключением.
 
 ### Interview Summary
+
 - Подтверждён general fix (не hotfix только под single-line).
 - Для `two-sides-no-close`: результат должен быть **2 separate open contours** (для open paths).
 - Направление one-sided: по **nearest segment normal** относительно курсора.
 - Test strategy: **TDD**.
 
 ### Research + Metis Synthesis
+
 - Наиболее вероятный корень дефекта: несогласованность сегментных endpoints vs arc metadata после stitching/reversal.
 - Главные зоны риска: `OffsetEngine._stitchSegments`, `OffsetCapper.capBothSides`, post-serialization normalization path.
 - Выявлен пробел тестов: раньше не проверялись topology invariants (contour count, stitched continuity, degenerate rejection).
@@ -39,15 +43,18 @@
 ## Work Objectives
 
 ### Core Objective
+
 Сделать предсказуемый и топологически корректный offset pipeline для open/closed contours и добавить режимы, точно соответствующие UX-правилам пользователя.
 
 ### Concrete Deliverables
+
 - Engine mode routing с явными режимами.
 - Fix topology/stitch consistency для open path.
 - TAB cycling в OffsetTool согласно типу контура.
 - TDD regression suite для single-line/open modes + closed regression guard.
 
 ### Definition of Done
+
 - [ ] Single-line (`M 0 0 V 10`, offset=1) больше не создаёт паразитный «12-сегментный» контур.
 - [ ] Open contour default = one-sided в сторону курсора.
 - [ ] Open TAB cycle: two-sides-no-close → two-sides-round-caps → two-sides-flat-caps.
@@ -56,12 +63,14 @@
 - [ ] Существующие offset regression tests не сломаны.
 
 ### Must Have
+
 - Чёткий mode contract в Engine API.
 - Топологические инварианты в тестах (contour/segment counts + continuity).
 - Нулевая деградация текущего closed-curve поведения.
 - Семантика `two-sides-no-close` для **closed contour**: два независимых closed контура (outer + inner).
 
 ### Must NOT Have (Guardrails)
+
 - Не добавлять новые типы join/cap вне `sharp|round` и `flat|round`.
 - Не трогать `OffsetCurveEvaluator` математику без доказанного дефекта.
 - Не делать крупный архитектурный рефактор UI state machine.
@@ -72,11 +81,13 @@
 ## Verification Strategy
 
 ### Test Decision
+
 - **Infrastructure exists**: YES (Vitest)
 - **Automated tests**: **TDD**
 - **Framework**: Vitest
 
 ### QA Policy
+
 Каждая задача включает agent-executed QA: unit/integration (Vitest), плюс runtime checks для TAB UX.
 
 ---
@@ -117,6 +128,7 @@ Wave FINAL:
 ```
 
 ### Dependency Matrix
+
 - 1-6: None → 7-11
 - 7: 1,4,6 → 9,11
 - 8: 1,4,6 → 9,11
@@ -181,7 +193,7 @@ Wave FINAL:
       2. Run: `npx vitest run tests/offset-modes.spec.js`
     - Expected Result: FAIL before mode implementation
     - Evidence: `.sisyphus/evidence/task-2-red-modes.txt`
-  **Evidence**: `.sisyphus/evidence/task-2-red-modes.txt`
+      **Evidence**: `.sisyphus/evidence/task-2-red-modes.txt`
 
 - [x] 3. RED: Cursor-side one-sided behavior tests
 
@@ -376,7 +388,7 @@ Wave FINAL:
   **Acceptance Criteria**:
   - [ ] `npx playwright --version` works
   - [ ] `npm run test:e2e -- --list` lists e2e tests
-  **Evidence**: `.sisyphus/evidence/task-12-playwright-setup.txt`
+        **Evidence**: `.sisyphus/evidence/task-12-playwright-setup.txt`
 
   **QA Scenarios**:
   - Scenario: E2E infra bootstrapped
@@ -507,7 +519,7 @@ Wave FINAL:
   - [ ] `npm run build` PASS
   - [ ] `npm run test:e2e` PASS
   - [ ] key dev flow PASS
-  **Evidence**: `.sisyphus/evidence/task-17-final-regression.txt`
+        **Evidence**: `.sisyphus/evidence/task-17-final-regression.txt`
 
   **QA Scenarios**:
   - Scenario: full automated regression
@@ -553,6 +565,7 @@ Wave FINAL:
 ## Success Criteria
 
 ### Verification Commands
+
 ```bash
 npx vitest run tests/task-6-offsetengine-qa.spec.js tests/f3-functional-qa.spec.js
 npx vitest run
@@ -561,6 +574,7 @@ npm run test:e2e
 ```
 
 ### Final Checklist
+
 - [ ] Single-line regression removed
 - [ ] Mode system behaves exactly as specified (open/closed)
 - [ ] Cursor-side one-sided default works

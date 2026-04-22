@@ -5,6 +5,7 @@
 > **Quick Summary**: Incrementally harden `CustomOffsetProcessor` and `OffsetTool` toward maximum geometric correctness for mixed line+arc offsets, while preserving your strict invariants (no arc angle expansion, fixed arc center, deterministic neighbor reconciliation, bridge persistence, and one-way degeneracy removal).
 >
 > **Deliverables**:
+>
 > - Stable and deterministic offset/join behavior for critical arc/line edge cases
 > - Completed micro-gap hardening for arc-arc joins
 > - Automated regression suite for processor/tool invariants (tests-after)
@@ -19,24 +20,31 @@
 ## Context
 
 ### Original Request
+
 Refactor `OffsetProcessor` logic deeply, validate against explicit geometry rules, research best public approaches, and adapt implementation toward better correctness and precision.
 
 ### Interview Summary
+
 **Key Decisions**:
+
 - Priority: **Correctness-first** (visual differences acceptable if mathematically better)
 - Refactor mode: **Staged hardening** (incremental), not full rewrite
 - Test strategy: **YES (Tests-after)**
 
 **Research Findings (Codebase)**:
+
 - Current flow mostly implements required rules, but has fragility in tolerance consistency, sign/coordinate conversions, and join mutation-order sensitivity.
 - No dedicated automated tests for `CustomOffsetProcessor`/`OffsetTool`.
 
 **Research Findings (External)**:
+
 - Best fit: arc-native pipeline patterns (CavalierContours-like), strengthened with robust predicate/tolerance policies and deterministic intersection ranking.
 - Clipper/CGAL are valuable references but not directly arc-native in core usage patterns.
 
 ### Metis Review
+
 **Main Gaps Addressed in this plan**:
+
 - Lock scope to staged hardening (no full algorithm rewrite)
 - Add explicit guardrails against scope creep
 - Make tolerance policy explicit and auditable
@@ -47,21 +55,25 @@ Refactor `OffsetProcessor` logic deeply, validate against explicit geometry rule
 ## Work Objectives
 
 ### Core Objective
+
 Deliver a correctness-first, production-stable offset pipeline for line+arc contours in `CustomOffsetProcessor` and `OffsetTool`, with deterministic join behavior and verified handling of degeneracy/bridges.
 
 ### Concrete Deliverables
+
 - Hardened join/intersection/degeneracy logic in `src/operations/CustomOffsetProcessor.js`
 - Hardened orchestration/sign-convention handling in `src/editor/tools/OffsetTool.js` (only where needed for correctness boundaries)
 - Automated tests for core invariants and critical regressions
 - Evidence package in `.sisyphus/evidence/`
 
 ### Definition of Done
+
 - [ ] All plan tasks completed with evidence artifacts
 - [ ] All critical geometry rules have automated regression tests
 - [ ] Determinism checks pass on repeated runs
 - [ ] Final verification wave (F1-F4) all APPROVE
 
 ### Must Have
+
 - No arc-angle expansion during joining/trimming
 - Arc center consistency for arc offsets
 - Degenerate segments removed without reversal
@@ -69,6 +81,7 @@ Deliver a correctness-first, production-stable offset pipeline for line+arc cont
 - Sequential neighbor reconciliation preserved
 
 ### Must NOT Have (Guardrails)
+
 - No full engine rewrite to a different architecture in this plan
 - No addition of global optimization replacing local neighbor reconciliation
 - No reversal fallback for degenerate line/arc segments
@@ -82,11 +95,13 @@ Deliver a correctness-first, production-stable offset pipeline for line+arc cont
 > **ZERO HUMAN INTERVENTION** — verification must be agent-executed.
 
 ### Test Decision
+
 - **Infrastructure exists**: PARTIAL (existing tests in `brep_reference`, not in target modules)
 - **Automated tests**: Tests-after
 - **Framework target**: Vitest (+ happy-dom/jsdom as needed)
 
 ### QA Policy
+
 Every task includes agent-executed QA scenarios with explicit evidence path.
 
 - **Frontend/UI checks**: Playwright where preview behavior must be validated in UI
@@ -100,21 +115,27 @@ Every task includes agent-executed QA scenarios with explicit evidence path.
 ### Parallel Execution Waves
 
 Wave 1 (Foundation + test scaffolding):
+
 - T1, T2, T3, T4, T5
 
 Wave 2 (Rule-level tests in parallel):
+
 - T6, T7, T8, T9, T10
 
 Wave 3 (Core hardening implementations):
+
 - T11, T12, T13, T14
 
 Wave 4 (Regression + determinism + packaging):
+
 - T15, T16, T17
 
 Wave FINAL (Independent parallel review):
+
 - F1, F2, F3, F4
 
 ### Dependency Matrix (FULL)
+
 - T1: blocked by — ; blocks T11
 - T2: blocked by — ; blocks T11, T12, T13, T15
 - T3: blocked by — ; blocks T11, T12
@@ -134,6 +155,7 @@ Wave FINAL (Independent parallel review):
 - T17: blocked by T15 ; blocks F1
 
 ### Agent Dispatch Summary
+
 - **Wave 1**: T1 quick, T2 quick, T3 unspecified-high, T4 deep, T5 quick
 - **Wave 2**: T6 quick, T7 deep, T8 deep, T9 unspecified-high, T10 unspecified-high
 - **Wave 3**: T11 deep, T12 deep, T13 unspecified-high, T14 quick
@@ -176,6 +198,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Each rule links to concrete function/section evidence.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Rule evidence completeness
     Tool: Bash
@@ -230,6 +253,7 @@ Wave FINAL (Independent parallel review):
   - [ ] All current magic numeric thresholds mapped to policy.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Tolerance table completeness
     Tool: Bash
@@ -280,6 +304,7 @@ Wave FINAL (Independent parallel review):
   - [ ] At least 3 invariant assertions defined for regression tests.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Sign truth-table validation
     Tool: Bash
@@ -330,6 +355,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Policy explicitly prohibits arc-angle expansion during ranking acceptance.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Deterministic tie-break replay
     Tool: Bash
@@ -381,6 +407,7 @@ Wave FINAL (Independent parallel review):
   - [ ] At least one smoke test confirms harness stability.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Test harness smoke run
     Tool: Bash
@@ -434,6 +461,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Tests pass for clockwise and counterclockwise arc cases.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Arc center invariant happy-path
     Tool: Bash
@@ -486,6 +514,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Valid contraction cases still accepted.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Expansion candidate rejection
     Tool: Bash
@@ -539,6 +568,7 @@ Wave FINAL (Independent parallel review):
   - [ ] No reversed segment appears as fallback.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Degenerate line removal
     Tool: Bash
@@ -592,6 +622,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Bridge removed only when its own length degenerates.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Bridge survives adjacent arc degeneracy
     Tool: Bash
@@ -644,6 +675,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Chain consistency validated with deterministic output ordering.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Closed contour wrap-around
     Tool: Bash
@@ -697,6 +729,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Existing rule tests (T6-T10) remain passing.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Symmetric-candidate stability
     Tool: Bash
@@ -750,6 +783,7 @@ Wave FINAL (Independent parallel review):
   - [ ] No forbidden arc expansion introduced.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Arc-arc micro-gap regression
     Tool: Bash
@@ -802,6 +836,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Tolerance comments map to policy names.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Magic-number scan
     Tool: Bash
@@ -854,6 +889,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Optional flags are either fully wired or explicitly guarded.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Module import integrity
     Tool: Bash
@@ -907,6 +943,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Continuity and rule constraints verified for each scenario.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Canonical path regression (happy path)
     Tool: Bash
@@ -959,6 +996,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Any nondeterminism is either removed or explicitly documented with rationale.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Repeatability loop
     Tool: Bash
@@ -1011,6 +1049,7 @@ Wave FINAL (Independent parallel review):
   - [ ] Rule compliance table updated to final state.
 
   **QA Scenarios (MANDATORY)**:
+
   ```
   Scenario: Documentation completeness
     Tool: Bash
@@ -1041,20 +1080,20 @@ Wave FINAL (Independent parallel review):
 ## Final Verification Wave (MANDATORY)
 
 - [ ] F1. **Plan Compliance Audit** — `oracle`
-  Verify every Must Have / Must NOT Have against implementation + evidence artifacts.
-  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT`
+      Verify every Must Have / Must NOT Have against implementation + evidence artifacts.
+      Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT`
 
 - [ ] F2. **Code Quality Review** — `unspecified-high`
-  Run typecheck/lint/tests and static anti-slop checks.
-  Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N/N] | VERDICT`
+      Run typecheck/lint/tests and static anti-slop checks.
+      Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N/N] | VERDICT`
 
 - [ ] F3. **Real QA Replay** — `unspecified-high` (+`playwright` for UI)
-  Execute all QA scenarios from all tasks and verify evidence exists.
-  Output: `Scenarios [N/N pass] | Integration [N/N] | Edge [N] | VERDICT`
+      Execute all QA scenarios from all tasks and verify evidence exists.
+      Output: `Scenarios [N/N pass] | Integration [N/N] | Edge [N] | VERDICT`
 
 - [ ] F4. **Scope Fidelity Check** — `deep`
-  Validate 1:1 match between task specs and actual changes; detect scope creep.
-  Output: `Tasks [N/N compliant] | Creep [0/N] | VERDICT`
+      Validate 1:1 match between task specs and actual changes; detect scope creep.
+      Output: `Tasks [N/N compliant] | Creep [0/N] | VERDICT`
 
 ---
 
@@ -1072,12 +1111,14 @@ Commit format: `type(scope): description`
 ## Success Criteria
 
 ### Verification Commands
+
 ```bash
 npm run test
 npm run build
 ```
 
 ### Final Checklist
+
 - [ ] All strict geometry rules are covered by automated tests
 - [ ] No forbidden behaviors introduced
 - [ ] Deterministic repeated-run outputs for fixed inputs

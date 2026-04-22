@@ -16,6 +16,7 @@ npm run dev      # Development server
 ```
 
 ## Notes
+
 - Uses Vite 7.3 for bundling
 - Output goes to `dist/` folder
 - Capacitor integration for mobile builds:

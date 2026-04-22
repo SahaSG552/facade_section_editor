@@ -29,6 +29,7 @@ Structural map compiled from source code via AST. No LLM — deterministic, 200m
 ## What the Wiki Does Not Cover
 
 These exist in your codebase but are **not** reflected in wiki articles:
+
 - Routes registered dynamically at runtime (loops, plugin factories, `app.use(dynamicRouter)`)
 - Internal routes from npm packages (e.g. Better Auth's built-in `/api/auth/*` endpoints)
 - WebSocket and SSE handlers
@@ -41,4 +42,5 @@ These exist in your codebase but are **not** reflected in wiki articles:
 When in doubt, search the source. The wiki is a starting point, not a complete inventory.
 
 ---
+
 _Last compiled: 2026-04-09 · 2 articles · [codesight](https://github.com/Houseofmvps/codesight)_

@@ -15,7 +15,8 @@ const filePath = join(__dirname, "src/operations/OffsetContourBuilder.js");
 let src = readFileSync(filePath, "utf8");
 
 // Anchor: the last line of the Step 4 filter block, right before Step 4b comment
-const ANCHOR = "    return true;\r\n  });\r\n\r\n  // Step 4b: Enforce monotonic arc";
+const ANCHOR =
+  "    return true;\r\n  });\r\n\r\n  // Step 4b: Enforce monotonic arc";
 
 const STEP_4_5 = `    return true;
   });
@@ -56,13 +57,17 @@ const STEP_4_5 = `    return true;
   // Step 4b: Enforce monotonic arc`;
 
 if (!src.includes(ANCHOR)) {
-  console.error("ERROR: anchor string not found — file may have changed. Aborting.");
+  console.error(
+    "ERROR: anchor string not found — file may have changed. Aborting.",
+  );
   process.exit(1);
 }
 
 const patched = src.replace(ANCHOR, STEP_4_5.replace(/\n/g, "\r\n"));
 if (patched === src) {
-  console.error("ERROR: replacement produced no change. Check anchor and replacement.");
+  console.error(
+    "ERROR: replacement produced no change. Check anchor and replacement.",
+  );
   process.exit(1);
 }
 

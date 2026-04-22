@@ -3,8 +3,9 @@
 ## TL;DR
 
 > **Quick Summary**: Incrementally refactor the facade_section_editor UI from a monolithic 58KB CSS file with `.dark` class theming to a modern, modular CSS architecture using Tailwind CSS v4, native browser APIs (`light-dark()`, `color-scheme`, `@property`, `color-mix()`, `oklch()`, container queries, view transitions, `<dialog>`, popover), and a 3-layer design token system. Fix responsive breakpoints, add smooth theme transitions, and include Capacitor mobile support.
-> 
+>
 > **Deliverables**:
+>
 > - Split CSS architecture (vars.css, reset.css, layout.css, components/, utilities.css)
 > - Tailwind CSS v4 integrated with CSS custom properties
 > - Modern theming via `color-scheme: light dark` + `light-dark()` + `@property` animated transitions
@@ -16,7 +17,7 @@
 > - SVG UI chrome icons using `currentColor` (CSS-themeable)
 > - Capacitor config populated and WebView-tested
 > - Smooth dark/light theme switch with `prefers-color-scheme` detection
-> 
+>
 > **Estimated Effort**: Large
 > **Parallel Execution**: YES - 5 waves + final verification
 > **Critical Path**: Task 0 (bug fix) → Task 1 (token system) → Task 3 (color-scheme) → Task 7 (responsive) → Task 11 (dialog) → Task 14 (Capacitor) → F1-F4
@@ -26,10 +27,13 @@
 ## Context
 
 ### Original Request
+
 User wants to refactor the UI of the facade_section_editor 3D application to: (1) make appearance consistent and configurable via CSS, (2) add convenient light/dark theme switching, (3) implement flexible adaptive design for large screens and mobile devices. Inspired by YouTube video "Browser APIs Just Killed Off Your JavaScript Dependencies" about modern native browser APIs replacing npm dependencies.
 
 ### Interview Summary
+
 **Key Discussions**:
+
 - **Approach**: Incremental migration (not full rewrite) — lower risk, testable at each step
 - **Browser targets**: Raised to 2024+ (Chrome 123+, Safari 17.5+, Firefox 128+) — all selected APIs work natively
 - **All modern APIs selected**: light-dark, @property, color-mix, oklch, container queries, view transitions, dialog, popover
@@ -39,6 +43,7 @@ User wants to refactor the UI of the facade_section_editor 3D application to: (1
 - **Capacitor**: Included in scope — fix empty config, add forceDarkAllowed, test WebView
 
 **Research Findings**:
+
 - Current project uses single 58KB `styles.css` with CSS variables + `.dark` class
 - Theme toggle exists in UIModule.js with localStorage persistence
 - Breakpoints mismatched: CSS (800/500px) vs JS (768/1000px)
@@ -50,7 +55,9 @@ User wants to refactor the UI of the facade_section_editor 3D application to: (1
 - Tailwind v4 uses CSS-first config via `@theme` blocks
 
 ### Metis Review
+
 **Identified Gaps** (addressed):
+
 - Browser target vs API compatibility → **RESOLVED**: Raised to 2024+, all APIs natively supported
 - SVG don't inherit `color-scheme` → **ADDRESSED**: Scope limited to UI chrome only, bit shapes excluded
 - Canvas/Three.js unaware of theme → **ADDRESSED**: Theme service emits event, consumers handle separately
@@ -64,9 +71,11 @@ User wants to refactor the UI of the facade_section_editor 3D application to: (1
 ## Work Objectives
 
 ### Core Objective
+
 Transform the UI from a monolithic, partially-themeable state to a modern, modular, fully-responsive design system using native CSS APIs and Tailwind CSS, with smooth light/dark mode switching and Capacitor mobile support.
 
 ### Concrete Deliverables
+
 - `styles/vars.css` — 3-layer design token system (primitives → semantic → component) with oklch + light-dark()
 - `styles/reset.css` — minimal CSS reset
 - `styles/layout.css` — app-level layout with unified breakpoints
@@ -79,6 +88,7 @@ Transform the UI from a monolithic, partially-themeable state to a modern, modul
 - Visual regression baseline screenshots
 
 ### Definition of Done
+
 - [ ] `npm run build` succeeds
 - [ ] `npm run test` passes
 - [ ] Theme toggle works smoothly with animation (no flash)
@@ -90,6 +100,7 @@ Transform the UI from a monolithic, partially-themeable state to a modern, modul
 - [ ] Capacitor Android build runs with correct theming
 
 ### Must Have
+
 - CSS custom properties for ALL colors (no hardcoded hex in components)
 - `color-scheme: light dark` + `light-dark()` as theming backbone
 - `@property` registered variables for smooth theme transitions
@@ -100,6 +111,7 @@ Transform the UI from a monolithic, partially-themeable state to a modern, modul
 - Capacitor config populated
 
 ### Must NOT Have (Guardrails)
+
 - NO changes to CSG/geometry/Three.js rendering pipeline
 - NO changes to bit shape color rendering (data-driven SVG colors stay in JS)
 - NO new business features
@@ -119,12 +131,14 @@ Transform the UI from a monolithic, partially-themeable state to a modern, modul
 > **ZERO HUMAN INTERVENTION** - ALL verification is agent-executed. No exceptions.
 
 ### Test Decision
+
 - **Infrastructure exists**: YES (Vitest configured)
 - **Automated tests**: Tests-after (add tests for critical paths after implementation)
 - **Framework**: Vitest
 - **Visual QA**: Agent-executed Playwright scenarios at 3 viewports in both themes
 
 ### QA Policy
+
 Every task MUST include agent-executed QA scenarios.
 Evidence saved to `.sisyphus/evidence/task-{N}-{scenario-slug}.{ext}`.
 
@@ -184,30 +198,30 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
 ### Dependency Matrix
 
-| Task | Depends On | Blocks | Wave |
-|------|-----------|--------|------|
-| 0.1 | - | 0.2, 1 | 0 |
-| 0.2 | 0.1 | 1 | 0 |
-| 1 | 0.2 | 3, 4, 5, 6, 7, 9 | 1 |
-| 2 | - | 3 | 1 |
-| 3 | 1, 2 | 6, 10, 11, 13 | 1 |
-| 4 | 1, 3 | 14 | 1 |
-| 5 | 1 | 6, 8, 19 | 1 |
-| 6 | 3, 5 | 7, 10 | 2 |
-| 7 | 6 | - | 2 |
-| 8 | 5 | - | 2 |
-| 9 | 1 | 10 | 2 |
-| 10 | 6, 9 | 18 | 2 |
-| 11 | 3 | 12, 13, 14 | 3 |
-| 12 | 11 | - | 3 |
-| 13 | 3, 11 | 14 | 3 |
-| 14 | 4, 13 | - | 3 |
-| 15 | 3 | - | 4 |
-| 16 | 3 | - | 4 |
-| 17 | 3, 6 | - | 4 |
-| 18 | 3, 10 | - | 4 |
-| 19 | 5 | 20 | 5 |
-| 20 | 19 | - | 5 |
+| Task | Depends On | Blocks           | Wave |
+| ---- | ---------- | ---------------- | ---- |
+| 0.1  | -          | 0.2, 1           | 0    |
+| 0.2  | 0.1        | 1                | 0    |
+| 1    | 0.2        | 3, 4, 5, 6, 7, 9 | 1    |
+| 2    | -          | 3                | 1    |
+| 3    | 1, 2       | 6, 10, 11, 13    | 1    |
+| 4    | 1, 3       | 14               | 1    |
+| 5    | 1          | 6, 8, 19         | 1    |
+| 6    | 3, 5       | 7, 10            | 2    |
+| 7    | 6          | -                | 2    |
+| 8    | 5          | -                | 2    |
+| 9    | 1          | 10               | 2    |
+| 10   | 6, 9       | 18               | 2    |
+| 11   | 3          | 12, 13, 14       | 3    |
+| 12   | 11         | -                | 3    |
+| 13   | 3, 11      | 14               | 3    |
+| 14   | 4, 13      | -                | 3    |
+| 15   | 3          | -                | 4    |
+| 16   | 3          | -                | 4    |
+| 17   | 3, 6       | -                | 4    |
+| 18   | 3, 10      | -                | 4    |
+| 19   | 5          | 20               | 5    |
+| 20   | 19         | -                | 5    |
 
 ### Agent Dispatch Summary
 
@@ -255,6 +269,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run test` passes
 
   **QA Scenarios**:
+
   ```
   Scenario: Canvas updates after panel toggle
     Tool: Playwright
@@ -320,6 +335,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Baseline commit hash recorded
 
   **QA Scenarios**:
+
   ```
   Scenario: Baseline screenshots captured
     Tool: Playwright
@@ -401,6 +417,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Visual output unchanged (no regressions)
 
   **QA Scenarios**:
+
   ```
   Scenario: Token system renders correctly in both themes
     Tool: Playwright
@@ -477,6 +494,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Visual output unchanged
 
   **QA Scenarios**:
+
   ```
   Scenario: Reset applied without visual regression
     Tool: Playwright
@@ -511,13 +529,13 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     - `styles/utilities.css` — Utility classes
   - Create `styles/main.css` as the new entry point that imports all modules in correct cascade order:
     ```css
-    @import url('./reset.css');
-    @import url('./vars.css');
-    @import url('./layout.css');
-    @import url('./components/panels.css');
-    @import url('./components/toolbar.css');
+    @import url("./reset.css");
+    @import url("./vars.css");
+    @import url("./layout.css");
+    @import url("./components/panels.css");
+    @import url("./components/toolbar.css");
     /* ... etc ... */
-    @import url('./utilities.css');
+    @import url("./utilities.css");
     ```
   - Update `index.html` to link `styles/main.css` instead of `styles/styles.css`
   - Each split = preserve exact same rendered output. Zero visual changes.
@@ -554,6 +572,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Visual output identical to baseline (compare screenshots)
 
   **QA Scenarios**:
+
   ```
   Scenario: Split preserves visual output exactly
     Tool: Playwright
@@ -600,7 +619,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
       --color-surface: var(--color-surface);
       --color-text-primary: var(--color-text-primary);
       /* ... map all semantic tokens ... */
-      
+
       /* Breakpoints */
       --breakpoint-sm: 640px;
       --breakpoint-md: 768px;
@@ -647,6 +666,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Tailwind utility classes available (test with a `bg-blue-500` class)
 
   **QA Scenarios**:
+
   ```
   Scenario: Tailwind utilities work alongside existing CSS
     Tool: Playwright
@@ -678,60 +698,68 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 
   **What to do**:
   - Create `src/ui/ThemeService.js` following the existing BaseModule pattern:
+
     ```javascript
     import BaseModule from "../core/BaseModule.js";
     import LoggerFactory from "../core/LoggerFactory.js";
-    
+
     export default class ThemeService extends BaseModule {
       static THEME_KEY = "theme";
       static THEMES = { LIGHT: "light", DARK: "dark" };
-      
+
       async initialize() {
         this.log = LoggerFactory.createLogger("ThemeService");
         this.currentTheme = this.detectTheme();
         this.applyTheme(this.currentTheme);
         this.setupSystemPreferenceListener();
       }
-      
+
       detectTheme() {
         const stored = localStorage.getItem(ThemeService.THEME_KEY);
         if (stored) return stored;
-        return window.matchMedia('(prefers-color-scheme: dark)').matches 
-          ? ThemeService.THEMES.DARK 
+        return window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? ThemeService.THEMES.DARK
           : ThemeService.THEMES.LIGHT;
       }
-      
+
       applyTheme(theme) {
         this.currentTheme = theme;
-        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.setAttribute("data-theme", theme);
         document.documentElement.style.colorScheme = theme;
         localStorage.setItem(ThemeService.THEME_KEY, theme);
         this.updateMetaThemeColor(theme);
-        this.emit('theme:changed', { theme });
+        this.emit("theme:changed", { theme });
       }
-      
+
       toggleTheme() {
-        const next = this.currentTheme === ThemeService.THEMES.DARK 
-          ? ThemeService.THEMES.LIGHT 
-          : ThemeService.THEMES.DARK;
+        const next =
+          this.currentTheme === ThemeService.THEMES.DARK
+            ? ThemeService.THEMES.LIGHT
+            : ThemeService.THEMES.DARK;
         this.applyTheme(next);
       }
-      
+
       updateMetaThemeColor(theme) {
         const meta = document.querySelector('meta[name="theme-color"]');
-        if (meta) meta.content = theme === 'dark' ? '#0d1117' : '#ffffff';
+        if (meta) meta.content = theme === "dark" ? "#0d1117" : "#ffffff";
       }
-      
+
       setupSystemPreferenceListener() {
-        window.matchMedia('(prefers-color-scheme: dark)')
-          .addEventListener('change', (e) => {
+        window
+          .matchMedia("(prefers-color-scheme: dark)")
+          .addEventListener("change", (e) => {
             if (!localStorage.getItem(ThemeService.THEME_KEY)) {
-              this.applyTheme(e.matches ? ThemeService.THEMES.DARK : ThemeService.THEMES.LIGHT);
+              this.applyTheme(
+                e.matches
+                  ? ThemeService.THEMES.DARK
+                  : ThemeService.THEMES.LIGHT,
+              );
             }
           });
       }
     }
     ```
+
   - Register ThemeService in `src/app/main.js` alongside existing modules
   - Update `src/ui/UIModule.js` to delegate theme logic to ThemeService
   - Update `src/script.js` theme toggle wiring to use ThemeService
@@ -770,6 +798,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds, `npm run test` passes
 
   **QA Scenarios**:
+
   ```
   Scenario: ThemeService detects system preference on first visit
     Tool: Bash (node REPL)
@@ -849,6 +878,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds, visual output unchanged
 
   **QA Scenarios**:
+
   ```
   Scenario: light-dark() resolves correctly for both themes
     Tool: Playwright
@@ -873,10 +903,26 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   **What to do**:
   - Register key CSS custom properties with `@property` to enable smooth transitions:
     ```css
-    @property --color-background { syntax: '<color>'; inherits: true; initial-value: #ffffff; }
-    @property --color-surface { syntax: '<color>'; inherits: true; initial-value: #f8fafc; }
-    @property --color-text-primary { syntax: '<color>'; inherits: true; initial-value: #020617; }
-    @property --color-border { syntax: '<color>'; inherits: true; initial-value: #e2e8f0; }
+    @property --color-background {
+      syntax: "<color>";
+      inherits: true;
+      initial-value: #ffffff;
+    }
+    @property --color-surface {
+      syntax: "<color>";
+      inherits: true;
+      initial-value: #f8fafc;
+    }
+    @property --color-text-primary {
+      syntax: "<color>";
+      inherits: true;
+      initial-value: #020617;
+    }
+    @property --color-border {
+      syntax: "<color>";
+      inherits: true;
+      initial-value: #e2e8f0;
+    }
     ```
   - Add transition rules to body and key containers (0.2-0.3s ease)
   - Add `@media (prefers-reduced-motion: reduce)` to disable transitions
@@ -906,6 +952,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: Theme transition is smooth
     Tool: Playwright
@@ -953,6 +1000,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Both meta tags present and dynamic
 
   **QA Scenarios**:
+
   ```
   Scenario: System dark preference detected on first visit
     Tool: Playwright
@@ -999,6 +1047,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Derived tokens work in both themes
 
   **QA Scenarios**:
+
   ```
   Scenario: Hover states use derived tokens
     Tool: Playwright
@@ -1050,6 +1099,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: UI icons respond to theme change
     Tool: Playwright
@@ -1072,7 +1122,11 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - Define canonical breakpoints in `src/ui/breakpoints.js`:
     ```javascript
     export const BREAKPOINTS = Object.freeze({
-      SM: 640, MD: 768, LG: 1024, XL: 1280, '2XL': 1536
+      SM: 640,
+      MD: 768,
+      LG: 1024,
+      XL: 1280,
+      "2XL": 1536,
     });
     ```
   - ⚠️ **IMPORTANT**: CSS `@media` queries do NOT support `var()` — breakpoint values must be hardcoded in CSS but match the JS constants exactly
@@ -1080,7 +1134,9 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     ```css
     /* Breakpoints: SM=640px, MD=768px, LG=1024px, XL=1280px, 2XL=1536px */
     /* Keep in sync with src/ui/breakpoints.js */
-    @media (max-width: 768px) { /* = BREAKPOINTS.MD */ }
+    @media (max-width: 768px) {
+      /* = BREAKPOINTS.MD */
+    }
     ```
   - Update all CSS `@media` queries to use the canonical values (replace 800px → 768px, 500px → 640px)
   - Update `UIModule.js` to use `BREAKPOINTS.MD` (768) and `BREAKPOINTS.LG` (1024) instead of hardcoded 768/1000
@@ -1114,6 +1170,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` and `npm run test` pass
 
   **QA Scenarios**:
+
   ```
   Scenario: CSS and JS breakpoints are synchronized
     Tool: Playwright
@@ -1163,6 +1220,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Components reflow when panel resizes (not just viewport)
 
   **QA Scenarios**:
+
   ```
   Scenario: Form reflows in narrow panel
     Tool: Playwright
@@ -1221,6 +1279,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: Layout adapts from 360px to 1920px
     Tool: Playwright
@@ -1272,6 +1331,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: Mobile viewport is usable
     Tool: Playwright
@@ -1331,6 +1391,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: Dialog modal works natively
     Tool: Playwright
@@ -1379,6 +1440,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: Popover opens and closes correctly
     Tool: Playwright
@@ -1413,8 +1475,12 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
     ```
   - Add CSS for view transition animations:
     ```css
-    ::view-transition-old(root) { animation: 0.2s ease-out both fade-out; }
-    ::view-transition-new(root) { animation: 0.2s ease-in both fade-in; }
+    ::view-transition-old(root) {
+      animation: 0.2s ease-out both fade-out;
+    }
+    ::view-transition-new(root) {
+      animation: 0.2s ease-in both fade-in;
+    }
     ```
   - Feature-detect `document.startViewTransition` with fallback to instant swap
   - Apply to: theme switch, panel toggle, 2D/3D view switch
@@ -1444,6 +1510,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: Panel toggle has smooth animation
     Tool: Playwright
@@ -1494,6 +1561,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] `npm run build` succeeds
 
   **QA Scenarios**:
+
   ```
   Scenario: No inline styles in HTML
     Tool: Bash (grep)
@@ -1554,6 +1622,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] Theme toggle works in WebView
 
   **QA Scenarios**:
+
   ```
   Scenario: Capacitor config is valid
     Tool: Bash
@@ -1602,6 +1671,7 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
   - [ ] 3D view looks correct in both themes
 
   **QA Scenarios**:
+
   ```
   Scenario: 3D scene background changes with theme
     Tool: Playwright
@@ -1624,20 +1694,20 @@ Wave FINAL (After ALL tasks — 4 parallel reviews, then user okay):
 ## Final Verification Wave
 
 - [ ] F1. **Plan Compliance Audit** — `oracle`
-  Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
-  Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
+      Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
+      Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
 - [ ] F2. **Code Quality Review** — `unspecified-high`
-  Run `tsc --noEmit` + linter + `npm run test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp).
-  Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
+      Run `tsc --noEmit` + linter + `npm run test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp).
+      Output: `Build [PASS/FAIL] | Lint [PASS/FAIL] | Tests [N pass/N fail] | Files [N clean/N issues] | VERDICT`
 
 - [ ] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill)
-  Start from clean state. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration (features working together, not isolation). Test edge cases: empty state, invalid input, rapid actions. Save to `.sisyphus/evidence/final-qa/`.
-  Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
+      Start from clean state. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration (features working together, not isolation). Test edge cases: empty state, invalid input, rapid actions. Save to `.sisyphus/evidence/final-qa/`.
+      Output: `Scenarios [N/N pass] | Integration [N/N] | Edge Cases [N tested] | VERDICT`
 
 - [ ] F4. **Scope Fidelity Check** — `deep`
-  For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes.
-  Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
+      For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes.
+      Output: `Tasks [N/N compliant] | Contamination [CLEAN/N issues] | Unaccounted [CLEAN/N files] | VERDICT`
 
 ---
 
@@ -1684,6 +1754,7 @@ Wave 5:
 ## Success Criteria
 
 ### Verification Commands
+
 ```bash
 npm run build       # Expected: successful build with no errors
 npm run test         # Expected: all tests pass
@@ -1691,6 +1762,7 @@ npm run dev          # Expected: dev server starts, UI loads
 ```
 
 ### Final Checklist
+
 - [ ] All "Must Have" present
 - [ ] All "Must NOT Have" absent
 - [ ] All tests pass

@@ -14,11 +14,13 @@ npm run test
 ```
 
 Or watch mode:
+
 ```bash
 npm run test:watch
 ```
 
 ## Notes
+
 - Project uses Vitest 4.1
 - No special test configuration needed
-- Tests are in the project root or __tests__ folders
+- Tests are in the project root or **tests** folders

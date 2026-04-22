@@ -23,7 +23,7 @@ started: pre-existing before the cursor-side arc fix
 ## Eliminated
 
 - hypothesis: PaperBooleanProcessor mock interferes with trimSelfIntersectionsDetailed
-  evidence: Mock returns hadSelfIntersections=undefined; trimSelfIntersectionsDetailed returns []; _splitContours fallback called; area check is the actual filter.
+  evidence: Mock returns hadSelfIntersections=undefined; trimSelfIntersectionsDetailed returns []; \_splitContours fallback called; area check is the actual filter.
   timestamp: 2026-04-11T14:30:00Z
 
 ## Evidence
@@ -34,13 +34,13 @@ started: pre-existing before the cursor-side arc fix
   implication: d=20 is exactly the geometric collapse threshold. 40-unit narrow leg / 2 = 20. At d=20 the contour collapses to a zero-area figure-8. Area filter correctly removes it. Test expectation is wrong for d=20.
 
 - timestamp: 2026-04-11T14:32:00Z
-  checked: _processSegmentsSync area filter at Math.abs(contourArea) <= EPSILON
+  checked: \_processSegmentsSync area filter at Math.abs(contourArea) <= EPSILON
   found: area=0 contour correctly rejected -- engine behavior is correct
   implication: Fix belongs in the test. Use d=15 for genuine non-degenerate inward offset test.
 
 ## Resolution
 
-root_cause: Test used d=20 which is the EXACT geometric collapse threshold for the L-shape (40-unit narrow leg / 2 = 20). buildOffsetContour produces a degenerate zero-area figure-8 at exactly this distance. The area filter in _processSegmentsSync correctly rejects it, yielding empty pathData. Engine behavior is correct.
+root_cause: Test used d=20 which is the EXACT geometric collapse threshold for the L-shape (40-unit narrow leg / 2 = 20). buildOffsetContour produces a degenerate zero-area figure-8 at exactly this distance. The area filter in \_processSegmentsSync correctly rejects it, yielding empty pathData. Engine behavior is correct.
 fix: Change d from 20 to 15 in tests/task-6-offsetengine-qa.spec.js Scenario 3. At d=15, result is a valid 6-segment shrunken L-shape (area=1300).
 verification: All 245 tests pass (245/245). No regressions. Scenario 3 now produces area=1300 shrunken L-shape at d=15.
 files_changed: [tests/task-6-offsetengine-qa.spec.js]

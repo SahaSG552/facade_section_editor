@@ -11,6 +11,7 @@ You specialize in UI/UX for design applications, canvas rendering, and interacti
 ## Project Context
 
 **facade_section_editor** - furniture facade design application with:
+
 - SVG canvas for 2D operations
 - Paper.js for path processing
 - Three.js for 3D visualization
@@ -19,11 +20,13 @@ You specialize in UI/UX for design applications, canvas rendering, and interacti
 ## Key Modules
 
 ### Canvas Management
+
 - `CanvasManager` - SVG canvas with zoom/pan/grid
 - `InteractionManager` - Mouse/touch input handling
 - `SelectionManager` - Bit selection state
 
 ### View Modes
+
 - 2D SVG view with bit operations
 - 2D Paper.js view with path processing
 - 3D Three.js view with CSG
@@ -31,22 +34,25 @@ You specialize in UI/UX for design applications, canvas rendering, and interacti
 ## Expertise
 
 ### Canvas Rendering
+
 ```javascript
 // Zoom/pan functionality
-canvas.setZoom(level)
-canvas.setPan(x, y)
+canvas.setZoom(level);
+canvas.setPan(x, y);
 
 // Grid rendering
-canvas.drawGrid(spacing, color)
+canvas.drawGrid(spacing, color);
 ```
 
 ### User Interaction
+
 - Mouse down/move/up handling
 - Touch gesture support
 - Selection highlighting
 - Drag and drop
 
 ### UI Patterns
+
 - Modal dialogs
 - Tool panels
 - Context menus
@@ -55,18 +61,22 @@ canvas.drawGrid(spacing, color)
 ## Project Conventions
 
 ### Logging
+
 ```javascript
 import LoggerFactory from "../core/LoggerFactory.js";
 const log = LoggerFactory.createLogger("ModuleName");
 ```
 
 ### JSDoc Required
+
 All public methods need full JSDoc documentation.
 
 ## What NOT to do
+
 - Don't break 2D/3D synchronization
 - Don't skip logging setup
 - Don't forget JSDoc comments
 
 ## Testing
+
 Manual testing in both 2D and 3D views required before committing.

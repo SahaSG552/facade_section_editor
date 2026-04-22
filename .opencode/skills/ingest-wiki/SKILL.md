@@ -18,30 +18,37 @@ Process new source documents into the project wiki system.
 ## Workflow
 
 ### 1. Read Source
+
 - Read source from `raw/` directory or web
 - Extract key information
 - Identify entities and concepts
 
 ### 2. Determine Category
+
 - **Entity page**: Things (bits, operations, panels, modules, libraries)
 - **Concept page**: Concepts (offset, v-carve, csg, coordinate transforms)
 - **Source summary**: From external documentation
 
 ### 3. Create or Update Wiki Page
+
 - If new topic → create in appropriate folder
 - If existing topic → update with new information
 - Add frontmatter with tags and date
 
 ### 4. Update Index
+
 - Add new page to `.wiki/index.md` under appropriate category
 - Ensure one-line summary
 
 ### 5. Add Cross-References
+
 - Find existing pages that relate to new content
 - Add links to both pages
 
 ### 6. Log Action
+
 - Append entry to `.wiki/log.md`:
+
 ```
 ## [[date]] ingest | Source name
 - Source: description
@@ -53,6 +60,7 @@ Process new source documents into the project wiki system.
 ## Example
 
 ### Ingest: Paper.js Documentation
+
 > "ingest Paper.js path operations"
 
 1. Read Paper.js docs online or from raw/
@@ -62,6 +70,7 @@ Process new source documents into the project wiki system.
 5. Log in `.wiki/log.md`
 
 ### Ingest: User Notes
+
 > "ingest my notes on V-Carve algorithms"
 
 1. Read notes from `raw/own-notes/`

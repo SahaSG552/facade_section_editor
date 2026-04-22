@@ -17,26 +17,31 @@ Query the wiki for knowledge and synthesize answers.
 ## Workflow
 
 ### 1. Read Index First
+
 - Start with `.wiki/index.md`
 - Identify relevant category (entities, concepts, sources)
 - Note related pages
 
 ### 2. Search Pages
+
 - Use grep or read relevant pages
 - Focus on pages matching query topic
 
 ### 3. Synthesize Answer
+
 - Combine information from sources
 - Include citations to wiki pages
 - Note any gaps or contradictions
 
 ### 4. Optionally File Back
+
 - If answer is valuable, create new wiki page
 - Update index and log
 
 ## Example
 
 ### Query: V-Carve
+
 > "how does V-Carve work?"
 
 1. Read index.md → find v-carve.md in Concepts
@@ -46,6 +51,7 @@ Query the wiki for knowledge and synthesize answers.
 5. Answer with citations
 
 ### Query: Offset Libraries
+
 > "what offset libraries are available?"
 
 1. Read index.md → find libraries.md and offset.md
@@ -54,6 +60,7 @@ Query the wiki for knowledge and synthesize answers.
 4. Synthesize answer with comparison
 
 ### Query: 2D to 3D Transform
+
 > "how do I convert coordinates?"
 
 1. Read index.md → find coordinate-systems.md
@@ -64,6 +71,7 @@ Query the wiki for knowledge and synthesize answers.
 ## MCP Search (qmd)
 
 If qmd is installed:
+
 ```bash
 curl http://localhost:8080/search?q=v-carve
 ```

@@ -5,6 +5,7 @@
 > **Quick Summary**: Полная перепись offset engine с нуля на основе алгоритма OCCT `Geom2d_OffsetCurve`. Текущий 7-stage pipeline + Clipper заменяется на чистую 5-компонентную архитектуру: Evaluator → ContourBuilder → Capper → Trimmer → Engine.
 >
 > **Deliverables**:
+>
 > - `src/operations/OffsetCurveEvaluator.js` — математическое ядро (line + arc offset)
 > - `src/operations/OffsetContourBuilder.js` — contour processing + corner joins (Sharp/Round)
 > - `src/operations/OffsetCapper.js` — open curve caps (Flat/Round)
@@ -24,26 +25,31 @@
 ## Context
 
 ### Original Request
+
 Пользователь провёл глубокое исследование алгоритма offset на основе OCCT `Geom2d_OffsetCurve`. Текущая реализация даёт неконсистентные результаты. Требуется полная перепись архитектуры и логики с сохранением только переиспользуемой инфраструктуры.
 
 ### Interview Summary
+
 **Key Discussions**:
+
 - **Segment types**: Только линии + дуги. Bézier аппроксимируются заранее через arcApproximation.js.
 - **Corner joins**: Round + Sharp. Round = дуга радиусом |offset|, Sharp = miter intersection.
 - **Self-intersection trimming**: Paper.js Boolean через существующий PaperBooleanProcessor.js.
 - **Open curves**: Да, с Flat cap (линия) и Round cap (дуга радиусом |offset|).
 - **Infrastructure reuse**: parseSVGPathSegments (ExportModule), arcApproximation.js, PaperBooleanProcessor.js.
-- **Delete**: ClipperOffsetProcessor.js + все tests/offset/*.spec.js (13 файлов).
+- **Delete**: ClipperOffsetProcessor.js + все tests/offset/\*.spec.js (13 файлов).
 - **Scope**: Только engine. OffsetTool адаптируется минимально — только импорт.
 - **Tests**: После реализации (не TDD).
 
 **Research Findings**:
+
 - Текущий pipeline: 7 stages в `src/operations/offset/` + CustomOffsetProcessor + ClipperOffsetProcessor.
 - Data structures: segment objects `{type, start, end, arc: {...}}`, contours = Array<Segment>.
 - Coordinate system: Y-down (SVG/Paper.js). Clipper использовал Y-flip — больше не нужен.
 - PaperBooleanProcessor.js уже реализует `resolveSelfIntersections()` — готовый trimming solver.
 
 ### Metis Review
+
 Metis consultation failed (timeout). Gaps identified through self-review below.
 
 ---
@@ -51,14 +57,17 @@ Metis consultation failed (timeout). Gaps identified through self-review below.
 ## Work Objectives
 
 ### Core Objective
+
 Создать математически корректный offset engine на основе OCCT формулы, который консистентно обрабатывает линии, дуги, углы и self-intersections.
 
 ### Concrete Deliverables
+
 - 5 новых файлов в `src/operations/` (Evaluator, ContourBuilder, Capper, Trimmer, Engine)
 - Удаление 9 старых файлов (7 stages + ClipperOffsetProcessor + 13 тестов = 21 файл)
 - Минимальная адаптация OffsetTool.js
 
 ### Definition of Done
+
 - [ ] `npm run dev` — приложение запускается без ошибок
 - [ ] `npm run build` — production build проходит
 - [ ] `npm run test` — все оставшиеся тесты проходят (без удалённых)
@@ -68,6 +77,7 @@ Metis consultation failed (timeout). Gaps identified through self-review below.
 - [ ] Open curves получают caps
 
 ### Must Have
+
 - OCCT формула для offset: `Value(u) = BasisCurve.Value(U) + (Offset * N)` где N = нормаль
 - Line offset: perpendicular translation
 - Arc offset: concentric arc с radius ± |offset| (зависит от sweep direction)
@@ -79,6 +89,7 @@ Metis consultation failed (timeout). Gaps identified through self-review below.
 - Интеграция с OffsetTool (минимальная — только импорт)
 
 ### Must NOT Have (Guardrails)
+
 - **NO Clipper** — никаких импортов clipper2-lib-js
 - **NO Bézier offset** — только линии и дуги. Bézier аппроксимируются заранее
 - **NO Chamfer/Smooth joins** — только Sharp и Round
@@ -93,13 +104,16 @@ Metis consultation failed (timeout). Gaps identified through self-review below.
 ## Verification Strategy
 
 ### Test Decision
+
 - **Infrastructure exists**: YES (Vitest)
 - **Automated tests**: Tests-after (сначала реализация, потом тесты)
 - **Framework**: Vitest
 - **Agent-Executed QA**: ALWAYS (каждый task включает QA scenarios)
 
 ### QA Policy
+
 Каждый task включает agent-executed QA scenarios:
+
 - **Engine modules**: Bash (node REPL) — импорт, вызов функций, проверка результатов
 - **Paper.js integration**: Playwright — проверка Boolean операций
 - **OffsetTool integration**: Playwright — открытие приложения, выбор бита, offset preview
@@ -131,6 +145,7 @@ Max Concurrent: 4 (Wave 1)
 ```
 
 ### Dependency Matrix
+
 - **1**: — — 2-7
 - **2**: 1 — 5
 - **3**: 1 — 5
@@ -141,6 +156,7 @@ Max Concurrent: 4 (Wave 1)
 - **8**: 7 — —
 
 ### Agent Dispatch Summary
+
 - **Wave 1**: 4 tasks — T1 → `quick`, T2 → `deep`/`@cad-engineer`, T3 → `quick`, T4 → `quick`
 - **Wave 2**: 2 tasks — T5 → `deep`/`@cad-engineer`, T6 → `deep`
 - **Wave 3**: 2 tasks — T7 → `quick`, T8 → `unspecified-high`
@@ -247,7 +263,7 @@ Max Concurrent: 4 (Wave 1)
 
   **Arc offset**:
   - Tangent varies along arc. Но offset circular arc = concentric arc.
-  - New radius = original_radius + sign * |offset|
+  - New radius = original_radius + sign \* |offset|
   - Sign зависит от sweep direction и стороны offset:
     - sweepFlag=1 (CCW) + positive offset → radius + offset (outside)
     - sweepFlag=1 (CCW) + negative offset → radius - offset (inside)
@@ -677,6 +693,7 @@ Max Concurrent: 4 (Wave 1)
   6. Return: { contours: [segments], pathData: string, metadata: {...} }
 
   **API (must match CustomOffsetProcessor for OffsetTool compatibility)**:
+
   ```javascript
   class OffsetEngine {
     constructor(options = {}) {
@@ -930,20 +947,20 @@ Max Concurrent: 4 (Wave 1)
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 
 - [x] F1. **Plan Compliance Audit** — `oracle`
-  Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
-  Output: `Must Have [10/10] | Must NOT Have [8/8] | Tasks [8/8] | VERDICT: APPROVE`
+      Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in .sisyphus/evidence/. Compare deliverables against plan.
+      Output: `Must Have [10/10] | Must NOT Have [8/8] | Tasks [8/8] | VERDICT: APPROVE`
 
 - [x] F2. **Code Quality Review** — `unspecified-high`
-  Run `tsc --noEmit` + linter + `npm run test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp).
-  Output: `Build [PASS] | Lint [PASS] | Tests [14 pass/0 fail] | Files [clean] | VERDICT: APPROVE`
+      Run `tsc --noEmit` + linter + `npm run test`. Review all changed files for: `as any`/`@ts-ignore`, empty catches, console.log in prod, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (data/result/item/temp).
+      Output: `Build [PASS] | Lint [PASS] | Tests [14 pass/0 fail] | Files [clean] | VERDICT: APPROVE`
 
 - [x] F3. **Real Manual QA** — `unspecified-high` (+ `playwright` skill if UI)
-  Start from clean state. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration (features working together, not isolation). Test edge cases: empty state, invalid input, rapid actions. Save to `.sisyphus/evidence/final-qa/`.
-  Output: `Scenarios [8/8 pass] | Integration [8/8] | Edge Cases [32 tested] | VERDICT: APPROVE`
+      Start from clean state. Execute EVERY QA scenario from EVERY task — follow exact steps, capture evidence. Test cross-task integration (features working together, not isolation). Test edge cases: empty state, invalid input, rapid actions. Save to `.sisyphus/evidence/final-qa/`.
+      Output: `Scenarios [8/8 pass] | Integration [8/8] | Edge Cases [32 tested] | VERDICT: APPROVE`
 
 - [x] F4. **Scope Fidelity Check** — `deep`
-  For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes.
-  Output: `Tasks [8/8 compliant] | Contamination [CLEAN] | Unaccounted [CLEAN] | VERDICT: APPROVE`
+      For each task: read "What to do", read actual diff (git log/diff). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance. Detect cross-task contamination: Task N touching Task M's files. Flag unaccounted changes.
+      Output: `Tasks [8/8 compliant] | Contamination [CLEAN] | Unaccounted [CLEAN] | VERDICT: APPROVE`
 
 ---
 
@@ -960,6 +977,7 @@ Max Concurrent: 4 (Wave 1)
 ## Success Criteria
 
 ### Verification Commands
+
 ```bash
 npm run build    # Expected: clean build, no errors
 npm run test     # Expected: all remaining tests pass
@@ -967,6 +985,7 @@ npm run dev      # Expected: app launches, no console errors
 ```
 
 ### Final Checklist
+
 - [ ] All "Must Have" present (Evaluator, ContourBuilder, Capper, Trimmer, Engine)
 - [ ] All "Must NOT Have" absent (no Clipper, no old stages, no Bézier offset)
 - [ ] All remaining tests pass

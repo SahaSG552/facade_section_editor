@@ -3,4 +3,3 @@
 This file tracks architectural and technical decisions made during implementation.
 
 ---
-

@@ -10,6 +10,7 @@ Expert guide for Paper.js path operations, boolean operations, and vector graphi
 ## Overview
 
 Paper.js is a vector graphics scripting library that excels at:
+
 - Path creation and manipulation
 - Boolean operations (unite, subtract, intersect, exclude)
 - Curve fitting and smoothing
@@ -19,6 +20,7 @@ Paper.js is a vector graphics scripting library that excels at:
 ## Core Classes
 
 ### Point
+
 ```javascript
 const point = new paper.Point(x, y);
 
@@ -36,38 +38,42 @@ point.rotate(angle, center?)
 ```
 
 ### Size
+
 ```javascript
 const size = new paper.Size(width, height);
 ```
 
 ### Segment
+
 ```javascript
 const segment = new paper.Segment(point, handleIn, handleOut);
 
 // Access via path
-path.segments[0].point
-path.segments[0].handleIn
-path.segments[0].handleOut
+path.segments[0].point;
+path.segments[0].handleIn;
+path.segments[0].handleOut;
 ```
 
 ### Curve
+
 ```javascript
 const curve = path.curves[0];
 
-curve.point1, curve.point2           // Endpoints
-curve.handle1, curve.handle2         // Control points
-curve.length                          // Curve length
-curve.getPointAt(t)                   // Point at t (0-1)
-curve.getTangentAt(t)                 // Tangent at t
-curve.getCurvatureAt(t)               // Curvature at t
+(curve.point1, curve.point2); // Endpoints
+(curve.handle1, curve.handle2); // Control points
+curve.length; // Curve length
+curve.getPointAt(t); // Point at t (0-1)
+curve.getTangentAt(t); // Tangent at t
+curve.getCurvatureAt(t); // Curvature at t
 ```
 
 ### Path
+
 ```javascript
 const path = new paper.Path();
 
 // From SVG
-const path = new paper.Path('M0 0 L100 100');
+const path = new paper.Path("M0 0 L100 100");
 
 // Rectangle
 const rect = new paper.Path.Rectangle(point, size);
@@ -85,6 +91,7 @@ const hex = new paper.Path.RegularPolygon(center, 6, radius);
 ## Path Operations
 
 ### Boolean Operations
+
 ```javascript
 // Union - combine shapes
 const united = path1.unite(path2);
@@ -103,13 +110,14 @@ const divided = path1.divide(path2);
 ```
 
 ### Path Modification
+
 ```javascript
 // Simplify - reduce points while keeping shape
-path.simplify(tolerance);  // default: 2.5
+path.simplify(tolerance); // default: 2.5
 
 // Smooth - apply curve smoothing
-path.smooth({ type: 'catmull-rom' });
-path.smooth({ type: 'geometric' });
+path.smooth({ type: "catmull-rom" });
+path.smooth({ type: "geometric" });
 
 // Flatten - convert curves to lines
 path.flatten(maxDistance);
@@ -123,12 +131,13 @@ path.openPath();
 ```
 
 ### Offset/Expansion (Requires paperjs-offset)
+
 ```javascript
-import { PaperOffset } from 'paperjs-offset';
+import { PaperOffset } from "paperjs-offset";
 
 // Offset outward
-const outer = PaperOffset.offset(path, distance, { 
-  join: 'round'  // 'miter' | 'bevel'
+const outer = PaperOffset.offset(path, distance, {
+  join: "round", // 'miter' | 'bevel'
 });
 
 // Offset inward (negative distance)
@@ -139,6 +148,7 @@ const stroked = PaperOffset.offsetStroke(path, strokeWidth);
 ```
 
 ### Path Analysis
+
 ```javascript
 // Bounds
 const bounds = path.bounds;
@@ -161,28 +171,31 @@ const interior = path.interiorPoint;
 ## Path Data (SVG)
 
 ### Import
+
 ```javascript
 // From SVG path data string
-const path = new paper.Path('M0 0 C10 20 30 20 50 0...');
+const path = new paper.Path("M0 0 C10 20 30 20 50 0...");
 
 // From SVG element
-const svg = document.getElementById('myPath');
+const svg = document.getElementById("myPath");
 const path = new paper.Path(svg.pathData);
 ```
 
 ### Export
+
 ```javascript
-const pathData = path.pathData;  // SVG path data string
+const pathData = path.pathData; // SVG path data string
 
 // Export to SVG element
-const svg = path.exportSVG({ 
-  bounds: 'content'  // or 'stroke' 
+const svg = path.exportSVG({
+  bounds: "content", // or 'stroke'
 });
 ```
 
 ## Compound Paths
 
 ### Creating
+
 ```javascript
 // Multiple subpaths
 const compound = new paper.CompoundPath();
@@ -190,13 +203,14 @@ compound.addChild(path1);
 compound.addChildChild(path2);
 
 // Boolean operations create compound paths
-const result = path1.unite(path2);  // May be compound
+const result = path1.unite(path2); // May be compound
 ```
 
 ### Accessing Children
+
 ```javascript
 if (result instanceof paper.CompoundPath) {
-  result.children.forEach(child => {
+  result.children.forEach((child) => {
     // Process each subpath
   });
 }
@@ -218,12 +232,13 @@ path.rotate(angle, center);
 path.transform(matrix);
 
 // Apply matrix
-path.transform(matrix, true);  // true = concate to existing
+path.transform(matrix, true); // true = concate to existing
 ```
 
 ## Geometric Utilities
 
 ### Distance
+
 ```javascript
 const dist = point1.getDistance(point2);
 
@@ -232,10 +247,11 @@ const closest = path.getNearestPoint(point);
 ```
 
 ### Intersections
+
 ```javascript
 const intersections = path1.getIntersections(path2);
 
-intersections.forEach(isect => {
+intersections.forEach((isect) => {
   const point = isect.point;
   const tangent1 = isect.tangent1;
   const tangent2 = isect.tangent2;
@@ -249,28 +265,29 @@ For offset operations, use **paperjs-offset** library:
 ```javascript
 // Install: npm install paperjs-offset
 
-import { PaperOffset } from 'paperjs-offset';
+import { PaperOffset } from "paperjs-offset";
 
 // Basic offset
 const offsetPath = PaperOffset.offset(path, 10);
 
 // With options
 const offsetPath = PaperOffset.offset(path, 10, {
-  join: 'round',      // 'miter' | 'bevel'
-  limit: 5,           // Miter limit
-  insert: false       // Don't add to canvas
+  join: "round", // 'miter' | 'bevel'
+  limit: 5, // Miter limit
+  insert: false, // Don't add to canvas
 });
 ```
 
 ## Performance Tips
 
 ### Optimize Large Paths
+
 ```javascript
 // 1. Simplify early
 path.simplify();
 
 // 2. Flatten curves if straight segments ok
-path.flatten(1);  // Max distance per segment
+path.flatten(1); // Max distance per segment
 
 // 3. Use compound paths efficiently
 // 4. Hide unused paths instead of removing
@@ -278,14 +295,15 @@ path.visible = false;
 ```
 
 ### Use Web Workers
+
 ```javascript
 // Heavy computation off main thread
-const worker = new Worker('geometry-worker.js');
+const worker = new Worker("geometry-worker.js");
 
-worker.postMessage({ 
-  type: 'offset', 
+worker.postMessage({
+  type: "offset",
   pathData: path.pathData,
-  distance: 10 
+  distance: 10,
 });
 
 worker.onmessage = (e) => {
@@ -296,39 +314,43 @@ worker.onmessage = (e) => {
 ## Common Patterns
 
 ### Create Rectangle with Corner Radius
+
 ```javascript
 const rect = new paper.Path.Rectangle({
   point: [0, 0],
   size: [100, 50],
-  radius: 5
+  radius: 5,
 });
 ```
 
 ### Rounded Panel Shape
+
 ```javascript
 function createRoundedPanel(width, height, radius) {
   const rect = new paper.Path.Rectangle({
     point: [0, 0],
     size: [width, height],
-    radius: radius
+    radius: radius,
   });
   return rect;
 }
 ```
 
 ### Offset Path for Bit Diameter
+
 ```javascript
-import { PaperOffset } from 'paperjs-offset';
+import { PaperOffset } from "paperjs-offset";
 
 function offsetForBit(profilePath, bitDiameter) {
   return PaperOffset.offset(profilePath, bitDiameter / 2, {
-    join: 'round',
-    insert: false
+    join: "round",
+    insert: false,
   });
 }
 ```
 
 ### Merge Adjacent Panels
+
 ```javascript
 function mergePanels(panels) {
   let result = panels[0];
@@ -342,20 +364,22 @@ function mergePanels(panels) {
 ## Coordinate Conversion
 
 ### Paper.js to SVG
+
 ```javascript
 // Paper.js is already SVG-compatible
 const svgElement = path.exportSVG();
 ```
 
 ### Paper.js to Three.js
+
 ```javascript
 function paperPathToThreeShape(paperPath, flipY = true) {
   const shape = new THREE.Shape();
-  
+
   paperPath.segments.forEach((seg, i) => {
     const x = seg.point.x;
     const y = flipY ? -seg.point.y : seg.point.y;
-    
+
     if (i === 0) {
       shape.moveTo(x, y);
     } else if (seg.handleIn.isZero()) {
@@ -365,13 +389,16 @@ function paperPathToThreeShape(paperPath, flipY = true) {
       const h1 = seg.handleIn;
       const h2 = seg.handleOut;
       shape.bezierCurveTo(
-        x + h1.x, flipY ? -(y + h1.y) : y + h1.y,
-        x + h2.x, flipY ? -(y + h2.y) : y + h2.y,
-        x, y
+        x + h1.x,
+        flipY ? -(y + h1.y) : y + h1.y,
+        x + h2.x,
+        flipY ? -(y + h2.y) : y + h2.y,
+        x,
+        y,
       );
     }
   });
-  
+
   return shape;
 }
 ```

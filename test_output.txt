@@ -1,0 +1,66 @@
+
+> facade_section_editor@1.0.0 test
+> vitest run offset-line-inversion-parallelism-break.spec.js
+
+
+[1m[46m RUN [49m[22m [36mv4.1.0 [39m[90mE:/╨а╨░╨▒╨╛╤В╨░/Programming/JavaScript/Projects/facade_section_editor[39m
+
+[90mstdout[2m | tests/offset-line-inversion-parallelism-break.spec.js[2m > [22m[2moffset-line-inversion-parallelism-break[2m > [22m[2mshould degenerate near-zero line instead of inverting to break parallelism
+[22m[39m[19:10:22] [OffsetContourBuilder:INFO] [тЬУ OFFSET OK] segment 0, type=line, will be at offsetSegments[0]
+[19:10:22] [OffsetContourBuilder:INFO] [тЬУ OFFSET OK] segment 1, type=arc, will be at offsetSegments[1]
+[19:10:22] [OffsetContourBuilder:INFO] [тЬУ OFFSET OK] segment 2, type=line, will be at offsetSegments[2]
+[19:10:22] [OffsetContourBuilder:INFO] [тЬУ OFFSET OK] segment 3, type=line, will be at offsetSegments[3]
+[19:10:22] [OffsetContourBuilder:INFO] [тЬУ OFFSET OK] segment 4, type=line, will be at offsetSegments[4]
+[19:10:22] [OffsetContourBuilder:INFO] [тЬУ OFFSET OK] segment 5, type=line, will be at offsetSegments[5]
+[19:10:22] [OffsetContourBuilder:INFO] [тнР OFFSET SUMMARY] Total segments: 6, offsetSegments: 6, sourceIndices: [0, 1, 2, 3, 4, 5], skipped: []
+[19:10:22] [OffsetContourBuilder:INFO] [тнР LOOP i=0] Processing offset segment 0 (type=line, source=0)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР PUSHED] Added segment type=line to result (result.length now 1)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР NO SKIPPED] between 0 and 1, droppedGap=false
+[19:10:22] [OffsetContourBuilder:INFO] [тнР LOOP i=1] Processing offset segment 1 (type=arc, source=1)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР PUSHED] Added segment type=arc to result (result.length now 2)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР NO SKIPPED] between 1 and 2, droppedGap=false
+[19:10:22] [OffsetContourBuilder:INFO] [тнР LOOP i=2] Processing offset segment 2 (type=line, source=2)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР PUSHED] Added segment type=line to result (result.length now 3)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР NO SKIPPED] between 2 and 3, droppedGap=false
+[19:10:22] [OffsetContourBuilder:INFO] [тнР LOOP i=3] Processing offset segment 3 (type=line, source=3)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР PUSHED] Added segment type=line to result (result.length now 4)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР NO SKIPPED] between 3 and 4, droppedGap=false
+[19:10:22] [OffsetContourBuilder:INFO] [тнР LOOP i=4] Processing offset segment 4 (type=line, source=4)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР PUSHED] Added segment type=line to result (result.length now 5)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР NO SKIPPED] between 4 and 5, droppedGap=false
+[19:10:22] [OffsetContourBuilder:INFO] [тнР LOOP i=5] Processing offset segment 5 (type=line, source=5)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР PUSHED] Added segment type=line to result (result.length now 6)
+[19:10:22] [OffsetContourBuilder:INFO] [тнР NO SKIPPED] between 5 and 0, droppedGap=false
+[19:10:22] [OffsetContourBuilder:INFO] [тнР BEFORE-FILTER] result=6: [line(2.73,4.74)тЖТ(1.72,8.76), arc(1.72,8.76)тЖТ(0.33,7.97), line(0.33,7.97)тЖТ(0.33,0.33), line(0.33,0.33)тЖТ(9.67,0.33), line(9.67,0.33)тЖТ(9.67,2.75), line(9.67,2.75)тЖТ(2.73,4.74)]
+[19:10:22] [OffsetContourBuilder:INFO] [тнР PRE-TRIM-SELF-INTERSECTIONS] finalSegments=6: [line(2.73,4.74)тЖТ(1.72,8.76), arc(1.72,8.76)тЖТ(0.33,7.97), line(0.33,7.97)тЖТ(0.33,0.33), line(0.33,0.33)тЖТ(9.67,0.33), line(9.67,0.33)тЖТ(9.67,2.75), line(9.67,2.75)тЖТ(2.73,4.74)]
+[19:10:22] [OffsetContourBuilder:INFO] [тнР POST-TRIM-SELF-INTERSECTIONS] finalSegments=6: [line(2.73,4.74)тЖТ(1.72,8.76), arc(1.72,8.76)тЖТ(0.33,7.97), line(0.33,7.97)тЖТ(0.33,0.33), line(0.33,0.33)тЖТ(9.67,0.33), line(9.67,0.33)тЖТ(9.67,2.75), line(9.67,2.75)тЖТ(2.73,4.74)]
+
+[90mstdout[2m | tests/offset-line-inversion-parallelism-break.spec.js[2m > [22m[2moffset-line-inversion-parallelism-break[2m > [22m[2mshould degenerate near-zero line instead of inverting to break parallelism
+[22m[39mOffset result contours count: [33m1[39m
+  Contour 0: 6 segments
+
+[90mstdout[2m | tests/offset-line-inversion-parallelism-break.spec.js[2m > [22m[2moffset-line-inversion-parallelism-break[2m > [22m[2mdiagnoses line inversion root cause in offset contour 3
+[22m[39mDiagnostic: {
+  contour3LineLength: [33m0.0177[39m,
+  degeneracyThreshold: [33m0.05[39m,
+  isNearDegenerate: [33mtrue[39m,
+  issue: [32m'Line length 0.0177 is near-degenerate; should not INVERT'[39m,
+  expectedBehavior: [32m'Flag as degenerate and remove or merge with neighbors'[39m,
+  actualBehavior: [32m'Inverted (direction flipped), breaking parallelism'[39m
+}
+
+[90mstdout[2m | tests/offset-line-inversion-parallelism-break.spec.js[2m > [22m[2moffset-line-inversion-parallelism-break[2m > [22m[2mvalidates parallelism preservation constraint
+[22m[39mParallelism check: {
+  originalDir: { x: [33m10[39m, y: [33m0[39m },
+  contour4Dir: { x: [33m0[39m, y: [33m0.1931[39m },
+  contour3Dir: { x: [33m0[39m, y: [33m0.0177[39m },
+  contour3IsNearDegenerate: [33mtrue[39m
+}
+
+ [32mтЬУ[39m tests/offset-line-inversion-parallelism-break.spec.js [2m([22m[2m3 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 23:10:22
+[2m   Duration [22m 804ms[2m (transform 182ms, setup 34ms, import 246ms, tests 17ms, environment 311ms)[22m
+

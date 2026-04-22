@@ -5,6 +5,7 @@
 > **Quick Summary**: Fix `CustomOffsetProcessor.joinOffsetSegments()` so that when degenerate segments (zero-radius arc or zero-length line) are removed, their actual neighbors in the full post-join topology (including inserted bridge segments) are correctly reconnected — including the cyclic last↔first pair in closed contours.
 >
 > **Deliverables**:
+>
 > - Bug fix: cyclic second pass for closed contours
 > - Enhancement: `isBridge` metadata on bridge segments
 > - Enhancement: iterative sanitize→reconnect for cascaded degeneracy
@@ -19,24 +20,30 @@
 ## Context
 
 ### Original Request
+
 When a segment becomes degenerate (radius≤0 or length≤0), it must be removed and its actual neighbors — including bridge segments inserted during the join pass — must be correctly reconnected.
 
 ### Interview Summary
+
 **Key Discussions**:
+
 - Previous hardening plan (T1-T17) completed: 67 tests pass
 - Problem: second pass gap-sealing is LINEAR — misses the `last↔first` gap in CLOSED contours after degenerate removal
 - "Actual neighbors" = neighbors in the **post-first-pass topology** including bridges, NOT original pre-join order
 - Bridges are currently unmarked (no `isBridge` flag), first-class segments by behavior only
 
 **Research Findings**:
+
 - `joinOffsetSegments` pipeline: first pass (join+bridges, lines 858-875) → `sanitizeSegments` (lines 879) → second pass (gap seal, lines 885-896)
 - Bug 1: second pass `for (i < clean.length)` with `i < clean.length - 1` guard → NEVER checks `clean[last]↔clean[0]`
-- Bug 2: no "reconnect across deleted run" semantics for multi-segment degenerate spans  
+- Bug 2: no "reconnect across deleted run" semantics for multi-segment degenerate spans
 - Bug 3: no iterative stabilization — second-pass trims can create new degeneracies
 - `applyMiterJoin` does NOT know bridge-vs-original provenance
 
 ### Metis Review
+
 **Gaps addressed**:
+
 - Cyclic second pass scope: MINIMAL fix (add `last↔first` check) + structural consistency
 - Cascaded degeneracy: iterative loop capped at N=3
 - `isBridge` flag: additive metadata only, does not change sanitize filtering
@@ -49,26 +56,31 @@ When a segment becomes degenerate (radius≤0 or length≤0), it must be removed
 ## Work Objectives
 
 ### Core Objective
+
 Fix incorrect neighbor reconnection after degenerate segment removal in `joinOffsetSegments`, specifically: make the second pass cyclic for closed contours, add bridge metadata, and optionally add iterative stabilization.
 
 ### Concrete Deliverables
+
 - `src/operations/CustomOffsetProcessor.js` — fixed `joinOffsetSegments` second pass
 - `tests/offset/degenerate-reconnect.spec.js` — new regression tests
 - Updated existing tests still passing (67 → 67+N)
 
 ### Definition of Done
+
 - [ ] All 67 existing tests pass
 - [ ] New tests for cyclic gap, bridge marking, edge cases all pass
 - [ ] Determinism 30-run hash tests still pass
 - [ ] No STITCH_TOLERANCE masking of remaining gaps (gap at `joinOffsetSegments` output < `JOIN_TOLERANCE`)
 
 ### Must Have
+
 - Second pass checks `last↔first` pair for closed contours
 - `isBridge: true` metadata on bridge segments returned by `applyMiterJoin`
 - `joinOffsetSegments` receives `closed` boolean parameter
 - All existing tests remain green after every commit
 
 ### Must NOT Have (Guardrails)
+
 - No changes to `applyMiterJoin` internals
 - No changes to `sanitizeSegments` filtering criteria
 - No changes to first pass segment ordering
@@ -84,12 +96,14 @@ Fix incorrect neighbor reconnection after degenerate segment removal in `joinOff
 > **ZERO HUMAN INTERVENTION** — ALL verification is agent-executed.
 
 ### Test Decision
+
 - **Infrastructure exists**: YES (Vitest + happy-dom, 67 tests passing)
 - **Automated tests**: TDD (write RED test first, then implement)
 - **Framework**: `npm test` = `vitest run`
 - **Pattern**: Tests use `calculateOffsetFromPathData` public API + direct `joinOffsetSegments` export for unit tests
 
 ### QA Policy
+
 Every task has agent-executed QA scenarios. Evidence in `.sisyphus/evidence/`.
 
 - **Module/API checks**: Bash + `npm test`
@@ -112,6 +126,7 @@ C5: Edge case tests + final clean-up
 All commits are sequential. No parallelism — each commit depends on previous green state.
 
 ### Dependency Matrix
+
 - T1: blocked by — ; blocks T2
 - T2: blocked by T1 ; blocks T3
 - T3: blocked by T2 ; blocks T4
@@ -163,6 +178,7 @@ All commits are sequential. No parallelism — each commit depends on previous g
   - [ ] Each test uses a concrete SVG path + offset value, no placeholders
 
   **QA Scenarios**:
+
   ```
   Scenario: Baseline green check
     Tool: Bash
@@ -195,12 +211,12 @@ All commits are sequential. No parallelism — each commit depends on previous g
     ```javascript
     // After loop ends, for closed contours check last↔first gap
     if (closed && sealed.length >= 2) {
-        const last = sealed[sealed.length - 1];
-        const first = sealed[0];
-        if (!isNear(last.end, first.start, JOIN_TOLERANCE)) {
-            const gap = applyMiterJoin(last, first, maxMiterLen, offset);
-            if (gap) sealed.push(...gap);
-        }
+      const last = sealed[sealed.length - 1];
+      const first = sealed[0];
+      if (!isNear(last.end, first.start, JOIN_TOLERANCE)) {
+        const gap = applyMiterJoin(last, first, maxMiterLen, offset);
+        if (gap) sealed.push(...gap);
+      }
     }
     ```
   - Verify: `joinOffsetSegments` is called from `offsetContour` with `closed` already computed (line ~921). Confirm the `closed` boolean is passed correctly.
@@ -237,6 +253,7 @@ All commits are sequential. No parallelism — each commit depends on previous g
   - [ ] Gap assertion: for fixed test cases, `distance(segments[last].end, segments[0].start) < JOIN_TOLERANCE`
 
   **QA Scenarios**:
+
   ```
   Scenario: Cyclic gap fix - T1 tests now GREEN
     Tool: Bash
@@ -311,6 +328,7 @@ All commits are sequential. No parallelism — each commit depends on previous g
   - [ ] All 67+ tests pass
 
   **QA Scenarios**:
+
   ```
   Scenario: Bridge metadata present
     Tool: Bash
@@ -345,12 +363,12 @@ All commits are sequential. No parallelism — each commit depends on previous g
     let iter = 0;
     let working = sealed;
     while (iter < MAX_ITER) {
-        const reSanitized = sanitizeSegments(working);
-        if (reSanitized.length === working.length) break; // stable
-        // Re-run second pass gap seal on re-sanitized list
-        working = gapSealPass(reSanitized, closed, maxMiterLen, offset);
-        iter++;
-        if (iter === MAX_ITER) log.warn("Max degenerate iterations reached");
+      const reSanitized = sanitizeSegments(working);
+      if (reSanitized.length === working.length) break; // stable
+      // Re-run second pass gap seal on re-sanitized list
+      working = gapSealPass(reSanitized, closed, maxMiterLen, offset);
+      iter++;
+      if (iter === MAX_ITER) log.warn("Max degenerate iterations reached");
     }
     return working;
     ```
@@ -387,6 +405,7 @@ All commits are sequential. No parallelism — each commit depends on previous g
   - [ ] Determinism tests still pass (30-run hash unchanged for normal inputs)
 
   **QA Scenarios**:
+
   ```
   Scenario: Cascaded degeneracy resolved
     Tool: Bash
@@ -458,6 +477,7 @@ All commits are sequential. No parallelism — each commit depends on previous g
   - [ ] `npm test` shows 67+N tests all passing (N = all new tests from T1-T5)
 
   **QA Scenarios**:
+
   ```
   Scenario: All edge case tests pass
     Tool: Bash
@@ -487,19 +507,19 @@ All commits are sequential. No parallelism — each commit depends on previous g
 ## Final Verification Wave
 
 - [x] F1. **Regression guard** — `unspecified-high`
-  Run full `npm test`. Assert all tests pass. Run determinism suite 30 times. Assert identical hashes.
-  Output: `Tests [N/N] | Determinism [STABLE] | VERDICT: APPROVE/REJECT`
-  **Result**: ✅ APPROVE — 81/81 tests pass, determinism STABLE (30 runs, identical hashes)
+      Run full `npm test`. Assert all tests pass. Run determinism suite 30 times. Assert identical hashes.
+      Output: `Tests [N/N] | Determinism [STABLE] | VERDICT: APPROVE/REJECT`
+      **Result**: ✅ APPROVE — 81/81 tests pass, determinism STABLE (30 runs, identical hashes)
 
 - [x] F2. **Gap assertion audit** — `deep`
-  For every closed-contour test case in test suite: extract `joinOffsetSegments` output and assert `distance(seg[i].end, seg[(i+1)%N].start) < JOIN_TOLERANCE` for all pairs. Verify no STITCH_TOLERANCE masking.
-  Output: `Closed contours tested [N] | Max gap [X units] | VERDICT`
-  **Result**: ✅ APPROVE — 12 closed contours tested, max gap 0.0 units, 0 violations
+      For every closed-contour test case in test suite: extract `joinOffsetSegments` output and assert `distance(seg[i].end, seg[(i+1)%N].start) < JOIN_TOLERANCE` for all pairs. Verify no STITCH_TOLERANCE masking.
+      Output: `Closed contours tested [N] | Max gap [X units] | VERDICT`
+      **Result**: ✅ APPROVE — 12 closed contours tested, max gap 0.0 units, 0 violations
 
 - [x] F3. **Scope fidelity** — `deep`
-  Verify: `applyMiterJoin` internal lines unchanged, `sanitizeSegments` filtering unchanged, first pass ordering unchanged. Diff shows changes only in second pass block and bridge insertion points.
-  Output: `Forbidden changes [0/N] | VERDICT`
-  **Result**: ✅ APPROVE — 0 forbidden changes detected (export removed), scope fidelity maintained
+      Verify: `applyMiterJoin` internal lines unchanged, `sanitizeSegments` filtering unchanged, first pass ordering unchanged. Diff shows changes only in second pass block and bridge insertion points.
+      Output: `Forbidden changes [0/N] | VERDICT`
+      **Result**: ✅ APPROVE — 0 forbidden changes detected (export removed), scope fidelity maintained
 
 ---
 
@@ -516,12 +536,14 @@ All commits are sequential. No parallelism — each commit depends on previous g
 ## Success Criteria
 
 ### Verification Commands
+
 ```bash
 npm test                    # Expected: all tests PASS (67+N)
 npm run test -- tests/offset/degenerate-reconnect.spec.js --reporter verbose
 ```
 
 ### Final Checklist
+
 - [ ] Cyclic second pass implemented for closed contours
 - [ ] `isBridge` metadata on bridges
 - [ ] All 67 existing tests pass

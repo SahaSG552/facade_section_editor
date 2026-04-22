@@ -5,6 +5,7 @@
 > **Quick Summary**: Implement stable snapshot-based offset system that captures topological events (bridge appearance, segment degeneracy) and preserves contour state across offset values, fixing the issue where П-bridges disappear when arcs degenerate.
 >
 > **Deliverables**:
+>
 > - Snapshot system in OffsetTool
 > - Topology event detector
 > - Snapshot-based offset calculation
@@ -22,22 +23,27 @@
 ## Context
 
 ### Original Problem
+
 When dynamically varying offset distance:
+
 - At offset -1: П-bridge appears (arc valid)
 - At offset -5: arc degenerates, П-bridge disappears!
 - Expected: П-bridge should remain because it was a valid segment at -1
 
 ### Root Cause
+
 Current implementation recalculates offset from ORIGINAL contour for each distance. When arc degenerates, NO bridges are created because `applyMiterJoin` returns null for degenerate segments.
 
 ### Solution: Two-Pronged Approach
 
 **1. Immediate Fix (T5-T7):**
+
 - Fix applyMiterJoin to create bridges even when neighbor is degenerate
 - Fix gapSealPass to preserve bridges after sanitize
 - Fix sanitizeSegments to keep bridges when arcs are removed
 
 **2. Stable System (T1-T4, T8-T9):**
+
 - Snapshot system to preserve state across offset values
 - Topology event detection
 - Snapshot-based offset calculation
@@ -48,21 +54,25 @@ Current implementation recalculates offset from ORIGINAL contour for each distan
 ## Work Objectives
 
 ### Core Objective
+
 Implement stable offset system with snapshot preservation that works consistently across all offset values.
 
 ### Concrete Deliverables
+
 - Snapshot storage and management in OffsetTool
 - Topology event detector
 - Modified offset calculation using snapshots
 - Tests verifying snapshot behavior
 
 ### Definition of Done
+
 - [ ] Snapshot captured when topology changes
 - [ ] Bridge preserved when navigating to intermediate offset
 - [ ] Sign change clears history correctly
 - [ ] Tests pass
 
 ### Must Have
+
 - Snapshot capture on bridge/degenerate/sanitize events
 - Correct snapshot selection (floor by absolute value)
 - Independent positive/negative stacks
@@ -70,6 +80,7 @@ Implement stable offset system with snapshot preservation that works consistentl
 - Fix sanitizeSegments to preserve bridges when arcs degenerate
 
 ### Must NOT Have
+
 - Global algorithm rewrite
 - Global path optimization
 
@@ -78,11 +89,13 @@ Implement stable offset system with snapshot preservation that works consistentl
 ## Verification Strategy
 
 ### Test Decision
+
 - **Infrastructure exists**: YES (Vitest)
 - **Automated tests**: Tests-after
 - **Framework**: Vitest
 
 ### QA Policy
+
 Every task includes agent-executed QA scenarios with evidence path.
 
 ---
@@ -90,19 +103,23 @@ Every task includes agent-executed QA scenarios with evidence path.
 ## Execution Strategy
 
 ### Wave 1 (Foundation):
+
 - T1: Add snapshot storage to OffsetTool
 - T2: Create topology event detector
 
 ### Wave 2 (Core Implementation):
-- T3: Modify _refreshPreview to use snapshots
+
+- T3: Modify \_refreshPreview to use snapshots
 - T4: Handle sign change correctly
 
 ### Wave 3 (Degenerate Fixes):
+
 - T5: Fix applyMiterJoin to create bridges when neighbor degenerates
 - T6: Fix gapSealPass to preserve bridges after sanitize
 - T7: Fix sanitizeSegments to handle degenerate+bridge correctly
 
 ### Wave 4 (Testing):
+
 - T8: Add snapshot behavior tests
 - T9: Test edge cases
 
@@ -146,7 +163,7 @@ Every task includes agent-executed QA scenarios with evidence path.
   - [ ] Function correctly identifies bridge segments
   - [ ] Function correctly identifies degenerate segments
 
-- [ ] 3. Modify _refreshPreview to use snapshots
+- [ ] 3. Modify \_refreshPreview to use snapshots
 
   **What to do**:
   - After each offset calculation, detect topology changes
@@ -156,7 +173,7 @@ Every task includes agent-executed QA scenarios with evidence path.
     - Use snapshot.pathData as input instead of original entry.pathData
 
   **References**:
-  - `src/editor/tools/OffsetTool.js:1181-1228` - current _refreshPreview
+  - `src/editor/tools/OffsetTool.js:1181-1228` - current \_refreshPreview
   - `.sisyphus/plans/offset-rules.md` - snapshot selection logic
 
   **Acceptance Criteria**:
@@ -182,14 +199,15 @@ Every task includes agent-executed QA scenarios with evidence path.
     - When curr OR next is degenerate, DON'T return null immediately
     - Instead: create bridge between non-degenerate neighbor endpoints
     - This ensures bridges exist even when arcs degenerate
-  
+
   **Current code (lines 620-627)**:
+
   ```javascript
   if (curr.degenerate || next.degenerate) {
-      return null;  // <-- PROBLEM: No bridge created!
+    return null; // <-- PROBLEM: No bridge created!
   }
   ```
-  
+
   **Fix**: Create bridge between non-degenerate endpoints
 
   **References**:
@@ -221,7 +239,7 @@ Every task includes agent-executed QA scenarios with evidence path.
   - Fix: Only remove segments that are:
     1. Actually degenerate (segment.degenerate === true)
     2. AND not bridges (isBridge !== true)
-  
+
   **Note**: Bridges are regular lines, NOT marked degenerate. They should survive sanitize.
 
   **References**:

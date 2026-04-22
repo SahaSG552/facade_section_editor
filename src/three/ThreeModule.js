@@ -1780,7 +1780,7 @@ export default class ThreeModule extends BaseModule {
                                         this.panelSide,
                                         transformOptions,
                                         {
-                                            offset: -profileLeftHalfWidth, // Offset inward by profile left half-width to align with left edge contour
+                                            offset: profileLeftHalfWidth, // Positive value maps to inward in CustomOffsetProcessor
                                             cornerStyle: "miter",
                                         },
                                     );
@@ -1854,7 +1854,7 @@ export default class ThreeModule extends BaseModule {
                                                 this.panelSide,
                                                 transformOptions,
                                                 {
-                                                    offset: profileRightHalfWidth,
+                                                    offset: -profileRightHalfWidth,
                                                     cornerStyle: "miter",
                                                 },
                                             );
@@ -2043,7 +2043,7 @@ export default class ThreeModule extends BaseModule {
                                             "round",
                                             this.panelSide,
                                             { ...transformOptions, pathVisual: false, isExtension: true },
-                                            { offset: -profileLeftHalfWidth, cornerStyle: "miter" }, // No offset for extensions
+                                            { offset: profileLeftHalfWidth, cornerStyle: "miter" },
                                         );
 
                                         let mainExtensionMeshes = [];
@@ -2118,7 +2118,7 @@ export default class ThreeModule extends BaseModule {
                                             "miter",
                                             this.panelSide,
                                             { ...transformOptions, pathVisual: false, isExtension: true },
-                                            { offset: profileRightHalfWidth, cornerStyle: "miter" }, // No offset for extensions
+                                            { offset: -profileRightHalfWidth, cornerStyle: "miter" },
                                         );
 
                                         let phantomExtensionMeshes = [];
@@ -2416,7 +2416,7 @@ export default class ThreeModule extends BaseModule {
         transformOptions,
     ) {
         try {
-            // Offset distances: inward for main, outward for phantom
+            // Offset distances: inward for both sides toward the pocket centerline
             const mainOffsetDist = Math.max(
                 0,
                 Number(profileLeftHalfWidth) || 0,
@@ -2435,7 +2435,7 @@ export default class ThreeModule extends BaseModule {
                 mainOffsetDist,
                 {
                     offsetSignMode: "direct",
-                    join: "miter",
+                    join: "sharp",
                     cap: "butt",
                     limit: 10,
                     useArcApproximation: true,
@@ -2453,18 +2453,18 @@ export default class ThreeModule extends BaseModule {
             const innerSVG = phantomPathData
                 ? calculateOffsetFromPathData(
                     phantomPathData,
-                                        -phantomOffsetDist,
+                    -phantomOffsetDist,
                     {
-                                            offsetSignMode: "direct",
-                      join: "miter",
-                      cap: "butt",
-                      limit: 10,
-                      useArcApproximation: true,
-                      exportModule,
-                      forceReverseOutput:
-                          window?.forceReverseOffset !== false,
-                    trimSelfIntersections: true,
-                },
+                        offsetSignMode: "direct",
+                        join: "sharp",
+                        cap: "butt",
+                        limit: 10,
+                        useArcApproximation: true,
+                        exportModule,
+                        forceReverseOutput:
+                            window?.forceReverseOffset !== false,
+                        trimSelfIntersections: true,
+                    },
                 )
                 : null;
 

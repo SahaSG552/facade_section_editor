@@ -24,4 +24,5 @@ Changes to these files have the widest blast radius across the codebase:
 - `DEV` — `src\three\ManifoldCSG.js`
 
 ---
+
 _Back to [index.md](./index.md) · Generated 2026-04-09_

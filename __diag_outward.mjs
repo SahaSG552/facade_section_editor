@@ -3,7 +3,11 @@ import ExportModule from "./src/export/ExportModule.js";
 
 const exportModule = new ExportModule();
 const source = "M 80 -1 L 60 30 A 13 13 0 0 0 40 30 L 40 0";
-const opts = { offsetSignMode: "direct", trimSelfIntersections: true, exportModule };
+const opts = {
+  offsetSignMode: "direct",
+  trimSelfIntersections: true,
+  exportModule,
+};
 
 const r13 = calculateOffsetFromPathData(source, 13, opts);
 console.log("d=+13:", r13);
