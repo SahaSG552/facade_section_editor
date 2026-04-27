@@ -18,6 +18,7 @@ import variablesManager from "../data/VariablesManager.js";
 import PathEditor from "./PathEditor.js";
 import ProfileEditor from "../editor/ProfileEditor.js";
 import { addUnifiedPressListener } from "../ui/pressEvents.js";
+import { EditorPanelLayout } from "../ui/EditorPanelLayout.js";
 import {
     evalAngle,
     modListToSvgTransform,
@@ -1716,8 +1717,8 @@ export default class BitsManager {
         modal.innerHTML = `
     <div class="modal-content">
       <h2>${isEdit ? "Edit Bit" : "New Bit Parameters"}</h2>
-      <div class="modal-body">
-        <div class="bit-form-container">
+      <div class="modal-body" id="bit-modal-panel-layout">
+        <div id="bit-panel-variables">
           <form id="bit-form" class="bit-form">
             <div class="bit-form-grid" id="bit-form-grid">
               ${formRows}
@@ -1726,8 +1727,8 @@ export default class BitsManager {
           <button type="button" class="add-field-btn" id="add-custom-field-btn">
             + Add Custom Field
           </button>
-          ${profilePathHtml}
         </div>
+        ${profilePathHtml ? `<div id="bit-panel-profile-path">${profilePathHtml}</div>` : ''}
         <div id="bit-preview" class="bit-preview">
           <svg id="bit-preview-canvas" width="400" height="400"></svg>
           <div id="preview-toolbar">
@@ -1749,6 +1750,54 @@ export default class BitsManager {
   `;
 
         document.body.appendChild(modal);
+
+        // Initialize EditorPanelLayout for the bit editor modal
+        const bitModalLayoutEl = modal.querySelector('#bit-modal-panel-layout');
+        if (bitModalLayoutEl) {
+            const bitLayout = new EditorPanelLayout(bitModalLayoutEl, {
+                storageKey: `facade-bit-editor-layout-v1`,
+                breakpoint: 560,
+            });
+            const varPanelEl = modal.querySelector('#bit-panel-variables');
+            if (varPanelEl) {
+                bitLayout.addPanel({ id: 'bit-variables', title: 'Variables', el: varPanelEl, col: 0, resizable: true });
+            }
+            const profilePathPanelEl = modal.querySelector('#bit-panel-profile-path');
+            if (profilePathPanelEl) {
+                // Extract the inner profile-path-section element so it sits in the panel body
+                const inner = profilePathPanelEl.querySelector('.profile-path-section') ?? profilePathPanelEl;
+                bitLayout.addPanel({ id: 'bit-profile-path', title: 'Profile Path', el: inner, col: 0, resizable: true });
+                // profilePathHtml generates a textarea for debug log — split it off
+                const debugLog = inner.querySelector('#bit-profileDebugLog');
+                if (debugLog) {
+                    const debugHeader = inner.querySelector('.profile-path-header[style]');
+                    const debugWrap = document.createElement('div');
+                    if (debugHeader) debugWrap.appendChild(debugHeader);
+                    debugWrap.appendChild(debugLog);
+
+                    // Keep debug helpers together with the debug log panel.
+                    const debugInputIds = [
+                        '#bit-profilePath',
+                        '#bit-rawProfilePath',
+                        '#bit-offsetDebugLog',
+                        '#bit-profileTransforms',
+                        '#bit-profileElements',
+                    ];
+                    for (const selector of debugInputIds) {
+                        const inputEl = inner.querySelector(selector);
+                        if (inputEl) debugWrap.appendChild(inputEl);
+                    }
+
+                    bitLayout.addPanel({ id: 'bit-debug-log', title: 'Debug Log', el: debugWrap, col: 0, collapsed: true, resizable: true });
+                }
+            }
+            const canvasPanelEl = modal.querySelector('#bit-preview');
+            if (canvasPanelEl) {
+                bitLayout.addPanel({ id: 'bit-canvas', title: 'Preview', el: canvasPanelEl, col: 1, resizable: true });
+            }
+            bitLayout.loadState();
+        }
+
         const form = modal.querySelector("#bit-form");
         const formGrid = modal.querySelector("#bit-form-grid");
 

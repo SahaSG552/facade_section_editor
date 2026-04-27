@@ -21,6 +21,7 @@ export default class InteractionManager {
         this.panMouseButton = config.panMouseButton ?? 2;
 
         // State flags
+        this.isEnabled = true;
         this.isPanning = false;
         this.isDraggingBit = false;
         this.dragStarted = false;
@@ -98,6 +99,23 @@ export default class InteractionManager {
     }
 
     /**
+     * Enable or disable default canvas interactions handled by this manager.
+     * Zoom/grid controls owned by other modules continue to work.
+     * @param {boolean} enabled
+     */
+    setInteractionEnabled(enabled) {
+        this.isEnabled = enabled !== false;
+        if (this.isEnabled) return;
+        this.isPanning = false;
+        this.isDraggingBit = false;
+        this.dragStarted = false;
+        this.isTouchDragging = false;
+        this.isTouchPanning = false;
+        this.isPinching = false;
+        this.canvas.style.cursor = "";
+    }
+
+    /**
      * Initialize all event listeners
      */
     initializeEventListeners() {
@@ -165,6 +183,8 @@ export default class InteractionManager {
     // ========== Mouse Event Handlers ==========
 
     handleMouseDown(e) {
+        // Keep right-button panning available even while edit mode disables bit interactions.
+        if (!this.isEnabled && e.button !== this.panMouseButton) return;
         if (e.button === this.panMouseButton) {
             this.isPanning = true;
             this.panStartX = e.clientX;
@@ -335,6 +355,7 @@ export default class InteractionManager {
     }
 
     handleMouseMove(e) {
+        if (!this.isEnabled && !this.isPanning) return;
         if (this.isDraggingPhantom && this.draggedPhantomIndex !== null) {
             // Handle phantom bit dragging (X-axis only for PO operation)
             this.dragStarted = true;
@@ -573,6 +594,7 @@ export default class InteractionManager {
     // ========== Touch Event Handlers ==========
 
     handleTouchStart(e) {
+        if (!this.isEnabled) return;
         // Let CanvasManager own multi-touch pan/pinch smoothing.
         // InteractionManager handles only single-touch select/drag.
         if (e.touches.length >= 2) {
@@ -685,6 +707,7 @@ export default class InteractionManager {
     }
 
     handleTouchMove(e) {
+        if (!this.isEnabled) return;
         // Multi-touch zoom/pan is handled by CanvasManager.
         if (e.touches.length >= 2) {
             this.isPinching = true;
@@ -693,6 +716,7 @@ export default class InteractionManager {
 
         if (e.cancelable) e.preventDefault();
 
+        if (!this.isEnabled) return;
         if (this.isTouchDragging && e.touches.length === 1) {
             const touch = Array.from(e.touches).find(
                 (t) => t.identifier === this.touchIdentifier

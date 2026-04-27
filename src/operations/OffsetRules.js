@@ -185,7 +185,9 @@ export function isSegmentDegenerated(segment) {
     return isArcDegenerated(segment);
   }
 
-  return true;
+  // Shapes (circle, rect, ellipse) and other types are never degenerate
+  // Only lines and arcs can have degenerate cases (zero-length, etc.)
+  return false;
 }
 
 /**

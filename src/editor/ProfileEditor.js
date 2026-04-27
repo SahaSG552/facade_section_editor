@@ -430,16 +430,18 @@ function _sanitizeEditorStateSegments(segments) {
 
     return segments.filter((seg) => {
         if (!seg) return false;
-        if (isSegmentDegenerated(seg)) return false;
+        if (seg.type === 'line' || seg.type === 'arc') {
+            if (isSegmentDegenerated(seg)) return false;
 
-        if (seg.type === 'arc') {
-            const start = seg.data?.start ?? seg.start;
-            const end = seg.data?.end ?? seg.end;
-            if (start && end) {
-                const dx = Number(end.x) - Number(start.x);
-                const dy = Number(end.y) - Number(start.y);
-                const chord2 = dx * dx + dy * dy;
-                if (chord2 <= 1e-8) return false;
+            if (seg.type === 'arc') {
+                const start = seg.data?.start ?? seg.start;
+                const end = seg.data?.end ?? seg.end;
+                if (start && end) {
+                    const dx = Number(end.x) - Number(start.x);
+                    const dy = Number(end.y) - Number(start.y);
+                    const chord2 = dx * dx + dy * dy;
+                    if (chord2 <= 1e-8) return false;
+                }
             }
         }
 
@@ -658,14 +660,21 @@ function _restoreContourFormulasIntoState(state, sourceElements, vars) {
  * @param {EditorStateManager} state
  * @param {Array<{kind:'path'|'shape', contourId?:number, segId?:string, transforms:Array<object>}>} transformsMeta
  */
-function _syncElementTransformsToState(state, transformsMeta) {
+function _syncElementTransformsToState(state, transformsMeta, options = {}) {
     if (!state || !Array.isArray(transformsMeta)) return;
+    const allowClear = options?.allowClear !== false;
 
     const normalize = (arr) => (Array.isArray(arr) ? arr : []).map(t => ({
         type: String(t?.type ?? '').toUpperCase(),
         raw: String(t?.raw ?? ''),
         params: Array.isArray(t?.params) ? [...t.params] : [],
     }));
+    const readTransforms = (metaEntry) => {
+        if (!metaEntry || !Array.isArray(metaEntry.transforms)) return null;
+        const normalized = normalize(metaEntry.transforms);
+        if (!allowClear && normalized.length === 0) return null;
+        return normalized;
+    };
     const same = (a, b) => JSON.stringify(normalize(a)) === JSON.stringify(normalize(b));
 
     const updates = [];
@@ -684,7 +693,8 @@ function _syncElementTransformsToState(state, transformsMeta) {
         const byContour = preferPositional
             ? null
             : metaPaths.find(m => Number(m?.contourId) === Number(elem?.contourId));
-        const tr = normalize(byContour?.transforms ?? metaPaths[i]?.transforms);
+        const tr = readTransforms(byContour) ?? readTransforms(metaPaths[i]);
+        if (!tr) continue;
         for (const seg of state.segments) {
             if ((seg.contourId ?? 0) !== (elem.contourId ?? 0)) continue;
             if (!same(seg.transforms, tr)) updates.push({ id: seg.id, changes: { transforms: tr } });
@@ -696,7 +706,8 @@ function _syncElementTransformsToState(state, transformsMeta) {
     for (let i = 0; i < stateShapes.length; i++) {
         const seg = stateShapes[i];
         const byId = metaShapes.find(m => typeof m.segId === 'string' && m.segId === seg.id);
-        const tr = normalize(byId?.transforms ?? metaShapes[i]?.transforms);
+        const tr = readTransforms(byId) ?? readTransforms(metaShapes[i]);
+        if (!tr) continue;
         if (!same(seg.transforms, tr)) updates.push({ id: seg.id, changes: { transforms: tr } });
     }
 
@@ -704,7 +715,8 @@ function _syncElementTransformsToState(state, transformsMeta) {
     if (Array.isArray(state.elementGroups) && metaGroups.length > 0) {
         state.elementGroups = state.elementGroups.map((g, i) => {
             const byId = metaGroups.find(m => Number(m?.groupId) === Number(g?.groupId));
-            const tr = normalize(byId?.transforms ?? metaGroups[i]?.transforms);
+            const tr = readTransforms(byId) ?? readTransforms(metaGroups[i]);
+            if (!tr) return g;
             if (!same(g?.transforms, tr)) return { ...g, transforms: tr };
             return g;
         });
@@ -1281,7 +1293,10 @@ function _restoreStateStructureFromElements(state, elements, { resetHistoryBasel
             state._nextSegmentId = Math.max(state._nextSegmentId, segNum + 1);
         }
 
-        const requestedParentCid = Number(elem?.parentContourId);
+        // CRITICAL: Check parentContourId != null BEFORE Number() conversion.
+        // Number(null) === 0, so null parentContourId would become 0 without this check,
+        // causing standalone shapes to incorrectly embed in contour 0.
+        const requestedParentCid = elem?.parentContourId != null ? Number(elem.parentContourId) : NaN;
         const hasParentContour = Number.isFinite(requestedParentCid);
 
         const seg = {
@@ -1465,13 +1480,24 @@ export default class ProfileEditor {
         this._lastToolHintKey = '';
         /** @type {number} */
         this._lastSelectionCount = 0;
+
+        /** Keep PathEditor structure on text-source updates (used by part editor integration). @type {boolean} */
+        this._preservePathEditorStructure = false;
+
+        /** @type {{
+         *  getPreviewContainer: () => HTMLElement|null,
+         *  getPreviewToolbar: () => HTMLElement|null,
+         *  getDebugLogElement: () => HTMLTextAreaElement|null,
+         *  onEditModeChange: (editMode: boolean) => void,
+         * }|null} */
+        this._host = null;
     }
 
     /** @returns {HTMLTextAreaElement|null} @private */
     _getDebugLogField() {
-        if (!this._modal) return null;
+        if (!this._modal && !this._host) return null;
         if (this._debugLogEl && this._debugLogEl.isConnected) return this._debugLogEl;
-        this._debugLogEl = this._modal.querySelector('#bit-profileDebugLog');
+        this._debugLogEl = this._host?.getDebugLogElement?.() ?? this._modal?.querySelector('#bit-profileDebugLog') ?? null;
         return this._debugLogEl;
     }
 
@@ -1788,20 +1814,39 @@ export default class ProfileEditor {
      * @param {string}      [context.profilePath=""]      - Initial SVG path to edit
      * @param {Record<string, number>} [context.variableValues={}]
      * @param {(path: string) => void} context.onSave     - Called with new path on Done
-     * @param {() => void}          [context.onClose]    - Called on both Done and Cancel after cleanup
-     * @param {import("../panel/PathEditor.js").default|null} [context.pathEditor] - Optional PathEditor for bidirectional text sync
+    * @param {() => void}          [context.onClose]    - Called on both Done and Cancel after cleanup
+    * @param {import("../panel/PathEditor.js").default|null} [context.pathEditor] - Optional PathEditor for bidirectional text sync
+    * @param {object|null}         [context.host=null]  - Optional host adapter for non-modal integrations
+    * @param {object|null}         [context.editorCanvasOptions=null] - EditorCanvas rendering options
+    * @param {boolean}             [context.clearOverlayLayerOnEnter=true] - Clear shared overlay layer when entering
+    * @param {boolean}             [context.preservePathEditorStructure=false] - Keep PathEditor row structure on text-originated sync
      */
-    enter({ modal, canvasManager, profilePath = "", profileElements = [], variableValues = {}, onSave, onClose, pathEditor = null }) {
+    enter({
+        modal,
+        canvasManager,
+        profilePath = "",
+        profileElements = [],
+        variableValues = {},
+        onSave,
+        onClose,
+        pathEditor = null,
+        host = null,
+        editorCanvasOptions = null,
+        clearOverlayLayerOnEnter = true,
+        preservePathEditorStructure = false,
+    }) {
         if (this._active) {
             log.warn("ProfileEditor.enter() called while already active");
             return;
         }
         this._active = true;
         this._modal = modal;
+        this._host = this._buildHostAdapter(modal, host);
         this._onSave = onSave;
         this._onClose = onClose ?? null;
         this._pathEditor = pathEditor;
-        this._debugLogEl = this._modal?.querySelector('#bit-profileDebugLog') ?? null;
+        this._preservePathEditorStructure = !!preservePathEditorStructure;
+        this._debugLogEl = this._host.getDebugLogElement();
         this._debugLogSeq = 0;
         const sourceElementsRaw = Array.isArray(profileElements) && profileElements.length > 0
             ? profileElements
@@ -1831,25 +1876,60 @@ export default class ProfileEditor {
         if (hasStructuredSource) {
             _realignContourIdsToSourceOrder(this.state, sourceElements);
         }
+
+        // DEBUG: Log transforms before restore
+        const shapesBeforeRestore = sourceElements.filter(e => e.type === 'circle' || e.type === 'rect' || e.type === 'ellipse');
+        log.debug("Shapes in sourceElements before restore:", shapesBeforeRestore.map(s => ({
+            segId: s.segId,
+            transforms: s.transforms
+        })));
+
         _restoreStateStructureFromElements(this.state, sourceElements, {
             vars: variableValues,
         });
+
+        // DEBUG: Log transforms after restore, before sync
+        const shapesAfterRestore = this.state.segments.filter(s => s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse');
+        log.debug("Shapes in state after restore:", shapesAfterRestore.map(s => ({
+            id: s.id,
+            transforms: s.transforms
+        })));
+
         _restoreContourLinkMetaFromElements(this.state, sourceElements);
         _restoreContourFormulasIntoState(this.state, sourceElements, variableValues);
         _restoreShapeFormulasIntoState(this.state, shapeFormulaSnapshot, variableValues);
-        _syncElementTransformsToState(this.state, pathEditor?.getElementTransformsSnapshot?.() ?? []);
+
+        // DEBUG: Log transforms from pathEditor before sync
+        const pathEditorTransforms = pathEditor?.getElementTransformsSnapshot?.() ?? [];
+        log.debug("Transforms from pathEditor.getElementTransformsSnapshot():", pathEditorTransforms);
+
+        _syncElementTransformsToState(this.state, pathEditorTransforms, { allowClear: false });
+
+        // DEBUG: Log transforms after sync
+        const shapesAfterSync = this.state.segments.filter(s => s.type === 'circle' || s.type === 'rect' || s.type === 'ellipse');
+        log.debug("Shapes in state after sync:", shapesAfterSync.map(s => ({
+            id: s.id,
+            transforms: s.transforms
+        })));
+
         this.state.onDebugLog = (entry) => {
             this._debugLog(`state.${String(entry?.event ?? 'event')}`, entry);
         };
 
         // 2. Initialize canvas extension
-        this.editorCanvas = new EditorCanvas(canvasManager, this.state);
+        this.editorCanvas = new EditorCanvas(
+            canvasManager,
+            this.state,
+            editorCanvasOptions || undefined,
+        );
         this.editorCanvas.initialize();
 
         // 3. Clear stale preview overlays (anchor cross, segment highlights) that
         // drawAnchorAndAxis() left on the overlay layer before edit mode was entered.
-        const overlayLayer = canvasManager.getLayer("overlay");
-        if (overlayLayer) overlayLayer.innerHTML = "";
+        if (clearOverlayLayerOnEnter) {
+            const overlayLayer = canvasManager.getLayer("overlay");
+            if (overlayLayer) overlayLayer.innerHTML = "";
+        }
 
         // 4. Wire PathEditor bidirectional callbacks (preserves formula tokens).
         if (pathEditor) this._setupPathEditorCallbacks(pathEditor);
@@ -1892,6 +1972,7 @@ export default class ProfileEditor {
         this._prevOnZoom = canvasManager.config.onZoom;
         canvasManager.config.onZoom = (zoom, panX, panY) => {
             if (this._prevOnZoom) this._prevOnZoom(zoom, panX, panY);
+            this.editorCanvas?.refreshAxis?.();
             this._currentTool?.onViewportChanged?.({ zoom, panX, panY });
             for (const id of (this.state?.selectedIds ?? new Set())) {
                 if (typeof id === 'string' && id.startsWith('m:')) {
@@ -1902,8 +1983,7 @@ export default class ProfileEditor {
         };
 
         // 8. Mount toolbar
-        const previewContainer = modal.querySelector("#bit-preview");
-        this._ensureStatusLog(previewContainer);
+        const previewContainer = this._host.getPreviewContainer();
         this.toolbar = new EditorToolbar(previewContainer, {
             onToolChange: (toolId) => {
                 if (toolId === "group") {
@@ -1944,10 +2024,11 @@ export default class ProfileEditor {
             },
         });
         this.toolbar.mount();
+        this._ensureStatusLog(previewContainer);
         this.toolbar.setActiveTool("cursor");
 
         // 9. Switch DOM to editor layout
-        this._applyEditLayout(modal, true);
+        this._applyEditLayout(true);
 
         // 10. Register undo/redo keyboard shortcut
         this._registerKeyboard();
@@ -2092,6 +2173,7 @@ export default class ProfileEditor {
         this._initialSyncDone = false;
         this._entryElementsSnapshot = [];
         this._entryVariableValues = {};
+        this._preservePathEditorStructure = false;
         this._lastSelectionCount = 0;
         this._lastToolHintKey = '';
         this._resetStatusFade();
@@ -2108,10 +2190,11 @@ export default class ProfileEditor {
         }
 
         // Restore DOM to preview layout
-        if (this._modal) this._applyEditLayout(this._modal, false);
+        this._applyEditLayout(false);
 
         const onClose = this._onClose;
         this._modal = null;
+        this._host = null;
         this._onSave = null;
         this._onClose = null;
         // Always notify the caller so it can restore preview rendering
@@ -2348,21 +2431,71 @@ export default class ProfileEditor {
                 snapshot,
                 this._pathEditor?.variableValues ?? this.state.variableValues ?? {}
             );
+            const contourPathTrimmed = String(contourPath ?? '').trim();
+            const isVariableUpdate = String(meta?.source ?? '') === 'variable-values';
+            if (contourPathTrimmed) {
+                log.debug('PathEditor contour path update', contourPathTrimmed);
+                this._showStatus(`Path: ${contourPathTrimmed.slice(0, 220)}`, { persist: false });
+            }
             this._debugLog('pathEditor.onChange.start', {
                 snapshotItems: snapshot.length,
                 contourPathLen: String(contourPath ?? '').length,
                 selectedRefs: Array.isArray(meta?.selectedLineRefs) ? meta.selectedLineRefs.length : 0,
+                isVariableUpdate,
             });
             // Mark that this change originated in the text editor so that
             // _syncToPathEditor does NOT overwrite PathEditor content.
             this._pathEditorIsSource = true;
-            if (contourPath && contourPath.trim()) {
+            if (contourPathTrimmed) {
+                // For variable-only updates: don't re-import path (that would
+                // destroy shapes). Just propagate updated shape data from the
+                // PathEditor's live elements (already re-evaluated via
+                // _recomputeShapeDataFromTokens) into state and notify canvas.
+                // Variable update: fall through to full _importPath pipeline so
+                // path-formula contours also update on canvas.
+                // Shapes will be restored by _restoreStateStructureFromElements below.
                 this.state._importPath(contourPath, { resetHistory: false });
                 // Re-align freshly-created contourIds to match snapshot contourIds
                 // (positional order) so the lookups inside _restoreStateStructureFromElements
                 // and _restoreContourLinkMetaFromElements find the correct segments.
                 _realignContourIdsToSourceOrder(this.state, snapshot);
             } else {
+                const hasContourRows = snapshot.some((elem) => {
+                    if (!(elem?.type === 'path' || elem?.type === 'polyline' || elem?.type === 'symmetry')) return false;
+                    const lines = Array.isArray(elem?.lines) ? elem.lines : [];
+                    if (lines.some((line) => String(line?.text ?? '').trim().length > 0)) return true;
+                    return String(elem?.path ?? '').trim().length > 0;
+                });
+                if (hasContourRows) {
+                    this._showStatus('Path parse returned empty result. Keeping current geometry.', { tone: 'warn', persist: false });
+                    this._pathEditorIsSource = false;
+                    return;
+                }
+                if (isVariableUpdate) {
+                    // Variable typing can temporarily produce non-evaluable tokens.
+                    // Never destructively clear state on variable-only updates.
+                    _restoreStateStructureFromElements(this.state, snapshot, {
+                        resetHistoryBaseline: false,
+                        vars: this._pathEditor?.variableValues ?? this.state.variableValues ?? {},
+                    });
+                    _restoreContourLinkMetaFromElements(this.state, snapshot);
+                    _restoreContourFormulasIntoState(
+                        this.state,
+                        snapshot,
+                        this._pathEditor?.variableValues ?? this.state.variableValues ?? {}
+                    );
+                    this.state.segments = _sanitizeEditorStateSegments(this.state.segments);
+                    if (typeof this.state._syncSymmetryContours === 'function') {
+                        this.state._syncSymmetryContours();
+                    }
+                    this.state._notifySegments();
+                    this._pathEditorIsSource = false;
+                    this._debugLog('pathEditor.onChange.variableUpdateApplied', {
+                        stateSegments: this.state.segments.length,
+                        stateGroups: (this.state.elementGroups ?? []).length,
+                    });
+                    return;
+                }
                 this.state.segments = [];
                 this.state._pushHistory("Import");
             }
@@ -2388,10 +2521,15 @@ export default class ProfileEditor {
             if (typeof this.state._syncSymmetryContours === 'function') {
                 this.state._syncSymmetryContours();
             }
-            // Allow one state->PathEditor pass so derived symmetry rows appear
-            // immediately after text-originated structural edits.
-            this._pathEditorIsSource = false;
+            // Optional bit-editor-style behavior for embedded PathEditor integrations:
+            // keep PathEditor row structure as the source for this notify cycle.
+            if (!this._preservePathEditorStructure) {
+                // Allow one state->PathEditor pass so derived symmetry rows appear
+                // immediately after text-originated structural edits.
+                this._pathEditorIsSource = false;
+            }
             this.state._notifySegments();
+            this._pathEditorIsSource = false;
             this._debugLog('pathEditor.onChange.applied', {
                 stateSegments: this.state.segments.length,
                 stateGroups: (this.state.elementGroups ?? []).length,
@@ -2500,6 +2638,11 @@ export default class ProfileEditor {
             if (changes === null) {
                 this._debugLog('pathEditor.onShapeElementChange.delete', { segId });
                 this.state.deleteSegments([segId]);
+                // After shape deletion, force canonical state->PathEditor sync.
+                // This prevents stale shape rows with dead segIds when structure
+                // was previously preserved from text-source updates.
+                this._pathEditorIsSource = false;
+                this._syncToPathEditor();
                 return;
             }
             // Handle shape creation triggered by PathEditor “Add” buttons.
@@ -2512,6 +2655,19 @@ export default class ProfileEditor {
             // Merge changes into existing data (updateSegments replaces `data` at top level).
             const seg = this.state.segments.find(s => s.id === segId);
             if (!seg) return;
+            
+            // CRITICAL: Prevent accidental contourId/parentContourId changes which would
+            // cause shape embedding in polyline export. Shape contour IDs are determined
+            // at creation time and must not change during attribute edits.
+            if (Object.prototype.hasOwnProperty.call(changes, 'contourId') && changes.contourId !== seg.contourId) {
+                log.warn(`onShapeElementChange: Ignoring contourId change attempt (${seg.contourId} → ${changes.contourId})`);
+                delete changes.contourId;
+            }
+            if (Object.prototype.hasOwnProperty.call(changes, 'parentContourId') && changes.parentContourId !== seg.parentContourId) {
+                log.warn(`onShapeElementChange: Ignoring parentContourId change attempt`);
+                delete changes.parentContourId;
+            }
+
             this._debugLog('pathEditor.onShapeElementChange.update', {
                 segId,
                 keys: Object.keys(changes ?? {}),
@@ -2532,7 +2688,14 @@ export default class ProfileEditor {
                 delete mergedData.radiusExpr;
             }
             this._pathEditorIsSource = true;
-            this.state.updateSegments([{ id: segId, changes: { data: mergedData } }]);
+            // Preserve transforms array if not explicitly provided in changes.
+            // Transforms are managed separately via onPathEditorChange's elementTransforms metadata,
+            // not through shape attribute changes, so we must not lose them during shape edits.
+            const updateChanges = { data: mergedData };
+            if (!Object.prototype.hasOwnProperty.call(changes, 'transforms') && Array.isArray(seg.transforms)) {
+                updateChanges.transforms = seg.transforms;
+            }
+            this.state.updateSegments([{ id: segId, changes: updateChanges }]);
             this.state._pushHistory("Edit shape element");
             this._pathEditorIsSource = false;
         };
@@ -2880,7 +3043,7 @@ export default class ProfileEditor {
             s.contourId === contourId && (s.type === 'line' || s.type === 'arc'));
         if (!seg) return;
         const { x, y } = seg.data.start;
-        const overlay = this.editorCanvas.cm.getLayer("overlay");
+        const overlay = this.editorCanvas.getOverlayRoot?.() ?? this.editorCanvas.cm.getLayer("overlay");
         if (!overlay) return;
         const zoom = this.editorCanvas.cm.zoomLevel || 1;
         const r = Math.max(0.5, 3 / zoom);
@@ -3240,22 +3403,58 @@ export default class ProfileEditor {
      * preview zoom/color toolbar is swapped for the editor toolbar, which
      * is injected by EditorToolbar.mount() directly below the SVG canvas.
      *
-     * @param {HTMLElement} modal
      * @param {boolean}     editMode
      * @private
      */
-    _applyEditLayout(modal, editMode) {
-        const previewEl = modal.querySelector("#bit-preview");
-        const previewToolbar = modal.querySelector("#preview-toolbar");
+    _applyEditLayout(editMode) {
+        const previewEl = this._host?.getPreviewContainer?.() ?? null;
+        const previewToolbar = this._host?.getPreviewToolbar?.() ?? null;
 
         if (editMode) {
             previewToolbar?.classList.add("editor-mode-hidden");
             previewEl?.classList.add("bit-preview--editing");
+            this._host?.onEditModeChange?.(true);
         } else {
             previewToolbar?.classList.remove("editor-mode-hidden");
             previewEl?.classList.remove("bit-preview--editing");
             const status = previewEl?.querySelector?.('#editor-status-log');
             status?.remove?.();
+            this._host?.onEditModeChange?.(false);
         }
+    }
+
+    /**
+     * @param {HTMLElement|null} modal
+     * @param {object|null} host
+     * @returns {{
+     *  getPreviewContainer: () => HTMLElement|null,
+     *  getPreviewToolbar: () => HTMLElement|null,
+     *  getDebugLogElement: () => HTMLTextAreaElement|null,
+     *  onEditModeChange: (editMode: boolean) => void,
+     * }}
+     * @private
+     */
+    _buildHostAdapter(modal, host) {
+        const fallback = {
+            getPreviewContainer: () => modal?.querySelector?.("#bit-preview") ?? null,
+            getPreviewToolbar: () => modal?.querySelector?.("#preview-toolbar") ?? null,
+            getDebugLogElement: () => modal?.querySelector?.("#bit-profileDebugLog") ?? null,
+            onEditModeChange: () => {},
+        };
+        if (!host || typeof host !== 'object') return fallback;
+        return {
+            getPreviewContainer: typeof host.getPreviewContainer === 'function'
+                ? () => host.getPreviewContainer() ?? null
+                : fallback.getPreviewContainer,
+            getPreviewToolbar: typeof host.getPreviewToolbar === 'function'
+                ? () => host.getPreviewToolbar() ?? null
+                : fallback.getPreviewToolbar,
+            getDebugLogElement: typeof host.getDebugLogElement === 'function'
+                ? () => host.getDebugLogElement() ?? null
+                : fallback.getDebugLogElement,
+            onEditModeChange: typeof host.onEditModeChange === 'function'
+                ? (editMode) => host.onEditModeChange(editMode)
+                : fallback.onEditModeChange,
+        };
     }
 }

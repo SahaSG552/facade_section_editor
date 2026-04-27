@@ -130,3 +130,9 @@ All public methods must have JSDoc with:
 - Use proper coordinate transformations between 2D and 3D systems
 - Follow logging and documentation standards for all new code
 - Test thoroughly in both 2D and 3D views before committing changes
+
+## graphify
+
+Before answering architecture or codebase questions, read `graphify-out/GRAPH_REPORT.md` if it exists.
+If `graphify-out/wiki/index.md` exists, navigate it for deep questions.
+Type `/graphify` in Copilot Chat to build or update the knowledge graph.

@@ -21,9 +21,13 @@
 export default class SnapManager {
     /**
      * @param {import("../../canvas/CanvasManager.js").default} canvasManager
+     * @param {{ getGridAnchor?: (() => { x: number, y: number })|null }} [options]
      */
-    constructor(canvasManager) {
+    constructor(canvasManager, options = {}) {
         this.cm = canvasManager;
+        this._getGridAnchorOverride = typeof options?.getGridAnchor === "function"
+            ? options.getGridAnchor
+            : null;
 
         /**
          * Which snap types are currently active.
@@ -60,6 +64,24 @@ export default class SnapManager {
      */
     setGridSize(size) {
         this.cm.config.gridSize = size;
+    }
+
+    /**
+     * Resolve the effective grid anchor used by the visible canvas grid.
+     * @returns {{ x: number, y: number }}
+     * @private
+     */
+    _getGridAnchor() {
+        const override = this._getGridAnchorOverride?.();
+        if (override && Number.isFinite(override.x) && Number.isFinite(override.y)) {
+            return override;
+        }
+        const gridAnchorX = this.cm.config.gridAnchorX;
+        const gridAnchorY = this.cm.config.gridAnchorY;
+        return {
+            x: Number.isFinite(gridAnchorX) ? gridAnchorX : this.cm.panX,
+            y: Number.isFinite(gridAnchorY) ? gridAnchorY : this.cm.panY,
+        };
     }
 
     // ─── Main entry point ────────────────────────────────────────────────────
@@ -117,9 +139,10 @@ export default class SnapManager {
      */
     _gridSnap(pos) {
         const g = this.cm.config.gridSize || 1;
+        const anchor = this._getGridAnchor();
         return {
-            x: Math.round(pos.x / g) * g,
-            y: Math.round(pos.y / g) * g,
+            x: anchor.x + Math.round((pos.x - anchor.x) / g) * g,
+            y: anchor.y + Math.round((pos.y - anchor.y) / g) * g,
             snapType: "grid",
         };
     }

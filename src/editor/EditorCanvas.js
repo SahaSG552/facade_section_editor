@@ -266,18 +266,52 @@ export default class EditorCanvas {
      * @param {import("../canvas/CanvasManager.js").default} canvasManager
      * @param {import("./EditorStateManager.js").default} stateManager
      */
-    constructor(canvasManager, stateManager) {
+    constructor(canvasManager, stateManager, options = {}) {
         /** @type {import("../canvas/CanvasManager.js").default} */
         this.cm = canvasManager;
 
         /** @type {import("./EditorStateManager.js").default} */
         this.state = stateManager;
 
+        /** @type {{ originX: number, originY: number, width?: number, height?: number }|null} */
+        this._localFrame = options?.localFrame
+            && Number.isFinite(options.localFrame.originX)
+            && Number.isFinite(options.localFrame.originY)
+            ? {
+                originX: Number(options.localFrame.originX),
+                originY: Number(options.localFrame.originY),
+                width: Number(options.localFrame.width ?? 0),
+                height: Number(options.localFrame.height ?? 0),
+            }
+            : null;
+
         /** @type {SnapManager} */
-        this.snapManager = new SnapManager(canvasManager);
+        this.snapManager = new SnapManager(canvasManager, {
+            getGridAnchor: typeof options?.gridAnchor === "function"
+                ? options.gridAnchor
+                : null,
+        });
+
+        /** @type {string} */
+        this._renderLayerName = String(options?.renderLayerName || "bits");
+        /** @type {boolean} */
+        this._clearRenderLayerOnDestroy = options?.clearRenderLayerOnDestroy !== false;
+
+        /** @type {(() => number)|null} */
+        this._axisXProvider = typeof options?.axisX === "function"
+            ? options.axisX
+            : Number.isFinite(options?.axisX)
+                ? () => Number(options.axisX)
+                : null;
 
         /** @type {SVGElement|null} — axis line element */
         this._axisLine = null;
+
+        /** @type {SVGGElement|null} */
+        this._overlayGroup = null;
+
+        /** @type {SVGElement|null} */
+        this._originMarker = null;
 
         /** @type {SVGElement|null} — ghost element during active drawing */
         this._ghostElement = null;
@@ -295,7 +329,9 @@ export default class EditorCanvas {
     initialize() {
         if (this._initialized) return;
         this._initialized = true;
+        this._applyCoordinateTransform();
         this._renderAxis();
+        this._renderOriginMarker();
         log.debug("EditorCanvas initialized");
     }
 
@@ -306,11 +342,93 @@ export default class EditorCanvas {
     destroy() {
         this.clearGhost();
         this._removeAxis();
+        this._removeOriginMarker();
+        this._removeOverlayGroup();
         // Clear editor segment rendering so the preview layer is ready for a fresh render
-        const bitsLayer = this.cm.getLayer("bits");
-        if (bitsLayer) bitsLayer.innerHTML = "";
+        if (this._clearRenderLayerOnDestroy) {
+            const renderLayer = this._getRenderLayer();
+            if (renderLayer) renderLayer.innerHTML = "";
+        }
         this._initialized = false;
         log.debug("EditorCanvas destroyed");
+    }
+
+    /** @returns {SVGGElement|SVGElement|null} @private */
+    _getRenderLayer() {
+        return this.cm.getLayer(this._renderLayerName) || null;
+    }
+
+    /** @returns {SVGGElement|null} @private */
+    _getOverlayGroup() {
+        if (this._overlayGroup && this._overlayGroup.isConnected) return this._overlayGroup;
+        const overlay = this.cm.getLayer("overlay");
+        if (!overlay) return null;
+        const group = document.createElementNS(SVG_NS, "g");
+        group.classList.add("editor-overlay-root");
+        overlay.appendChild(group);
+        this._overlayGroup = group;
+        this._applyCoordinateTransform();
+        return group;
+    }
+
+    /** @private */
+    _removeOverlayGroup() {
+        if (this._overlayGroup) {
+            this._overlayGroup.remove();
+            this._overlayGroup = null;
+        }
+    }
+
+    /** @private */
+    _getCoordinateTransform() {
+        if (!this._localFrame) return null;
+        const { originX, originY } = this._localFrame;
+        return `translate(${originX} ${originY})`;
+    }
+
+    /** @private */
+    _applyCoordinateTransform() {
+        const transform = this._getCoordinateTransform();
+        const renderLayer = this._getRenderLayer();
+        if (renderLayer) {
+            if (transform) renderLayer.setAttribute("transform", transform);
+            else renderLayer.removeAttribute("transform");
+        }
+        if (this._overlayGroup) {
+            if (transform) this._overlayGroup.setAttribute("transform", transform);
+            else this._overlayGroup.removeAttribute("transform");
+        }
+    }
+
+    /**
+     * Convert an editor-space point to canvas-space coordinates.
+     * @param {{ x: number, y: number }} point
+     * @returns {{ x: number, y: number }}
+     */
+    localToCanvasPoint(point) {
+        if (!this._localFrame) return { x: point.x, y: point.y };
+        return {
+            x: this._localFrame.originX + point.x,
+            y: this._localFrame.originY + point.y,
+        };
+    }
+
+    /**
+     * Convert a canvas-space point to editor-space coordinates.
+     * @param {{ x: number, y: number }} point
+     * @returns {{ x: number, y: number }}
+     */
+    canvasToLocalPoint(point) {
+        if (!this._localFrame) return { x: point.x, y: point.y };
+        return {
+            x: point.x - this._localFrame.originX,
+            y: point.y - this._localFrame.originY,
+        };
+    }
+
+    /** @returns {SVGGElement|SVGElement|null} */
+    getOverlayRoot() {
+        return this._getOverlayGroup();
     }
 
     // ─── Coordinate helpers ─────────────────────────────────────────────────
@@ -330,10 +448,10 @@ export default class EditorCanvas {
         const vbHeight = rect.height / this.cm.zoomLevel;
         const vbX = this.cm.panX - vbWidth / 2;
         const vbY = this.cm.panY - vbHeight / 2;
-        return {
+        return this.canvasToLocalPoint({
             x: vbX + (px / rect.width) * vbWidth,
             y: vbY + (py / rect.height) * vbHeight,
-        };
+        });
     }
 
     /**
@@ -355,7 +473,7 @@ export default class EditorCanvas {
      * @private
      */
     _renderAxis() {
-        const overlay = this.cm.getLayer("overlay");
+        const overlay = this._getOverlayGroup();
         if (!overlay) return;
 
         // Remove stale axis
@@ -363,11 +481,9 @@ export default class EditorCanvas {
 
         const line = document.createElementNS(SVG_NS, "line");
         line.classList.add("editor-axis");
-        line.setAttribute("x1", 0); line.setAttribute("x2", 0);
-        // Y range will be updated via _updateAxisExtent
-        line.setAttribute("y1", -1e5); line.setAttribute("y2", 1e5);
         overlay.appendChild(line);
         this._axisLine = line;
+        this.refreshAxis();
     }
 
     /** @private */
@@ -376,6 +492,63 @@ export default class EditorCanvas {
             this._axisLine.remove();
             this._axisLine = null;
         }
+    }
+
+    /** @private */
+    _renderOriginMarker() {
+        const overlay = this._getOverlayGroup();
+        if (!overlay) return;
+        this._removeOriginMarker();
+
+        const zoom = this.cm.zoomLevel || 1;
+        const crossSize = 5;
+        const thickness = Math.max(0.1, 0.5 / Math.sqrt(zoom));
+        const marker = document.createElementNS(SVG_NS, "g");
+        marker.classList.add("editor-origin-marker");
+        marker.setAttribute("pointer-events", "none");
+
+        const horizontal = document.createElementNS(SVG_NS, "line");
+        horizontal.setAttribute("x1", String(-crossSize));
+        horizontal.setAttribute("y1", "0");
+        horizontal.setAttribute("x2", String(crossSize));
+        horizontal.setAttribute("y2", "0");
+        horizontal.setAttribute("stroke", "red");
+        horizontal.setAttribute("stroke-width", String(thickness));
+        marker.appendChild(horizontal);
+
+        const vertical = document.createElementNS(SVG_NS, "line");
+        vertical.setAttribute("x1", "0");
+        vertical.setAttribute("y1", String(-crossSize));
+        vertical.setAttribute("x2", "0");
+        vertical.setAttribute("y2", String(crossSize));
+        vertical.setAttribute("stroke", "red");
+        vertical.setAttribute("stroke-width", String(thickness));
+        marker.appendChild(vertical);
+
+        overlay.appendChild(marker);
+        this._originMarker = marker;
+    }
+
+    /** @private */
+    _removeOriginMarker() {
+        if (this._originMarker) {
+            this._originMarker.remove();
+            this._originMarker = null;
+        }
+    }
+
+    /** Position axis at the detail symmetry centre on X. */
+    refreshAxis() {
+        if (!this._axisLine) return;
+        const providedX = this._axisXProvider?.();
+        const x = Number.isFinite(providedX)
+            ? providedX
+            : (this.cm.canvasParameters?.width ?? 0) / 2;
+        this._axisLine.setAttribute("x1", String(x));
+        this._axisLine.setAttribute("x2", String(x));
+        this._axisLine.setAttribute("y1", "-1000000");
+        this._axisLine.setAttribute("y2", "1000000");
+        this._renderOriginMarker();
     }
 
     // ─── Ghost / in-progress preview ────────────────────────────────────────
@@ -387,7 +560,7 @@ export default class EditorCanvas {
      */
     setGhost(element) {
         this.clearGhost();
-        const overlay = this.cm.getLayer("overlay");
+        const overlay = this._getOverlayGroup();
         if (!overlay || !element) return;
         element.classList.add("editor-ghost");
         overlay.appendChild(element);
@@ -408,7 +581,7 @@ export default class EditorCanvas {
      */
     refreshGhost() {
         if (!this._ghostElement) return;
-        const overlay = this.cm.getLayer("overlay");
+        const overlay = this._getOverlayGroup();
         if (!overlay) return;
         const clone = this._ghostElement.cloneNode(true);
         this.setGhost(clone);
@@ -422,8 +595,9 @@ export default class EditorCanvas {
      * @param {import("./EditorStateManager.js").PathSegment[]} segments
      */
     renderAllSegments(segments) {
-        const layer = this.cm.getLayer("bits");
+        const layer = this._getRenderLayer();
         if (!layer) return;
+        this._applyCoordinateTransform();
         layer.innerHTML = "";
         for (const seg of segments) {
             const el = this._buildSegmentElement(seg);
@@ -971,7 +1145,7 @@ export default class EditorCanvas {
      */
     setHoverSegment(segId, active = true) {
         if (!segId) return;
-        const layer = this.cm.getLayer("bits");
+        const layer = this._getRenderLayer();
         if (!layer) return;
         // Match line, path (arcs), circle, rect, and ellipse children.
         layer.querySelectorAll(`[data-seg-id="${segId}"] line, [data-seg-id="${segId}"] path, [data-seg-id="${segId}"] circle.editor-segment, [data-seg-id="${segId}"] rect.editor-segment, [data-seg-id="${segId}"] ellipse.editor-segment`)
@@ -985,7 +1159,7 @@ export default class EditorCanvas {
      */
     setHoverPoint(ref, active = true) {
         if (!ref) return;
-        const layer = this.cm.getLayer("bits");
+        const layer = this._getRenderLayer();
         if (!layer) return;
         const circle = layer.querySelector(
             `[data-seg-id="${ref.segId}"] [data-point-key="${ref.pointKey}"]`
@@ -1007,7 +1181,7 @@ export default class EditorCanvas {
      */
     setRectSideHighlight(segId, role, active = true) {
         if (!segId || !role) return;
-        const layer = this.cm.getLayer("bits");
+        const layer = this._getRenderLayer();
         if (!layer) return;
         const sideEl = layer.querySelector(`[data-seg-id="${segId}"] [data-rect-side-role="${role}"]`);
         if (sideEl) sideEl.classList.toggle("editor-rect-side-selected", active);
@@ -1020,7 +1194,7 @@ export default class EditorCanvas {
      */
     setRectSideOnlySelection(segId, active = true) {
         if (!segId) return;
-        const layer = this.cm.getLayer("bits");
+        const layer = this._getRenderLayer();
         if (!layer) return;
         const rectEl = layer.querySelector(`[data-seg-id="${segId}"] rect.editor-segment`);
         if (rectEl) rectEl.classList.toggle("editor-rect-side-only", active);

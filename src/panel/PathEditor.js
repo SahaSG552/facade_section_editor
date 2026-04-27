@@ -1168,7 +1168,7 @@ export default class PathEditor {
                 }
             }
         }
-        this._fireOnChange();
+        this._fireOnChange({ source: 'variable-values' });
         this._renderSuggestions();
     }
 
@@ -1631,10 +1631,11 @@ export default class PathEditor {
                 const idx = this._elements.indexOf(elem);
                 if (idx !== -1) this._elements.splice(idx, 1);
                 // Notify external handler (editor mode: will delete canvas segment).
-                if (this.onShapeElementChange) this.onShapeElementChange(elem.segId, null);
+                const hasExternalShapeHandler = typeof this.onShapeElementChange === 'function';
+                if (hasExternalShapeHandler) this.onShapeElementChange(elem.segId, null);
                 // Re-render and propagate the change.
                 this._renderElements();
-                this._fireOnChange();
+                if (!hasExternalShapeHandler) this._fireOnChange();
             });
         }
         row.appendChild(delBtn);
@@ -3506,14 +3507,23 @@ export default class PathEditor {
             clickEvent ? this.positionCursorAtClick(input, clickEvent) : input.select();
         });
 
+        let finished = false;
         const finish = (save = true) => {
+            if (finished) return;
+            finished = true;
             if (save) this._finishParamEditInElem(lineData, lineEl, parentElem, argIndex, input.value);
             else      this._buildLineCellsInElem(lineEl, lineData, parentElem);
             this._clearActiveEdit();
             this._renderSuggestions();
         };
 
-        input.addEventListener('blur',    () => finish(true));
+        input.addEventListener('blur', () => {
+            requestAnimationFrame(() => {
+                const active = document.activeElement;
+                if (active === input || cell.contains(active)) return;
+                finish(true);
+            });
+        });
         input.addEventListener('keydown', (e) => {
             e.stopPropagation();
             if (e.key === 'Enter')  { e.preventDefault(); finish(true);  }
@@ -3521,6 +3531,8 @@ export default class PathEditor {
             if (e.key === 'Tab')    { e.preventDefault(); finish(true); paramCells?.[argIndex + 1]?.click(); }
         });
         input.addEventListener('input',   e => e.stopPropagation());
+        input.addEventListener('mousedown', e => e.stopPropagation());
+        input.addEventListener('click', e => e.stopPropagation());
         input.addEventListener('dblclick',e => { e.stopPropagation(); input.select(); });
 
         this.activeEditInput = input;
@@ -3688,7 +3700,7 @@ export default class PathEditor {
      * Concatenate evaluated path strings from all path/polyline elements and fire onChange.
      * @private
      */
-    _fireOnChange() {
+    _fireOnChange(meta = null) {
         const parts    = [];
         const rawParts = [];
         for (const elem of this._elements) {
@@ -3875,6 +3887,7 @@ export default class PathEditor {
             selectedLineRefs: this._collectSelectedLineRefs(),
             activeElemId: this._activeElemId,
             elementTransforms: this.getElementTransformsSnapshot(),
+            ...(meta && typeof meta === 'object' ? meta : {}),
         });
     }
 
@@ -4153,6 +4166,62 @@ export default class PathEditor {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Create a default top-level shape directly in PathEditor.
+     * Used as a preview-mode fallback when no external shape handler is wired.
+     *
+     * @param {'circle'|'rect'|'ellipse'} type
+     * @private
+     */
+    _createDefaultShapeElement(type) {
+        if (!PathEditor.isShapeType(type)) return;
+
+        const usedSegIds = new Set(
+            this._elements
+                .filter((e) => PathEditor.isShapeType(e?.type))
+                .map((e) => String(e?.segId ?? '').trim())
+                .filter(Boolean)
+        );
+
+        let segN = 1;
+        let segId = `seg-${segN}`;
+        while (usedSegIds.has(segId)) {
+            segN += 1;
+            segId = `seg-${segN}`;
+        }
+
+        let data;
+        if (type === 'circle') {
+            data = { center: { x: 0, y: 0 }, radius: 10 };
+        } else if (type === 'rect') {
+            data = { x: -15, y: -10, w: 30, h: 20, dirW: 1, dirH: -1, rx: 0 };
+        } else {
+            data = { cx: 0, cy: 0, rx: 20, ry: 10 };
+        }
+
+        const newElem = {
+            type,
+            segId,
+            data,
+            transforms: [],
+            _elem: null,
+            parentContourId: null,
+            parentGroupId: null,
+            groupId: null,
+        };
+
+        this._elements.push(newElem);
+        this._renderElements();
+        this.clearAllSelection();
+
+        const row = newElem._elem;
+        row?.classList?.add('path-line-selected');
+        this._lastSelectedElemRef = this._getTopLevelRef(newElem);
+        this._setActiveElem(`shape:${segId}`);
+        this._fireOnChange();
+        this._renderSuggestions();
     }
 
     /** @returns {object|null} the path/polyline element descriptor that is currently active */
@@ -4503,8 +4572,10 @@ export default class PathEditor {
                     this._setActiveElem(`path:${cid}`);
                     this._renderSuggestions();
                 } else {
-                    // Delegate shape creation to the caller via a special change event
+                    // Delegate shape creation to external state manager in editor mode.
+                    // Fallback to local creation in preview mode when no handler is wired.
                     if (this.onShapeElementChange) this.onShapeElementChange(null, { _create: type });
+                    else this._createDefaultShapeElement(type);
                 }
             });
         });
@@ -4578,7 +4649,10 @@ export default class PathEditor {
 
         requestAnimationFrame(() => { input.focus(); input.select(); });
 
+        let finished = false;
         const finish = (save = true) => {
+            if (finished) return;
+            finished = true;
             if (save) {
                 const val = input.value.trim();
                 const arr = Array.isArray(elem.transforms) ? elem.transforms : [];
@@ -4604,13 +4678,21 @@ export default class PathEditor {
             this._renderSuggestions();
         };
 
-        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('blur', () => {
+            requestAnimationFrame(() => {
+                const active = document.activeElement;
+                if (active === input || cell.contains(active)) return;
+                finish(true);
+            });
+        });
         input.addEventListener('keydown', (e) => {
             e.stopPropagation();
             if (e.key === 'Enter')  { e.preventDefault(); finish(true); }
             if (e.key === 'Escape') { e.preventDefault(); finish(false); }
         });
         input.addEventListener('input', e => e.stopPropagation());
+        input.addEventListener('mousedown', e => e.stopPropagation());
+        input.addEventListener('click', e => e.stopPropagation());
 
         this.activeEditInput = input;
         this._renderVariableSuggestions(label);
@@ -5766,6 +5848,11 @@ export default class PathEditor {
             if (!rowEl) return false;
 
             current.segId = incoming.segId;
+            // Missing incoming transforms means "no metadata change" for this row.
+            const incomingTransforms = Array.isArray(incoming.transforms) ? incoming.transforms : null;
+            if (incomingTransforms) {
+                current.transforms = this._mergeTransformsWithFormulaPriority(current.transforms, incomingTransforms);
+            }
             const nextData = { ...(incoming.data ?? {}) };
             const attrs = PathEditor.SHAPE_DEFS[incoming.type]?.attrs ?? [];
             for (const attrKey of attrs) {
@@ -5897,7 +5984,10 @@ export default class PathEditor {
 
         requestAnimationFrame(() => { input.focus(); input.select(); });
 
+        let finished = false;
         const finish = (save = true) => {
+            if (finished) return;
+            finished = true;
             if (save) {
                 const val = input.value.trim();
                 if (val) {
@@ -5925,13 +6015,21 @@ export default class PathEditor {
             this._renderSuggestions();
         };
 
-        input.addEventListener('blur', () => finish(true));
+        input.addEventListener('blur', () => {
+            requestAnimationFrame(() => {
+                const active = document.activeElement;
+                if (active === input || cell.contains(active)) return;
+                finish(true);
+            });
+        });
         input.addEventListener('keydown', (e) => {
             e.stopPropagation();
             if (e.key === 'Enter')  { e.preventDefault(); finish(true);  }
             if (e.key === 'Escape') { e.preventDefault(); finish(false); }
         });
         input.addEventListener('input',   e => e.stopPropagation());
+        input.addEventListener('mousedown', e => e.stopPropagation());
+        input.addEventListener('click', e => e.stopPropagation());
         input.addEventListener('dblclick', e => { e.stopPropagation(); input.select(); });
 
         this.activeEditInput = input;

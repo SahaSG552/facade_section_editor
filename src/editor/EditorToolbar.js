@@ -208,32 +208,35 @@ export default class EditorToolbar {
             .join("");
 
         return `
-            <div class="editor-toolbar-section editor-tools-draw">
-                ${drawButtons}
+            <div class="editor-toolbar-main">
+                <div class="editor-toolbar-section editor-tools-draw">
+                    ${drawButtons}
+                </div>
+                <div class="editor-toolbar-separator"></div>
+                <div class="editor-toolbar-section editor-tools-edit">
+                    ${editButtons}
+                </div>
+                <div class="editor-toolbar-separator"></div>
+                <div class="editor-toolbar-section editor-snap-controls">
+                    <button class="editor-snap-btn${_saved.snaps.grid ? " active" : ""}" data-snap="grid"  title="Snap to grid">Grid</button>
+                    <select class="editor-grid-select" title="Grid scale">
+                        <option value="10"${_saved.gridSize === 10 ? " selected" : ""}>10</option>
+                        <option value="5"${_saved.gridSize === 5 ? " selected" : ""}>5</option>
+                        <option value="1"${_saved.gridSize === 1 ? " selected" : ""}> 1</option>
+                        <option value="0.5"${_saved.gridSize === 0.5 ? " selected" : ""}>0.5</option>
+                        <option value="0.1"${_saved.gridSize === 0.1 ? " selected" : ""}>0.1</option>
+                        <option value="0.01"${_saved.gridSize === 0.01 ? " selected" : ""}>0.01</option>
+                    </select>
+                    <button class="editor-snap-btn${_saved.snaps.ortho ? " active" : ""}" data-snap="ortho" title="Ortho snap (O)">Ortho</button>
+                    <button class="editor-snap-btn${_saved.snaps.obj ? " active" : ""}" data-snap="obj"   title="Object snap">Obj</button>
+                </div>
+                <div class="editor-toolbar-spacer"></div>
+                <div class="editor-toolbar-section editor-actions">
+                    <button class="editor-action-btn" id="editor-cancel-btn" title="Discard changes (Esc)">Cancel</button>
+                    <button class="editor-action-btn editor-action-primary" id="editor-done-btn" title="Accept changes (Enter)">Done</button>
+                </div>
             </div>
-            <div class="editor-toolbar-separator"></div>
-            <div class="editor-toolbar-section editor-tools-edit">
-                ${editButtons}
-            </div>
-            <div class="editor-toolbar-separator"></div>
-            <div class="editor-toolbar-section editor-snap-controls">
-                <button class="editor-snap-btn${_saved.snaps.grid ? " active" : ""}" data-snap="grid"  title="Snap to grid">Grid</button>
-                <select class="editor-grid-select" title="Grid scale">
-                    <option value="10"${_saved.gridSize === 10 ? " selected" : ""}>10</option>
-                    <option value="5"${_saved.gridSize === 5 ? " selected" : ""}>5</option>
-                    <option value="1"${_saved.gridSize === 1 ? " selected" : ""}> 1</option>
-                    <option value="0.5"${_saved.gridSize === 0.5 ? " selected" : ""}>0.5</option>
-                    <option value="0.1"${_saved.gridSize === 0.1 ? " selected" : ""}>0.1</option>
-                    <option value="0.01"${_saved.gridSize === 0.01 ? " selected" : ""}>0.01</option>
-                </select>
-                <button class="editor-snap-btn${_saved.snaps.ortho ? " active" : ""}" data-snap="ortho" title="Ortho snap (O)">Ortho</button>
-                <button class="editor-snap-btn${_saved.snaps.obj ? " active" : ""}" data-snap="obj"   title="Object snap">Obj</button>
-            </div>
-            <div class="editor-toolbar-spacer"></div>
-            <div class="editor-toolbar-section editor-actions">
-                <button class="editor-action-btn" id="editor-cancel-btn" title="Discard changes (Esc)">Cancel</button>
-                <button class="editor-action-btn editor-action-primary" id="editor-done-btn" title="Accept changes (Enter)">Done</button>
-            </div>
+            <div id="editor-status-log" class="editor-status-log"></div>
         `;
     }
 

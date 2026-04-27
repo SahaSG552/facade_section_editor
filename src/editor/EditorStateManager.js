@@ -856,19 +856,22 @@ export default class EditorStateManager {
             }
 
             if (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse') {
-                const explicitParent = Number(seg?.parentContourId);
-                const fallbackParent = Number(seg.contourId ?? 0);
-                const resolvedParentContourId = Number.isFinite(explicitParent)
-                    ? explicitParent
-                    : (lineArcContours.has(fallbackParent) ? fallbackParent : null);
+                // CRITICAL: Check parentContourId != null BEFORE Number() conversion.
+                // Number(null) === 0, so null parentContourId would become 0 without this check,
+                // causing standalone shapes to incorrectly embed in contour 0.
+                const explicitParent = seg?.parentContourId != null ? Number(seg.parentContourId) : NaN;
+                // Only use explicitly set parentContourId — never infer embedding from contourId
+                // matching a line/arc contour, because shapes can get accidental contourId collisions
+                // when created while a path is active (activeContourId set).
+                const resolvedParentContourId = Number.isFinite(explicitParent) ? explicitParent : null;
                 const shapeElem = {
                     type: seg.type,
                     segId: seg.id,
                     data: { ...seg.data },
                     transforms: Array.isArray(seg.transforms) ? [...seg.transforms] : [],
-                    parentContourId: Number.isFinite(resolvedParentContourId)
-                        ? Number(resolvedParentContourId)
-                        : null,
+                    ...(Number.isFinite(resolvedParentContourId)
+                        ? { parentContourId: Number(resolvedParentContourId) }
+                        : {}),  // Omit parentContourId for standalone shapes
                     groupId: _optFiniteId(seg?.groupId),
                     // For symmetry shapes, parentGroupId must always follow their own
                     // symmetry group to keep PathEditor read-only behavior stable.
@@ -1839,6 +1842,11 @@ export default class EditorStateManager {
         );
         const _seenCids = new Set();
         const _ordered = [];
+        // Determine if a shape is embedded: ONLY via explicit parentContourId, never by contourId collision.
+        const _isShapeEmbedded = (sh) => {
+            const explicitParent = sh?.parentContourId != null ? Number(sh.parentContourId) : NaN;
+            return Number.isFinite(explicitParent) && _lineArcCids.has(explicitParent);
+        };
         for (const seg of this.segments) {
             if (seg.type === 'line' || seg.type === 'arc') {
                 _ordered.push(seg);
@@ -1851,12 +1859,13 @@ export default class EditorStateManager {
                     _seenCids.add(cid);
                     for (const sh of this.segments) {
                         if ((sh.type === 'circle' || sh.type === 'rect' || sh.type === 'ellipse')
-                            && (sh.contourId ?? 0) === cid) {
+                            && _isShapeEmbedded(sh)
+                            && Number(sh.parentContourId) === cid) {
                             _ordered.push(sh);
                         }
                     }
                 }
-            } else if (!_lineArcCids.has(seg.contourId ?? 0)) {
+            } else if (!_isShapeEmbedded(seg)) {
                 // Standalone shape — append as-is; embedded shapes handled above.
                 _ordered.push(seg);
             }
@@ -1865,7 +1874,7 @@ export default class EditorStateManager {
         for (const seg of _ordered) {
             // ── Circle: emit as two half-arcs OR collect as shape element ────────
             if (seg.type === 'circle') {
-                const _isEmbedded = _lineArcCids.has(seg.contourId ?? 0);
+                const _isEmbedded = _isShapeEmbedded(seg);
                 if (skipShapes && !_isEmbedded) {
                     shapeElements.push({ segId: seg.id, type: 'circle', data: { ...seg.data } });
                 } else {
@@ -1884,7 +1893,7 @@ export default class EditorStateManager {
             }
             // ── Future shape types (rect, ellipse) ───────────────────────────────
             if (seg.type === 'rect' || seg.type === 'ellipse') {
-                const _isEmbedded = _lineArcCids.has(seg.contourId ?? 0);
+                const _isEmbedded = _isShapeEmbedded(seg);
                 if (skipShapes && !_isEmbedded) {
                     shapeElements.push({ segId: seg.id, type: seg.type, data: { ...seg.data } });
                 } else if (seg.type === 'rect') {

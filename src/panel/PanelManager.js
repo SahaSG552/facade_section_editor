@@ -258,6 +258,18 @@ class PanelManager {
     updatePartFront() {
         const panelOrigin = this.getPanelOrigin();
 
+        // Preserve user-edited contour and only keep style/stroke in sync.
+        const existingPath = String(this.partFront?.getAttribute("d") ?? "").trim();
+        if (this.partFrontManuallyEdited && existingPath) {
+            this.partFront.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
+            this.partFront.setAttribute("stroke", "black");
+            this.partFront.setAttribute(
+                "stroke-width",
+                this.getAdaptiveStrokeWidth(),
+            );
+            return;
+        }
+
         const frontX = panelOrigin.x;
         const frontY = panelOrigin.y - this.panelHeight - 100;
         const frontWidth = this.panelWidth;
@@ -371,9 +383,7 @@ class PanelManager {
         this.panelThickness =
             parseInt(this.panelThicknessInput.value) || this.panelThickness;
 
-        // Reset manual edit flag when parameters are changed
-        this.partFrontManuallyEdited = false;
-
+        // Keep manual edit mode active so parameter updates don't regenerate the default contour.
         this.updatePanelShape();
         this.updateGridAnchor();
         this.updateOffsetContours();

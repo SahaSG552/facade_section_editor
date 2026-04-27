@@ -23,10 +23,13 @@ import appState from "./state/AppState.js";
 import csgScheduler from "./scheduling/CSGScheduler.js";
 import InteractionManager from "./interaction/InteractionManager.js";
 import PanelManager from "./panel/PanelManager.js";
+import PathEditor from "./panel/PathEditor.js";
 import SVGElementFactory from "./canvas/SVGElementFactory.js";
 import ExtensionCalculator from "./bits/ExtensionCalculator.js";
 import PhantomBitCalculator from "./bits/PhantomBitCalculator.js";
 import { addUnifiedPressListener } from "./ui/pressEvents.js";
+import ProfileEditor from "./editor/ProfileEditor.js";
+import { EditorPanelLayout } from "./ui/EditorPanelLayout.js";
 import {
     ARC_APPROX_TOLERANCE,
     ARC_RADIUS_TOLERANCE,
@@ -44,6 +47,7 @@ import { AppConfig, appConfig } from "./config/AppConfig.js";
 import { BitRegistry, bitRegistry } from "./bits/BitRegistry.js";
 import { PanelCoordinateHelper } from "./canvas/PanelCoordinateHelper.js";
 import { ManagerFactory } from "./core/ManagerFactory.js";
+import variablesManager from "./data/VariablesManager.js";
 
 // **PHASE 2 REFACTORING IMPORTS** - Business Logic Extraction
 import { BooleanOperationStrategy } from "./operations/BooleanOperationStrategy.js";
@@ -89,6 +93,27 @@ let bitsTableManager;
 let interactionManager;
 let panelManager;
 let selectionManager;
+let partFrontProfileEditor;
+let partFrontPathEditor;
+let partFrontOverlayResizeHandler = null;
+let partFrontEditorFrame = null;
+const PART_FRONT_VARIABLE_GROUP = "profile";
+
+const PART_FRONT_EDITOR_COORD_VERSION = 2;
+
+const partFrontEditorState = {
+    elements: [],
+    transforms: [],
+    coordVersion: PART_FRONT_EDITOR_COORD_VERSION,
+};
+
+// Panel layout instances
+let rightMenuLayout = null;
+
+// Whether the part editor has unsaved changes
+let _partEditorDirty = false;
+
+const PART_FRONT_SAVE_KEY = 'facade-part-front-editor-v1';
 
 // **PHASE 1 REFACTORING** - Create PanelCoordinateHelper
 let panelCoordinateHelper;
@@ -396,6 +421,62 @@ function initializeSVG() {
     if (lcsBtn) {
         addUnifiedPressListener(lcsBtn, addLcsRow);
     }
+    const partEditBtn = document.getElementById("part-edit-btn");
+    if (partEditBtn) {
+        addUnifiedPressListener(partEditBtn, startPartFrontEditMode);
+    }
+
+    const partSaveBtn = document.getElementById("part-save-btn");
+    if (partSaveBtn) {
+        addUnifiedPressListener(partSaveBtn, savePartFrontEditorState);
+    }
+
+    // Initialize EditorPanelLayout for the right menu (Part Parameters + Operations)
+    const rightMenuEl = document.getElementById("right-menu");
+    if (rightMenuEl) {
+        rightMenuLayout = new EditorPanelLayout(rightMenuEl, {
+            storageKey: 'facade-right-panel-layout-v1',
+            breakpoint: 9999, // always single-column
+        });
+        rightMenuLayout.addPanel({
+            id: 'part-params',
+            title: 'Part Parameters',
+            el: document.getElementById('part-params'),
+            resizable: true,
+        });
+        rightMenuLayout.addPanel({
+            id: 'part-variables',
+            title: 'Variables',
+            el: document.getElementById('part-variables-section'),
+        });
+        rightMenuLayout.addPanel({
+            id: 'part-path',
+            title: 'Path Editor',
+            el: document.getElementById('part-path-section'),
+        });
+        rightMenuLayout.addPanel({
+            id: 'part-debug-log',
+            title: 'Debug Log',
+            el: document.getElementById('part-debug-section'),
+            collapsed: true,
+        });
+        rightMenuLayout.addPanel({
+            id: 'operations',
+            title: 'Operations',
+            el: document.getElementById('operations'),
+            resizable: true,
+        });
+        rightMenuLayout.loadState();
+        // Editor panels start hidden (shown only in edit mode)
+        rightMenuLayout.setPanelVisible('part-variables', false);
+        rightMenuLayout.setPanelVisible('part-path', false);
+        rightMenuLayout.setPanelVisible('part-debug-log', false);
+    }
+
+    // partEditorSubLayout removed — editor panels now live directly in rightMenuLayout
+
+    // Restore saved editor state from localStorage
+    _restorePartFrontEditorStateFromStorage();
 
     // Setup part button
     bindPressById("part-btn", togglePartView);
@@ -981,6 +1062,27 @@ function updatePanelParams() {
         updatePhantomBits();
         if (showPart) updatePartShape();
 
+        if (!partFrontProfileEditor?.isActive) {
+            const currentPartFrontPath = String(partFront?.getAttribute("d") ?? "").trim();
+            const currentEditorFrame = getPartFrontEditorFrame();
+            partFrontEditorFrame = currentEditorFrame;
+            renderPartFrontVariablePanel();
+            partFrontEditorState.elements = buildPartFrontPathElements(
+                toEditorBitSpacePath(currentPartFrontPath, currentEditorFrame)
+            );
+            partFrontEditorState.transforms = [];
+            partFrontEditorState.coordVersion = PART_FRONT_EDITOR_COORD_VERSION;
+            if (partFrontPathEditor) {
+                restoreMainPathEditorState(partFrontPathEditor, {
+                    elementsSnapshot: partFrontEditorState.elements,
+                    transformsSnapshot: [],
+                    legacyPath: toEditorBitSpacePath(currentPartFrontPath, currentEditorFrame),
+                    suppressOnChange: true,
+                });
+                applyPartFrontVariableValuesToPathEditor();
+            }
+        }
+
         // Update 3D view if it's visible
         if (window.threeModule) {
             updateThreeView().then((didUpdate) => {
@@ -991,6 +1093,731 @@ function updatePanelParams() {
             });
         }
     }
+}
+
+function cloneSnapshot(value, fallback) {
+    try {
+        return JSON.parse(JSON.stringify(value ?? fallback));
+    } catch (_) {
+        return fallback;
+    }
+}
+
+function parseJsonArraySafe(raw, fallback = []) {
+    if (!raw || !String(raw).trim()) return cloneSnapshot(fallback, []);
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : cloneSnapshot(fallback, []);
+    } catch (_) {
+        return cloneSnapshot(fallback, []);
+    }
+}
+
+function buildPartFrontPathElements(pathData) {
+    const normalized = String(pathData ?? "").trim();
+    if (!normalized) return [];
+    return [{
+        type: "path",
+        contourId: 1,
+        segIds: [],
+        lineSegIds: [],
+        path: normalized,
+    }];
+}
+
+function getPartFrontEditorFrame() {
+    const panelOrigin = panelManager?.getPanelOrigin?.() ?? { x: 0, y: 0 };
+    const width = panelManager?.getWidth?.() ?? panelWidth;
+    const height = panelManager?.getHeight?.() ?? panelHeight;
+    return {
+        originX: panelOrigin.x,
+        originY: panelOrigin.y - 100,
+        width,
+        height,
+    };
+}
+
+function flipPathYAxis(pathData) {
+    const normalized = String(pathData ?? "").trim();
+    if (!normalized) return "";
+
+    const commandRe = /([MmLlHhVvZzCcSsQqTtAa])([^MmLlHhVvZzCcSsQqTtAa]*)/g;
+    const parts = [];
+    let match;
+
+    while ((match = commandRe.exec(normalized)) !== null) {
+        const cmd = match[1];
+        const upper = cmd.toUpperCase();
+        const args = match[2].trim();
+        const nums = args
+            .split(/[\s,]+/)
+            .filter(Boolean)
+            .map(Number);
+
+        if (nums.length === 0 || nums.some((n) => !Number.isFinite(n))) {
+            parts.push(`${cmd}${args ? ` ${args}` : ""}`);
+            continue;
+        }
+
+        let transformed = [...nums];
+        if (upper === "M" || upper === "L" || upper === "T") {
+            transformed = nums.map((value, index) => (index % 2 === 1 ? -value : value));
+        } else if (upper === "H") {
+            transformed = nums;
+        } else if (upper === "V") {
+            transformed = nums.map((value) => -value);
+        } else if (upper === "C") {
+            transformed = nums.map((value, index) => (index % 2 === 1 ? -value : value));
+        } else if (upper === "S" || upper === "Q") {
+            transformed = nums.map((value, index) => (index % 2 === 1 ? -value : value));
+        } else if (upper === "A") {
+            transformed = [...nums];
+            for (let i = 0; i + 6 < transformed.length; i += 7) {
+                transformed[i + 4] = 1 - Math.round(transformed[i + 4]);
+                transformed[i + 6] = -transformed[i + 6];
+            }
+        } else if (upper === "Z") {
+            transformed = [];
+        }
+
+        const argText = transformed.map((value) => Number(value.toFixed(6))).join(" ");
+        parts.push(argText ? `${cmd} ${argText}` : cmd);
+    }
+
+    return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function transformPathToEditorFrame(pathData, frame, direction = "to-editor") {
+    const normalized = String(pathData ?? "").trim();
+    if (!normalized) return "";
+    if (!frame || !Number.isFinite(frame.originX) || !Number.isFinite(frame.originY)) {
+        return flipPathYAxis(normalized);
+    }
+
+    const toEditor = direction === "to-editor";
+    const originX = Number(frame.originX);
+    const originY = Number(frame.originY);
+    const commandRe = /([MmLlHhVvZzCcSsQqTtAa])([^MmLlHhVvZzCcSsQqTtAa]*)/g;
+    const parts = [];
+    let match;
+
+    const roundValue = (value) => Number(value.toFixed(6));
+    const mapAbsPoint = (x, y) => toEditor
+        ? { x: x - originX, y: originY - y }
+        : { x: originX + x, y: originY - y };
+    const mapRelPoint = (x, y) => ({ x, y: -y });
+
+    while ((match = commandRe.exec(normalized)) !== null) {
+        const cmd = match[1];
+        const upper = cmd.toUpperCase();
+        const isRelative = cmd !== upper;
+        const args = match[2].trim();
+        const nums = args
+            .split(/[\s,]+/)
+            .filter(Boolean)
+            .map(Number);
+
+        if (nums.length === 0 || nums.some((n) => !Number.isFinite(n))) {
+            parts.push(`${cmd}${args ? ` ${args}` : ""}`);
+            continue;
+        }
+
+        let transformed = [...nums];
+        if (upper === "M" || upper === "L" || upper === "T") {
+            transformed = [];
+            for (let i = 0; i + 1 < nums.length; i += 2) {
+                const next = isRelative
+                    ? mapRelPoint(nums[i], nums[i + 1])
+                    : mapAbsPoint(nums[i], nums[i + 1]);
+                transformed.push(next.x, next.y);
+            }
+        } else if (upper === "H") {
+            transformed = nums.map((value) => (isRelative ? value : mapAbsPoint(value, 0).x));
+        } else if (upper === "V") {
+            transformed = nums.map((value) => (isRelative ? -value : mapAbsPoint(0, value).y));
+        } else if (upper === "C") {
+            transformed = [];
+            for (let i = 0; i + 5 < nums.length; i += 6) {
+                const p1 = isRelative ? mapRelPoint(nums[i], nums[i + 1]) : mapAbsPoint(nums[i], nums[i + 1]);
+                const p2 = isRelative ? mapRelPoint(nums[i + 2], nums[i + 3]) : mapAbsPoint(nums[i + 2], nums[i + 3]);
+                const p3 = isRelative ? mapRelPoint(nums[i + 4], nums[i + 5]) : mapAbsPoint(nums[i + 4], nums[i + 5]);
+                transformed.push(p1.x, p1.y, p2.x, p2.y, p3.x, p3.y);
+            }
+        } else if (upper === "S" || upper === "Q") {
+            transformed = [];
+            for (let i = 0; i + 3 < nums.length; i += 4) {
+                const p1 = isRelative ? mapRelPoint(nums[i], nums[i + 1]) : mapAbsPoint(nums[i], nums[i + 1]);
+                const p2 = isRelative ? mapRelPoint(nums[i + 2], nums[i + 3]) : mapAbsPoint(nums[i + 2], nums[i + 3]);
+                transformed.push(p1.x, p1.y, p2.x, p2.y);
+            }
+        } else if (upper === "A") {
+            transformed = [];
+            for (let i = 0; i + 6 < nums.length; i += 7) {
+                const endpoint = isRelative
+                    ? mapRelPoint(nums[i + 5], nums[i + 6])
+                    : mapAbsPoint(nums[i + 5], nums[i + 6]);
+                transformed.push(
+                    nums[i],
+                    nums[i + 1],
+                    nums[i + 2],
+                    nums[i + 3],
+                    1 - Math.round(nums[i + 4]),
+                    endpoint.x,
+                    endpoint.y,
+                );
+            }
+        } else if (upper === "Z") {
+            transformed = [];
+        }
+
+        const argText = transformed.map(roundValue).join(" ");
+        parts.push(argText ? `${cmd} ${argText}` : cmd);
+    }
+
+    return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function toEditorBitSpacePath(pathData, frame = null) {
+    return transformPathToEditorFrame(pathData, frame, "to-editor");
+}
+
+function fromEditorBitSpacePath(pathData, frame = null) {
+    return transformPathToEditorFrame(pathData, frame, "to-canvas");
+}
+
+function ensureMainEditorLayer() {
+    if (!mainCanvasManager) return null;
+    const existing = mainCanvasManager.getLayer("editor");
+    if (existing) {
+        // Keep editor visuals on top of other canvas layers.
+        existing.parentNode?.appendChild(existing);
+        return existing;
+    }
+
+    const svg = mainCanvasManager.canvas;
+    if (!svg) return null;
+    const layer = document.createElementNS(svgNS, "g");
+    layer.id = "editor-layer";
+    svg.appendChild(layer);
+    mainCanvasManager.layers.editor = layer;
+    return layer;
+}
+
+function restoreMainPathEditorState(editor, {
+    elementsSnapshot = [],
+    transformsSnapshot = [],
+    legacyPath = "",
+    suppressOnChange = true,
+} = {}) {
+    if (!editor) return false;
+    const savedOnChange = editor.onChange;
+    if (suppressOnChange) editor.onChange = () => {};
+
+    const elements = Array.isArray(elementsSnapshot) && elementsSnapshot.length > 0
+        ? cloneSnapshot(elementsSnapshot, [])
+        : buildPartFrontPathElements(legacyPath);
+
+    if (elements.length > 0) {
+        editor.setElements(elements);
+    }
+
+    const transforms = Array.isArray(transformsSnapshot)
+        ? cloneSnapshot(transformsSnapshot, [])
+        : [];
+    editor.setElementTransformsSnapshot(transforms);
+    editor.syncHiddenInputsFromElements?.();
+
+    if (suppressOnChange) editor.onChange = savedOnChange;
+    return elements.length > 0;
+}
+
+function ensurePartFrontPathEditor() {
+    const container = document.getElementById("part-path-editor-container");
+    const profilePathInput = document.getElementById("part-profilePath");
+    const rawProfilePathInput = document.getElementById("part-rawProfilePath");
+    const profileTransformsInput = document.getElementById("part-profileTransforms");
+    const profileElementsInput = document.getElementById("part-profileElements");
+
+    if (!container || !profilePathInput || !rawProfilePathInput || !profileTransformsInput || !profileElementsInput) {
+        return null;
+    }
+
+    if (!partFrontPathEditor) {
+        partFrontPathEditor = new PathEditor({
+            container,
+            hiddenInput: profilePathInput,
+            rawHiddenInput: rawProfilePathInput,
+            transformsHiddenInput: profileTransformsInput,
+            elementsHiddenInput: profileElementsInput,
+            onChange: () => {},
+            variableValues: {},
+            getVariableList: () => {
+                const values = getPartFrontVariableValues();
+                return Object.keys(values).map((name) => ({
+                    varName: name,
+                    name,
+                    value: values[name],
+                }));
+            },
+            getViewportCenter: () => ({
+                x: Number(mainCanvasManager?.panX ?? 0),
+                y: Number(mainCanvasManager?.panY ?? 0),
+            }),
+        });
+    }
+
+    renderPartFrontVariablePanel();
+    applyPartFrontVariableValuesToPathEditor();
+
+    return partFrontPathEditor;
+}
+
+function getPartFrontVariableValues() {
+    const frame = partFrontEditorFrame ?? getPartFrontEditorFrame();
+    const width = Number(frame?.width ?? panelManager?.getWidth?.() ?? panelWidth ?? 0);
+    const height = Number(frame?.height ?? panelManager?.getHeight?.() ?? panelHeight ?? 0);
+    const values = {
+        w: Number.isFinite(width) ? Number(width.toFixed(6)) : 0,
+        h: Number.isFinite(height) ? Number(height.toFixed(6)) : 0,
+    };
+
+    const customVars = variablesManager.getCustomVariables(PART_FRONT_VARIABLE_GROUP);
+    for (const variable of customVars) {
+        const varName = String(variable?.varName ?? "").trim();
+        if (!varName) continue;
+        const input = document.getElementById(`part-var-${varName}`);
+        const raw = String(input?.value ?? variable?.defaultValue ?? 0).trim();
+        let resolved = Number(raw);
+        if (!Number.isFinite(resolved)) {
+            try {
+                const expr = raw.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (_m, name) => String(values[name] ?? 0));
+                resolved = Number(evaluateMathExpression(expr));
+            } catch {
+                resolved = Number(variable?.defaultValue ?? 0);
+            }
+        }
+        values[varName] = Number.isFinite(resolved) ? resolved : 0;
+    }
+
+    return values;
+}
+
+function applyPartFrontVariableValuesToPathEditor() {
+    const values = getPartFrontVariableValues();
+    if (partFrontPathEditor) {
+        partFrontPathEditor.setVariableValues(values);
+    }
+    if (partFrontProfileEditor?.state) {
+        partFrontProfileEditor.state.variableValues = { ...values };
+    }
+    return values;
+}
+
+function renderPartFrontVariablePanel() {
+    const grid = document.getElementById("part-variables-grid");
+    const addBtn = document.getElementById("part-add-custom-field-btn");
+    if (!grid || !addBtn) return;
+
+    const frame = partFrontEditorFrame ?? getPartFrontEditorFrame();
+    const width = Number(frame?.width ?? panelManager?.getWidth?.() ?? panelWidth ?? 0);
+    const height = Number(frame?.height ?? panelManager?.getHeight?.() ?? panelHeight ?? 0);
+
+    const preservedValues = new Map();
+    grid.querySelectorAll("input[id^='part-var-']").forEach((input) => {
+        preservedValues.set(String(input.id), String(input.value ?? ""));
+    });
+
+    const customVars = variablesManager.getCustomVariables(PART_FRONT_VARIABLE_GROUP);
+    let rows = `
+        <div class="bit-form-row" data-field="w">
+            <label for="part-var-w">Width:<span class="var-name">{w}</span></label>
+            <div class="input-wrapper">
+                <input type="text" id="part-var-w" value="${Number.isFinite(width) ? Number(width.toFixed(6)) : 0}" disabled>
+                <div class="formula-result"></div>
+            </div>
+            <button type="button" class="delete-field-btn" disabled style="visibility:hidden;">×</button>
+        </div>
+        <div class="bit-form-row" data-field="h">
+            <label for="part-var-h">Height:<span class="var-name">{h}</span></label>
+            <div class="input-wrapper">
+                <input type="text" id="part-var-h" value="${Number.isFinite(height) ? Number(height.toFixed(6)) : 0}" disabled>
+                <div class="formula-result"></div>
+            </div>
+            <button type="button" class="delete-field-btn" disabled style="visibility:hidden;">×</button>
+        </div>
+    `;
+
+    customVars.forEach((variable) => {
+        const varName = String(variable?.varName ?? "").trim();
+        if (!varName) return;
+        const inputId = `part-var-${varName}`;
+        const defaultValue = preservedValues.get(inputId)
+            ?? String(variable?.defaultValue ?? 0);
+        rows += `
+            <div class="bit-form-row" data-field="${varName}" data-var-id="${String(variable?.id ?? "")}">
+                <label for="${inputId}">${String(variable?.name ?? varName)}:<span class="var-name">{${varName}}</span></label>
+                <div class="input-wrapper">
+                    <input type="text" id="${inputId}" value="${defaultValue}">
+                    <div class="formula-result"></div>
+                </div>
+                <button type="button" class="delete-field-btn visible" title="Delete custom field">×</button>
+            </div>
+        `;
+    });
+
+    grid.innerHTML = rows;
+
+    grid.querySelectorAll("input[id^='part-var-']").forEach((input) => {
+        if (input.id === "part-var-w" || input.id === "part-var-h") return;
+        input.addEventListener("input", () => {
+            applyPartFrontVariableValuesToPathEditor();
+            markPartEditorDirty();
+        });
+    });
+
+    grid.querySelectorAll(".delete-field-btn.visible").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+            const row = e.currentTarget?.closest?.(".bit-form-row");
+            const varId = row?.dataset?.varId;
+            if (!varId) return;
+            if (variablesManager.removeCustomVariable(PART_FRONT_VARIABLE_GROUP, varId)) {
+                renderPartFrontVariablePanel();
+                applyPartFrontVariableValuesToPathEditor();
+            }
+        });
+    });
+
+    addBtn.onclick = () => {
+        if (!bitsManager?.openAddCustomFieldModal) return;
+        bitsManager.openAddCustomFieldModal(PART_FRONT_VARIABLE_GROUP, grid, () => {
+            renderPartFrontVariablePanel();
+            applyPartFrontVariableValuesToPathEditor();
+        });
+    };
+}
+
+function syncPartFrontEditorStateFromPathEditor() {
+    if (!partFrontPathEditor) return;
+    partFrontEditorState.elements = cloneSnapshot(
+        partFrontPathEditor.getElementsDebugSnapshot?.() ?? [],
+        []
+    );
+    partFrontEditorState.transforms = cloneSnapshot(
+        partFrontPathEditor.getElementTransformsSnapshot?.() ?? [],
+        []
+    );
+    partFrontEditorState.coordVersion = PART_FRONT_EDITOR_COORD_VERSION;
+}
+
+/** Mark editor state as changed and enable the Save button. */
+function markPartEditorDirty() {
+    if (_partEditorDirty) return;
+    _partEditorDirty = true;
+    const btn = document.getElementById('part-save-btn');
+    if (btn) btn.disabled = false;
+}
+
+/** Save part editor state (elements + variable values) to localStorage. */
+function savePartFrontEditorState() {
+    // If in edit mode, sync PathEditor → partFrontEditorState first
+    if (partFrontProfileEditor?.isActive) {
+        syncPartFrontEditorStateFromPathEditor();
+    }
+    const customVars = variablesManager.getCustomVariables(PART_FRONT_VARIABLE_GROUP);
+    const variableValues = {};
+    customVars.forEach((v) => {
+        const varName = String(v?.varName ?? '').trim();
+        if (!varName) return;
+        const input = document.getElementById(`part-var-${varName}`);
+        variableValues[varName] = String(input?.value ?? v?.defaultValue ?? 0);
+    });
+    const payload = {
+        version: 1,
+        elements: partFrontEditorState.elements,
+        transforms: partFrontEditorState.transforms,
+        variableValues,
+        customVariables: customVars,
+    };
+    try {
+        localStorage.setItem(PART_FRONT_SAVE_KEY, JSON.stringify(payload));
+    } catch (_) {}
+    _partEditorDirty = false;
+    const btn = document.getElementById('part-save-btn');
+    if (btn) btn.disabled = true;
+}
+
+/**
+ * Restore part editor state from localStorage on page load.
+ * Called once during initialization.
+ */
+function _restorePartFrontEditorStateFromStorage() {
+    let payload;
+    try {
+        const raw = localStorage.getItem(PART_FRONT_SAVE_KEY);
+        if (!raw) return;
+        payload = JSON.parse(raw);
+    } catch (_) { return; }
+
+    if (!payload || payload.version !== 1) return;
+
+    // Restore custom variables before elements so formulas can resolve
+    if (Array.isArray(payload.customVariables)) {
+        for (const v of payload.customVariables) {
+            const varName = String(v?.varName ?? '').trim();
+            if (!varName) continue;
+            variablesManager.addCustomVariable(PART_FRONT_VARIABLE_GROUP, v);
+        }
+    }
+
+    // Store into partFrontEditorState so startPartFrontEditMode uses it
+    if (Array.isArray(payload.elements) && payload.elements.length > 0) {
+        partFrontEditorState.elements = payload.elements;
+        partFrontEditorState.transforms = payload.transforms ?? [];
+        partFrontEditorState.coordVersion = PART_FRONT_EDITOR_COORD_VERSION;
+    }
+
+    // Restore variable input values (rendered after renderPartFrontVariablePanel call)
+    if (payload.variableValues && typeof payload.variableValues === 'object') {
+        // Defer until the panel is rendered
+        const origRender = renderPartFrontVariablePanel;
+        const _applyOnce = () => {
+            requestAnimationFrame(() => {
+                for (const [key, val] of Object.entries(payload.variableValues)) {
+                    const input = document.getElementById(`part-var-${key}`);
+                    if (input) input.value = String(val);
+                }
+                applyPartFrontVariableValuesToPathEditor();
+            });
+        };
+        _applyOnce();
+    }
+}
+
+function setMainCanvasPassiveVisualState(editMode) {
+    ensureMainEditorLayer();
+    const bitsLayerEl = mainCanvasManager?.getLayer("bits");
+    const phantomsLayerEl = mainCanvasManager?.getLayer("phantoms");
+    const offsetsLayerEl = mainCanvasManager?.getLayer("offsets");
+    const panelFrontEl = partFront;
+    const partPathEl = partPath;
+    const panelSectionEl = partSection;
+    const panelAnchorEl = document.getElementById("panel-anchor-indicator");
+    const passiveTargets = [
+        bitsLayerEl,
+        phantomsLayerEl,
+        offsetsLayerEl,
+        panelFrontEl,
+        partPathEl,
+        panelSectionEl,
+        panelAnchorEl,
+    ];
+
+    passiveTargets.forEach((target) => {
+        if (!target) return;
+        target.classList.toggle("canvas-passive-dim", editMode);
+    });
+}
+
+function syncCanvasEditorOverlayLayout() {
+    const canvasContainerEl = document.getElementById("canvas-container");
+    const zoomToolbarEl = document.getElementById("zoom-toolbar");
+    const editorToolbarEl = document.getElementById("editor-toolbar");
+    if (!canvasContainerEl || !zoomToolbarEl) return;
+
+    if (!canvasContainerEl.classList.contains("canvas-editor-active")) {
+        zoomToolbarEl.style.removeProperty("position");
+        zoomToolbarEl.style.removeProperty("left");
+        zoomToolbarEl.style.removeProperty("right");
+        zoomToolbarEl.style.removeProperty("bottom");
+        zoomToolbarEl.style.removeProperty("margin");
+        zoomToolbarEl.style.removeProperty("z-index");
+        return;
+    }
+
+    const editorHeight = Math.max(0, Number(editorToolbarEl?.offsetHeight || 0));
+    zoomToolbarEl.style.position = "absolute";
+    zoomToolbarEl.style.left = "10px";
+    zoomToolbarEl.style.right = "10px";
+    zoomToolbarEl.style.bottom = `${editorHeight + 20}px`;
+    zoomToolbarEl.style.margin = "0";
+    zoomToolbarEl.style.zIndex = "25";
+}
+
+function setMainCanvasEditMode(editMode) {
+    const editBtnEl = document.getElementById("part-edit-btn");
+    const canvasContainerEl = document.getElementById("canvas-container");
+    const partParamsControls = document.querySelectorAll(
+        '#part-params input, #part-params button:not(#part-edit-btn):not(#part-save-btn)'
+    );
+
+    // Show/hide panels via layout manager when available; fall back to class toggle
+    if (rightMenuLayout) {
+        rightMenuLayout.setPanelVisible('operations', !editMode);
+        rightMenuLayout.setPanelVisible('part-params', !editMode);
+        rightMenuLayout.setPanelVisible('part-variables', !!editMode);
+        rightMenuLayout.setPanelVisible('part-path', !!editMode);
+        rightMenuLayout.setPanelVisible('part-debug-log', !!editMode);
+    } else {
+        document.getElementById("operations")?.classList.toggle("editor-mode-hidden", editMode);
+        document.getElementById("part-params")?.classList.toggle("editor-mode-hidden", !!editMode);
+        document.getElementById("part-variables-section")?.classList.toggle("editor-mode-hidden", !editMode);
+        document.getElementById("part-path-section")?.classList.toggle("editor-mode-hidden", !editMode);
+        document.getElementById("part-debug-section")?.classList.toggle("editor-mode-hidden", !editMode);
+    }
+
+    canvasContainerEl?.classList.toggle("canvas-editor-active", !!editMode);
+    if (editBtnEl) editBtnEl.disabled = !!editMode;
+    partParamsControls.forEach((control) => {
+        control.disabled = !!editMode;
+    });
+
+    if (mainCanvasManager?.config) {
+        if (editMode && partFrontEditorFrame) {
+            mainCanvasManager.config.gridAnchorX = partFrontEditorFrame.originX;
+            mainCanvasManager.config.gridAnchorY = partFrontEditorFrame.originY;
+            if (mainCanvasManager.gridEnabled) mainCanvasManager.drawGrid();
+        } else {
+            panelManager?.updateGridAnchor?.();
+            renderPartFrontVariablePanel();
+            applyPartFrontVariableValuesToPathEditor();
+        }
+    }
+
+    interactionManager?.setInteractionEnabled?.(!editMode);
+    setMainCanvasPassiveVisualState(!!editMode);
+
+    if (partFrontOverlayResizeHandler) {
+        window.removeEventListener("resize", partFrontOverlayResizeHandler);
+        partFrontOverlayResizeHandler = null;
+    }
+
+    if (editMode) {
+        partFrontOverlayResizeHandler = () => syncCanvasEditorOverlayLayout();
+        window.addEventListener("resize", partFrontOverlayResizeHandler);
+        requestAnimationFrame(() => syncCanvasEditorOverlayLayout());
+    } else {
+        syncCanvasEditorOverlayLayout();
+    }
+}
+
+function refreshPartFrontDependentViews() {
+    updateOffsetContours();
+    updatePhantomBits();
+    if (showPart) updatePartShape();
+
+    if (window.threeModule) {
+        updateThreeView().then((didUpdate) => {
+            if (showPart && didUpdate) {
+                window.threeModule.showBasePanel();
+            }
+        });
+    }
+}
+
+function startPartFrontEditMode() {
+    if (partFrontProfileEditor?.isActive) return;
+    if (!partFront || !mainCanvasManager) return;
+
+    const pathEditor = ensurePartFrontPathEditor();
+    if (!pathEditor) return;
+
+    ensureMainEditorLayer();
+    const currentPath = String(partFront.getAttribute("d") ?? "").trim();
+    partFrontEditorFrame = getPartFrontEditorFrame();
+    renderPartFrontVariablePanel();
+    const currentVariableValues = applyPartFrontVariableValuesToPathEditor();
+    const currentPathForEditor = toEditorBitSpacePath(currentPath, partFrontEditorFrame);
+    log.info("PartFront editor enter path", {
+        frame: partFrontEditorFrame,
+        sourcePathLength: currentPath.length,
+        editorPathLength: currentPathForEditor.length,
+    });
+    const useStoredEditorState = partFrontEditorState.coordVersion === PART_FRONT_EDITOR_COORD_VERSION;
+    const elementsSnapshot = useStoredEditorState && partFrontEditorState.elements.length > 0
+        ? partFrontEditorState.elements
+        : buildPartFrontPathElements(currentPathForEditor);
+    const transformsSnapshot = useStoredEditorState ? partFrontEditorState.transforms : [];
+
+    restoreMainPathEditorState(pathEditor, {
+        elementsSnapshot,
+        transformsSnapshot,
+        legacyPath: currentPathForEditor,
+        suppressOnChange: true,
+    });
+
+    const entryElementsSnapshot = cloneSnapshot(
+        pathEditor.getElementsDebugSnapshot?.() ?? elementsSnapshot,
+        []
+    );
+    const entryTransformsSnapshot = cloneSnapshot(
+        pathEditor.getElementTransformsSnapshot?.() ?? transformsSnapshot,
+        []
+    );
+
+    let editSaved = false;
+    if (!partFrontProfileEditor) {
+        partFrontProfileEditor = new ProfileEditor();
+    }
+
+    partFrontProfileEditor.enter({
+        modal: document.body,
+        canvasManager: mainCanvasManager,
+        profilePath: currentPathForEditor,
+        profileElements: entryElementsSnapshot,
+        variableValues: currentVariableValues,
+        pathEditor,
+        editorCanvasOptions: {
+            renderLayerName: "editor",
+            clearRenderLayerOnDestroy: true,
+            localFrame: partFrontEditorFrame,
+            axisX: () => (partFrontEditorFrame?.width ?? (panelManager?.getWidth?.() ?? panelWidth)) / 2,
+            gridAnchor: () => ({ x: 0, y: 0 }),
+        },
+        clearOverlayLayerOnEnter: false,
+        preservePathEditorStructure: true,
+        host: {
+            getPreviewContainer: () => document.getElementById("canvas-container"),
+            getPreviewToolbar: () => null,
+            getDebugLogElement: () => document.getElementById("part-profileDebugLog"),
+            onEditModeChange: (nextEditMode) => setMainCanvasEditMode(nextEditMode),
+        },
+        onSave: (nextPath) => {
+            editSaved = true;
+            pathEditor.syncHiddenInputsFromElements?.();
+            const evaluatedPath = String(document.getElementById("part-profilePath")?.value ?? "").trim();
+            const editorResolvedPath = String(
+                evaluatedPath
+                || nextPath
+                || currentPathForEditor
+            ).trim();
+            const resolvedPath = fromEditorBitSpacePath(editorResolvedPath, partFrontEditorFrame);
+            log.info("PartFront editor save path", {
+                editorPathLength: editorResolvedPath.length,
+                resolvedPathLength: resolvedPath.length,
+            });
+            if (resolvedPath) {
+                partFront.setAttribute("d", resolvedPath);
+            }
+            syncPartFrontEditorStateFromPathEditor();
+            markPartEditorDirty();
+            panelWidth = panelManager?.getWidth?.() ?? panelWidth;
+            panelHeight = panelManager?.getHeight?.() ?? panelHeight;
+            refreshPartFrontDependentViews();
+            renderPartFrontVariablePanel();
+            applyPartFrontVariableValuesToPathEditor();
+        },
+        onClose: () => {
+            if (!editSaved) {
+                restoreMainPathEditorState(pathEditor, {
+                    elementsSnapshot: entryElementsSnapshot,
+                    transformsSnapshot: entryTransformsSnapshot,
+                    legacyPath: currentPathForEditor,
+                    suppressOnChange: true,
+                });
+            }
+            pathEditor.syncHiddenInputsFromElements?.();
+        },
+    });
 }
 
 // New: reposition all bits according to current panel anchor and their stored logical coords
@@ -3184,6 +4011,22 @@ function initialize() {
     // Initial update of offset contours and phantom bits (even if no bits are loaded yet)
     updateOffsetContours();
     updatePhantomBits();
+
+    const initialPartFrontPath = String(partFront?.getAttribute("d") ?? "").trim();
+    const pathEditor = ensurePartFrontPathEditor();
+    if (pathEditor && initialPartFrontPath) {
+        const currentEditorFrame = getPartFrontEditorFrame();
+        partFrontEditorFrame = currentEditorFrame;
+        renderPartFrontVariablePanel();
+        restoreMainPathEditorState(pathEditor, {
+            elementsSnapshot: partFrontEditorState.elements,
+            transformsSnapshot: partFrontEditorState.transforms,
+            legacyPath: toEditorBitSpacePath(initialPartFrontPath, currentEditorFrame),
+            suppressOnChange: true,
+        });
+        applyPartFrontVariableValuesToPathEditor();
+        syncPartFrontEditorStateFromPathEditor();
+    }
 
     // Add event listeners for panel parameter inputs
     panelWidthInput.addEventListener("input", updatePanelParams);

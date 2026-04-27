@@ -12,6 +12,7 @@
     <meta name="apple-mobile-web-app-title" content="Facade Editor" />
     <title>Furniture Facade Section Editor</title>
     <link rel="stylesheet" href="styles/styles.css" />
+    <link rel="stylesheet" href="styles/components/editor-panels.css" />
     <script type="module" src="https://cdn.jsdelivr.net/npm/@capacitor/core@5.0.0/dist/capacitor.js"></script>
 </head>
 
@@ -135,6 +136,27 @@
                 <label for="panel-anchor">Anchor:</label>
                 <button id="panel-anchor-btn" style="background: none; border: none; cursor: pointer"></button>
                 <button id="lcs-btn" title="Add LCS">LCS</button>
+                <button id="part-edit-btn" title="Edit part contour">Edit</button>
+                <button id="part-save-btn" title="Save editor state" disabled>Save</button>
+            </div>
+            <!-- Editor panels — shown only in edit mode; managed individually by rightMenuLayout -->
+            <div id="part-variables-section" class="part-editor-section-block">
+                <div id="part-variables-grid" class="bit-form-grid"></div>
+                <button type="button" id="part-add-custom-field-btn" class="add-field-btn">+ Add Custom Field</button>
+            </div>
+            <div id="part-path-section" class="part-editor-section-block">
+                <div id="part-path-editor-container"></div>
+            </div>
+            <div id="part-debug-section" class="part-editor-section-block">
+                <textarea id="part-profileDebugLog" rows="8" style="width:100%;font-family:monospace;resize:vertical;"
+                    placeholder="Editor logs will appear here in part edit mode."></textarea>
+            </div>
+            <!-- Hidden inputs for profile editor state -->
+            <div id="part-debug-hidden-inputs" style="display:none">
+                <input type="hidden" id="part-profilePath" value="" />
+                <input type="hidden" id="part-rawProfilePath" value="" />
+                <input type="hidden" id="part-profileTransforms" value="[]" />
+                <input type="hidden" id="part-profileElements" value="[]" />
             </div>
             <div id="operations">
                 <div id="operations-header">

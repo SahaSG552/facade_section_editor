@@ -1,0 +1,258 @@
+/* ── EditorPanelLayout ──────────────────────────────────────────────────────
+   Unified draggable / collapsible panel system used in all editors.
+   
+   CSS prefix: epl-
+   Theme variables:
+     --panel-border: border color (#d0ccc8)
+     --panel-bg: panel background (#faf8f7)
+     --panel-header-bg: header background (#ece9e6)
+     --panel-title-color: title text color (#3a3835)
+     --panel-chevron-color: chevron icon color (#999, #888)
+     --panel-drop-accent: drop zone highlight (#6b7cff)
+   
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Layout root */
+.epl-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+/* Two-column mode */
+.epl-layout.epl-wide {
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+/* Column */
+.epl-col {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 0 0 auto;
+    min-width: 0;
+    min-height: 24px; /* allow drop on empty column */
+}
+
+/* In wide mode, columns share width. */
+.epl-layout.epl-wide .epl-col {
+    flex: 1 1 0;
+}
+
+/* In narrow mode keep both columns visible and stacked into one vertical flow. */
+.epl-layout.epl-narrow .epl-col {
+    width: 100%;
+    min-height: 0;
+}
+
+/* ── Panel wrapper ────────────────────────────────────────────────────────── */
+
+.epl-panel {
+    border: 1px solid var(--panel-border, #d0ccc8);
+    border-radius: 6px;
+    background: var(--panel-bg, #faf8f7);
+    overflow: hidden;
+    transition: opacity 0.12s;
+    height: auto;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+
+.epl-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 10px 5px 6px;
+    cursor: default;
+    user-select: none;
+    background: var(--panel-header-bg, #ece9e6);
+    border-bottom: 1px solid var(--panel-border, #d0ccc8);
+    touch-action: none;
+}
+
+/* Dedicated drag handle inside header */
+.epl-panel-drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    border-radius: 4px;
+    cursor: grab;
+    font-size: 14px;
+    color: var(--panel-chevron-color, #999);
+    transition: background 0.1s, color 0.1s;
+    touch-action: none;
+}
+
+.epl-panel-drag-handle:hover {
+    background: color-mix(in srgb, #141413 10%, transparent);
+    color: var(--panel-title-color, #3a3835);
+}
+
+.epl-panel-drag-handle:active {
+    cursor: grabbing;
+}
+
+.epl-panel-title {
+    flex: 1;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--panel-title-color, #3a3835);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+}
+
+.epl-panel-chevron {
+    font-size: 10px;
+    color: var(--panel-chevron-color, #888);
+    transition: transform 0.15s;
+    cursor: pointer;
+}
+
+/* ── Body ─────────────────────────────────────────────────────────────────── */
+
+.epl-panel-body {
+    padding: 8px;
+    overflow: visible;
+}
+
+/* Resized panels: use flexbox so header + body + resize-handle always stay in
+   sync with the fixed height. Body gets the remaining space and scrolls. */
+.epl-panel.epl-resized {
+    display: flex;
+    flex-direction: column;
+}
+
+.epl-panel.epl-resized .epl-panel-header {
+    flex-shrink: 0;
+}
+
+.epl-panel.epl-resized .epl-panel-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.epl-panel.epl-resized .epl-resize-handle {
+    flex-shrink: 0;
+}
+
+/* ── Collapsed state ─────────────────────────────────────────────────────── */
+
+.epl-panel.epl-collapsed .epl-panel-body {
+    display: none;
+}
+
+.epl-panel.epl-collapsed .epl-panel-chevron {
+    transform: rotate(-90deg);
+}
+
+.epl-panel.epl-collapsed {
+    opacity: 0.75;
+}
+
+.epl-panel.epl-collapsed .epl-resize-handle {
+    display: none;
+}
+
+/* ── Bottom resize handle ─────────────────────────────────────────────────── */
+
+.epl-resize-handle {
+    height: 12px;
+    cursor: ns-resize;
+    background: transparent;
+    position: relative;
+    opacity: 0.95;
+}
+
+.epl-resize-handle::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 3px;
+    border-radius: 999px;
+    background: color-mix(in srgb, #141413 28%, #f3f0ee 72%);
+}
+
+.epl-resize-handle:hover {
+    opacity: 1;
+}
+
+.epl-resize-handle:hover::before {
+    background: color-mix(in srgb, #141413 55%, #f3f0ee 45%);
+}
+
+/* ── Drag states ─────────────────────────────────────────────────────────── */
+
+.epl-panel.epl-dragging {
+    opacity: 0.35;
+}
+
+.epl-panel.epl-drop-before {
+    box-shadow: 0 -3px 0 0 var(--panel-drop-accent, #6b7cff);
+}
+
+.epl-panel.epl-drop-after {
+    box-shadow: 0 3px 0 0 var(--panel-drop-accent, #6b7cff);
+}
+
+.epl-col.epl-col-target {
+    background: color-mix(in srgb, var(--panel-drop-accent, #6b7cff) 8%, transparent);
+    border: 1px dashed var(--panel-drop-accent, #6b7cff);
+    border-radius: 6px;
+}
+
+/* ── Drag ghost ───────────────────────────────────────────────────────────── */
+
+.epl-ghost {
+    opacity: 0.55;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--panel-drop-accent, #6b7cff);
+}
+
+/* ── Bit editor modal integration ────────────────────────────────────────────
+   When modal-body becomes an epl-layout, disable the old flex gap rules and
+   let the panel system control the layout.
+   ────────────────────────────────────────────────────────────────────────── */
+.modal-body.epl-layout {
+    gap: 8px;
+}
+
+/* Keep bit-preview SVG sizing inside a panel body */
+.epl-panel-body .bit-preview {
+    width: 100%;
+    min-height: 200px;
+}
+
+.epl-panel-body .bit-preview svg {
+    width: 100%;
+    height: 300px;
+}
+
+/* Part editor panels: EditorPanelLayout provides spacing, remove old margins. */
+.epl-panel-body > .part-editor-section-block + .part-editor-section-block {
+    margin-top: 0;
+}
+
+/* Right-side panel-content integration: remove old fixed cap from operations */
+.epl-panel-body #operations {
+    max-height: none;
+    height: auto;
+    overflow: visible;
+}
+
+/* Ensure part params/operations are content-sized by default before resize */
+.epl-panel-body #part-params,
+.epl-panel-body #operations {
+    overflow: visible;
+}

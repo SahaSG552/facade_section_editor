@@ -176,3 +176,43 @@ This project uses LLM Wiki pattern for knowledge management.
 - `ingest-wiki` - Process new sources
 - `query-wiki` - Find information  
 - `maintain-wiki` - Health check
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
+
+## Design System
+
+All UI code must adhere to the design system defined in `DESIGN.md`.
+
+### Mandatory Reference
+
+**BEFORE writing any UI code, ALWAYS read `DESIGN.md` first.** This file contains:
+- Color palette & roles (Canvas Cream `#F3F0EE`, Ink Black `#141413`, Signal Orange `#CF4500`, etc.)
+- Typography rules (MarkForMC, weight 450 for body, -2% tracking on headlines)
+- Component specifications (button radii 20px, hero frames 40px, pills 999px)
+- Spacing system (8px base unit, 8/16/24/32/48/64/96/128 scale)
+- Shadow philosophy (atmospheric cushioning, never hard shadows)
+- Responsive breakpoints & touch target requirements
+
+### Core Principles to Preserve
+
+1. **Warm editorial tone** — Canvas Cream (`#F3F0EE`) background, never pure white
+2. **Extreme border-radius commitment** — 20px (buttons), 40px (hero/stadium), 999px (pills), 50% (circles). No intermediate radii.
+3. **Weight 450 is load-bearing** — use `font-weight: 450` for body text
+4. **Signal Orange is consent-only** — `#CF4500` reserved for legal/compliance actions
+5. **Ink Black is primary** — `#141413` for CTAs, headlines, footer
+6. **Circular portrait + satellite** — service imagery must be perfect circles with white circular CTA docked bottom-right
+7. **Orbital arcs** — Light Signal Orange (`#F37338`) decorative lines between portrait cards
+8. **Whitespace as structure** — generous negative space, not absence
+9. **Depth via soft halos** — shadows use 48px+ spread, ≤10% opacity
+10. **One-font system** — MarkForMC or Sofia Sans fallback; no secondary typefaces
+
+### When Updating DESIGN.md
+
+As the project evolves, `DESIGN.md` may be extended with component-specific patterns or migrated into the `.wiki/` knowledge base for structured lookup. Always consult the latest version before implementing UI changes.
