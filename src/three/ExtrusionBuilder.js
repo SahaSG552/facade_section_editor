@@ -1991,11 +1991,39 @@ export default class ExtrusionBuilder {
     }
 
     /**
+     * Estimate profile radius as max point distance from origin.
+     * Used for adaptive arc segmentation near sharp junctions.
+     * @private
+     * @param {THREE.Shape|Object} profile - Profile shape
+     * @returns {number} Estimated profile radius in mm
+     */
+    _calculateProfileRadius(profile) {
+        if (!profile || typeof profile.getPoints !== "function") {
+            return 10;
+        }
+
+        const points = profile.getPoints(16);
+        if (!points || points.length === 0) {
+            return 10;
+        }
+
+        let maxRadius = 0;
+        for (const p of points) {
+            const dist = Math.hypot(p.x, p.y);
+            if (dist > maxRadius) {
+                maxRadius = dist;
+            }
+        }
+
+        return maxRadius > 0 ? maxRadius : 10;
+    }
+
+    /**
      * Internal: Create round extrusion with half-profile (outer side) and partial lathe junctions.
-     * 
+     *
      * For junctions with angles ≥ 2°: creates partial lathe geometry for smooth transitions.
      * For micro-angles < 2°: skips lathe and directly merges vertices to avoid self-intersection.
-     * 
+     *
      * @private
      */
     _extrudeRound(profile, pathOrString, color, side = "top", options = {}) {
@@ -2170,6 +2198,133 @@ export default class ExtrusionBuilder {
                 isClosedPath = closureGap < 0.01;
             }
 
+            const profileRadius = this._calculateProfileRadius(profile);
+
+            const calculateMinLastSegmentLength = (angleBetween, bitRadius) => {
+                if (!Number.isFinite(angleBetween) || !Number.isFinite(bitRadius) || bitRadius <= 0) {
+                    return bitRadius;
+                }
+
+                const cornerAngleDeg = THREE.MathUtils.radToDeg(
+                    Math.max(0, Math.min(Math.PI, Math.PI - angleBetween)),
+                );
+
+                let k;
+                if (cornerAngleDeg >= 90) {
+                    // 180° → 0.5, 90° → 1.0
+                    k = 0.5 + ((180 - cornerAngleDeg) / 90) * 0.5;
+                } else if (cornerAngleDeg >= 45) {
+                    // 90° → 1.0, 45° → 1.5
+                    k = 1.0 + ((90 - cornerAngleDeg) / 45) * 0.5;
+                } else if (cornerAngleDeg >= 30) {
+                    // 45° → 1.5, 30° → 2.0
+                    k = 1.5 + ((45 - cornerAngleDeg) / 15) * 0.5;
+                } else {
+                    // <30°: increase aggressively (30° → 2.0, 0° → 2.75)
+                    k = 2.0 + ((30 - cornerAngleDeg) / 30) * 0.75;
+                }
+
+                return bitRadius * Math.max(0.5, k);
+            };
+
+            const sampleCurvesToContour = (curves, nextJunctionAngle = null) => {
+                const contourPoints = [];
+
+                for (let curveIdx = 0; curveIdx < curves.length; curveIdx++) {
+                    const curve = curves[curveIdx];
+                    const len = curve.getLength ? curve.getLength() : 0;
+                    const isLine =
+                        curve.segmentType === "LINE" ||
+                        curve instanceof THREE.LineCurve3;
+                    const isArc = curve.segmentType === "ARC";
+
+                    const baseSamples = isLine
+                        ? 1
+                        : Math.max(
+                            2,
+                            Math.ceil(len / this.arcDivisionCoefficient),
+                        );
+
+                    let samples = baseSamples;
+
+                    const isLastCurve = curveIdx === curves.length - 1;
+                    const hasJunction =
+                        isLastCurve && Number.isFinite(nextJunctionAngle);
+
+                    if (hasJunction && isArc && len > 1e-6) {
+                        const minLastSegmentLength = calculateMinLastSegmentLength(
+                            nextJunctionAngle,
+                            profileRadius,
+                        );
+
+                        if (Number.isFinite(minLastSegmentLength) && minLastSegmentLength > 1e-6) {
+                            const arcLength = len;
+                            const adaptiveSamples = Math.max(
+                                1,
+                                Math.floor(arcLength / minLastSegmentLength),
+                            );
+                            samples = Math.min(baseSamples, adaptiveSamples);
+
+                            if (samples < baseSamples) {
+                                const cornerAngleDeg = THREE.MathUtils.radToDeg(
+                                    Math.max(0, Math.min(Math.PI, Math.PI - nextJunctionAngle)),
+                                );
+                                this.log.debug("Adaptive arc segmentation at junction", {
+                                    angleDeg: Number(cornerAngleDeg.toFixed(2)),
+                                    bitRadius: Number(profileRadius.toFixed(3)),
+                                    minLastSeg: Number(minLastSegmentLength.toFixed(3)),
+                                    samplesBefore: baseSamples,
+                                    samplesAfter: samples,
+                                });
+                            }
+                        }
+                    }
+
+                    const points = curve.getPoints(samples);
+                    if (contourPoints.length === 0) {
+                        contourPoints.push(...points);
+                    } else {
+                        contourPoints.push(points[points.length - 1]);
+                    }
+                }
+
+                return contourPoints;
+            };
+
+            const junctionAngles = new Map();
+            if (curveGroups.length > 1) {
+                for (let groupIndex = 0; groupIndex < curveGroups.length; groupIndex++) {
+                    const closesContour =
+                        isClosedPath && groupIndex === curveGroups.length - 1;
+                    const hasNextGroup = groupIndex < curveGroups.length - 1;
+
+                    if (!hasNextGroup && !closesContour) {
+                        continue;
+                    }
+
+                    const currentGroup = curveGroups[groupIndex];
+                    const nextGroup = closesContour
+                        ? curveGroups[0]
+                        : curveGroups[groupIndex + 1];
+
+                    if (!currentGroup || !nextGroup) continue;
+                    if (currentGroup.curves.length === 0 || nextGroup.curves.length === 0)
+                        continue;
+
+                    const lastCurve =
+                        currentGroup.curves[currentGroup.curves.length - 1];
+                    const firstCurve = nextGroup.curves[0];
+
+                    const prevDir = getCurveTangent(lastCurve, 1);
+                    const nextDir = getCurveTangent(firstCurve, 0);
+                    const angleBetween = Math.acos(
+                        Math.max(-1, Math.min(1, prevDir.dot(nextDir))),
+                    );
+
+                    junctionAngles.set(groupIndex, angleBetween);
+                }
+            }
+
             const allMeshes = [];
             const junctionPoints = [];
 
@@ -2179,25 +2334,14 @@ export default class ExtrusionBuilder {
                 groupIndex++
             ) {
                 const group = curveGroups[groupIndex];
-                const contourPoints = [];
+                const contourPoints = sampleCurvesToContour(
+                    group.curves,
+                    junctionAngles.get(groupIndex) ?? null,
+                );
 
-                for (const curve of group.curves) {
-                    const len = curve.getLength ? curve.getLength() : 0;
-                    const isLine =
-                        curve.segmentType === "LINE" ||
-                        curve instanceof THREE.LineCurve3;
-                    const samples = isLine
-                        ? 1
-                        : Math.max(
-                            2,
-                            Math.ceil(len / this.arcDivisionCoefficient),
-                        );
-                    const points = curve.getPoints(samples);
-                    if (contourPoints.length === 0) {
-                        contourPoints.push(...points);
-                    } else {
-                        contourPoints.push(points[points.length - 1]);
-                    }
+                if (contourPoints.length === 0) {
+                    this.log.warn(`No contour points sampled for group ${groupIndex}`);
+                    continue;
                 }
 
                 if (groupIndex < curveGroups.length - 1) {
