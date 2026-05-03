@@ -97,7 +97,7 @@ let partFrontProfileEditor;
 let partFrontPathEditor;
 let partFrontOverlayResizeHandler = null;
 let partFrontEditorFrame = null;
-const PART_FRONT_VARIABLE_GROUP = "profile";
+const PART_FRONT_VARIABLE_GROUP = "__part_front";
 
 const PART_FRONT_EDITOR_COORD_VERSION = 2;
 
@@ -114,6 +114,9 @@ let rightMenuLayout = null;
 let _partEditorDirty = false;
 
 const PART_FRONT_SAVE_KEY = 'facade-part-front-editor-v1';
+
+// Canvas path restored from localStorage; applied to partFront after panelManager initializes
+let _restoredPartFrontCanvasPath = null;
 
 // **PHASE 1 REFACTORING** - Create PanelCoordinateHelper
 let panelCoordinateHelper;
@@ -745,6 +748,14 @@ function initializeSVG() {
     partSection = panelManager.partSection;
     partFront = panelManager.partFront;
 
+    // Apply canvas path saved by a previous session (if any) before the first
+    // updatePartFront() call can overwrite it with the default arch shape.
+    if (_restoredPartFrontCanvasPath && partFront) {
+        partFront.setAttribute("d", _restoredPartFrontCanvasPath);
+        panelManager.markPartFrontAsEdited();
+        _restoredPartFrontCanvasPath = null;
+    }
+
     // Update grid anchor position on initialization
     updateGridAnchor();
 
@@ -1063,23 +1074,28 @@ function updatePanelParams() {
         if (showPart) updatePartShape();
 
         if (!partFrontProfileEditor?.isActive) {
-            const currentPartFrontPath = String(partFront?.getAttribute("d") ?? "").trim();
             const currentEditorFrame = getPartFrontEditorFrame();
             partFrontEditorFrame = currentEditorFrame;
             renderPartFrontVariablePanel();
-            partFrontEditorState.elements = buildPartFrontPathElements(
-                toEditorBitSpacePath(currentPartFrontPath, currentEditorFrame)
-            );
-            partFrontEditorState.transforms = [];
-            partFrontEditorState.coordVersion = PART_FRONT_EDITOR_COORD_VERSION;
-            if (partFrontPathEditor) {
-                restoreMainPathEditorState(partFrontPathEditor, {
-                    elementsSnapshot: partFrontEditorState.elements,
-                    transformsSnapshot: [],
-                    legacyPath: toEditorBitSpacePath(currentPartFrontPath, currentEditorFrame),
-                    suppressOnChange: true,
-                });
-                applyPartFrontVariableValuesToPathEditor();
+            // Only rebuild editor state from canvas path when not manually edited.
+            // When manually edited, preserve the editor's own element structure so the
+            // user's custom shapes (circles, arcs, etc.) survive bit moves and panel updates.
+            if (!panelManager?.partFrontManuallyEdited) {
+                const currentPartFrontPath = String(partFront?.getAttribute("d") ?? "").trim();
+                partFrontEditorState.elements = buildPartFrontPathElements(
+                    toEditorBitSpacePath(currentPartFrontPath, currentEditorFrame)
+                );
+                partFrontEditorState.transforms = [];
+                partFrontEditorState.coordVersion = PART_FRONT_EDITOR_COORD_VERSION;
+                if (partFrontPathEditor) {
+                    restoreMainPathEditorState(partFrontPathEditor, {
+                        elementsSnapshot: partFrontEditorState.elements,
+                        transformsSnapshot: [],
+                        legacyPath: toEditorBitSpacePath(currentPartFrontPath, currentEditorFrame),
+                        suppressOnChange: true,
+                    });
+                    applyPartFrontVariableValuesToPathEditor();
+                }
             }
         }
 
@@ -1537,6 +1553,7 @@ function savePartFrontEditorState() {
         transforms: partFrontEditorState.transforms,
         variableValues,
         customVariables: customVars,
+        canvasPath: String(partFront?.getAttribute("d") ?? ""),
     };
     try {
         localStorage.setItem(PART_FRONT_SAVE_KEY, JSON.stringify(payload));
@@ -1574,6 +1591,11 @@ function _restorePartFrontEditorStateFromStorage() {
         partFrontEditorState.elements = payload.elements;
         partFrontEditorState.transforms = payload.transforms ?? [];
         partFrontEditorState.coordVersion = PART_FRONT_EDITOR_COORD_VERSION;
+    }
+
+    // Stash canvas path so it can be applied after panelManager + partFront are initialized
+    if (payload.canvasPath) {
+        _restoredPartFrontCanvasPath = payload.canvasPath;
     }
 
     // Restore variable input values (rendered after renderPartFrontVariablePanel call)
@@ -1799,6 +1821,9 @@ function startPartFrontEditMode() {
                 partFront.setAttribute("d", resolvedPath);
             }
             syncPartFrontEditorStateFromPathEditor();
+            // Mark the contour as manually edited so subsequent panel updates
+            // (e.g. bit move → updatePanelParams) don't regenerate the default arch path.
+            panelManager?.markPartFrontAsEdited?.();
             markPartEditorDirty();
             panelWidth = panelManager?.getWidth?.() ?? panelWidth;
             panelHeight = panelManager?.getHeight?.() ?? panelHeight;

@@ -1212,7 +1212,7 @@ export default class BitsManager {
     }
 
     // Helper method to collect variable values from form with dependency resolution
-    collectVariableValues(form, groupName) {
+    collectVariableValues(form, groupName, customVarDefs = null) {
         const values = {};
         const rawExpressions = {};
         const fieldToVarMap = {
@@ -1243,10 +1243,10 @@ export default class BitsManager {
             }
         });
 
-        // Collect custom variable values if groupName is provided
-        if (groupName) {
-            const customVars = variablesManager.getCustomVariables(groupName);
-            customVars.forEach(v => {
+        // Collect custom variable values (use per-bit defs if provided, else fall back to type-wide)
+        if (groupName || customVarDefs) {
+            const effectiveCustomVars = customVarDefs ?? variablesManager.getCustomVariables(groupName);
+            effectiveCustomVars.forEach(v => {
                 const input = form.querySelector(`#bit-${v.varName}`);
                 if (input && input.value.trim()) {
                     const value = input.value.trim();
@@ -1492,9 +1492,9 @@ export default class BitsManager {
 
     // Helper method to build bit payload for saving
     // modalElement is needed for profile type to find profilePath input (it's outside form)
-    buildBitPayload(form, groupName, modalElement = null) {
-        // Get resolved variable values (pass groupName for custom vars)
-        const variableValues = this.collectVariableValues(form, groupName);
+    buildBitPayload(form, groupName, modalElement = null, customVarDefs = null) {
+        // Get resolved variable values (use per-bit defs if provided)
+        const variableValues = this.collectVariableValues(form, groupName, customVarDefs);
 
         // Helper to get raw value from input
         const getRawValue = (fieldId) => {
@@ -1651,10 +1651,10 @@ export default class BitsManager {
             }
         }
 
-        // Store custom variable values
-        const customVars = variablesManager.getCustomVariables(groupName);
+        // Store custom variable values (use per-bit defs if provided, else fall back)
+        const effectiveCustomVarDefs = customVarDefs ?? variablesManager.getCustomVariables(groupName);
         const customValues = {};
-        customVars.forEach(v => {
+        effectiveCustomVarDefs.forEach(v => {
             const input = form.querySelector(`#bit-${v.varName}`);
             if (input) {
                 customValues[v.varName] = input.value.trim();
@@ -1662,6 +1662,11 @@ export default class BitsManager {
         });
         if (Object.keys(customValues).length > 0) {
             payload.customValues = customValues;
+        }
+
+        // Save per-bit custom var definitions so they're not shared across instances
+        if (customVarDefs !== null) {
+            payload.customVarDefs = [...customVarDefs];
         }
 
         return payload;
@@ -1706,10 +1711,12 @@ export default class BitsManager {
 
         // Get variables for this bit type
         const variables = variablesManager.getVariablesForType(groupName);
-        const customVariables = variablesManager.getCustomVariables(groupName);
+
+        // Per-bit custom var defs: use bit's own defs if present, fall back to type-wide for legacy bits
+        let modalCustomVarDefs = [...(bit?.customVarDefs ?? variablesManager.getCustomVariables(groupName))];
 
         // Generate form rows without profile path (will be added separately)
-        const formRows = this.generateFormRows(groupName, defaultValues, variables, false);
+        const formRows = this.generateFormRows(groupName, defaultValues, variables, false, modalCustomVarDefs);
         const profilePathHtml = groupName === "profile" ? this.generateProfilePathHtml(defaultValues) : "";
 
         const modal = document.createElement("div");
@@ -2707,23 +2714,30 @@ export default class BitsManager {
 
         // Add custom field button
         modal.querySelector("#add-custom-field-btn").addEventListener("click", () => {
-            this.openAddCustomFieldModal(groupName, formGrid, () => {
+            this.openAddCustomFieldModal(groupName, formGrid, (newVar, deletedVarId) => {
+                if (deletedVarId) {
+                    // Delete triggered from "Add Custom Field" dialog's own delete button
+                    const idx = modalCustomVarDefs.findIndex(v => String(v.id) === String(deletedVarId));
+                    if (idx !== -1) modalCustomVarDefs.splice(idx, 1);
+                } else if (newVar) {
+                    // Per-bit: track locally, not in VariablesManager
+                    modalCustomVarDefs.push(newVar);
+                }
                 addInputListeners();
                 updateBitPreview();
                 // Update PathEditor variables when new custom field is added
                 if (pathEditorInstance) {
-                    pathEditorInstance.setVariableValues(this.collectVariableValues(form, groupName));
+                    pathEditorInstance.setVariableValues(this.collectVariableValues(form, groupName, modalCustomVarDefs));
                 }
                 // Add listener to update PathEditor when new field value changes
                 if (pathEditorInstance) {
                     formGrid.querySelectorAll("input").forEach(input => {
-                        // Remove old listener by replacing with new one (simple approach)
                         input.addEventListener("input", () => {
-                            pathEditorInstance.setVariableValues(this.collectVariableValues(form, groupName));
+                            pathEditorInstance.setVariableValues(this.collectVariableValues(form, groupName, modalCustomVarDefs));
                         });
                     });
                 }
-            });
+            }, /* perBitMode= */ true);
         });
 
         // Add delete field listeners
@@ -2733,7 +2747,10 @@ export default class BitsManager {
                 btn.addEventListener("click", (e) => {
                     const row = e.target.closest(".bit-form-row");
                     const varId = row?.dataset?.varId;
-                    if (varId && variablesManager.removeCustomVariable(groupName, varId)) {
+                    if (varId) {
+                        // Remove from per-bit local array
+                        const idx = modalCustomVarDefs.findIndex(v => String(v.id) === String(varId));
+                        if (idx !== -1) modalCustomVarDefs.splice(idx, 1);
                         row.remove();
                         updateBitPreview();
                     }
@@ -2770,7 +2787,7 @@ export default class BitsManager {
 
         // OK button click handler
         modal.querySelector("#ok-btn").addEventListener("click", async () => {
-            const payload = this.buildBitPayload(form, groupName, modal);
+            const payload = this.buildBitPayload(form, groupName, modal, modalCustomVarDefs);
             const evaluatedName = payload?.name || "";
 
             if (await this.isBitNameDuplicate(evaluatedName, isEdit ? bit?.id : null)) {
@@ -2822,7 +2839,7 @@ export default class BitsManager {
     }
 
     // Generate form rows for flex grid layout
-    generateFormRows(groupName, defaultValues, variables, includeProfilePath = true) {
+    generateFormRows(groupName, defaultValues, variables, includeProfilePath = true, customVarDefs = null) {
         let rows = "";
 
         // Name field (always first) - supports variables like R{cr}
@@ -2880,8 +2897,8 @@ export default class BitsManager {
         });
 
         // Add custom variable rows - delete button is visible
-        const customVars = variablesManager.getCustomVariables(groupName);
-        customVars.forEach(v => {
+        const effectiveCustomVars = customVarDefs ?? variablesManager.getCustomVariables(groupName);
+        effectiveCustomVars.forEach(v => {
             // Use saved customValue if available, otherwise use defaultValue
             const savedValue = defaultValues.customValues?.[v.varName];
             const fieldValue = savedValue !== undefined ? savedValue : (v.defaultValue || "");
@@ -2901,7 +2918,7 @@ export default class BitsManager {
     }
 
     // Open modal to add custom field
-    openAddCustomFieldModal(groupName, formGrid, onUpdate) {
+    openAddCustomFieldModal(groupName, formGrid, onUpdate, perBitMode = false) {
         const availableVars = variablesManager.getAvailableCustomVariables(groupName);
 
         const modal = document.createElement("div");
@@ -2977,12 +2994,24 @@ export default class BitsManager {
                 return;
             }
 
-            const newVar = variablesManager.addCustomVariable(groupName, {
-                name,
-                varName,
-                defaultValue: parseFloat(defaultValue) || 0,
-                unit: "",
-            });
+            let newVar;
+            if (perBitMode) {
+                // Per-bit mode: create a local var def without touching VariablesManager
+                newVar = {
+                    id: `bit_var_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                    name,
+                    varName,
+                    defaultValue: parseFloat(defaultValue) || 0,
+                    unit: "",
+                };
+            } else {
+                newVar = variablesManager.addCustomVariable(groupName, {
+                    name,
+                    varName,
+                    defaultValue: parseFloat(defaultValue) || 0,
+                    unit: "",
+                });
+            }
 
             if (newVar) {
                 // Add new row to form
@@ -3002,13 +3031,17 @@ export default class BitsManager {
 
                 // Add delete listener
                 row.querySelector(".delete-field-btn").addEventListener("click", (e) => {
-                    if (variablesManager.removeCustomVariable(groupName, newVar.id)) {
+                    if (perBitMode) {
+                        // Per-bit: caller manages the defs array; just remove the row
+                        row.remove();
+                        if (onUpdate) onUpdate(null, newVar.id);
+                    } else if (variablesManager.removeCustomVariable(groupName, newVar.id)) {
                         row.remove();
                         if (onUpdate) onUpdate();
                     }
                 });
 
-                if (onUpdate) onUpdate();
+                if (onUpdate) onUpdate(newVar);
             } else {
                 alert(`Variable {${varName}} already exists for this bit type`);
             }

@@ -150,13 +150,14 @@
             <div id="part-debug-section" class="part-editor-section-block">
                 <textarea id="part-profileDebugLog" rows="8" style="width:100%;font-family:monospace;resize:vertical;"
                     placeholder="Editor logs will appear here in part edit mode."></textarea>
-            </div>
-            <!-- Hidden inputs for profile editor state -->
-            <div id="part-debug-hidden-inputs" style="display:none">
-                <input type="hidden" id="part-profilePath" value="" />
-                <input type="hidden" id="part-rawProfilePath" value="" />
-                <input type="hidden" id="part-profileTransforms" value="[]" />
-                <input type="hidden" id="part-profileElements" value="[]" />
+                <div class="profile-path-header" style="margin-top:8px;">Profile Path:</div>
+                <input id="part-profilePath" value="" style="width:100%;font-family:monospace;font-size:11px;box-sizing:border-box;">
+                <div class="profile-path-header" style="margin-top:4px;">Raw Profile Path:</div>
+                <input id="part-rawProfilePath" value="" style="width:100%;font-family:monospace;font-size:11px;box-sizing:border-box;">
+                <div class="profile-path-header" style="margin-top:4px;">Transforms:</div>
+                <input id="part-profileTransforms" value="[]" style="width:100%;font-family:monospace;font-size:11px;box-sizing:border-box;">
+                <div class="profile-path-header" style="margin-top:4px;">Elements:</div>
+                <input id="part-profileElements" value="[]" style="width:100%;font-family:monospace;font-size:11px;box-sizing:border-box;">
             </div>
             <div id="operations">
                 <div id="operations-header">
