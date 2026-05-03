@@ -18,246 +18,23 @@ import { approximatePath } from "../utils/arcApproximation.js";
 import { calculateOffsetFromPathData } from "../operations/CustomOffsetProcessor.js";
 import { getRepairInstance } from "../utils/meshRepair.js";
 import { appConfig } from "../config/AppConfig.js";
+import MeshEdgeMatcher from "./utils/MeshEdgeMatcher.js";
+
+const EXTRUSION_CONSTANTS = {
+    DEGENERATE_CURVE_THRESHOLD: 0.001,
+    MIN_GROUP_LENGTH: 0.01,
+    PATH_GAP_TOLERANCE: 0.001,
+    PATH_CLOSURE_TOLERANCE: 0.01,
+    AREA_EPSILON: 1e-10,
+    VOLUME_EPSILON: 1e-6,
+    PROFILE_CACHE_MAX_SIZE: 50,
+    MICRO_ANGLE_DEG: 2,
+    MICRO_VERTEX_MERGE_TOLERANCE: 1.0,
+};
 
 // Add three-mesh-bvh extensions to BufferGeometry
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
-
-// Aligns coincident edges across meshes to avoid tiny gaps before merge
-class MeshEdgeMatcher {
-    constructor(tolerance = 0.001) {
-        this.tolerance = tolerance;
-    }
-
-    matchEdges(sourceMesh, targetMesh) {
-        sourceMesh.updateMatrixWorld(true);
-        targetMesh.updateMatrixWorld(true);
-
-        const sourceVertices = this.getWorldVertices(sourceMesh);
-        const targetVertices = this.getWorldVertices(targetMesh);
-
-        const sourceBoundary = this.getBoundaryVertexIndices(
-            sourceMesh.geometry,
-        );
-        const targetBoundary = this.getBoundaryVertexIndices(
-            targetMesh.geometry,
-        );
-
-        // Quick reject by bounding boxes
-        const sourceBox = new THREE.Box3().setFromArray(
-            sourceVertices.flatMap((v) => [v.x, v.y, v.z]),
-        );
-        const targetBox = new THREE.Box3().setFromArray(
-            targetVertices.flatMap((v) => [v.x, v.y, v.z]),
-        );
-        if (
-            !sourceBox.expandByScalar(this.tolerance).intersectsBox(targetBox)
-        ) {
-            return 0;
-        }
-
-        let matches = this.findMatchingPairs(
-            sourceVertices,
-            targetVertices,
-            this.tolerance,
-            sourceBoundary,
-            targetBoundary,
-        );
-
-        // Optional coarse pass if nothing snapped
-        if (matches.length === 0) {
-            const coarseTol = this.tolerance * 2;
-            matches = this.findMatchingPairs(
-                sourceVertices,
-                targetVertices,
-                coarseTol,
-                sourceBoundary,
-                targetBoundary,
-            );
-        }
-        if (matches.length === 0) {
-            return 0;
-        }
-
-        this.applyVertexCorrections(sourceMesh, matches, true);
-        this.applyVertexCorrections(targetMesh, matches, false);
-
-        return matches.length;
-    }
-
-    matchMultipleMeshes(meshes) {
-        const results = [];
-
-        for (let i = 0; i < meshes.length; i++) {
-            for (let j = i + 1; j < meshes.length; j++) {
-                const matchedVertices = this.matchEdges(meshes[i], meshes[j]);
-                if (matchedVertices > 0) {
-                    results.push({ source: i, target: j, matchedVertices });
-                }
-            }
-        }
-
-        return results;
-    }
-
-    getWorldVertices(mesh) {
-        const worldVertices = [];
-        const position = mesh.geometry.attributes.position;
-
-        for (let i = 0; i < position.count; i++) {
-            const vertex = new THREE.Vector3(
-                position.getX(i),
-                position.getY(i),
-                position.getZ(i),
-            );
-            vertex.applyMatrix4(mesh.matrixWorld);
-            worldVertices.push(vertex);
-        }
-
-        return worldVertices;
-    }
-
-    findMatchingPairs(
-        sourceVertices,
-        targetVertices,
-        tol,
-        boundarySource,
-        boundaryTarget,
-    ) {
-        const matches = [];
-
-        // Spatial hash for faster lookup
-        const index = this.buildSpatialIndex(targetVertices, tol);
-
-        for (let i = 0; i < sourceVertices.length; i++) {
-            if (boundarySource && !boundarySource.has(i)) continue;
-            const sourceVertex = sourceVertices[i];
-
-            const neighbors = this.querySpatialIndex(index, sourceVertex);
-            let best = null;
-            let bestDist = tol;
-
-            for (const neighbor of neighbors) {
-                if (boundaryTarget && !boundaryTarget.has(neighbor.index))
-                    continue;
-                const d = sourceVertex.distanceTo(neighbor.pos);
-                if (d < bestDist) {
-                    bestDist = d;
-                    best = neighbor;
-                }
-            }
-
-            if (best) {
-                const averaged = new THREE.Vector3()
-                    .addVectors(sourceVertex, best.pos)
-                    .multiplyScalar(0.5);
-
-                matches.push({
-                    sourceIndex: i,
-                    targetIndex: best.index,
-                    averagedPos: averaged,
-                });
-            }
-        }
-
-        return matches;
-    }
-
-    getBoundaryVertexIndices(geometry) {
-        try {
-            const geom = geometry.index ? geometry : geometry.toNonIndexed();
-            const index = geom.index.array;
-            const edgeCount = new Map();
-            const addEdge = (a, b) => {
-                const key = a < b ? `${a}_${b}` : `${b}_${a}`;
-                edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
-            };
-            for (let i = 0; i < index.length; i += 3) {
-                const a = index[i];
-                const b = index[i + 1];
-                const c = index[i + 2];
-                addEdge(a, b);
-                addEdge(b, c);
-                addEdge(c, a);
-            }
-            const boundary = new Set();
-            edgeCount.forEach((count, key) => {
-                if (count === 1) {
-                    const [a, b] = key.split("_").map((v) => parseInt(v, 10));
-                    boundary.add(a);
-                    boundary.add(b);
-                }
-            });
-            return boundary.size ? boundary : null;
-        } catch (e) {
-            return null;
-        }
-    }
-
-    buildSpatialIndex(vertices, tol) {
-        const grid = new Map();
-        const inv = 1 / tol;
-        const keyOf = (v) =>
-            `${Math.floor(v.x * inv)}|${Math.floor(v.y * inv)}|${Math.floor(
-                v.z * inv,
-            )}`;
-
-        vertices.forEach((v, idx) => {
-            const key = keyOf(v);
-            if (!grid.has(key)) grid.set(key, []);
-            grid.get(key).push({ pos: v, index: idx });
-        });
-
-        return { grid, tol };
-    }
-
-    querySpatialIndex(index, point) {
-        const { grid, tol } = index;
-        const inv = 1 / tol;
-        const cx = Math.floor(point.x * inv);
-        const cy = Math.floor(point.y * inv);
-        const cz = Math.floor(point.z * inv);
-
-        const results = [];
-        for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dz = -1; dz <= 1; dz++) {
-                    const key = `${cx + dx}|${cy + dy}|${cz + dz}`;
-                    const bucket = grid.get(key);
-                    if (bucket) results.push(...bucket);
-                }
-            }
-        }
-        return results;
-    }
-
-    applyVertexCorrections(mesh, matches, useSourceIndex) {
-        const geometry = mesh.geometry;
-        const position = geometry.attributes.position;
-        const inverseMatrix = new THREE.Matrix4()
-            .copy(mesh.matrixWorld)
-            .invert();
-
-        for (const correction of matches) {
-            const vertexIndex = useSourceIndex
-                ? correction.sourceIndex
-                : correction.targetIndex;
-
-            if (vertexIndex === undefined || vertexIndex < 0) continue;
-
-            const localPos = correction.averagedPos
-                .clone()
-                .applyMatrix4(inverseMatrix);
-
-            position.setXYZ(vertexIndex, localPos.x, localPos.y, localPos.z);
-        }
-
-        position.needsUpdate = true;
-        geometry.computeBoundingBox();
-        geometry.computeVertexNormals();
-        geometry.normalizeNormals();
-    }
-}
 
 /**
  * ExtrusionBuilder
@@ -285,8 +62,101 @@ export default class ExtrusionBuilder {
         this.arcAngleStep = 5; // Degrees per segment for Arc (A) commands
         this.arcSegmentationMode = 'length'; // 'length' or 'angle'
         this.profileOverlap = 0.01; // Overlap added to profile width to prevent gaps (mm)
+        this.profilePointsCache = new Map();
 
         this.log.info("Created");
+    }
+
+    _safeExecute(operationName, fn, fallbackValue) {
+        try {
+            return fn();
+        } catch (error) {
+            this.log.error(`${operationName} failed`, error);
+            return fallbackValue;
+        }
+    }
+
+    _logOperationResult(operation, payload = {}) {
+        this.log.info(`[ExtrusionBuilder] ${operation}`, payload);
+    }
+
+    _ensureFiniteNumber(value, fallback = 0) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+    }
+
+    _getProfileCacheKey(profile, pointsCount, mode = "full") {
+        const id = profile?.uuid || profile?.id || "profile";
+        return `${id}:${mode}:${pointsCount}`;
+    }
+
+    _getCachedProfilePoints(profile, pointsCount, mode = "full") {
+        const key = this._getProfileCacheKey(profile, pointsCount, mode);
+        const cached = this.profilePointsCache.get(key);
+        if (cached) {
+            return cached.map((p) => new THREE.Vector2(p.x, p.y));
+        }
+
+        const points = profile.getPoints(pointsCount);
+        this._setCachedProfilePoints(key, points);
+        return points;
+    }
+
+    _setCachedProfilePoints(key, points) {
+        const serialized = points.map((p) => ({ x: p.x, y: p.y }));
+        this.profilePointsCache.set(key, serialized);
+
+        while (this.profilePointsCache.size > EXTRUSION_CONSTANTS.PROFILE_CACHE_MAX_SIZE) {
+            const oldestKey = this.profilePointsCache.keys().next().value;
+            this.profilePointsCache.delete(oldestKey);
+        }
+    }
+
+    _validateProfile(profile) {
+        if (!profile || typeof profile.getPoints !== "function") {
+            throw new Error("Invalid profile: profile.getPoints() is required");
+        }
+        const sample = profile.getPoints(16);
+        if (!Array.isArray(sample) || sample.length < 3) {
+            throw new Error("Invalid profile: less than 3 points");
+        }
+        const area = this._computeSignedArea2D(sample);
+        if (Math.abs(area) < EXTRUSION_CONSTANTS.AREA_EPSILON) {
+            this.log.warn("Profile has near-zero area", { area });
+        }
+    }
+
+    _validatePathInput(pathOrString) {
+        if (typeof pathOrString === "string") {
+            const p = pathOrString.trim();
+            if (!p) throw new Error("Path string is empty");
+            return;
+        }
+
+        if (!pathOrString || !pathOrString.curves || pathOrString.curves.length === 0) {
+            throw new Error("Invalid path: expected non-empty CurvePath or SVG path string");
+        }
+    }
+
+    _validateExtrudeInputs(profile, path, options = {}) {
+        this._validateProfile(profile);
+        this._validatePathInput(path);
+        if (options && options.side && options.side !== "top" && options.side !== "bottom") {
+            this.log.warn(`Unknown side option '${options.side}', expected 'top' or 'bottom'`);
+        }
+    }
+
+    _isPathClosed(path) {
+        if (!path || !path.curves || path.curves.length === 0) return false;
+        if (path.closed === true || path.autoClose === true) return true;
+
+        const firstCurve = path.curves[0];
+        const lastCurve = path.curves[path.curves.length - 1];
+        const firstPoint = firstCurve.getPoint(0);
+        const lastPoint = lastCurve.getPoint(1);
+        const closureGap = firstPoint.distanceTo(lastPoint);
+
+        return closureGap < EXTRUSION_CONSTANTS.PATH_CLOSURE_TOLERANCE;
     }
 
     /**
@@ -423,7 +293,7 @@ export default class ExtrusionBuilder {
         };
 
         // Remove degenerate (zero-length) segments
-        const DEGENERATE_THRESHOLD = 0.001; // 1 micron
+        const DEGENERATE_THRESHOLD = EXTRUSION_CONSTANTS.DEGENERATE_CURVE_THRESHOLD;
         const filtered = (pathCurves || []).filter((curve) => {
             try {
                 const length = curve.getLength();
@@ -495,7 +365,7 @@ export default class ExtrusionBuilder {
         }
 
         // Remove degenerate groups (total length < threshold)
-        const MIN_GROUP_LENGTH = 0.01; // 10 microns
+        const MIN_GROUP_LENGTH = EXTRUSION_CONSTANTS.MIN_GROUP_LENGTH;
         const validGroups = groups.filter((group) => {
             const totalLength = group.curves.reduce(
                 (sum, curve) => sum + curve.getLength(),
@@ -1572,7 +1442,8 @@ export default class ExtrusionBuilder {
         options = {},
         pathModifier = null,
     ) {
-        try {
+        return this._safeExecute("extrudeAlongPath", () => {
+            this._validateExtrudeInputs(profile, path, options);
             let modifiedPath = path;
 
             // Apply path modification if specified
@@ -1678,14 +1549,15 @@ export default class ExtrusionBuilder {
                 }
             }
 
+            this._logOperationResult("extrudeAlongPath:success", {
+                type,
+                side,
+                meshCount: meshes.length,
+                hasPathVisualization: options.pathVisual !== false,
+            });
+
             return meshes;
-        } catch (error) {
-            this.log.error(
-                `Error in extrudeAlongPath (${type}):`,
-                error.message,
-            );
-            return [];
-        }
+        }, []);
     }
 
     /**
@@ -1817,7 +1689,7 @@ export default class ExtrusionBuilder {
      * @private
      */
     _extrudeMiter(profile, curveOrString, color, side = "top", options = {}) {
-        try {
+        return this._safeExecute("_extrudeMiter", () => {
             let curve;
 
             // Check if curveOrString is a string (SVG path data)
@@ -1983,51 +1855,26 @@ export default class ExtrusionBuilder {
             mesh.userData.profilePoints = profilePoints;
             mesh.userData.isBitPart = true;
 
+            this._logOperationResult("_extrudeMiter:success", {
+                side,
+                contourPointCount: contour.length,
+                profilePointCount: profilePoints.length,
+            });
+
             return [mesh];
-        } catch (error) {
-            this.log.error("Error in _extrudeMiter:", error.message);
-            return [];
-        }
-    }
-
-    /**
-     * Estimate profile radius as max point distance from origin.
-     * Used for adaptive arc segmentation near sharp junctions.
-     * @private
-     * @param {THREE.Shape|Object} profile - Profile shape
-     * @returns {number} Estimated profile radius in mm
-     */
-    _calculateProfileRadius(profile) {
-        if (!profile || typeof profile.getPoints !== "function") {
-            return 10;
-        }
-
-        const points = profile.getPoints(16);
-        if (!points || points.length === 0) {
-            return 10;
-        }
-
-        let maxRadius = 0;
-        for (const p of points) {
-            const dist = Math.hypot(p.x, p.y);
-            if (dist > maxRadius) {
-                maxRadius = dist;
-            }
-        }
-
-        return maxRadius > 0 ? maxRadius : 10;
+        }, []);
     }
 
     /**
      * Internal: Create round extrusion with half-profile (outer side) and partial lathe junctions.
-     *
+     * 
      * For junctions with angles ≥ 2°: creates partial lathe geometry for smooth transitions.
      * For micro-angles < 2°: skips lathe and directly merges vertices to avoid self-intersection.
-     *
+     * 
      * @private
      */
     _extrudeRound(profile, pathOrString, color, side = "top", options = {}) {
-        try {
+        return this._safeExecute("_extrudeRound", () => {
             let path;
 
             // Helper: Get precise curve tangent at parameter t for junction angle calculation
@@ -2188,186 +2035,217 @@ export default class ExtrusionBuilder {
             const curveGroups = this.groupCurves(path.curves);
 
             // Check if path is closed
-            let isClosedPath = false;
-            if (path.curves.length > 0) {
-                const firstCurve = path.curves[0];
-                const lastCurve = path.curves[path.curves.length - 1];
-                const firstPoint = firstCurve.getPoint(0);
-                const lastPoint = lastCurve.getPoint(1);
-                const closureGap = firstPoint.distanceTo(lastPoint);
-                isClosedPath = closureGap < 0.01;
-            }
+            const isClosedPath = this._isPathClosed(path);
 
-            const profileRadius = this._calculateProfileRadius(profile);
+            const allMeshes = [];
+            const junctionPoints = [];
 
-            const calculateMinLastSegmentLength = (angleBetween, bitRadius) => {
-                if (!Number.isFinite(angleBetween) || !Number.isFinite(bitRadius) || bitRadius <= 0) {
-                    return bitRadius;
-                }
-
-                const cornerAngleDeg = THREE.MathUtils.radToDeg(
-                    Math.max(0, Math.min(Math.PI, Math.PI - angleBetween)),
-                );
-
-                let k;
-                if (cornerAngleDeg >= 90) {
-                    // 180° → 0.5, 90° → 1.0
-                    k = 0.5 + ((180 - cornerAngleDeg) / 90) * 0.5;
-                } else if (cornerAngleDeg >= 45) {
-                    // 90° → 1.0, 45° → 1.5
-                    k = 1.0 + ((90 - cornerAngleDeg) / 45) * 0.5;
-                } else if (cornerAngleDeg >= 30) {
-                    // 45° → 1.5, 30° → 2.0
-                    k = 1.5 + ((45 - cornerAngleDeg) / 15) * 0.5;
-                } else {
-                    // <30°: increase aggressively (30° → 2.0, 0° → 2.75)
-                    k = 2.0 + ((30 - cornerAngleDeg) / 30) * 0.75;
-                }
-
-                return bitRadius * Math.max(0.5, k);
-            };
-
-            const sampleCurvesToContour = (curves, nextJunctionAngle = null) => {
+            const sampleCurvesToContour = (curves) => {
                 const contourPoints = [];
-
-                for (let curveIdx = 0; curveIdx < curves.length; curveIdx++) {
-                    const curve = curves[curveIdx];
+                for (const curve of curves) {
                     const len = curve.getLength ? curve.getLength() : 0;
                     const isLine =
                         curve.segmentType === "LINE" ||
                         curve instanceof THREE.LineCurve3;
-                    const isArc = curve.segmentType === "ARC";
-
-                    const baseSamples = isLine
+                    const samples = isLine
                         ? 1
                         : Math.max(
                             2,
                             Math.ceil(len / this.arcDivisionCoefficient),
                         );
-
-                    let samples = baseSamples;
-
-                    const isLastCurve = curveIdx === curves.length - 1;
-                    const hasJunction =
-                        isLastCurve && Number.isFinite(nextJunctionAngle);
-
-                    if (hasJunction && isArc && len > 1e-6) {
-                        const minLastSegmentLength = calculateMinLastSegmentLength(
-                            nextJunctionAngle,
-                            profileRadius,
-                        );
-
-                        if (Number.isFinite(minLastSegmentLength) && minLastSegmentLength > 1e-6) {
-                            const arcLength = len;
-                            const adaptiveSamples = Math.max(
-                                1,
-                                Math.floor(arcLength / minLastSegmentLength),
-                            );
-                            samples = Math.min(baseSamples, adaptiveSamples);
-
-                            if (samples < baseSamples) {
-                                const cornerAngleDeg = THREE.MathUtils.radToDeg(
-                                    Math.max(0, Math.min(Math.PI, Math.PI - nextJunctionAngle)),
-                                );
-                                this.log.debug("Adaptive arc segmentation at junction", {
-                                    angleDeg: Number(cornerAngleDeg.toFixed(2)),
-                                    bitRadius: Number(profileRadius.toFixed(3)),
-                                    minLastSeg: Number(minLastSegmentLength.toFixed(3)),
-                                    samplesBefore: baseSamples,
-                                    samplesAfter: samples,
-                                });
-                            }
-                        }
-                    }
-
                     const points = curve.getPoints(samples);
                     if (contourPoints.length === 0) {
-                        contourPoints.push(...points);
+                        contourPoints.push(...points.map((p) => p.clone()));
                     } else {
-                        contourPoints.push(points[points.length - 1]);
+                        const firstNew = points[0];
+                        const lastExisting = contourPoints[contourPoints.length - 1];
+                        const startIdx =
+                            lastExisting.distanceTo(firstNew) <
+                            EXTRUSION_CONSTANTS.PATH_GAP_TOLERANCE
+                                ? 1
+                                : 0;
+                        for (let i = startIdx; i < points.length; i++) {
+                            contourPoints.push(points[i].clone());
+                        }
                     }
                 }
-
                 return contourPoints;
             };
 
-            const junctionAngles = new Map();
-            if (curveGroups.length > 1) {
-                for (let groupIndex = 0; groupIndex < curveGroups.length; groupIndex++) {
-                    const closesContour =
-                        isClosedPath && groupIndex === curveGroups.length - 1;
-                    const hasNextGroup = groupIndex < curveGroups.length - 1;
+            const buildChunksFromSplitBoundaries = (
+                groupCount,
+                splitBoundarySet,
+                closed,
+            ) => {
+                if (groupCount <= 0) return [];
+                if (groupCount === 1) return [[0]];
 
-                    if (!hasNextGroup && !closesContour) {
-                        continue;
+                if (!closed) {
+                    const chunks = [];
+                    let current = [0];
+                    for (let boundary = 0; boundary < groupCount - 1; boundary++) {
+                        if (splitBoundarySet.has(boundary)) {
+                            chunks.push(current);
+                            current = [];
+                        }
+                        current.push(boundary + 1);
                     }
+                    if (current.length > 0) chunks.push(current);
+                    return chunks;
+                }
 
-                    const currentGroup = curveGroups[groupIndex];
-                    const nextGroup = closesContour
-                        ? curveGroups[0]
-                        : curveGroups[groupIndex + 1];
+                const sorted = Array.from(splitBoundarySet).sort((a, b) => a - b);
+                if (sorted.length === 0) {
+                    return [Array.from({ length: groupCount }, (_, i) => i)];
+                }
 
-                    if (!currentGroup || !nextGroup) continue;
-                    if (currentGroup.curves.length === 0 || nextGroup.curves.length === 0)
-                        continue;
+                const chunks = [];
+                for (let i = 0; i < sorted.length; i++) {
+                    const start = (sorted[i] + 1) % groupCount;
+                    const endBoundary = sorted[(i + 1) % sorted.length];
 
-                    const lastCurve =
-                        currentGroup.curves[currentGroup.curves.length - 1];
-                    const firstCurve = nextGroup.curves[0];
+                    const chunk = [];
+                    let idx = start;
+                    let guard = 0;
+                    while (guard <= groupCount) {
+                        chunk.push(idx);
+                        if (idx === endBoundary) break;
+                        idx = (idx + 1) % groupCount;
+                        guard++;
+                    }
+                    if (chunk.length > 0) chunks.push(chunk);
+                }
 
-                    const prevDir = getCurveTangent(lastCurve, 1);
-                    const nextDir = getCurveTangent(firstCurve, 0);
-                    const angleBetween = Math.acos(
-                        Math.max(-1, Math.min(1, prevDir.dot(nextDir))),
-                    );
+                return chunks;
+            };
 
-                    junctionAngles.set(groupIndex, angleBetween);
+            const isOuterCornerForHalf = (crossZ, half) => {
+                if (Math.abs(crossZ) < 1e-10) return false;
+                // left turn (cross>0): right side is outer; right turn (cross<0): left side is outer
+                return half === "left" ? crossZ < 0 : crossZ > 0;
+            };
+
+            const groupContours = curveGroups.map((group) =>
+                sampleCurvesToContour(group.curves),
+            );
+
+            const groupCount = curveGroups.length;
+            const boundaryCount = isClosedPath
+                ? groupCount
+                : Math.max(0, groupCount - 1);
+
+            const splitBoundaries = new Set();
+            const splitBoundariesInner = new Set();
+            const junctionPointsInner = [];
+            const MICRO_ANGLE_THRESHOLD = THREE.MathUtils.degToRad(
+                EXTRUSION_CONSTANTS.MICRO_ANGLE_DEG,
+            );
+
+            for (let boundary = 0; boundary < boundaryCount; boundary++) {
+                const currentGroup = curveGroups[boundary];
+                const nextGroup = curveGroups[(boundary + 1) % groupCount];
+                if (!currentGroup || !nextGroup) continue;
+
+                const currentContour = groupContours[boundary];
+                if (!currentContour || currentContour.length === 0) continue;
+
+                const lastCurve =
+                    currentGroup.curves[currentGroup.curves.length - 1];
+                const firstCurve = nextGroup.curves[0];
+
+                const prevDir = getCurveTangent(lastCurve, 1);
+                const nextDir = getCurveTangent(firstCurve, 0);
+
+                const dot = Math.max(-1, Math.min(1, prevDir.dot(nextDir)));
+                const angleBetween = Math.acos(dot);
+                const crossZ = prevDir.x * nextDir.y - prevDir.y * nextDir.x;
+
+                const isOuterForOutsideHalf = isOuterCornerForHalf(
+                    crossZ,
+                    outsideHalf,
+                );
+                const isOuterForInnerHalf = isOuterCornerForHalf(
+                    crossZ,
+                    innerHalf,
+                );
+
+                const shouldCreateLathe =
+                    isOuterForOutsideHalf && angleBetween >= MICRO_ANGLE_THRESHOLD;
+                const shouldCreateLatheInner =
+                    isOuterForInnerHalf && angleBetween >= MICRO_ANGLE_THRESHOLD;
+
+                if (shouldCreateLathe) {
+                    splitBoundaries.add(boundary);
+                    junctionPoints.push({
+                        point: currentContour[currentContour.length - 1].clone(),
+                        boundary,
+                        prevDir,
+                        nextDir,
+                        angleBetween,
+                    });
+                }
+
+                if (shouldCreateLatheInner) {
+                    splitBoundariesInner.add(boundary);
+                    junctionPointsInner.push({
+                        point: currentContour[currentContour.length - 1].clone(),
+                        boundary,
+                        prevDir,
+                        nextDir,
+                        angleBetween,
+                    });
                 }
             }
 
-            const allMeshes = [];
-            const junctionPoints = [];
+            const chunkGroupIndices = buildChunksFromSplitBoundaries(
+                groupCount,
+                splitBoundaries,
+                isClosedPath,
+            );
 
-            for (
-                let groupIndex = 0;
-                groupIndex < curveGroups.length;
-                groupIndex++
-            ) {
-                const group = curveGroups[groupIndex];
-                const contourPoints = sampleCurvesToContour(
-                    group.curves,
-                    junctionAngles.get(groupIndex) ?? null,
-                );
+            for (let chunkIndex = 0; chunkIndex < chunkGroupIndices.length; chunkIndex++) {
+                const groupIndices = chunkGroupIndices[chunkIndex];
+                let contourPoints = [];
 
-                if (contourPoints.length === 0) {
-                    this.log.warn(`No contour points sampled for group ${groupIndex}`);
-                    continue;
+                for (const gi of groupIndices) {
+                    const source = groupContours[gi] || [];
+                    if (contourPoints.length === 0) {
+                        contourPoints.push(...source.map((p) => p.clone()));
+                    } else if (source.length > 0) {
+                        const firstNew = source[0];
+                        const lastExisting = contourPoints[contourPoints.length - 1];
+                        const startIdx =
+                            lastExisting.distanceTo(firstNew) <
+                            EXTRUSION_CONSTANTS.PATH_GAP_TOLERANCE
+                                ? 1
+                                : 0;
+                        for (let i = startIdx; i < source.length; i++) {
+                            contourPoints.push(source[i].clone());
+                        }
+                    }
                 }
 
-                if (groupIndex < curveGroups.length - 1) {
-                    junctionPoints.push({
-                        point: contourPoints[contourPoints.length - 1].clone(),
-                        groupIndex: groupIndex,
-                    });
-                } else if (isClosedPath && curveGroups.length > 1) {
-                    junctionPoints.push({
-                        point: contourPoints[contourPoints.length - 1].clone(),
-                        groupIndex: groupIndex,
-                        closesContour: true,
-                    });
+                if (contourPoints.length < 2) {
+                    this.log.warn(
+                        `Round extrusion: chunk ${chunkIndex} has insufficient contour points`,
+                    );
+                    continue;
                 }
 
                 const firstPoint = contourPoints[0];
                 const lastPoint = contourPoints[contourPoints.length - 1];
-                const groupClosed = firstPoint.distanceTo(lastPoint) < 0.01;
+                const chunkClosed =
+                    isClosedPath &&
+                    splitBoundaries.size === 0 &&
+                    firstPoint.distanceTo(lastPoint) <
+                        EXTRUSION_CONSTANTS.PATH_CLOSURE_TOLERANCE;
 
-                const curveSegments =
-                    this.calculateAdaptiveCurveSegments(profile);
+                const curveSegments = this.calculateAdaptiveCurveSegments(profile);
                 const flags = this._getGeometryTransformFlags(side, false);
                 const geometry = this.createProfiledContourGeometry(
                     profile,
                     contourPoints,
-                    groupClosed,
+                    chunkClosed,
                     options.openCaps === true,
                     curveSegments,
                     flags.invertExtrusionCaps,
@@ -2381,7 +2259,7 @@ export default class ExtrusionBuilder {
 
                 if (!geometry) {
                     this.log.warn(
-                        `Failed to create geometry for group ${groupIndex}`,
+                        `Failed to create geometry for chunk ${chunkIndex}`,
                     );
                     continue;
                 }
@@ -2403,8 +2281,8 @@ export default class ExtrusionBuilder {
                 mesh.castShadow = true;
                 mesh.receiveShadow = true;
                 mesh.userData.isBitPart = true;
-                mesh.userData.groupIndex = groupIndex;
-                mesh.userData.groupType = group.type;
+                mesh.userData.chunkIndex = chunkIndex;
+                mesh.userData.groupIndices = groupIndices.slice();
                 mesh.userData.halfProfile = outsideHalf;
                 mesh.userData.contourPointCount = contourPoints.length;
                 mesh.userData.profilePointCount = halfProfilePoints.length;
@@ -2413,7 +2291,7 @@ export default class ExtrusionBuilder {
                 allMeshes.push(mesh);
             }
 
-            // Partial lathe at every junction using the same half-profile (no overlap)
+            // Partial lathe only at OUTER corners for this half-profile (concave corners stay mitered)
             if (junctionPoints.length > 0) {
                 let extensionHeight = 0;
                 if (options.zOffset && options.zOffset !== 0) {
@@ -2425,184 +2303,225 @@ export default class ExtrusionBuilder {
 
                 for (let i = 0; i < junctionPoints.length; i++) {
                     const junction = junctionPoints[i];
-                    const groupIndex = junction.groupIndex;
-                    let currentGroup, nextGroup;
 
-                    if (junction.closesContour) {
-                        currentGroup = curveGroups[curveGroups.length - 1];
-                        nextGroup = curveGroups[0];
-                    } else {
-                        currentGroup = curveGroups[groupIndex];
-                        nextGroup = curveGroups[groupIndex + 1];
-                    }
-
-                    if (!currentGroup || !nextGroup) continue;
-
-                    const lastCurve =
-                        currentGroup.curves[currentGroup.curves.length - 1];
-                    const firstCurve = nextGroup.curves[0];
-
-                    const prevDir = getCurveTangent(lastCurve, 1);
-                    const nextDir = getCurveTangent(firstCurve, 0);
-
-                    // Calculate angle between segment directions for micro-angle detection
-                    const angleBetween = Math.acos(
-                        Math.max(-1, Math.min(1, prevDir.dot(nextDir)))
+                    const latheResult = this.createPartialLatheAtJunction(
+                        profile,
+                        junction.point,
+                        junction.prevDir,
+                        junction.nextDir,
+                        color,
+                        i,
+                        true,
+                        null,
+                        false,
+                        side,
+                        !!options.isExtension,
+                        extensionHeight,
+                        lathePoints,
+                        0,
+                        false,
                     );
-                    
-                    // Micro-angle threshold: ~2° - below this, skip lathe to avoid self-intersection
-                    const MICRO_ANGLE_THRESHOLD = THREE.MathUtils.degToRad(2);
-                    
-                    if (angleBetween < MICRO_ANGLE_THRESHOLD) {
-                        // Micro-angle detected: skip lathe creation and merge vertices directly
-                        this.log.debug(
-                            `Junction ${i}: micro-angle (${THREE.MathUtils.radToDeg(
-                                angleBetween,
-                            ).toFixed(2)}°) - merging profile vertices instead of lathe`,
-                        );
-                        junction.isMicroAngle = true;
-                        junction.prevGroupIndex = groupIndex;
-                        junction.nextGroupIndex = groupIndex + 1;
-                    } else {
-                        // Regular lathe for larger angles
-                        const latheResult = this.createPartialLatheAtJunction(
-                            profile,
-                            junction.point,
-                            prevDir,
-                            nextDir,
-                            color,
-                            i,
-                            true,
-                            null,
-                            false,
-                            side,
-                            !!options.isExtension,
-                            extensionHeight,
-                            lathePoints,
-                            0,
-                            false,
-                        );
 
-                        if (latheResult && latheResult.mesh) {
-                            const latheMesh = latheResult.mesh;
-                            latheMesh.userData.isBitPart = true;
-                            latheMesh.userData.isLatheCorner = true;
-                            latheMesh.userData.isPartialLathe = true;
-                            latheMesh.userData.junctionAfterGroup =
-                                junction.groupIndex;
-                            latheMesh.userData.halfProfile = outsideHalf;
-                            allMeshes.push(latheMesh);
+                    if (latheResult && latheResult.mesh) {
+                        const latheMesh = latheResult.mesh;
+                        latheMesh.userData.isBitPart = true;
+                        latheMesh.userData.isLatheCorner = true;
+                        latheMesh.userData.isPartialLathe = true;
+                        latheMesh.userData.junctionAfterBoundary =
+                            junction.boundary;
+                        latheMesh.userData.halfProfile = outsideHalf;
+                        allMeshes.push(latheMesh);
+                    }
+                }
+            }
+
+            // Inside half extrusion: same convex/concave split logic as outside,
+            // but with corner classification for inner half.
+            const chunkGroupIndicesInner = buildChunksFromSplitBoundaries(
+                groupCount,
+                splitBoundariesInner,
+                isClosedPath,
+            );
+
+            const extrudeInnerProfilePoints = innerProfilePoints
+                .slice()
+                .reverse();
+
+            // Compute a miter limit for the inner sweep based on the profile
+            // height.  When an arc is tessellated into many short sub-segments
+            // the concave miter at the arc→line transition can reach extremely
+            // large shift values, causing the sweep to fold back on itself.
+            // Limiting shift to ≤ profileHeight keeps the geometry clean while
+            // still producing a good-looking sharp corner.
+            const _innerProfileYs = innerProfilePoints.map((p) => p.y);
+            const _innerProfileHeight =
+                Math.max(..._innerProfileYs) - Math.min(..._innerProfileYs);
+            const innerMiterLimit = Math.max(1, _innerProfileHeight);
+
+            // Phase 1: collect contour points for every inner chunk.
+            const innerChunkData = [];
+            for (let chunkIndex = 0; chunkIndex < chunkGroupIndicesInner.length; chunkIndex++) {
+                const groupIndices = chunkGroupIndicesInner[chunkIndex];
+                let contourPoints = [];
+
+                for (const gi of groupIndices) {
+                    const source = groupContours[gi] || [];
+                    if (contourPoints.length === 0) {
+                        contourPoints.push(...source.map((p) => p.clone()));
+                    } else if (source.length > 0) {
+                        const firstNew = source[0];
+                        const lastExisting = contourPoints[contourPoints.length - 1];
+                        const startIdx =
+                            lastExisting.distanceTo(firstNew) <
+                            EXTRUSION_CONSTANTS.PATH_GAP_TOLERANCE
+                                ? 1
+                                : 0;
+                        for (let i = startIdx; i < source.length; i++) {
+                            contourPoints.push(source[i].clone());
                         }
                     }
                 }
+
+                innerChunkData.push({ chunkIndex, groupIndices, contourPoints });
             }
 
-            // Inside half extrusion along merged path (single sweep)
-            const mergedCurvePath = new THREE.CurvePath();
-            curveGroups.forEach((group) => {
-                group.curves.forEach((c) => mergedCurvePath.add(c));
-            });
+            // Phase 2: clip overlapping inner contours.
+            this._clipInnerChunkContours(innerChunkData);
 
-            const pathLength = mergedCurvePath.getLength
-                ? mergedCurvePath.getLength()
-                : 100;
-            const segments = Math.max(64, Math.ceil(pathLength * 2));
-            let innerContour = mergedCurvePath
-                .getPoints(segments)
-                .map((p) => new THREE.Vector3(p.x, p.y, p.z));
+            // Phase 3: create geometries from (possibly clipped) contour points.
+            for (const chunkData of innerChunkData) {
+                const { chunkIndex, groupIndices, contourPoints } = chunkData;
 
-            if (innerContour.length > 1) {
-                const firstPoint = innerContour[0];
-                const lastPoint = innerContour[innerContour.length - 1];
-                const contourClosed = firstPoint.distanceTo(lastPoint) < 0.01;
-                if (contourClosed) {
-                    innerContour = innerContour.slice(0, -1);
-                }
-
-                const extrudeInnerProfilePoints = innerProfilePoints
-                    .slice()
-                    .reverse();
-
-                if (innerProfilePoints && innerProfilePoints.length > 1) {
-                    const curveSegments =
-                        this.calculateAdaptiveCurveSegments(profile);
-                    const flags = this._getGeometryTransformFlags(side, false);
-                    const innerGeometry = this.createProfiledContourGeometry(
-                        profile,
-                        innerContour,
-                        contourClosed,
-                        options.openCaps === true,
-                        curveSegments,
-                        flags.invertExtrusionCaps,
-                        side,
-                        {
-                            profilePointsOverride: extrudeInnerProfilePoints,
-                            profileClosed: false,
-                            useParallelTransport: false,
-                        },
+                if (contourPoints.length < 2) {
+                    this.log.warn(
+                        `Round extrusion (inner): chunk ${chunkIndex} has insufficient contour points`,
                     );
-
-                    if (innerGeometry) {
-                        innerGeometry.computeVertexNormals();
-                        innerGeometry.normalizeNormals();
-
-                        const innerMaterial = new THREE.MeshStandardMaterial({
-                            color: new THREE.Color(color || "#cccccc"),
-                            roughness: 0.5,
-                            metalness: 0.2,
-                            side: THREE.FrontSide,
-                            wireframe: this.materialManager
-                                ? this.materialManager.isWireframeEnabled()
-                                : false,
-                        });
-
-                        const innerMesh = new THREE.Mesh(
-                            innerGeometry,
-                            innerMaterial,
-                        );
-                        innerMesh.castShadow = true;
-                        innerMesh.receiveShadow = true;
-                        innerMesh.userData.isBitPart = true;
-                        innerMesh.userData.halfProfile = innerHalf;
-                        innerMesh.userData.isMergedInnerHalf = true;
-                        allMeshes.push(innerMesh);
-                    }
+                    continue;
                 }
-            }
 
-            // Merge profile vertices at micro-angle junctions for seamless connection
-            const microAngleJunctions = junctionPoints.filter(j => j.isMicroAngle);
-            if (microAngleJunctions.length > 0) {
-                this.log.debug(
-                    `Merging vertices at ${microAngleJunctions.length} micro-angle junction(s)`,
+                const firstPoint = contourPoints[0];
+                const lastPoint = contourPoints[contourPoints.length - 1];
+                const chunkClosed =
+                    isClosedPath &&
+                    splitBoundariesInner.size === 0 &&
+                    firstPoint.distanceTo(lastPoint) <
+                        EXTRUSION_CONSTANTS.PATH_CLOSURE_TOLERANCE;
+
+                const curveSegments = this.calculateAdaptiveCurveSegments(profile);
+                const flags = this._getGeometryTransformFlags(side, false);
+                const innerGeometry = this.createProfiledContourGeometry(
+                    profile,
+                    contourPoints,
+                    chunkClosed,
+                    options.openCaps === true,
+                    curveSegments,
+                    flags.invertExtrusionCaps,
+                    side,
+                    {
+                        profilePointsOverride: extrudeInnerProfilePoints,
+                        profileClosed: false,
+                        useParallelTransport: false,
+                        miterLimit: innerMiterLimit,
+                    },
                 );
-                
-                for (const junction of microAngleJunctions) {
-                    const prevMesh = allMeshes.find(
-                        m => m.userData.groupIndex === junction.prevGroupIndex,
+
+                if (!innerGeometry) {
+                    this.log.warn(
+                        `Failed to create inner geometry for chunk ${chunkIndex}`,
                     );
-                    const nextMesh = allMeshes.find(
-                        m => m.userData.groupIndex === junction.nextGroupIndex,
+                    continue;
+                }
+
+                innerGeometry.computeVertexNormals();
+                innerGeometry.normalizeNormals();
+
+                const innerMaterial = new THREE.MeshStandardMaterial({
+                    color: new THREE.Color(color || "#cccccc"),
+                    roughness: 0.5,
+                    metalness: 0.2,
+                    side: THREE.FrontSide,
+                    wireframe: this.materialManager
+                        ? this.materialManager.isWireframeEnabled()
+                        : false,
+                });
+
+                const innerMesh = new THREE.Mesh(innerGeometry, innerMaterial);
+                innerMesh.castShadow = true;
+                innerMesh.receiveShadow = true;
+                innerMesh.userData.isBitPart = true;
+                innerMesh.userData.halfProfile = innerHalf;
+                innerMesh.userData.chunkIndex = chunkIndex;
+                innerMesh.userData.groupIndices = groupIndices.slice();
+                innerMesh.userData.contourPointCount = contourPoints.length;
+                innerMesh.userData.profilePointCount = innerProfilePoints.length;
+                innerMesh.userData.contourReversed = true;
+                innerMesh.userData.isInnerHalfPart = true;
+
+                allMeshes.push(innerMesh);
+            }
+
+            // Partial lathes for INNER half on its own outer corners.
+            if (junctionPointsInner.length > 0) {
+                let extensionHeight = 0;
+                if (options.zOffset && options.zOffset !== 0) {
+                    const yCoords = innerProfilePoints.map((p) => p.y);
+                    const minY = Math.min(...yCoords);
+                    const maxY = Math.max(...yCoords);
+                    extensionHeight = Math.abs(maxY - minY);
+                }
+
+                const lathePointsInner = innerProfilePoints.map(
+                    (p) => new THREE.Vector2(Math.abs(p.x), p.y),
+                );
+
+                for (let i = 0; i < junctionPointsInner.length; i++) {
+                    const junction = junctionPointsInner[i];
+
+                    const latheResult = this.createPartialLatheAtJunction(
+                        profile,
+                        junction.point,
+                        junction.prevDir,
+                        junction.nextDir,
+                        color,
+                        i,
+                        true,
+                        null,
+                        false,
+                        side,
+                        !!options.isExtension,
+                        extensionHeight,
+                        lathePointsInner,
+                        0,
+                        false,
                     );
-                    
-                    if (prevMesh && nextMesh && prevMesh.geometry && nextMesh.geometry) {
-                        const merged = this._mergeMicroAngleVertices(prevMesh, nextMesh);
-                        this.log.debug(
-                            `  Junction ${junction.prevGroupIndex}→${junction.nextGroupIndex}: merged ${merged} vertices`,
-                        );
+
+                    if (latheResult && latheResult.mesh) {
+                        const latheMesh = latheResult.mesh;
+
+                        // Inner-half lathes must match inner sweep winding before
+                        // mergedInside global inversion; otherwise they end up flipped.
+                        if (!isExtension && latheMesh.geometry) {
+                            this._invertGeometryNormals(latheMesh.geometry);
+                        }
+
+                        latheMesh.userData.isBitPart = true;
+                        latheMesh.userData.isLatheCorner = true;
+                        latheMesh.userData.isPartialLathe = true;
+                        latheMesh.userData.junctionAfterBoundary =
+                            junction.boundary;
+                        latheMesh.userData.halfProfile = innerHalf;
+                        latheMesh.userData.isInnerHalfLathe = true;
+                        allMeshes.push(latheMesh);
                     }
                 }
             }
 
             // Merge all OUTSIDE half parts, then merge with INSIDE
             const outsideMeshes = allMeshes.filter(
-                (m) =>
-                    m &&
-                    (m.userData.halfProfile === outsideHalf ||
-                        m.userData.isLatheCorner),
+                (m) => m && m.userData.halfProfile === outsideHalf,
             );
             const insideMeshes = allMeshes.filter(
-                (m) => m && m.userData.isMergedInnerHalf,
+                (m) => m && m.userData.halfProfile === innerHalf,
             );
 
             const mergedOutside = this.mergeExtrudeMeshes(outsideMeshes, color);
@@ -2646,11 +2565,15 @@ export default class ExtrusionBuilder {
                 return [mergedInside];
             }
 
+            this._logOperationResult("_extrudeRound:success", {
+                side,
+                isClosedPath,
+                totalParts: allMeshes.length,
+                junctions: junctionPoints.length,
+            });
+
             return allMeshes;
-        } catch (error) {
-            this.log.error("Error in _extrudeRoundHalf:", error.message);
-            return [];
-        }
+        }, []);
     }
 
     /**
@@ -2677,6 +2600,149 @@ export default class ExtrusionBuilder {
             addExtensionOffset: isExtension, // Add height for all extensions (top and bottom)
             invertExtensionOffset: isExtension && !isBottom, // Invert offset for top extensions
         };
+    }
+
+    /**
+     * Clip overlapping inner extrusion contours.
+     *
+     * When an arc is tessellated into many short sub-segments the last few
+     * arc-chunks may geometrically overlap the adjacent linear chunk because the
+     * inner offset contour of those sub-segments falls inside the linear
+     * segment's swept volume.  This method iterates over every consecutive pair
+     * of inner chunks and, whenever the tail of chunk[i] penetrates the head of
+     * chunk[i+1] (or vice-versa), trims the intruding contour back to the
+     * 2-D intersection point so the final sweep produces no self-intersections.
+     *
+     * The algorithm works entirely in the XZ path-space (Vector3 x/z) because
+     * that is the plane in which the inner offset contour is laid out before
+     * being swept along the profile.
+     *
+     * @param {Array<{chunkIndex:number, groupIndices:number[], contourPoints:THREE.Vector3[]}>} innerChunkData
+     * @private
+     */
+    _clipInnerChunkContours(innerChunkData) {
+        if (!innerChunkData || innerChunkData.length < 2) return;
+
+        /**
+         * 2-D segment intersection in XZ plane.
+         * Returns the parameter t ∈ (0,1) along segment AB where it intersects
+         * segment CD, or null if there is no intersection in that range.
+         * We treat Vector3 (x, z) as the 2-D coordinates.
+         */
+        const segmentIntersectXZ = (a, b, c, d) => {
+            const r = { x: b.x - a.x, z: b.z - a.z };
+            const s = { x: d.x - c.x, z: d.z - c.z };
+            const denom = r.x * s.z - r.z * s.x;
+            if (Math.abs(denom) < 1e-10) return null; // parallel / collinear
+            const diff = { x: c.x - a.x, z: c.z - a.z };
+            const t = (diff.x * s.z - diff.z * s.x) / denom;
+            const u = (diff.x * r.z - diff.z * r.x) / denom;
+            if (t > 1e-6 && t < 1 - 1e-6 && u > 1e-6 && u < 1 - 1e-6) {
+                return { t, u, x: a.x + t * r.x, z: a.z + t * r.z };
+            }
+            return null;
+        };
+
+        /**
+         * Test whether point P lies geometrically "inside" (past the start of)
+         * the contour of the next chunk — i.e., the projection of P onto the
+         * first edge of nextPoints overshoots the edge.
+         * We use a simple signed-area / cross-product test.
+         */
+        const pointPastEdge = (p, edgeA, edgeB) => {
+            // Cross product of edge direction with (p - edgeA) in XZ.
+            const ex = edgeB.x - edgeA.x;
+            const ez = edgeB.z - edgeA.z;
+            const px = p.x - edgeA.x;
+            const pz = p.z - edgeA.z;
+            const dot = ex * px + ez * pz;
+            const lenSq = ex * ex + ez * ez;
+            // t > 1 means p is "past" the edge end — it has overshot.
+            return lenSq > 1e-12 && dot / lenSq > 1 - 1e-6;
+        };
+
+        for (let i = 0; i < innerChunkData.length - 1; i++) {
+            const curr = innerChunkData[i];
+            const next = innerChunkData[i + 1];
+
+            const currPts = curr.contourPoints;
+            const nextPts = next.contourPoints;
+
+            if (currPts.length < 2 || nextPts.length < 2) continue;
+
+            // --- 1. Try to find a 2-D intersection between the TAIL of currPts
+            //        and the HEAD of nextPts.
+            // We scan the last few segments of currPts against the first few
+            // segments of nextPts.  To keep it O(n) we limit the scan window.
+            const WINDOW = Math.min(currPts.length - 1, 16);
+            const WINDOW_NEXT = Math.min(nextPts.length - 1, 16);
+
+            let foundCurrSeg = -1;
+            let foundNextSeg = -1;
+            let foundX = 0;
+            let foundZ = 0;
+            let foundT = 0;
+            let foundU = 0;
+
+            outer: for (let ci = currPts.length - 1 - WINDOW; ci < currPts.length - 1; ci++) {
+                for (let ni = 0; ni < WINDOW_NEXT; ni++) {
+                    const hit = segmentIntersectXZ(
+                        currPts[ci], currPts[ci + 1],
+                        nextPts[ni], nextPts[ni + 1],
+                    );
+                    if (hit) {
+                        foundCurrSeg = ci;
+                        foundNextSeg = ni;
+                        foundX = hit.x;
+                        foundZ = hit.z;
+                        foundT = hit.t;
+                        foundU = hit.u;
+                        break outer;
+                    }
+                }
+            }
+
+            if (foundCurrSeg !== -1) {
+                // Intersection found — trim both contours to the crossing point.
+                const splitPoint = new THREE.Vector3(
+                    foundX,
+                    // Interpolate Y at the crossing for smooth caps.
+                    currPts[foundCurrSeg].y +
+                        foundT * (currPts[foundCurrSeg + 1].y - currPts[foundCurrSeg].y),
+                    foundZ,
+                );
+
+                // Trim curr: keep [0 .. foundCurrSeg] + splitPoint
+                curr.contourPoints = currPts.slice(0, foundCurrSeg + 1);
+                curr.contourPoints.push(splitPoint.clone());
+
+                // Trim next: keep splitPoint + [foundNextSeg+1 .. end]
+                next.contourPoints = [splitPoint.clone()];
+                for (let k = foundNextSeg + 1; k < nextPts.length; k++) {
+                    next.contourPoints.push(nextPts[k].clone());
+                }
+
+                this.log.debug(
+                    `[_clipInnerChunkContours] Clipped chunk ${curr.chunkIndex}↔${next.chunkIndex}: ` +
+                    `curr trimmed to ${curr.contourPoints.length} pts, ` +
+                    `next starts at ${next.contourPoints.length} pts`,
+                );
+                continue; // No need for the overshoot check below.
+            }
+
+            // --- 2. No explicit crossing found.  Check whether the last point
+            //        of curr is already "past" (inside) the first edge of next.
+            //        This happens when tiny arc sub-segments are fully swallowed.
+            const lastCurr = currPts[currPts.length - 1];
+            if (nextPts.length >= 2 && pointPastEdge(lastCurr, nextPts[0], nextPts[1])) {
+                // The tail of curr overshoots into next.  Snap curr's last point
+                // to the start of next so the two chunks share exactly one vertex.
+                currPts[currPts.length - 1] = nextPts[0].clone();
+                this.log.debug(
+                    `[_clipInnerChunkContours] Snapped chunk ${curr.chunkIndex} tail to chunk ${next.chunkIndex} head`,
+                );
+            }
+        }
     }
 
     /**
@@ -2751,7 +2817,7 @@ export default class ExtrusionBuilder {
         }
 
         const volume = this._computeSignedVolume(geometry);
-        if (Number.isFinite(volume) && Math.abs(volume) > 1e-6) {
+            if (Number.isFinite(volume) && Math.abs(volume) > EXTRUSION_CONSTANTS.VOLUME_EPSILON) {
             if (volume < 0) {
                 this._invertGeometryNormals(geometry);
                 this.log.debug(`Flipped normals by signed volume (${label})`, {
@@ -2819,7 +2885,7 @@ export default class ExtrusionBuilder {
         side = "top",
         profileOptions = {},
     ) {
-        try {
+        return this._safeExecute("createProfiledContourGeometry", () => {
             contourClosed = contourClosed !== undefined ? contourClosed : true;
             openEnded = openEnded !== undefined ? openEnded : false;
             openEnded = contourClosed === true ? false : openEnded;
@@ -2829,6 +2895,11 @@ export default class ExtrusionBuilder {
                 profileClosed = true,
                 useParallelTransport = false,
                 frameAngles = null,
+                // Maximum |shift| allowed for miter joints. Values above this
+                // are clamped so that acute-angle miters (e.g. the concave join
+                // between an arc's last sub-segment and an adjacent line) do not
+                // produce self-intersecting geometry.  Pass Infinity to disable.
+                miterLimit = Infinity,
             } = profileOptions;
 
             this.log.debug("createProfiledContourGeometry starting:", {
@@ -2900,6 +2971,10 @@ export default class ExtrusionBuilder {
             const posCount = profile.count * contour.length;
             let positions = new Float32Array(posCount * 3);
 
+            const shiftMatrix = new THREE.Matrix4();
+            const rotationMatrix = new THREE.Matrix4();
+            const translationMatrix = new THREE.Matrix4();
+
             for (let i = 0; i < contour.length; i++) {
                 let shift = 0;
                 let tempAngle;
@@ -2956,10 +3031,17 @@ export default class ExtrusionBuilder {
                     }
 
                     shift = Math.tan(hA - Math.PI * 0.5);
+                    // Clamp miter shift to avoid self-intersecting geometry at
+                    // acute concave corners (e.g. arc→line transition on the
+                    // inner half).
+                    if (miterLimit !== Infinity) {
+                        if (shift > miterLimit) shift = miterLimit;
+                        else if (shift < -miterLimit) shift = -miterLimit;
+                    }
                     tempAngle = tA;
                 }
 
-                let shiftMatrix = new THREE.Matrix4().set(
+                shiftMatrix.set(
                     1,
                     0,
                     0,
@@ -2978,7 +3060,7 @@ export default class ExtrusionBuilder {
                     1,
                 );
 
-                let rotationMatrix = new THREE.Matrix4().set(
+                rotationMatrix.set(
                     Math.cos(tempAngle),
                     -Math.sin(tempAngle),
                     0,
@@ -2997,7 +3079,7 @@ export default class ExtrusionBuilder {
                     1,
                 );
 
-                let translationMatrix = new THREE.Matrix4().set(
+                translationMatrix.set(
                     1,
                     0,
                     0,
@@ -3106,11 +3188,7 @@ export default class ExtrusionBuilder {
             fullProfileGeometry.normalizeNormals();
 
             return fullProfileGeometry;
-        } catch (error) {
-            this.log.error("Error in createProfiledContourGeometry:", error);
-            // Fallback to simple box geometry
-            return new THREE.BoxGeometry(1, 1, 1);
-        }
+        }, new THREE.BoxGeometry(1, 1, 1));
     }
 
     /**
@@ -3383,7 +3461,7 @@ export default class ExtrusionBuilder {
                 fullProfile = existingPoints;
             } else {
                 // Get all points from the profile shape
-                fullProfile = profile.getPoints(64);
+                fullProfile = this._getCachedProfilePoints(profile, 64, "lathe");
             }
 
             // Find center X and bottom Y (reference point is bottom-center)
@@ -3527,7 +3605,7 @@ export default class ExtrusionBuilder {
             const invNext = new THREE.Matrix4().copy(nextMesh.matrixWorld).invert();
 
             let mergedCount = 0;
-            const tolerance = 1.0; // 1.0mm tolerance for micro-angle vertex matching
+            const tolerance = EXTRUSION_CONSTANTS.MICRO_VERTEX_MERGE_TOLERANCE;
 
             // Collect world positions for both slices
             const prevSlicePositions = [];
@@ -3930,7 +4008,7 @@ export default class ExtrusionBuilder {
             if (existingPoints && existingPoints.length > 0) {
                 fullProfile = existingPoints;
             } else {
-                fullProfile = profile.getPoints(pointsCount);
+                fullProfile = this._getCachedProfilePoints(profile, pointsCount, "half");
             }
 
             // Canonicalize profile winding so half extraction is orientation-agnostic.
@@ -4294,6 +4372,7 @@ export default class ExtrusionBuilder {
      * Dispose of resources
      */
     dispose() {
+        this.profilePointsCache.clear();
         this.log.info("Disposed");
     }
 }
