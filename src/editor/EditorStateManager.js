@@ -1121,11 +1121,6 @@ export default class EditorStateManager {
      * Select segment(s) by ID, replacing current selection.
      * @param {string|string[]} ids
      */
-    /**
-     * Set the current selection to the given segment IDs.
-     * Automatically adds M-command IDs for fully selected contours.
-     * @param {string|string[]} ids - Segment ID(s) to select
-     */
     setSelection(ids) {
         const nextIds = this._resolveSelectableIds(Array.isArray(ids) ? ids : [ids]);
         const newIds = new Set(nextIds);
@@ -1153,7 +1148,7 @@ export default class EditorStateManager {
             }
         }
         
-        // Add M-command only for fully selected contours
+        // Add m:<contourId> only if ALL segments are selected
         for (const [cid, counts] of contourSegments.entries()) {
             if (counts.selected === counts.total && counts.total > 0) {
                 newIds.add(`m:${cid}`);
@@ -1164,21 +1159,10 @@ export default class EditorStateManager {
         this.segments = this.segments.map(s => ({ ...s, selected: newIds.has(s.id) }));
         if (this.onSelectionChange) this.onSelectionChange();
     }
-        }
-        // Add synthetic m:<contourId> for each contour
-        for (const cid of contourIds) {
-            newIds.add(`m:${cid}`);
-        }
-        
-        this.selectedIds = newIds;
-        this.segments = this.segments.map(s => ({ ...s, selected: newIds.has(s.id) }));
-        if (this.onSelectionChange) this.onSelectionChange();
-    }
 
     /**
      * Toggle membership of a segment ID in the selection.
-     * Automatically manages M-command selection based on contour completeness.
-     * @param {string} id - Segment ID to toggle
+     * @param {string} id
      */
     toggleSelection(id) {
         const seg = this.segments.find(s => s.id === id);
@@ -1201,51 +1185,20 @@ export default class EditorStateManager {
             this.selectedIds.add(id);
         }
         
-        // Update M-command selection based on whether entire contour is selected
+        // Update M-command based on whether ALL segments of contour are selected
         if (seg && (seg.type === 'line' || seg.type === 'arc') && Number.isFinite(seg.contourId)) {
             const contourSegs = this.segments.filter(s => 
                 (s.type === 'line' || s.type === 'arc') && s.contourId === seg.contourId
             );
             const allSelected = contourSegs.every(s => this.selectedIds.has(s.id));
-            const mId = `m:${seg.contourId}`;
             
             if (allSelected) {
-                this.selectedIds.add(mId);
+                this.selectedIds.add(`m:${seg.contourId}`);
             } else {
-                this.selectedIds.delete(mId);
+                this.selectedIds.delete(`m:${seg.contourId}`);
             }
         }
         
-        this.segments = this.segments.map(s => ({
-            ...s,
-            selected: this.selectedIds.has(s.id),
-        }));
-        if (this.onSelectionChange) this.onSelectionChange();
-    }
-                this.segments = this.segments.map(s => ({ ...s, selected: this.selectedIds.has(s.id) }));
-                if (this.onSelectionChange) this.onSelectionChange();
-                return;
-            }
-        }
-        
-        const seg = this.segments.find(s => s.id === id);
-        if (seg && _isSymmetrySegment(seg)) {
-            const mapped = this._resolveSelectableIds([id]);
-            if (mapped.length === 0) return;
-            const next = new Set(this.selectedIds);
-            const allSelected = mapped.every(mid => next.has(mid));
-            if (allSelected) mapped.forEach(mid => next.delete(mid));
-            else mapped.forEach(mid => next.add(mid));
-            this.selectedIds = next;
-            this.segments = this.segments.map(s => ({ ...s, selected: this.selectedIds.has(s.id) }));
-            if (this.onSelectionChange) this.onSelectionChange();
-            return;
-        }
-        if (this.selectedIds.has(id)) {
-            this.selectedIds.delete(id);
-        } else {
-            this.selectedIds.add(id);
-        }
         this.segments = this.segments.map(s => ({
             ...s,
             selected: this.selectedIds.has(s.id),

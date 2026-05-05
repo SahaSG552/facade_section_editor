@@ -1974,16 +1974,21 @@ export default class ProfileEditor {
             if (this._prevOnZoom) this._prevOnZoom(zoom, panX, panY);
             this.editorCanvas?.refreshAxis?.();
             this._currentTool?.onViewportChanged?.({ zoom, panX, panY });
+            
+            // Refresh M-dot or shape start dot only when explicitly selected
             for (const id of (this.state?.selectedIds ?? new Set())) {
                 if (typeof id === 'string' && id.startsWith('m:')) {
                     this._showMDotForContour(Number(id.slice(2)));
-                    break;
+                    return; // Only show one dot
                 }
-                // Refresh shape start dot on zoom
+            }
+            
+            // Refresh shape start dot on zoom
+            for (const id of (this.state?.selectedIds ?? new Set())) {
                 const seg = this.state.segments.find(s => s.id === id);
                 if (seg && (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse')) {
                     this._showShapeStartDot(seg);
-                    break;
+                    return; // Only show one dot
                 }
             }
         };
@@ -2976,16 +2981,21 @@ export default class ProfileEditor {
         const expandGroups = !!this._forceExpandGroupSelection;
         this._pathEditor.setSelectedElements(this.state.selectedIds, { expandGroups });
         this._forceExpandGroupSelection = false;
+        
+        // Show M-dot or shape start dot only when explicitly selected
         for (const id of this.state.selectedIds) {
             if (typeof id === 'string' && id.startsWith('m:')) {
                 this._showMDotForContour(Number(id.slice(2)));
-                break;
+                return; // Only show one dot
             }
-            // Show start point for selected shapes
+        }
+        
+        // Show start point for selected shapes
+        for (const id of this.state.selectedIds) {
             const seg = this.state.segments.find(s => s.id === id);
             if (seg && (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse')) {
                 this._showShapeStartDot(seg);
-                break;
+                return; // Only show one dot
             }
         }
     }
@@ -3085,10 +3095,6 @@ export default class ProfileEditor {
 
     /**
      * Draw a filled blue circle on the canvas overlay at the shape's start point.
-     * Start points vary by shape type:
-     * - Circle: rightmost point (center.x + radius, center.y)
-     * - Rect: top-left corner adjusted for rounded corners
-     * - Ellipse: rightmost point (cx + rx, cy)
      * @param {object} seg - The shape segment (circle, rect, or ellipse)
      * @private
      */

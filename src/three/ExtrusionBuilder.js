@@ -1653,21 +1653,52 @@ export default class ExtrusionBuilder {
                 }
             };
 
-            const direct = runOffset(offset);
-            if (isUsable(direct, { requireChanged: true })) return direct;
+            // Winding-independent offset: positive = inward, negative = outward,
+            // regardless of whether the path is drawn CW or CCW.
+            //
+            // CustomOffsetProcessor convention: positive offset = inward for CW paths
+            // (standard SVG facade contours drawn clockwise on screen).
+            // For CCW paths (area < 0 in standard shoelace), the direction is inverted,
+            // so we negate the offset to restore the inward/outward meaning.
+            const svgPathArea = (() => {
+                try {
+                    const rawCurves = this.parsePathToCurves(basePath);
+                    if (!rawCurves?.length) return 1; // assume CW
+                    const pts = [];
+                    for (const c of rawCurves) {
+                        const n = Math.max(2, Math.min(8, Math.ceil((c.getLength?.() ?? 0) / 20)));
+                        c.getPoints(n).forEach((p) => {
+                            if (!pts.length || pts[pts.length - 1].distanceTo(p) > 0.01) {
+                                pts.push(p);
+                            }
+                        });
+                    }
+                    return this._computeSignedArea2D(pts);
+                } catch (_) {
+                    return 1; // assume CW on error
+                }
+            })();
+            // CW (area > 0): pass offset as-is → inward for positive
+            // CCW (area < 0): negate offset → positive still = inward
+            const windingAdjustedOffset = svgPathArea < 0 ? -offset : offset;
 
             if (!exportModule?.dxfExporter?.parseSVGPathSegments) {
                 this.log.warn("Path modifier: exportModule/dxf parser unavailable");
             }
 
+            const direct = runOffset(windingAdjustedOffset);
+            if (isUsable(direct, { requireChanged: true })) return direct;
+
+            // Last-resort fallback: try original unadjusted sign (covers edge cases
+            // where area computation is unreliable, e.g., self-intersecting paths).
             if (Math.abs(Number(offset) || 0) > 1e-9) {
-                const reversedSign = runOffset(-offset);
-                if (isUsable(reversedSign, { requireChanged: true })) {
+                const fallback = runOffset(-windingAdjustedOffset);
+                if (isUsable(fallback, { requireChanged: true })) {
                     this.log.warn(
-                        "Custom offset sign fallback applied",
-                        { requestedOffset: offset, appliedOffset: -offset },
+                        "Offset winding correction used fallback sign",
+                        { offset, windingAdjustedOffset, svgPathArea },
                     );
-                    return reversedSign;
+                    return fallback;
                 }
             }
 
@@ -1778,45 +1809,61 @@ export default class ExtrusionBuilder {
                 );
             }
 
-            // Build grouped path, then merge all groups into one continuous path
-            let samplingPath = curve;
+            // Build per-group contours, apply arc endpoint trimming, then assemble.
+            // This is the same pipeline as _extrudeRound, enabling unified arc
+            // endpoint chord enforcement for miter corners.
             let curveGroups = [];
             if (curve && curve.curves && Array.isArray(curve.curves)) {
                 curveGroups = this.groupCurves(curve.curves);
-                if (curveGroups.length > 0) {
-                    const mergedCurvePath = new THREE.CurvePath();
-                    curveGroups.forEach((group) => {
-                        group.curves.forEach((c) => mergedCurvePath.add(c));
-                    });
-                    samplingPath = mergedCurvePath;
+            }
+
+            const contourClosed = this._isPathClosed(curve);
+
+            let contour;
+            if (curveGroups.length > 0) {
+                // Sample each group individually
+                const groupContours = curveGroups.map((g) =>
+                    this._sampleCurvesToContour(g.curves),
+                );
+
+                // Apply arc endpoint trimming (same rule as round extrusion)
+                const bitRadiusMiter = geometryPoints.length > 0
+                    ? Math.max(...geometryPoints.map((p) => Math.abs(p.x)))
+                    : 1;
+                this._trimArcEndpointChords(curveGroups, groupContours, contourClosed, bitRadiusMiter);
+
+                // Assemble trimmed group contours, deduplicating junction points
+                contour = [];
+                for (const gc of groupContours) {
+                    if (!gc.length) continue;
+                    if (!contour.length) {
+                        contour.push(...gc.map((p) => new THREE.Vector3(p.x, p.y, p.z)));
+                    } else {
+                        const last = contour[contour.length - 1];
+                        const startIdx = last.distanceTo(gc[0]) < EXTRUSION_CONSTANTS.PATH_GAP_TOLERANCE ? 1 : 0;
+                        for (let k = startIdx; k < gc.length; k++) {
+                            contour.push(new THREE.Vector3(gc[k].x, gc[k].y, gc[k].z));
+                        }
+                    }
                 }
-            }
 
-            // Get contour points from the merged path
-            let segments;
-            if (samplingPath instanceof THREE.LineCurve3) {
-                segments = 1;
+                // Remove duplicate closing point for closed contours
+                if (contourClosed && contour.length > 1) {
+                    const fc = contour[0];
+                    const lc = contour[contour.length - 1];
+                    if (fc.distanceTo(lc) < EXTRUSION_CONSTANTS.PATH_GAP_TOLERANCE) {
+                        contour = contour.slice(0, -1);
+                    }
+                }
             } else {
-                const pathLength = samplingPath.getLength
-                    ? samplingPath.getLength()
-                    : 100;
-                segments = Math.max(64, Math.ceil(pathLength * 2));
-            }
-            const contourPoints = samplingPath.getPoints(segments);
-
-            // Convert to contour array
-            let contour = contourPoints.map(
-                (p) => new THREE.Vector3(p.x, p.y, p.z),
-            );
-
-            // Determine if the path is closed
-            const firstPoint = contour[0];
-            const lastPoint = contour[contour.length - 1];
-            const contourClosed = firstPoint.distanceTo(lastPoint) < 0.01;
-
-            // For closed contours, remove the duplicate last point
-            if (contourClosed && contour.length > 1) {
-                contour = contour.slice(0, -1);
+                // Fallback: no groups (single curve), sample directly
+                const pathLen = curve.getLength ? curve.getLength() : 100;
+                const segments = Math.max(64, Math.ceil(pathLen * 2));
+                const pts = curve.getPoints(segments);
+                contour = pts.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+                if (contourClosed && contour.length > 1) {
+                    contour = contour.slice(0, -1);
+                }
             }
 
             // Use ProfiledContourGeometry for miter corners
@@ -1838,6 +1885,9 @@ export default class ExtrusionBuilder {
             if (!geometry) {
                 throw new Error("Failed to create ProfiledContourGeometry");
             }
+
+            // Ensure normals point outward regardless of path/profile winding
+            this._ensureOutwardNormals(geometry, "miter");
 
             const material = new THREE.MeshStandardMaterial({
                 color: new THREE.Color(color || "#cccccc"),
@@ -2129,6 +2179,16 @@ export default class ExtrusionBuilder {
                 sampleCurvesToContour(group.curves),
             );
 
+            // Enforce minimum endpoint chord length on arc/curve groups to prevent
+            // inner-offset self-intersection at arc↔segment junctions.
+            // See _trimArcEndpointChords for full explanation.
+            {
+                const bitRadius = halfProfilePoints.length > 0
+                    ? Math.max(...halfProfilePoints.map((p) => Math.abs(p.x)))
+                    : 1;
+                this._trimArcEndpointChords(curveGroups, groupContours, isClosedPath, bitRadius);
+            }
+
             const groupCount = curveGroups.length;
             const boundaryCount = isClosedPath
                 ? groupCount
@@ -2153,8 +2213,31 @@ export default class ExtrusionBuilder {
                     currentGroup.curves[currentGroup.curves.length - 1];
                 const firstCurve = nextGroup.curves[0];
 
-                const prevDir = getCurveTangent(lastCurve, 1);
-                const nextDir = getCurveTangent(firstCurve, 0);
+                const prevDirFromCurve = getCurveTangent(lastCurve, 1);
+                const nextDirFromCurve = getCurveTangent(firstCurve, 0);
+
+                // Use actual, post-trim contour endpoint chords for boundary angle/lathe
+                // so lathes stay synchronized with any arc endpoint trimming.
+                const prevDir = (() => {
+                    if (currentContour.length >= 2) {
+                        const a = currentContour[currentContour.length - 2];
+                        const b = currentContour[currentContour.length - 1];
+                        const v = new THREE.Vector3().subVectors(b, a);
+                        if (v.lengthSq() > 1e-12) return v.normalize();
+                    }
+                    return prevDirFromCurve;
+                })();
+
+                const nextContour = groupContours[(boundary + 1) % groupCount];
+                const nextDir = (() => {
+                    if (nextContour && nextContour.length >= 2) {
+                        const a = nextContour[0];
+                        const b = nextContour[1];
+                        const v = new THREE.Vector3().subVectors(b, a);
+                        if (v.lengthSq() > 1e-12) return v.normalize();
+                    }
+                    return nextDirFromCurve;
+                })();
 
                 const dot = Math.max(-1, Math.min(1, prevDir.dot(nextDir)));
                 const angleBetween = Math.acos(dot);
@@ -4383,6 +4466,157 @@ export default class ExtrusionBuilder {
     /**
      * Dispose of resources
      */
+    /**
+     * Get precise tangent direction at parameter t for a Three.js curve.
+     * Falls back to numerical finite-difference when getTangent() is unavailable.
+     * @private
+     */
+    _getCurveTangent(curve, t) {
+        if (curve && typeof curve.getTangent === "function") {
+            const tangent = curve.getTangent(t);
+            if (tangent && tangent.lengthSq() > 1e-12) {
+                return tangent.clone().normalize();
+            }
+        }
+        if (!curve || typeof curve.getPoint !== "function") {
+            return new THREE.Vector3(1, 0, 0);
+        }
+        const eps = 1e-4;
+        const t0 = Math.max(0, Math.min(1, t - eps));
+        const t1 = Math.max(0, Math.min(1, t + eps));
+        const p0 = curve.getPoint(t0);
+        const p1 = curve.getPoint(t1);
+        const delta = new THREE.Vector3().subVectors(p1, p0);
+        if (delta.lengthSq() < 1e-12) return new THREE.Vector3(1, 0, 0);
+        return delta.normalize();
+    }
+
+    /**
+     * Sample a list of Three.js curves into a 3-D polyline, respecting arc
+     * division coefficient and deduplicating shared junction points.
+     * @param {THREE.Curve[]} curves
+     * @returns {THREE.Vector3[]}
+     * @private
+     */
+    _sampleCurvesToContour(curves) {
+        const contourPoints = [];
+        for (const curve of curves) {
+            const len = curve.getLength ? curve.getLength() : 0;
+            const isLine =
+                curve.segmentType === "LINE" ||
+                curve instanceof THREE.LineCurve3;
+            const samples = isLine
+                ? 1
+                : Math.max(2, Math.ceil(len / this.arcDivisionCoefficient));
+            const points = curve.getPoints(samples);
+            if (contourPoints.length === 0) {
+                contourPoints.push(...points.map((p) => p.clone()));
+            } else {
+                const firstNew = points[0];
+                const lastExisting = contourPoints[contourPoints.length - 1];
+                const startIdx =
+                    lastExisting.distanceTo(firstNew) <
+                    EXTRUSION_CONSTANTS.PATH_GAP_TOLERANCE
+                        ? 1
+                        : 0;
+                for (let i = startIdx; i < points.length; i++) {
+                    contourPoints.push(points[i].clone());
+                }
+            }
+        }
+        return contourPoints;
+    }
+
+    /**
+     * Trim arc/curve group endpoints so that the first and last chord of each
+     * arc group is long enough to avoid self-intersection at miter joints.
+     *
+     * Rule: chord ≥ bitRadius · 1.05 · tan(θ/2) where θ is the exterior turn
+     * angle at that junction.  The loop is self-consistent — chord direction and
+     * θ are re-evaluated after each removed point, yielding minimal deviation
+     * from the original arc path.
+     *
+     * @param {Array<{type:string, curves:THREE.Curve[]}>} curveGroups
+     * @param {THREE.Vector3[][]} groupContours - sampled per-group contours (mutated in-place)
+     * @param {boolean} isClosedPath
+     * @param {number} bitRadius - maximum half-profile width
+     * @private
+     */
+    _trimArcEndpointChords(curveGroups, groupContours, isClosedPath, bitRadius) {
+        const SAFETY_FACTOR = 1.05;
+        const MIN_TRIM_ANGLE = THREE.MathUtils.degToRad(5);
+        const nGroups = curveGroups.length;
+
+        const calcMinChord = (turnAngle) => {
+            if (turnAngle < MIN_TRIM_ANGLE) return 0;
+            const halfTan = Math.tan(turnAngle * 0.5);
+            if (halfTan < 1e-9) return 0;
+            return bitRadius * SAFETY_FACTOR * halfTan;
+        };
+
+        for (let i = 0; i < nGroups; i++) {
+            const group = curveGroups[i];
+            if (group.type === "LINE") continue;
+
+            const contour = groupContours[i];
+            if (!contour || contour.length < 3) continue;
+
+            // START endpoint: junction with previous group
+            const prevIdx = isClosedPath ? (i - 1 + nGroups) % nGroups : i - 1;
+            if (prevIdx >= 0 && prevIdx < nGroups) {
+                const prevContourRef = groupContours[prevIdx];
+                const prevDirRef = (() => {
+                    if (prevContourRef && prevContourRef.length >= 2) {
+                        const n = prevContourRef.length;
+                        const v = new THREE.Vector3().subVectors(
+                            prevContourRef[n - 1], prevContourRef[n - 2]);
+                        if (v.lengthSq() > 1e-12) return v.normalize();
+                    }
+                    const pg = curveGroups[prevIdx];
+                    return this._getCurveTangent(pg.curves[pg.curves.length - 1], 1);
+                })();
+
+                while (contour.length > 2) {
+                    const firstVec = new THREE.Vector3().subVectors(contour[1], contour[0]);
+                    const firstChordLen = firstVec.length();
+                    if (firstChordLen < 1e-12) { contour.splice(1, 1); continue; }
+                    const firstChordDir = firstVec.clone().divideScalar(firstChordLen);
+                    const dot = Math.max(-1, Math.min(1, prevDirRef.dot(firstChordDir)));
+                    const minChord = calcMinChord(Math.acos(dot));
+                    if (minChord <= 0 || firstChordLen >= minChord) break;
+                    contour.splice(1, 1);
+                }
+            }
+
+            // END endpoint: junction with next group
+            const nextIdx = isClosedPath ? (i + 1) % nGroups : i + 1;
+            if (nextIdx < nGroups) {
+                const nextContourRef = groupContours[nextIdx];
+                const nextDirRef = (() => {
+                    if (nextContourRef && nextContourRef.length >= 2) {
+                        const v = new THREE.Vector3().subVectors(
+                            nextContourRef[1], nextContourRef[0]);
+                        if (v.lengthSq() > 1e-12) return v.normalize();
+                    }
+                    return this._getCurveTangent(curveGroups[nextIdx].curves[0], 0);
+                })();
+
+                while (contour.length > 2) {
+                    const m = contour.length;
+                    const lastVec = new THREE.Vector3().subVectors(
+                        contour[m - 1], contour[m - 2]);
+                    const lastChordLen = lastVec.length();
+                    if (lastChordLen < 1e-12) { contour.splice(m - 2, 1); continue; }
+                    const lastChordDir = lastVec.clone().divideScalar(lastChordLen);
+                    const dot = Math.max(-1, Math.min(1, lastChordDir.dot(nextDirRef)));
+                    const minChord = calcMinChord(Math.acos(dot));
+                    if (minChord <= 0 || lastChordLen >= minChord) break;
+                    contour.splice(m - 2, 1);
+                }
+            }
+        }
+    }
+
     dispose() {
         this.profilePointsCache.clear();
         this.log.info("Disposed");

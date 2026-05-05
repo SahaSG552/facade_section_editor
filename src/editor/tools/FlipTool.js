@@ -187,79 +187,13 @@ export default class FlipTool extends BaseTool {
     _commitFlip() {
         const state = this.ctx.state;
         const selected = new Set(this._selectedSegIds);
-
-        // Handle contours (lines and arcs)
-        const contourIds = new Set(
-            state.segments
-                .filter((seg) => selected.has(seg.id) && (seg.type === "line" || seg.type === "arc"))
-                .map((seg) => Number(seg?.contourId))
-                .filter(Number.isFinite),
-        );
-
         const updates = [];
-        
-        // Reverse contour segments
-        for (const contourId of contourIds) {
-            const contourSegs = state.segments.filter((seg) =>
-                (seg.type === "line" || seg.type === "arc") && Number(seg?.contourId) === contourId,
-            );
-            if (contourSegs.length === 0) continue;
-            const reversed = [...contourSegs].reverse();
-            for (let i = 0; i < contourSegs.length; i++) {
-                const target = contourSegs[i];
-                const source = reversed[i];
-                updates.push({
-                    id: target.id,
-                    changes: {
-                        type: source.type,
-                        data: _reverseSegmentData(source),
-                        transforms: _clone(Array.isArray(source.transforms) ? source.transforms : []),
-                        cmdHint: source.cmdHint,
-                    },
-                });
-            }
-        }
 
-        // Handle shapes (circle, rect, ellipse)
-        for (const seg of state.segments) {
-            if (!selected.has(seg.id)) continue;
-            
-            if (seg.type === "circle" || seg.type === "ellipse") {
-                // Toggle flip direction flag
-                updates.push({
-                    id: seg.id,
-                    changes: {
-                        data: {
-                            ...seg.data,
-                            _flipDirection: !(seg.data?._flipDirection ?? false),
-                        },
-                    },
-                });
-            } else if (seg.type === "rect") {
-                // Flip rect direction by inverting dirW and dirH
-                // and adjusting x,y to keep the rect in the same position
-                const data = { ...seg.data };
-                const oldDirW = data.dirW ?? 1;
-                const oldDirH = data.dirH ?? -1;
-                const w = data.w ?? 0;
-                const h = data.h ?? 0;
-                
-                // Calculate opposite corner before flip
-                const x2 = data.x + oldDirW * w;
-                const y2 = data.y + oldDirH * h;
-                
-                // Invert directions and adjust origin
-                data.dirW = -oldDirW;
-                data.dirH = -oldDirH;
-                data.x = x2;
-                data.y = y2;
-                
-                updates.push({
-                    id: seg.id,
-                    changes: { data },
-                });
-            }
-        }
+        // Flip contours (lines and arcs)
+        this._flipContours(state, selected, updates);
+
+        // Flip shapes (circle, rect, ellipse)
+        this._flipShapes(state, selected, updates);
 
         if (updates.length === 0) return;
         state.updateSegments(updates);

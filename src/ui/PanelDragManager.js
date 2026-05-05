@@ -13,24 +13,39 @@
 import { createClientPosGetter, attachDocumentListeners, clearDropIndicators, isValidTouchEvent } from './panel-event-helpers.js';
 
 export class PanelDragManager {
+    /**
+     * Creates a new PanelDragManager.
+     *
+     * @param {string} [cssPrefix='epl'] - CSS class prefix for styling
+     */
     constructor(cssPrefix = 'epl') {
         this._cssPrefix = cssPrefix;
+        this._activeDrag = null;
     }
 
     /**
      * Initiates a panel drag operation.
      *
+     * Prevents multiple simultaneous drags and sets up event handlers for
+     * drag movement and drop. Ghost element is created only after cursor
+     * moves more than 5px to distinguish between click and drag.
+     *
      * @param {Object} context - Drag context
-     *   - event: MouseEvent|TouchEvent
-     *   - panelEl: HTMLElement to drag
-     *   - panelId: string, unique panel identifier
-     *   - columns: [HTMLElement, HTMLElement], column containers
-     *   - panels: Array, panel entries { id, _panelEl, col }
-     *   - onReorder: Function(panelId, targetPanel, targetCol, insertBefore)
-     *   - isTouch: boolean
+     * @param {MouseEvent|TouchEvent} context.event - Initial mouse/touch event
+     * @param {HTMLElement} context.panelEl - Panel element to drag
+     * @param {string} context.panelId - Unique panel identifier
+     * @param {HTMLElement[]} context.columns - Column container elements [col0, col1]
+     * @param {Array} context.panels - Panel entries with { id, _panelEl, col }
+     * @param {Function} context.onReorder - Callback when panel is dropped
+     * @param {boolean} context.isTouch - Whether this is a touch event
      * @returns {void}
      */
     startDrag(context) {
+        // Prevent multiple simultaneous drags
+        if (this._activeDrag) {
+            return;
+        }
+
         const {
             event: e,
             panelEl,
@@ -49,11 +64,27 @@ export class PanelDragManager {
         let dragging = false;
         let ghost = null;
         let dropInfo = null;
+        let offsetX = 0;
+        let offsetY = 0;
+        let cleanupFn = null;
         const P = this._cssPrefix;
 
-        const startGhostDrag = (pos) => {
+        this._activeDrag = { panelId, cleanupFn: null };
+
+        /**
+         * Creates and displays the ghost element for visual feedback.
+         * Calculates cursor offset relative to panel top-left corner.
+         *
+         * @private
+         */
+        const startGhostDrag = () => {
             dragging = true;
             const rect = panelEl.getBoundingClientRect();
+            
+            // Calculate offset from cursor to panel top-left
+            offsetX = startPos.x - rect.left;
+            offsetY = startPos.y - rect.top;
+            
             ghost = panelEl.cloneNode(true);
             ghost.className = `${P}-ghost`;
             if (panelEl.classList.contains(`${P}-collapsed`)) {
@@ -64,16 +95,29 @@ export class PanelDragManager {
             panelEl.classList.add(`${P}-dragging`);
         };
 
+        /**
+         * Handles mouse/touch move events during drag.
+         * Updates ghost position and detects drop targets.
+         *
+         * @private
+         * @param {MouseEvent|TouchEvent} ev - Move event
+         */
         const onMove = (ev) => {
             const pos = clientPos(ev);
             const moved = Math.abs(pos.x - startPos.x) + Math.abs(pos.y - startPos.y) > 5;
-            if (!dragging && moved) startGhostDrag(pos);
+            
+            // Start dragging only after 5px movement threshold
+            if (!dragging && moved) {
+                startGhostDrag();
+            }
             if (!dragging || !ghost) return;
 
-            ghost.style.left = `${pos.x - (pos.x - startPos.x)}px`;
-            ghost.style.top = `${pos.y - (pos.y - startPos.y)}px`;
+            // Update ghost position to follow cursor with offset
+            ghost.style.left = `${pos.x - offsetX}px`;
+            ghost.style.top = `${pos.y - offsetY}px`;
+            
+            // Temporarily hide ghost to detect element underneath
             ghost.style.display = 'none';
-
             const hit = document.elementFromPoint(pos.x, pos.y);
             ghost.style.display = '';
 
@@ -94,26 +138,48 @@ export class PanelDragManager {
             }
         };
 
+        /**
+         * Handles mouse/touch up events to complete or cancel drag.
+         * Cleans up visual state and triggers reorder if valid drop target.
+         *
+         * @private
+         */
         const onUp = () => {
+            // Clean up visual state
             panelEl.classList.remove(`${P}-dragging`);
-            ghost?.remove();
+            if (ghost) {
+                ghost.remove();
+                ghost = null;
+            }
             clearDropIndicators(P, ['drop-before', 'drop-after', 'col-target']);
-            cleanup();
 
-            if (!dragging || !dropInfo) return;
+            // Handle drop if dragging occurred
+            if (dragging && dropInfo) {
+                const entry = panels.find(p => p.id === panelId);
+                if (entry) {
+                    onReorder?.({
+                        panelId,
+                        panelEl,
+                        targetPanel: dropInfo.panel,
+                        targetCol: dropInfo.col,
+                        insertBefore: dropInfo.before ?? false,
+                    });
+                }
+            }
 
-            const entry = panels.find(p => p.id === panelId);
-            if (!entry) return;
-
-            onReorder?.({
-                panelId,
-                panelEl,
-                targetPanel: dropInfo.panel,
-                targetCol: dropInfo.col,
-                insertBefore: dropInfo.before ?? false,
-            });
+            // Reset state and remove listeners
+            dragging = false;
+            dropInfo = null;
+            if (cleanupFn) {
+                cleanupFn();
+                cleanupFn = null;
+            }
+            
+            // Clear active drag
+            this._activeDrag = null;
         };
 
-        const cleanup = attachDocumentListeners({ onMove, onUp }, isTouch);
+        cleanupFn = attachDocumentListeners({ onMove, onEnd: onUp }, isTouch);
+        this._activeDrag.cleanupFn = cleanupFn;
     }
 }
