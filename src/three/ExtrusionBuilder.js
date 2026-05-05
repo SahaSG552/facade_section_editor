@@ -2240,11 +2240,17 @@ export default class ExtrusionBuilder {
                     firstPoint.distanceTo(lastPoint) <
                         EXTRUSION_CONSTANTS.PATH_CLOSURE_TOLERANCE;
 
+                // For closed chunks, remove duplicate last point (same as _extrudeMiter)
+                let extrudeContourOuter = contourPoints;
+                if (chunkClosed && extrudeContourOuter.length > 1) {
+                    extrudeContourOuter = extrudeContourOuter.slice(0, -1);
+                }
+
                 const curveSegments = this.calculateAdaptiveCurveSegments(profile);
                 const flags = this._getGeometryTransformFlags(side, false);
                 const geometry = this.createProfiledContourGeometry(
                     profile,
-                    contourPoints,
+                    extrudeContourOuter,
                     chunkClosed,
                     options.openCaps === true,
                     curveSegments,
@@ -2407,11 +2413,17 @@ export default class ExtrusionBuilder {
                     firstPoint.distanceTo(lastPoint) <
                         EXTRUSION_CONSTANTS.PATH_CLOSURE_TOLERANCE;
 
+                // For closed chunks, remove duplicate last point (same as _extrudeMiter)
+                let extrudeContourInner = contourPoints;
+                if (chunkClosed && extrudeContourInner.length > 1) {
+                    extrudeContourInner = extrudeContourInner.slice(0, -1);
+                }
+
                 const curveSegments = this.calculateAdaptiveCurveSegments(profile);
                 const flags = this._getGeometryTransformFlags(side, false);
                 const innerGeometry = this.createProfiledContourGeometry(
                     profile,
-                    contourPoints,
+                    extrudeContourInner,
                     chunkClosed,
                     options.openCaps === true,
                     curveSegments,
