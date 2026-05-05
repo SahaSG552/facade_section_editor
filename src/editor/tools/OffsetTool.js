@@ -1767,6 +1767,132 @@ export default class OffsetTool extends BaseTool {
         let bestNormal = { x: 0, y: 0 };
 
         for (const entry of this._sourceEntries) {
+            // Handle shapes (circle, rect, ellipse)
+            if (entry.kind === "shape") {
+                const seg = entry.seg;
+                let nearestX, nearestY, unsignedDist, nx, ny;
+                
+                if (seg.type === "circle") {
+                    const center = seg.data?.center;
+                    const radius = Math.abs(num(seg.data?.radius ?? 0));
+                    if (!center || !Number.isFinite(radius)) continue;
+                    
+                    const cx = num(center.x);
+                    const cy = num(center.y);
+                    const dx = px - cx;
+                    const dy = py - cy;
+                    const distFromCenter = Math.hypot(dx, dy);
+                    
+                    if (distFromCenter < 1e-9) {
+                        nearestX = cx + radius;
+                        nearestY = cy;
+                        nx = 1;
+                        ny = 0;
+                    } else {
+                        const angle = Math.atan2(dy, dx);
+                        nearestX = cx + radius * Math.cos(angle);
+                        nearestY = cy + radius * Math.sin(angle);
+                        nx = Math.cos(angle);
+                        ny = Math.sin(angle);
+                    }
+                    unsignedDist = Math.abs(distFromCenter - radius);
+                    
+                } else if (seg.type === "rect") {
+                    const { x, y, w, h } = seg.data ?? {};
+                    if (![x, y, w, h].every(Number.isFinite)) continue;
+                    
+                    const dirW = Number(seg.data?.dirW) < 0 ? -1 : 1;
+                    const hasDirH = Object.prototype.hasOwnProperty.call(seg.data ?? {}, 'dirH');
+                    const dirH = hasDirH ? (Number(seg.data?.dirH) < 0 ? -1 : 1) : -1;
+                    const x1 = num(x);
+                    const y1 = num(y);
+                    const x2 = x1 + dirW * num(w);
+                    const y2 = y1 + dirH * num(h);
+                    
+                    const minX = Math.min(x1, x2);
+                    const maxX = Math.max(x1, x2);
+                    const minY = Math.min(y1, y2);
+                    const maxY = Math.max(y1, y2);
+                    
+                    // Find nearest point on rectangle boundary
+                    const clampedX = Math.max(minX, Math.min(maxX, px));
+                    const clampedY = Math.max(minY, Math.min(maxY, py));
+                    
+                    // Determine which edge is closest
+                    const distLeft = Math.abs(px - minX);
+                    const distRight = Math.abs(px - maxX);
+                    const distTop = Math.abs(py - minY);
+                    const distBottom = Math.abs(py - maxY);
+                    const minEdgeDist = Math.min(distLeft, distRight, distTop, distBottom);
+                    
+                    if (minEdgeDist === distLeft) {
+                        nearestX = minX;
+                        nearestY = clampedY;
+                        nx = -1;
+                        ny = 0;
+                    } else if (minEdgeDist === distRight) {
+                        nearestX = maxX;
+                        nearestY = clampedY;
+                        nx = 1;
+                        ny = 0;
+                    } else if (minEdgeDist === distTop) {
+                        nearestX = clampedX;
+                        nearestY = minY;
+                        nx = 0;
+                        ny = -1;
+                    } else {
+                        nearestX = clampedX;
+                        nearestY = maxY;
+                        nx = 0;
+                        ny = 1;
+                    }
+                    unsignedDist = Math.hypot(px - nearestX, py - nearestY);
+                    
+                } else if (seg.type === "ellipse") {
+                    const { cx, cy, rx, ry } = seg.data ?? {};
+                    if (![cx, cy, rx, ry].every(Number.isFinite)) continue;
+                    
+                    const centerX = num(cx);
+                    const centerY = num(cy);
+                    const radiusX = Math.abs(num(rx));
+                    const radiusY = Math.abs(num(ry));
+                    
+                    // Approximate nearest point on ellipse
+                    const dx = px - centerX;
+                    const dy = py - centerY;
+                    const angle = Math.atan2(dy, dx);
+                    
+                    nearestX = centerX + radiusX * Math.cos(angle);
+                    nearestY = centerY + radiusY * Math.sin(angle);
+                    
+                    // Normal at this point (perpendicular to tangent)
+                    const tx = -radiusX * Math.sin(angle);
+                    const ty = radiusY * Math.cos(angle);
+                    const tLen = Math.hypot(tx, ty);
+                    if (tLen > 1e-9) {
+                        nx = -ty / tLen;
+                        ny = tx / tLen;
+                    } else {
+                        nx = 1;
+                        ny = 0;
+                    }
+                    
+                    unsignedDist = Math.hypot(px - nearestX, py - nearestY);
+                } else {
+                    continue;
+                }
+                
+                if (unsignedDist < bestDist) {
+                    bestDist = unsignedDist;
+                    bestNearest = { x: nearestX, y: nearestY };
+                    bestSegType = seg.type;
+                    bestNormal = { x: nx, y: ny };
+                    bestSignedDist = (px - nearestX) * nx + (py - nearestY) * ny;
+                }
+                continue;
+            }
+            
+            // Handle contours
             if (entry.kind !== "contour") continue;
             const contourArea = entry.closed ? contourSignedAreaEditor(entry.chain) : 0;
             const outsideIsLeft = !entry.closed || contourArea < 0;

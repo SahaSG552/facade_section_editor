@@ -1979,6 +1979,12 @@ export default class ProfileEditor {
                     this._showMDotForContour(Number(id.slice(2)));
                     break;
                 }
+                // Refresh shape start dot on zoom
+                const seg = this.state.segments.find(s => s.id === id);
+                if (seg && (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse')) {
+                    this._showShapeStartDot(seg);
+                    break;
+                }
             }
         };
 
@@ -2966,12 +2972,19 @@ export default class ProfileEditor {
     _syncPathEditorSelectionOnly() {
         if (!this._pathEditor) return;
         this._clearMDot();
+        this._clearShapeStartDot();
         const expandGroups = !!this._forceExpandGroupSelection;
         this._pathEditor.setSelectedElements(this.state.selectedIds, { expandGroups });
         this._forceExpandGroupSelection = false;
         for (const id of this.state.selectedIds) {
             if (typeof id === 'string' && id.startsWith('m:')) {
                 this._showMDotForContour(Number(id.slice(2)));
+                break;
+            }
+            // Show start point for selected shapes
+            const seg = this.state.segments.find(s => s.id === id);
+            if (seg && (seg.type === 'circle' || seg.type === 'rect' || seg.type === 'ellipse')) {
+                this._showShapeStartDot(seg);
                 break;
             }
         }
@@ -3067,6 +3080,83 @@ export default class ProfileEditor {
         if (this._mDotElement) {
             this._mDotElement.remove();
             this._mDotElement = null;
+        }
+    }
+
+    /**
+     * Draw a filled blue circle on the canvas overlay at the shape's start point.
+     * Start points vary by shape type:
+     * - Circle: rightmost point (center.x + radius, center.y)
+     * - Rect: top-left corner adjusted for rounded corners
+     * - Ellipse: rightmost point (cx + rx, cy)
+     * @param {object} seg - The shape segment (circle, rect, or ellipse)
+     * @private
+     */
+    _showShapeStartDot(seg) {
+        this._clearShapeStartDot();
+        if (!this.editorCanvas || !seg) return;
+        
+        let startX, startY;
+        
+        if (seg.type === 'circle') {
+            // Start point is at the rightmost point
+            const { center, radius } = seg.data;
+            if (!center || !Number.isFinite(radius)) return;
+            startX = center.x + radius;
+            startY = center.y;
+        } else if (seg.type === 'rect') {
+            // Start point is at the top-left corner (adjusted for rounded corners)
+            const { x, y, w, h, rx: rx0 = 0 } = seg.data ?? {};
+            if (![x, y, w, h].every(Number.isFinite)) return;
+            const dirW = Number(seg.data?.dirW) < 0 ? -1 : 1;
+            const hasDirH = Object.prototype.hasOwnProperty.call(seg.data ?? {}, 'dirH');
+            const dirH = hasDirH ? (Number(seg.data?.dirH) < 0 ? -1 : 1) : -1;
+            const x1 = Number(x);
+            const y1 = Number(y);
+            const x2 = x1 + dirW * Number(w);
+            const y2 = y1 + dirH * Number(h);
+            const widthAbs = Math.abs(x2 - x1);
+            const heightAbs = Math.abs(y2 - y1);
+            const rx = Math.max(0, Math.min(Number(rx0), widthAbs / 2, heightAbs / 2));
+            const sW = x2 >= x1 ? 1 : -1;
+            
+            startX = rx > 1e-9 ? x1 + sW * rx : x1;
+            startY = y1;
+        } else if (seg.type === 'ellipse') {
+            // Start point is at the rightmost point
+            const { cx, cy, rx } = seg.data;
+            if (![cx, cy, rx].every(Number.isFinite)) return;
+            startX = cx + rx;
+            startY = cy;
+        } else {
+            return;
+        }
+        
+        const overlay = this.editorCanvas.getOverlayRoot?.() ?? this.editorCanvas.cm.getLayer("overlay");
+        if (!overlay) return;
+        const zoom = this.editorCanvas.cm.zoomLevel || 1;
+        const r = Math.max(0.5, 3 / zoom);
+        const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        dot.setAttribute("cx", startX);
+        dot.setAttribute("cy", startY);
+        dot.setAttribute("r", r);
+        dot.setAttribute("fill", "#2196F3");
+        dot.setAttribute("fill-opacity", "0.85");
+        dot.setAttribute("stroke", "#1565C0");
+        dot.setAttribute("stroke-width", Math.max(0.05, 0.5 / zoom));
+        dot.classList.add("editor-shape-start-selection");
+        this._shapeStartDotElement = dot;
+        overlay.appendChild(dot);
+    }
+
+    /**
+     * Remove the shape start point dot from the canvas overlay (if present).
+     * @private
+     */
+    _clearShapeStartDot() {
+        if (this._shapeStartDotElement) {
+            this._shapeStartDotElement.remove();
+            this._shapeStartDotElement = null;
         }
     }
     // ─── Tool activation ─────────────────────────────────────────────────────

@@ -4902,12 +4902,26 @@ export default class PathEditor {
                     rowEl?.classList.add('path-line-selected');
                 }
             } else if (elem.type === 'path' || elem.type === 'polyline') {
+                // Check if any segments in this path/polyline are selected
+                const anySegmentSelected = elem.segIds?.some(sid => ids.has(sid));
+                const mRowSelected = ids.has(`m:${elem.contourId}`);
+                
                 // Highlight the path group header if any of its segments are selected,
                 // or if the M-row synthetic segId "m:<contourId>" is selected.
                 const headerEl = elem._elem?.querySelector?.('.pe-path-header');
-                const anySelected = elem.segIds?.some(sid => ids.has(sid))
-                    || ids.has(`m:${elem.contourId}`);
-                if (anySelected && headerEl) headerEl.classList.add('path-line-selected');
+                const anySelected = anySegmentSelected || mRowSelected;
+                if (anySelected && headerEl) {
+                    headerEl.classList.add('path-line-selected');
+                }
+                
+                // Highlight M-row (first line with segId=null) when any segment is selected
+                if (anySegmentSelected && !mRowSelected && Array.isArray(elem.lines) && elem.lines.length > 0) {
+                    const mLine = elem.lines[0];
+                    if (mLine && !mLine.segId && mLine._elem) {
+                        mLine._elem.classList.add('path-line-selected');
+                    }
+                }
+                
                 // Highlight individual sub-lines
                 for (const lineData of elem.lines) {
                     const lineRef = this._getSelectableLineId(lineData, elem);

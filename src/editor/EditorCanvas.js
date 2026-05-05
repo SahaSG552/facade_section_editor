@@ -48,6 +48,22 @@ function _appendArcCenter(g, cx, cy) {
     g.appendChild(c);
 }
 
+/** Blue start point marker for selected shapes. */
+function _appendShapeStartPoint(g, x, y) {
+    const c = document.createElementNS(SVG_NS, "circle");
+    c.setAttribute("cx", x);
+    c.setAttribute("cy", y);
+    c.setAttribute("r", EV.r.handle);
+    c.setAttribute("fill", "#2196F3");
+    c.setAttribute("fill-opacity", "0.85");
+    c.setAttribute("stroke", "#1565C0");
+    c.setAttribute("stroke-width", "1");
+    c.setAttribute("vector-effect", "non-scaling-stroke");
+    c.classList.add("editor-shape-start-point");
+    c.setAttribute("pointer-events", "none");
+    g.appendChild(c);
+}
+
 /** Dashed radius guide line from arc center to the control handle. */
 function _appendArcRadiusLine(g, x1, y1, x2, y2) {
     const line = document.createElementNS(SVG_NS, "line");
@@ -767,6 +783,11 @@ export default class EditorCanvas {
                 g.appendChild(dash);
                 _appendArcCenter(g, center.x, center.y);
                 _appendArcHandle(g, pt3.x, pt3.y, "pt3");
+                
+                // Show start point (rightmost point on circle)
+                const startX = center.x + radius;
+                const startY = center.y;
+                _appendShapeStartPoint(g, startX, startY);
             }
             if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
             return g;
@@ -814,6 +835,19 @@ export default class EditorCanvas {
                 _appendArcHandle(g, xOpp, yStart, "rx-x");
                 _appendArcHandle(g, xStart, yOpp, "rx-y");
                 _appendArcHandle(g, xOpp, yOpp, "rx-opposite");
+                
+                // Show start point (top-left corner adjusted for rounded corners)
+                const dirW = Number(seg.data?.dirW) < 0 ? -1 : 1;
+                const hasDirH = Object.prototype.hasOwnProperty.call(seg.data ?? {}, 'dirH');
+                const dirH = hasDirH ? (Number(seg.data?.dirH) < 0 ? -1 : 1) : -1;
+                const sW = xOpp >= xStart ? 1 : -1;
+                const sH = yOpp >= yStart ? 1 : -1;
+                
+                // Start point is at (xStart + sW*rx, yStart) for rounded rect
+                // or (xStart, yStart) for non-rounded rect
+                const startX = rx > 1e-9 ? xStart + sW * rx : xStart;
+                const startY = yStart;
+                _appendShapeStartPoint(g, startX, startY);
             }
             if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
             return g;
@@ -844,6 +878,11 @@ export default class EditorCanvas {
                 ]) {
                     _appendArcHandle(g, hx, hy, "axis");
                 }
+                
+                // Show start point (rightmost point on ellipse)
+                const startX = cx + rx;
+                const startY = cy;
+                _appendShapeStartPoint(g, startX, startY);
             }
             if (Math.abs(rtAngle) > 1e-9) g.setAttribute("transform", `rotate(${rtAngle})`);
             return g;

@@ -141,7 +141,10 @@ export default class FlipTool extends BaseTool {
         if (this._phase === "selecting") {
             const selected = [...this.ctx.state.selectedIds].filter((id) => {
                 const seg = this._findSeg(id);
-                return !!seg && String(seg?.linkType ?? "") !== "symmetry";
+                if (!seg || String(seg?.linkType ?? "") === "symmetry") return false;
+                // Allow lines, arcs, and shapes (circle, rect, ellipse)
+                return seg.type === "line" || seg.type === "arc" || 
+                       seg.type === "circle" || seg.type === "rect" || seg.type === "ellipse";
             });
             if (selected.length === 0) {
                 this.ctx.canvas.clearGhost();
@@ -178,13 +181,14 @@ export default class FlipTool extends BaseTool {
 
     /**
      * Executes the actual reversal of all segments in the contours
-     * associated with the current selection.
+     * associated with the current selection, and flips shape directions.
      * @private
      */
     _commitFlip() {
         const state = this.ctx.state;
         const selected = new Set(this._selectedSegIds);
 
+        // Handle contours (lines and arcs)
         const contourIds = new Set(
             state.segments
                 .filter((seg) => selected.has(seg.id) && (seg.type === "line" || seg.type === "arc"))
@@ -193,6 +197,8 @@ export default class FlipTool extends BaseTool {
         );
 
         const updates = [];
+        
+        // Reverse contour segments
         for (const contourId of contourIds) {
             const contourSegs = state.segments.filter((seg) =>
                 (seg.type === "line" || seg.type === "arc") && Number(seg?.contourId) === contourId,
@@ -214,37 +220,170 @@ export default class FlipTool extends BaseTool {
             }
         }
 
+        // Handle shapes (circle, rect, ellipse)
+        for (const seg of state.segments) {
+            if (!selected.has(seg.id)) continue;
+            
+            if (seg.type === "circle" || seg.type === "ellipse") {
+                // Toggle flip direction flag
+                updates.push({
+                    id: seg.id,
+                    changes: {
+                        data: {
+                            ...seg.data,
+                            _flipDirection: !(seg.data?._flipDirection ?? false),
+                        },
+                    },
+                });
+            } else if (seg.type === "rect") {
+                // Flip rect direction by inverting dirW and dirH
+                // and adjusting x,y to keep the rect in the same position
+                const data = { ...seg.data };
+                const oldDirW = data.dirW ?? 1;
+                const oldDirH = data.dirH ?? -1;
+                const w = data.w ?? 0;
+                const h = data.h ?? 0;
+                
+                // Calculate opposite corner before flip
+                const x2 = data.x + oldDirW * w;
+                const y2 = data.y + oldDirH * h;
+                
+                // Invert directions and adjust origin
+                data.dirW = -oldDirW;
+                data.dirH = -oldDirH;
+                data.x = x2;
+                data.y = y2;
+                
+                updates.push({
+                    id: seg.id,
+                    changes: { data },
+                });
+            }
+        }
+
         if (updates.length === 0) return;
         state.updateSegments(updates);
         state._pushHistory("Flip");
     }
 
     /**
+     * Flip direction of contours by reversing segment order.
+     * @param {object} state - EditorStateManager instance
+     * @param {Set<string>} selected - Set of selected segment IDs
+     * @param {Array<object>} updates - Array to append segment updates
+     * @private
+     */
+    _flipContours(state, selected, updates) {
+        const contourIds = new Set(
+            state.segments
+                .filter((seg) => selected.has(seg.id) && (seg.type === "line" || seg.type === "arc"))
+                .map((seg) => Number(seg?.contourId))
+                .filter(Number.isFinite),
+        );
+
+        for (const contourId of contourIds) {
+            const contourSegs = state.segments.filter((seg) =>
+                (seg.type === "line" || seg.type === "arc") && Number(seg?.contourId) === contourId,
+            );
+            if (contourSegs.length === 0) continue;
+            
+            const reversed = [...contourSegs].reverse();
+            for (let i = 0; i < contourSegs.length; i++) {
+                const target = contourSegs[i];
+                const source = reversed[i];
+                updates.push({
+                    id: target.id,
+                    changes: {
+                        type: source.type,
+                        data: _reverseSegmentData(source),
+                        transforms: _clone(Array.isArray(source.transforms) ? source.transforms : []),
+                        cmdHint: source.cmdHint,
+                    },
+                });
+            }
+        }
+    }
+
+    /**
+     * Flip direction of shapes (circle, rect, ellipse).
+     * @param {object} state - EditorStateManager instance
+     * @param {Set<string>} selected - Set of selected segment IDs
+     * @param {Array<object>} updates - Array to append segment updates
+     * @private
+     */
+    _flipShapes(state, selected, updates) {
+        for (const seg of state.segments) {
+            if (!selected.has(seg.id)) continue;
+            
+            if (seg.type === "circle" || seg.type === "ellipse") {
+                // Toggle flip direction flag for circular shapes
+                updates.push({
+                    id: seg.id,
+                    changes: {
+                        data: {
+                            ...seg.data,
+                            _flipDirection: !(seg.data?._flipDirection ?? false),
+                        },
+                    },
+                });
+            } else if (seg.type === "rect") {
+                // Flip rect by inverting direction flags and adjusting origin
+                const data = { ...seg.data };
+                const oldDirW = data.dirW ?? 1;
+                const oldDirH = data.dirH ?? -1;
+                const w = data.w ?? 0;
+                const h = data.h ?? 0;
+                
+                // Calculate opposite corner (new origin after flip)
+                const x2 = data.x + oldDirW * w;
+                const y2 = data.y + oldDirH * h;
+                
+                // Invert directions and update origin
+                data.dirW = -oldDirW;
+                data.dirH = -oldDirH;
+                data.x = x2;
+                data.y = y2;
+                
+                updates.push({
+                    id: seg.id,
+                    changes: { data },
+                });
+            }
+        }
+    }
+
+    /**
      * Renders zoom-aware direction arrows for the selected segments.
-     * Arrows scale with zoom to remain legible.
+     * Arrows scale with zoom and are distributed evenly along segments.
      * @private
      */
     _renderDirectionGhost() {
         const vars = this.ctx.state.variableValues ?? {};
         const selected = new Set(this._selectedSegIds);
         const zoom = this.ctx.canvas?.cm?.zoomLevel || 1;
-        // Scale arrow size with zoom: larger SVG units when zoomed out,
-        // smaller when zoomed in, to keep screen size roughly constant but
-        // slightly larger when far away for better visibility.
-        const arrowSize = Math.max(0.12, Math.min(6.0, 10 / zoom));
+        
+        // Arrow sizing and spacing (screen-space constants)
+        const arrowSize = Math.max(0.2, Math.min(8.0, 15 / zoom));
         const tangentDelta = Math.max(0.001, arrowSize * 0.2);
+        const arrowSpacing = 50 / zoom; // 50px on screen
 
         const g = document.createElementNS(SVG_NS, "g");
         g.classList.add("editor-flip-preview");
 
+        /**
+         * Add a direction arrow at the given position.
+         * @param {{x:number, y:number}} at - Arrow position
+         * @param {{x:number, y:number}} vec - Direction vector
+         */
         const addArrow = (at, vec) => {
             const len = Math.hypot(vec.x, vec.y);
             if (len < 1e-6) return;
+            
             const ux = vec.x / len;
             const uy = vec.y / len;
             const half = arrowSize * 0.5;
-            const head = arrowSize * 0.35;
-            const side = arrowSize * 0.22;
+            const head = arrowSize * 0.4;
+            const side = arrowSize * 0.25;
 
             const tailPt = { x: at.x - ux * half, y: at.y - uy * half };
             const tipPt = { x: at.x + ux * half, y: at.y + uy * half };
@@ -257,21 +396,23 @@ export default class FlipTool extends BaseTool {
                 y: tipPt.y - uy * head - ux * side,
             };
 
+            // Arrow shaft
             const shaft = document.createElementNS(SVG_NS, "line");
             shaft.setAttribute("x1", String(tailPt.x));
             shaft.setAttribute("y1", String(tailPt.y));
             shaft.setAttribute("x2", String(tipPt.x));
             shaft.setAttribute("y2", String(tipPt.y));
             shaft.setAttribute("stroke", "#eb1f3e");
-            shaft.setAttribute("stroke-width", "1.8");
+            shaft.setAttribute("stroke-width", "2.2");
             shaft.setAttribute("vector-effect", "non-scaling-stroke");
             shaft.setAttribute("pointer-events", "none");
             g.appendChild(shaft);
 
+            // Arrow head
             const headPath = document.createElementNS(SVG_NS, "path");
             headPath.setAttribute("d", `M ${left.x} ${left.y} L ${tipPt.x} ${tipPt.y} L ${right.x} ${right.y}`);
             headPath.setAttribute("stroke", "#eb1f3e");
-            headPath.setAttribute("stroke-width", "1.8");
+            headPath.setAttribute("stroke-width", "2.2");
             headPath.setAttribute("fill", "none");
             headPath.setAttribute("vector-effect", "non-scaling-stroke");
             headPath.setAttribute("pointer-events", "none");
@@ -280,39 +421,218 @@ export default class FlipTool extends BaseTool {
 
         for (const seg of this.ctx.state.segments) {
             if (!selected.has(seg.id)) continue;
-            if (seg.type !== "line" && seg.type !== "arc") continue;
             const rt = sumRtAngle(seg.transforms, vars);
 
             if (seg.type === "line") {
-                const start = worldFromRaw(seg.data.start, rt);
-                const end = worldFromRaw(seg.data.end, rt);
-                const vec = { x: end.x - start.x, y: end.y - start.y };
-                const mid = { x: (start.x + end.x) * 0.5, y: (start.y + end.y) * 0.5 };
-                addArrow(start, vec);
-                addArrow(mid, vec);
-                addArrow(end, vec);
-                continue;
-            }
-
-            const pathEl = document.createElementNS(SVG_NS, "path");
-            pathEl.setAttribute(
-                "d",
-                `M ${seg.data.start.x} ${seg.data.start.y} A ${seg.data.radius} ${seg.data.radius} 0 ${seg.data.largeArc} ${seg.data.sweep} ${seg.data.end.x} ${seg.data.end.y}`,
-            );
-            const totalLen = pathEl.getTotalLength();
-            if (!Number.isFinite(totalLen) || totalLen <= 1e-6) continue;
-            const positions = [0, totalLen * 0.5, totalLen];
-            for (const pos of positions) {
-                const pA = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos - tangentDelta)));
-                const pB = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos + tangentDelta)));
-                const p = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos)));
-                const pointW = worldFromRaw({ x: p.x, y: p.y }, rt);
-                const vecW = rotatePoint({ x: pB.x - pA.x, y: pB.y - pA.y }, rt);
-                addArrow(pointW, vecW);
+                this._renderLineArrows(seg, rt, arrowSpacing, addArrow);
+            } else if (seg.type === "arc") {
+                this._renderArcArrows(seg, rt, arrowSpacing, tangentDelta, addArrow);
+            } else if (seg.type === "circle") {
+                this._renderCircleArrows(seg, rt, arrowSpacing, addArrow);
+            } else if (seg.type === "rect") {
+                this._renderRectArrows(seg, rt, arrowSpacing, tangentDelta, addArrow);
+            } else if (seg.type === "ellipse") {
+                this._renderEllipseArrows(seg, rt, arrowSpacing, addArrow);
             }
         }
 
         this.ctx.canvas.setGhost(g);
+    }
+
+    /**
+     * Render direction arrows for a line segment.
+     * @param {object} seg - Line segment
+     * @param {object} rt - Rotation/translation transform
+     * @param {number} arrowSpacing - Spacing between arrows in SVG units
+     * @param {Function} addArrow - Arrow rendering callback
+     * @private
+     */
+    _renderLineArrows(seg, rt, arrowSpacing, addArrow) {
+        const start = worldFromRaw(seg.data.start, rt);
+        const end = worldFromRaw(seg.data.end, rt);
+        const vec = { x: end.x - start.x, y: end.y - start.y };
+        const segLength = Math.hypot(vec.x, vec.y);
+        
+        const numArrows = Math.max(1, Math.floor(segLength / arrowSpacing));
+        
+        for (let i = 0; i <= numArrows; i++) {
+            const t = numArrows > 0 ? i / numArrows : 0.5;
+            const pos = {
+                x: start.x + vec.x * t,
+                y: start.y + vec.y * t
+            };
+            addArrow(pos, vec);
+        }
+    }
+
+    /**
+     * Render direction arrows for an arc segment.
+     * @param {object} seg - Arc segment
+     * @param {object} rt - Rotation/translation transform
+     * @param {number} arrowSpacing - Spacing between arrows in SVG units
+     * @param {number} tangentDelta - Delta for tangent calculation
+     * @param {Function} addArrow - Arrow rendering callback
+     * @private
+     */
+    _renderArcArrows(seg, rt, arrowSpacing, tangentDelta, addArrow) {
+        const pathEl = document.createElementNS(SVG_NS, "path");
+        pathEl.setAttribute(
+            "d",
+            `M ${seg.data.start.x} ${seg.data.start.y} A ${seg.data.radius} ${seg.data.radius} 0 ${seg.data.largeArc} ${seg.data.sweep} ${seg.data.end.x} ${seg.data.end.y}`,
+        );
+        const totalLen = pathEl.getTotalLength();
+        if (!Number.isFinite(totalLen) || totalLen <= 1e-6) return;
+        
+        const numArrows = Math.max(1, Math.floor(totalLen / arrowSpacing));
+        
+        for (let i = 0; i <= numArrows; i++) {
+            const t = numArrows > 0 ? i / numArrows : 0.5;
+            const pos = t * totalLen;
+            
+            const pA = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos - tangentDelta)));
+            const pB = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos + tangentDelta)));
+            const p = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos)));
+            const pointW = worldFromRaw({ x: p.x, y: p.y }, rt);
+            const vecW = rotatePoint({ x: pB.x - pA.x, y: pB.y - pA.y }, rt);
+            addArrow(pointW, vecW);
+        }
+    }
+
+    /**
+     * Render direction arrows for a circle shape.
+     * @param {object} seg - Circle segment
+     * @param {object} rt - Rotation/translation transform
+     * @param {number} arrowSpacing - Spacing between arrows in SVG units
+     * @param {Function} addArrow - Arrow rendering callback
+     * @private
+     */
+    _renderCircleArrows(seg, rt, arrowSpacing, addArrow) {
+        const center = seg.data?.center;
+        const radius = Number(seg.data?.radius ?? 0);
+        if (!center || !Number.isFinite(radius) || radius <= 0) return;
+        
+        const circumference = 2 * Math.PI * radius;
+        const numArrows = Math.max(3, Math.floor(circumference / arrowSpacing));
+        const isFlipped = seg.data?._flipDirection ?? false;
+        const angleStep = (2 * Math.PI) / numArrows;
+        
+        for (let i = 0; i < numArrows; i++) {
+            const angle = i * angleStep;
+            const pos = {
+                x: center.x + radius * Math.cos(angle),
+                y: center.y + radius * Math.sin(angle)
+            };
+            // Tangent vector (perpendicular to radius)
+            const vec = isFlipped 
+                ? { x: radius * Math.sin(angle), y: -radius * Math.cos(angle) }
+                : { x: -radius * Math.sin(angle), y: radius * Math.cos(angle) };
+            const posW = worldFromRaw(pos, rt);
+            const vecW = rotatePoint(vec, rt);
+            addArrow(posW, vecW);
+        }
+    }
+
+    /**
+     * Render direction arrows for a rectangle shape.
+     * @param {object} seg - Rectangle segment
+     * @param {object} rt - Rotation/translation transform
+     * @param {number} arrowSpacing - Spacing between arrows in SVG units
+     * @param {number} tangentDelta - Delta for tangent calculation
+     * @param {Function} addArrow - Arrow rendering callback
+     * @private
+     */
+    _renderRectArrows(seg, rt, arrowSpacing, tangentDelta, addArrow) {
+        const { x, y, w, h, rx: rx0 = 0 } = seg.data ?? {};
+        if (![x, y, w, h].every(Number.isFinite)) return;
+        
+        const dirW = Number(seg.data?.dirW) < 0 ? -1 : 1;
+        const hasDirH = Object.prototype.hasOwnProperty.call(seg.data ?? {}, 'dirH');
+        const dirH = hasDirH ? (Number(seg.data?.dirH) < 0 ? -1 : 1) : -1;
+        const x1 = Number(x);
+        const y1 = Number(y);
+        const x2 = x1 + dirW * Number(w);
+        const y2 = y1 + dirH * Number(h);
+        const rx = Math.max(0, Math.min(Number(rx0), Math.abs(Number(w)) / 2, Math.abs(Number(h)) / 2));
+
+        // Calculate perimeter
+        const width = Math.abs(x2 - x1);
+        const height = Math.abs(y2 - y1);
+        const perimeter = rx > 1e-9 
+            ? 2 * (width + height) - 8 * rx + 2 * Math.PI * rx
+            : 2 * (width + height);
+        
+        const numArrows = Math.max(4, Math.floor(perimeter / arrowSpacing));
+        
+        // Create rect path
+        const pathEl = document.createElementNS(SVG_NS, "path");
+        if (rx <= 1e-9) {
+            pathEl.setAttribute("d", `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2} L ${x1} ${y2} Z`);
+        } else {
+            const sW = x2 >= x1 ? 1 : -1;
+            const sH = y2 >= y1 ? 1 : -1;
+            pathEl.setAttribute("d", 
+                `M ${x1 + sW * rx} ${y1} ` +
+                `L ${x2 - sW * rx} ${y1} ` +
+                `A ${rx} ${rx} 0 0 ${sW * sH > 0 ? 1 : 0} ${x2} ${y1 + sH * rx} ` +
+                `L ${x2} ${y2 - sH * rx} ` +
+                `A ${rx} ${rx} 0 0 ${sW * sH > 0 ? 1 : 0} ${x2 - sW * rx} ${y2} ` +
+                `L ${x1 + sW * rx} ${y2} ` +
+                `A ${rx} ${rx} 0 0 ${sW * sH > 0 ? 1 : 0} ${x1} ${y2 - sH * rx} ` +
+                `L ${x1} ${y1 + sH * rx} ` +
+                `A ${rx} ${rx} 0 0 ${sW * sH > 0 ? 1 : 0} ${x1 + sW * rx} ${y1} Z`
+            );
+        }
+        
+        const totalLen = pathEl.getTotalLength();
+        if (!Number.isFinite(totalLen) || totalLen <= 1e-6) return;
+        
+        for (let i = 0; i < numArrows; i++) {
+            const t = i / numArrows;
+            const pos = t * totalLen;
+            
+            const pA = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos - tangentDelta)));
+            const pB = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos + tangentDelta)));
+            const p = pathEl.getPointAtLength(Math.max(0, Math.min(totalLen, pos)));
+            const pointW = worldFromRaw({ x: p.x, y: p.y }, rt);
+            const vecW = rotatePoint({ x: pB.x - pA.x, y: pB.y - pA.y }, rt);
+            addArrow(pointW, vecW);
+        }
+    }
+
+    /**
+     * Render direction arrows for an ellipse shape.
+     * @param {object} seg - Ellipse segment
+     * @param {object} rt - Rotation/translation transform
+     * @param {number} arrowSpacing - Spacing between arrows in SVG units
+     * @param {Function} addArrow - Arrow rendering callback
+     * @private
+     */
+    _renderEllipseArrows(seg, rt, arrowSpacing, addArrow) {
+        const { cx, cy, rx, ry } = seg.data ?? {};
+        if (![cx, cy, rx, ry].every(Number.isFinite) || rx <= 0 || ry <= 0) return;
+        
+        // Approximate ellipse perimeter using Ramanujan's formula
+        const h = Math.pow((rx - ry) / (rx + ry), 2);
+        const perimeter = Math.PI * (rx + ry) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h)));
+        const numArrows = Math.max(3, Math.floor(perimeter / arrowSpacing));
+        
+        const isFlipped = seg.data?._flipDirection ?? false;
+        const angleStep = (2 * Math.PI) / numArrows;
+        
+        for (let i = 0; i < numArrows; i++) {
+            const angle = i * angleStep;
+            const pos = {
+                x: cx + rx * Math.cos(angle),
+                y: cy + ry * Math.sin(angle)
+            };
+            // Tangent vector for ellipse
+            const vec = isFlipped
+                ? { x: rx * Math.sin(angle), y: -ry * Math.cos(angle) }
+                : { x: -rx * Math.sin(angle), y: ry * Math.cos(angle) };
+            const posW = worldFromRaw(pos, rt);
+            const vecW = rotatePoint(vec, rt);
+            addArrow(posW, vecW);
+        }
     }
 
     _rollbackToSelecting() {
