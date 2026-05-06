@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Toolbar HTML</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        #output { border: 1px solid #ccc; padding: 10px; margin-top: 20px; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>EditorToolbar HTML Test</h1>
+    <button id="generate">Generate HTML</button>
+    <div id="output"></div>
+    
+    <script type="module">
+        import { EditorToolbar } from './src/editor/EditorToolbar.js';
+        
+        document.getElementById('generate').addEventListener('click', () => {
+            const container = document.createElement('div');
+            container.innerHTML = '<svg id="canvas"></svg>';
+            
+            const toolbar = new EditorToolbar(container, {
+                onToolChange: () => {},
+                onDone: () => {},
+                onCancel: () => {}
+            });
+            
+            // Access private method via reflection
+            const html = toolbar._buildHTML();
+            
+            const output = document.getElementById('output');
+            output.innerHTML = '<h2>Generated HTML:</h2><pre>' + 
+                html.replace(/</g, '&lt;').replace(/>/g, '&gt;') + 
+                '</pre><h2>Rendered:</h2>' + html;
+            
+            console.log('HTML length:', html.length);
+            console.log('HTML:', html);
+        });
+    </script>
+</body>
+</html>

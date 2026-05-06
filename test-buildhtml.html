@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test _buildHTML Output</title>
+    <style>
+        body { 
+            font-family: monospace; 
+            padding: 20px; 
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border: 1px solid #ccc;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .rendered {
+            border: 2px solid #333;
+            padding: 10px;
+            margin: 20px 0;
+            background: white;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test _buildHTML() Output</h1>
+    <button id="test-btn">Generate HTML</button>
+    
+    <h2>Raw HTML String:</h2>
+    <pre id="raw-html"></pre>
+    
+    <h2>Rendered Result:</h2>
+    <div class="rendered" id="rendered"></div>
+    
+    <h2>DOM Structure:</h2>
+    <pre id="dom-structure"></pre>
+    
+    <script type="module">
+        document.getElementById('test-btn').addEventListener('click', async () => {
+            try {
+                // Создаем временный контейнер
+                const tempContainer = document.createElement('div');
+                tempContainer.innerHTML = '<svg id="canvas"></svg>';
+                
+                // Импортируем EditorToolbar
+                const { default: EditorToolbar } = await import('./src/editor/EditorToolbar.js');
+                
+                // Создаем экземпляр
+                const toolbar = new EditorToolbar(tempContainer, {
+                    onToolChange: () => {},
+                    onDone: () => {},
+                    onCancel: () => {}
+                });
+                
+                // Получаем HTML через рефлексию
+                const html = toolbar._buildHTML();
+                
+                // Показываем сырой HTML
+                document.getElementById('raw-html').textContent = html;
+                
+                // Рендерим
+                const rendered = document.getElementById('rendered');
+                rendered.innerHTML = html;
+                
+                // Показываем структуру DOM
+                const structure = document.getElementById('dom-structure');
+                let structureText = '';
+                
+                function printNode(node, indent = 0) {
+                    const spaces = '  '.repeat(indent);
+                    if (node.nodeType === 1) { // Element
+                        const tag = node.tagName.toLowerCase();
+                        const id = node.id ? ` id="${node.id}"` : '';
+                        const classes = node.className ? ` class="${node.className}"` : '';
+                        structureText += `${spaces}<${tag}${id}${classes}>\n`;
+                        
+                        for (const child of node.childNodes) {
+                            printNode(child, indent + 1);
+                        }
+                        
+                        structureText += `${spaces}</${tag}>\n`;
+                    } else if (node.nodeType === 3) { // Text
+                        const text = node.textContent.trim();
+                        if (text) {
+                            structureText += `${spaces}TEXT: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"\n`;
+                        }
+                    }
+                }
+                
+                printNode(rendered);
+                structure.textContent = structureText;
+                
+                console.log('HTML length:', html.length);
+                console.log('Rendered children:', rendered.children.length);
+                
+            } catch (error) {
+                alert('Error: ' + error.message);
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>

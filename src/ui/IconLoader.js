@@ -79,10 +79,18 @@ export default class IconLoader {
         }
 
         try {
+            // Маппинг для зарезервированных имен Windows и camelCase → kebab-case
+            const fileNameMap = {
+                'aux': 'aux-line',  // aux.svg → aux-line.svg (Windows reserved name)
+                'clipperOffset': 'clipper-offset'  // clipperOffset → clipper-offset.svg
+            };
+            
+            const fileName = fileNameMap[name] || name;
+            
             // Формируем путь к SVG файлу
             const path = category 
-                ? `assets/icons/${this._currentPack}/${category}/${name}.svg`
-                : `assets/icons/${this._currentPack}/${name}.svg`;
+                ? `assets/icons/${this._currentPack}/${category}/${fileName}.svg`
+                : `assets/icons/${this._currentPack}/${fileName}.svg`;
             
             log.debug(`Loading icon: ${path}`);
             

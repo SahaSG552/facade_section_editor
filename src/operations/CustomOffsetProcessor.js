@@ -15,13 +15,119 @@ import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { OffsetEngine, calculateOffsetFromPathData as engineCalculateOffset } from "./OffsetEngine.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
-const COMMAND_RE = /([MmLlHhVvZz])([^MmLlHhVvZz]*)/g;
+const COMMAND_RE = /([MmLlHhVvAaZz])([^MmLlHhVvAaZz]*)/g;
 const SUBPATH_RE = /([MmLlHhVvZzAa])([^MmLlHhVvZzAa]*)/g;
 const HAS_CLOSE_COMMAND_RE = /[Zz]/;
 
+function getPathEndpoints(pathData) {
+    let cx = 0, cy = 0, sx = null, sy = null, ex = null, ey = null;
+    const re = new RegExp(COMMAND_RE);
+    for (;;) {
+        const match = re.exec(pathData);
+        if (match === null) break;
+
+        const rawCmd = match[1];
+        const cmd = rawCmd.toUpperCase();
+        const isRelative = rawCmd !== cmd;
+        const args = match[2].trim().split(/[\s,]+/).filter(Boolean).map(Number);
+
+        if (cmd === "M") {
+            if (args.length >= 2) {
+                let mx = args[0] || 0;
+                let my = args[1] || 0;
+                if (isRelative) {
+                    mx += cx;
+                    my += cy;
+                }
+                cx = mx;
+                cy = my;
+                if (sx === null || sy === null) {
+                    sx = cx;
+                    sy = cy;
+                }
+                ex = cx;
+                ey = cy;
+                for (let i = 2; i + 1 < args.length; i += 2) {
+                    let nx = args[i];
+                    let ny = args[i + 1];
+                    if (isRelative) {
+                        nx += cx;
+                        ny += cy;
+                    }
+                    cx = nx;
+                    cy = ny;
+                    ex = cx;
+                    ey = cy;
+                }
+            }
+        } else if (cmd === "L") {
+            for (let i = 0; i + 1 < args.length; i += 2) {
+                let nx = args[i];
+                let ny = args[i + 1];
+                if (isRelative) {
+                    nx += cx;
+                    ny += cy;
+                }
+                cx = nx;
+                cy = ny;
+                ex = cx;
+                ey = cy;
+            }
+        } else if (cmd === "H") {
+            for (let i = 0; i < args.length; i += 1) {
+                let nx = args[i];
+                if (isRelative) {
+                    nx += cx;
+                }
+                cx = nx;
+                ex = cx;
+                ey = cy;
+            }
+        } else if (cmd === "V") {
+            for (let i = 0; i < args.length; i += 1) {
+                let ny = args[i];
+                if (isRelative) {
+                    ny += cy;
+                }
+                cy = ny;
+                ex = cx;
+                ey = cy;
+            }
+        } else if (cmd === "A") {
+            for (let i = 0; i + 6 < args.length; i += 7) {
+                let ex1 = args[i + 5];
+                let ey1 = args[i + 6];
+                if (isRelative) {
+                    ex1 += cx;
+                    ey1 += cy;
+                }
+                cx = ex1;
+                cy = ey1;
+                ex = cx;
+                ey = cy;
+            }
+        } else if (cmd === "Z") {
+            ex = sx;
+            ey = sy;
+            cx = sx;
+            cy = sy;
+        }
+    }
+    return { sx, sy, ex, ey };
+}
+
+function isPathGeometricallyClosed(pathData, tolerance = 1e-6) {
+    const { sx, sy, ex, ey } = getPathEndpoints(pathData);
+    if (![sx, sy, ex, ey].every(Number.isFinite)) return false;
+    return Math.hypot(ex - sx, ey - sy) <= tolerance;
+}
+
 /**
- * Compute signed area of an SVG path (positive = CCW, negative = CW).
- * Only looks at the polygonal approximation (ignores arcs for speed).
+ * Compute signed area of an SVG path in mathematical coordinates
+ * (positive = CCW, negative = CW).
+ *
+ * We only need the winding sign, so line contributions and arc endpoint chord
+ * contributions are sufficient and robust for mixed line/arc facade contours.
  */
 function signedArea(pathData) {
     let area = 0;
@@ -31,17 +137,78 @@ function signedArea(pathData) {
         const match = re.exec(pathData);
         if (match === null) break;
 
-        const cmd = match[1].toUpperCase();
+        const rawCmd = match[1];
+        const cmd = rawCmd.toUpperCase();
+        const isRelative = rawCmd !== cmd;
         const args = match[2].trim().split(/[\s,]+/).filter(Boolean).map(Number);
         if (cmd === "M") {
-            if (sx !== 0 || sy !== 0) { /* new subpath, close previous */ }
-            cx = args[0] || 0; cy = args[1] || 0;
-            sx = cx; sy = cy;
-        } else if (cmd === "L" || cmd === "H" || cmd === "V") {
-            const nx = cmd === "H" ? args[0] : (args[0] !== undefined ? args[0] : cx);
-            const ny = cmd === "V" ? args[0] : (args[1] !== undefined ? args[1] : cy);
-            area += (cx * ny - nx * cy);
-            cx = nx; cy = ny;
+            if (args.length >= 2) {
+                let mx = args[0] || 0;
+                let my = args[1] || 0;
+                if (isRelative) {
+                    mx += cx;
+                    my += cy;
+                }
+                cx = mx;
+                cy = my;
+                sx = cx;
+                sy = cy;
+
+                // Additional moveto pairs are treated as implicit lineto commands.
+                for (let i = 2; i + 1 < args.length; i += 2) {
+                    let nx = args[i];
+                    let ny = args[i + 1];
+                    if (isRelative) {
+                        nx += cx;
+                        ny += cy;
+                    }
+                    area += (cx * ny - nx * cy);
+                    cx = nx;
+                    cy = ny;
+                }
+            }
+        } else if (cmd === "L") {
+            for (let i = 0; i + 1 < args.length; i += 2) {
+                let nx = args[i];
+                let ny = args[i + 1];
+                if (isRelative) {
+                    nx += cx;
+                    ny += cy;
+                }
+                area += (cx * ny - nx * cy);
+                cx = nx;
+                cy = ny;
+            }
+        } else if (cmd === "H") {
+            for (let i = 0; i < args.length; i += 1) {
+                let nx = args[i];
+                if (isRelative) {
+                    nx += cx;
+                }
+                area += (cx * cy - nx * cy);
+                cx = nx;
+            }
+        } else if (cmd === "V") {
+            for (let i = 0; i < args.length; i += 1) {
+                let ny = args[i];
+                if (isRelative) {
+                    ny += cy;
+                }
+                area += (cx * ny - cx * cy);
+                cy = ny;
+            }
+        } else if (cmd === "A") {
+            for (let i = 0; i + 6 < args.length; i += 7) {
+                let ex = args[i + 5];
+                let ey = args[i + 6];
+                if (isRelative) {
+                    ex += cx;
+                    ey += cy;
+                }
+                area += (cx * ey - ex * cy);
+                cx = ex;
+                cy = ey;
+            }
         } else if (cmd === "Z") {
             area += (cx * sy - sx * cy);
             cx = sx; cy = sy;
@@ -171,14 +338,27 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
         // Preserve winding only for closed paths. For open contours, signed-area
         // is not a stable orientation signal and can cause spurious reversals
         // across sequential offsets (breaking bridge direction consistency).
-        const inputHasClose = HAS_CLOSE_COMMAND_RE.test(pathData);
-        const originalCCW = inputHasClose ? signedArea(pathData) > 0 : null;
+        const inputHasClose =
+            HAS_CLOSE_COMMAND_RE.test(pathData) ||
+            isPathGeometricallyClosed(pathData);
+        const originalMathArea = inputHasClose ? signedArea(pathData) : 0;
+        const originalCCW = inputHasClose ? originalMathArea > 0 : null;
 
-        // Main canvas expects: positive offset = inward.
-        // OffsetEngine uses CCW normal (rotate90CCW): positive = left of path.
-        // Canvas paths are typically CW, so "left" = outward.
-        // Negate to flip: positive offset → inward.
-        const effectiveOffset = -offset;
+        let effectiveOffset = -offset;
+
+        if (
+            inputHasClose &&
+            Number.isFinite(originalMathArea) &&
+            Math.abs(originalMathArea) > 1e-9
+        ) {
+            // For closed/closed-like contours the engine's direct-mode sign still
+            // depends on traversal winding. Normalize by the mathematical winding
+            // sign so main-canvas table semantics stay stable:
+            //   +offset => inward
+            //   -offset => outward
+            // regardless of whether the contour is stored in either direction.
+            effectiveOffset = originalMathArea > 0 ? offset : -offset;
+        }
 
         let result = engineCalculateOffset(pathData, effectiveOffset, {
             joinType: options.join || "sharp",

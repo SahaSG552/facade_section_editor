@@ -457,6 +457,21 @@ class CanvasManager {
         const viewBoxX = this.panX - viewBoxWidth / 2;
         const viewBoxY = this.panY - viewBoxHeight / 2;
 
+        // Проверка на NaN
+        if (isNaN(viewBoxX) || isNaN(viewBoxY) || isNaN(viewBoxWidth) || isNaN(viewBoxHeight)) {
+            console.error("Invalid viewBox values:", {
+                rect: { width: rect.width, height: rect.height },
+                zoomLevel: this.zoomLevel,
+                panX: this.panX,
+                panY: this.panY,
+                viewBoxX,
+                viewBoxY,
+                viewBoxWidth,
+                viewBoxHeight
+            });
+            return; // Не обновляем viewBox если значения некорректны
+        }
+
         this.canvas.setAttribute(
             "viewBox",
             `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`

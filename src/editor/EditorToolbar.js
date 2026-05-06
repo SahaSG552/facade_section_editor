@@ -158,9 +158,11 @@ export default class EditorToolbar {
         this._toolbar = document.createElement("div");
         this._toolbar.id = "editor-toolbar";
         this._toolbar.innerHTML = this._buildHTML();
+        
         // Suppress the browser's native context menu over the whole toolbar so
         // right-click on tool buttons activates the secondary tool cleanly.
         this._toolbar.addEventListener("contextmenu", (e) => e.preventDefault());
+        
         // Insert directly after the SVG canvas so toolbar sits BELOW it;
         // fall back to append if no SVG found.
         const svgEl = this.container.querySelector("svg");
@@ -203,6 +205,19 @@ export default class EditorToolbar {
             
             try {
                 const svgContent = await iconLoader.loadIcon(iconName, category);
+                
+                // Проверяем, что SVG контент корректный
+                if (!svgContent || svgContent.trim().length === 0) {
+                    log.warn(`Empty SVG content for ${iconName}`);
+                    return;
+                }
+                
+                // Проверяем, что это действительно SVG или span
+                if (!svgContent.startsWith('<svg') && !svgContent.startsWith('<span')) {
+                    log.error(`Invalid SVG content for ${iconName}: ${svgContent.substring(0, 50)}`);
+                    return;
+                }
+                
                 button.innerHTML = svgContent;
             } catch (error) {
                 log.warn(`Failed to load icon ${iconName}`, error);
