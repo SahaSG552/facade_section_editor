@@ -1,0 +1,58 @@
+{
+  "name": "default",
+  "version": "1.0.0",
+  "description": "Default CAD-style icon pack with technical markers and geometric precision",
+  "author": "Facade Section Editor",
+  "style": {
+    "strokeWidth": "1.5",
+    "strokeLinecap": "round",
+    "strokeLinejoin": "round",
+    "fill": "none",
+    "stroke": "currentColor"
+  },
+  "icons": {
+    "main": [
+      "zoom-in",
+      "zoom-out",
+      "fit-scale",
+      "zoom-selected",
+      "part",
+      "bits",
+      "shank",
+      "export-dxf",
+      "grid",
+      "save",
+      "save-as",
+      "load",
+      "clear"
+    ],
+    "editor": {
+      "draw": [
+        "cursor",
+        "move",
+        "rotate",
+        "mirror",
+        "flip",
+        "line",
+        "arc",
+        "circle",
+        "rect",
+        "ellipse",
+        "group"
+      ],
+      "edit": [
+        "fillet",
+        "chamfer",
+        "trim",
+        "extend",
+        "offset",
+        "clipperOffset",
+        "join",
+        "explode",
+        "close",
+        "bool",
+        "aux-line"
+      ]
+    }
+  }
+}

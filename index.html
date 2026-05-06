@@ -83,22 +83,14 @@
         <div id="canvas-container">
             <svg id="canvas"></svg>
             <div id="zoom-toolbar">
-                <button id="zoom-in-btn" title="Zoom In">+</button>
-                <button id="zoom-out-btn" title="Zoom Out">-</button>
-                <button id="fit-scale-btn" title="Fit to Scale">Fit</button>
-                <button id="zoom-selected-btn" title="Zoom to Selected">
-                    Sel
-                </button>
-                <button id="part-btn" title="Show Part">Part</button>
-                <button id="bits-btn" title="Toggle Bits Visibility">
-                    Bits
-                </button>
-                <button id="shank-btn" title="Toggle Shank Visibility">
-                    Shank
-                </button>
-                <button id="export-dxf-btn" title="Export to DXF">
-                    DXF
-                </button>
+                <button id="zoom-in-btn" data-icon="zoom-in" title="Zoom In">+</button>
+                <button id="zoom-out-btn" data-icon="zoom-out" title="Zoom Out">−</button>
+                <button id="fit-scale-btn" data-icon="fit-scale" title="Fit to Scale">⊡</button>
+                <button id="zoom-selected-btn" data-icon="zoom-selected" title="Zoom to Selected">⊙</button>
+                <button id="part-btn" data-icon="part" title="Show Part">▭</button>
+                <button id="bits-btn" data-icon="bits" title="Toggle Bits Visibility">◉</button>
+                <button id="shank-btn" data-icon="shank" title="Toggle Shank Visibility">⊥</button>
+                <button id="export-dxf-btn" data-icon="export-dxf" title="Export to DXF">📄</button>
                 <label for="grid-scale" style="font-size: 12px; margin: auto">Grid:</label>
                 <select id="grid-scale" style="font-size: 12px; width: 55px">
                     <option value="10">10</option>
@@ -108,9 +100,7 @@
                     <option value="0.1">0.1</option>
                     <option value="0.01">0.01</option>
                 </select>
-                <button id="toggle-grid-btn" title="Toggle Grid">
-                    Grid
-                </button>
+                <button id="toggle-grid-btn" data-icon="grid" title="Toggle Grid">⊞</button>
             </div>
         </div>
         <div id="three-canvas-container">
@@ -163,18 +153,10 @@
                 <div id="operations-header">
                     <h3>Operations</h3>
                     <div id="operations-toolbar">
-                        <button id="save-btn" title="Save current bit positions">
-                            Save
-                        </button>
-                        <button id="save-as-btn" title="Save bit positions to JSON file">
-                            Save As
-                        </button>
-                        <button id="load-btn" title="Load bit positions from JSON file">
-                            Load
-                        </button>
-                        <button id="clear-btn" title="Clear all bits from canvas">
-                            Clear
-                        </button>
+                        <button id="save-btn" data-icon="save" title="Save current bit positions">💾</button>
+                        <button id="save-as-btn" data-icon="save-as" title="Save bit positions to JSON file">💾↗</button>
+                        <button id="load-btn" data-icon="load" title="Load bit positions from JSON file">📂</button>
+                        <button id="clear-btn" data-icon="clear" title="Clear all bits from canvas">🗑</button>
                     </div>
                 </div>
                 <div id="operations-log"></div>

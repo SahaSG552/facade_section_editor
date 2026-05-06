@@ -49,6 +49,9 @@ import { PanelCoordinateHelper } from "./canvas/PanelCoordinateHelper.js";
 import { ManagerFactory } from "./core/ManagerFactory.js";
 import variablesManager from "./data/VariablesManager.js";
 
+// Icon loading system
+import { loadIconsForButtons } from "./ui/IconButton.js";
+
 // **PHASE 2 REFACTORING IMPORTS** - Business Logic Extraction
 import { BooleanOperationStrategy } from "./operations/BooleanOperationStrategy.js";
 import { UpdatePipeline } from "./operations/UpdatePipeline.js";
@@ -4487,6 +4490,15 @@ async function initializeModularSystem() {
         log.debug("Canvas module:", canvasModule);
         log.debug("Bits module:", bitsModule);
         log.debug("Three module:", threeModule);
+
+        // Load SVG icons for toolbar buttons
+        log.info("Loading SVG icons...");
+        try {
+            await loadIconsForButtons(document.body);
+            log.info("SVG icons loaded successfully");
+        } catch (error) {
+            log.warn("Failed to load some icons, using fallbacks", error);
+        }
 
         // Initialize Three.js module
         if (threeModule) {

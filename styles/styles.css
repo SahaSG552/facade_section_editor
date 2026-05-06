@@ -770,6 +770,15 @@ html {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#zoom-toolbar button svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 #zoom-toolbar button:hover {
@@ -1072,6 +1081,15 @@ html {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#operations-toolbar button svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 #operations-toolbar button:hover {
@@ -1879,6 +1897,12 @@ button,
   align-items: center;
   justify-content: center;
   transition: background-color 0.1s, border-color 0.1s;
+}
+
+.editor-tool-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .editor-tool-btn:hover {
