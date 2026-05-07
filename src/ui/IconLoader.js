@@ -73,8 +73,9 @@ export default class IconLoader {
     async loadIcon(name, category = "") {
         const cacheKey = category ? `${category}/${name}` : name;
         
-        // Проверяем кэш
-        if (this._cache.has(cacheKey)) {
+        // Проверяем кэш (только в production)
+        const isDev = import.meta.env?.DEV || window.location.hostname === 'localhost';
+        if (!isDev && this._cache.has(cacheKey)) {
             return this._cache.get(cacheKey);
         }
 
@@ -92,17 +93,24 @@ export default class IconLoader {
                 ? `assets/icons/${this._currentPack}/${category}/${fileName}.svg`
                 : `assets/icons/${this._currentPack}/${fileName}.svg`;
             
-            log.debug(`Loading icon: ${path}`);
+            // Добавляем cache-busting параметр в dev режиме
+            const url = isDev ? `${path}?t=${Date.now()}` : path;
             
-            const response = await fetch(path);
+            log.debug(`Loading icon: ${url} (dev mode: ${isDev})`);
+            
+            const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`Failed to load icon: ${response.status}`);
             }
             
             const svgContent = await response.text();
             
-            // Кэшируем
-            this._cache.set(cacheKey, svgContent);
+            log.debug(`Loaded icon ${name}, length: ${svgContent.length}, first 100 chars: ${svgContent.substring(0, 100)}`);
+            
+            // Кэшируем только в production
+            if (!isDev) {
+                this._cache.set(cacheKey, svgContent);
+            }
             
             return svgContent;
         } catch (error) {
@@ -167,3 +175,8 @@ export default class IconLoader {
 
 // Singleton instance
 export const iconLoader = new IconLoader();
+
+// Expose to window for debugging
+if (typeof window !== 'undefined') {
+    window.iconLoader = iconLoader;
+}

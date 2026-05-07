@@ -13,6 +13,7 @@
 import LoggerFactory from "../core/LoggerFactory.js";
 import { ARC_APPROX_TOLERANCE } from "../config/constants.js";
 import { OffsetEngine, calculateOffsetFromPathData as engineCalculateOffset } from "./OffsetEngine.js";
+import { resolveSelfIntersectionsDetailed } from "./PaperBooleanProcessor.js";
 
 const log = LoggerFactory.createLogger("CustomOffsetProcessor");
 const COMMAND_RE = /([MmLlHhVvAaZz])([^MmLlHhVvAaZz]*)/g;
@@ -374,6 +375,50 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
             useArcApproximation: options.useArcApproximation || false,
             arcTolerance: options.arcTolerance || ARC_APPROX_TOLERANCE,
         });
+
+        // Match PathEditor behavior for closed contours with self-intersections:
+        // split detailed Paper components and keep the components matching the
+        // source winding. This is what turns a single self-intersecting contour
+        // into the same multi-contour result the editor preview shows.
+        if (
+            result &&
+            inputHasClose &&
+            options.editorLikeClosedSplit === true &&
+            (typeof options.trimSelfIntersections === "boolean"
+                ? options.trimSelfIntersections
+                : true)
+        ) {
+            try {
+                const detailed = resolveSelfIntersectionsDetailed(result, {
+                    preserveAllComponents: true,
+                });
+                if (
+                    detailed?.hadSelfIntersections &&
+                    Array.isArray(detailed.components) &&
+                    detailed.components.length > 1
+                ) {
+                    const sourceWindingSign = Math.sign(originalMathArea);
+                    const picked = detailed.components.filter((component) => {
+                        const area = Number(component?.area) || 0;
+                        if (Math.abs(area) <= 1e-9) return false;
+                        if (sourceWindingSign === 0) return true;
+                        return Math.sign(area) === sourceWindingSign;
+                    });
+                    const useComponents =
+                        picked.length > 0 ? picked : detailed.components;
+                    const splitPath = useComponents
+                        .map((component) => component.pathData)
+                        .filter(Boolean)
+                        .join(" ")
+                        .trim();
+                    if (splitPath) {
+                        result = splitPath;
+                    }
+                }
+            } catch (_err) {
+                // Non-fatal: keep engine output when Paper split is unavailable.
+            }
+        }
 
         if (result && inputHasClose && originalCCW !== null) {
             const resultCCW = signedArea(result) > 0;

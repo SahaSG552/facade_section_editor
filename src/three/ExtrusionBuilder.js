@@ -1893,7 +1893,7 @@ export default class ExtrusionBuilder {
                 color: new THREE.Color(color || "#cccccc"),
                 roughness: 0.5,
                 metalness: 0.2,
-                side: THREE.FrontSide,
+                side: THREE.DoubleSide,
                 wireframe: this.materialManager
                     ? this.materialManager.isWireframeEnabled()
                     : false,
@@ -2529,7 +2529,6 @@ export default class ExtrusionBuilder {
 
                 innerGeometry.computeVertexNormals();
                 innerGeometry.normalizeNormals();
-
                 const innerMaterial = new THREE.MeshStandardMaterial({
                     color: new THREE.Color(color || "#cccccc"),
                     roughness: 0.5,
@@ -2593,12 +2592,6 @@ export default class ExtrusionBuilder {
                     if (latheResult && latheResult.mesh) {
                         const latheMesh = latheResult.mesh;
 
-                        // Inner-half lathes must match inner sweep winding before
-                        // mergedInside global inversion; otherwise they end up flipped.
-                        if (!isExtension && latheMesh.geometry) {
-                            this._invertGeometryNormals(latheMesh.geometry);
-                        }
-
                         latheMesh.userData.isBitPart = true;
                         latheMesh.userData.isLatheCorner = true;
                         latheMesh.userData.isPartialLathe = true;
@@ -2629,11 +2622,10 @@ export default class ExtrusionBuilder {
                 );
             }
             if (mergedInside?.geometry) {
-                // Inner cutter half historically needs opposite winding from the
-                // raw merged result for correct outward-facing shading.
-                if (!isExtension) {
-                    this._invertGeometryNormals(mergedInside.geometry);
-                }
+                this._ensureOutwardNormals(
+                    mergedInside.geometry,
+                    "round-inside",
+                );
             }
 
             if (mergedOutside && mergedInside) {
@@ -2911,6 +2903,357 @@ export default class ExtrusionBuilder {
             geometry.normalizeNormals();
         }
 
+        const pos = geometry.attributes.position;
+        const idx = geometry.index?.array;
+        const q = 1e5;
+        const vertexGeomKey = (vi) =>
+            `${Math.round(pos.getX(vi) * q)}:${Math.round(pos.getY(vi) * q)}:${Math.round(pos.getZ(vi) * q)}`;
+
+        const enforceConsistentWinding = () => {
+            if (!idx || idx.length < 3) return false;
+
+            const triCount = Math.floor(idx.length / 3);
+            const adjacency = Array.from({ length: triCount }, () => []);
+            const edgeMap = new Map();
+
+            for (let tri = 0; tri < triCount; tri++) {
+                const a = idx[tri * 3];
+                const b = idx[tri * 3 + 1];
+                const c = idx[tri * 3 + 2];
+                const edges = [
+                    [a, b],
+                    [b, c],
+                    [c, a],
+                ];
+
+                for (const [u, v] of edges) {
+                    const ku = vertexGeomKey(u);
+                    const kv = vertexGeomKey(v);
+                    const key = ku < kv ? `${ku}|${kv}` : `${kv}|${ku}`;
+                    if (!edgeMap.has(key)) edgeMap.set(key, []);
+                    edgeMap.get(key).push({ tri, u: ku, v: kv });
+                }
+            }
+
+            for (const owners of edgeMap.values()) {
+                if (owners.length < 2) continue;
+                for (let i = 0; i < owners.length; i++) {
+                    for (let j = i + 1; j < owners.length; j++) {
+                        const a = owners[i];
+                        const b = owners[j];
+                        const sameDirection = a.u === b.u && a.v === b.v;
+                        adjacency[a.tri].push({ tri: b.tri, invert: sameDirection });
+                        adjacency[b.tri].push({ tri: a.tri, invert: sameDirection });
+                    }
+                }
+            }
+
+            const state = new Int8Array(triCount);
+            state.fill(-1);
+            let changed = false;
+
+            for (let start = 0; start < triCount; start++) {
+                if (state[start] !== -1) continue;
+                state[start] = 0;
+
+                const queue = [start];
+                for (let qi = 0; qi < queue.length; qi++) {
+                    const t = queue[qi];
+                    const st = state[t];
+                    for (const nb of adjacency[t]) {
+                        const required = st ^ (nb.invert ? 1 : 0);
+                        if (state[nb.tri] === -1) {
+                            state[nb.tri] = required;
+                            queue.push(nb.tri);
+                        }
+                    }
+                }
+            }
+
+            for (let tri = 0; tri < triCount; tri++) {
+                if (state[tri] === 1) {
+                    const i = tri * 3;
+                    const b = idx[i + 1];
+                    idx[i + 1] = idx[i + 2];
+                    idx[i + 2] = b;
+                    changed = true;
+                }
+            }
+
+            return changed;
+        };
+
+        let flippedByWindingConsistency = false;
+        if (idx && idx.length >= 3) {
+            flippedByWindingConsistency = enforceConsistentWinding();
+            if (flippedByWindingConsistency) {
+                geometry.index.needsUpdate = true;
+                geometry.computeVertexNormals();
+                geometry.normalizeNormals();
+            }
+        }
+
+        const applyComponentFlip = (componentTriangles) => {
+            if (!idx || componentTriangles.length === 0) return false;
+
+            // Detect whether this component is open (has boundary edges).
+            // Signed volume is reliable for closed shells, but can be misleading
+            // for open strips/surfaces (e.g. lathe ribbons), so use it only when closed.
+            const componentEdgeCounts = new Map();
+            for (const tri of componentTriangles) {
+                const i0 = idx[tri * 3];
+                const i1 = idx[tri * 3 + 1];
+                const i2 = idx[tri * 3 + 2];
+                const edges = [
+                    [i0, i1],
+                    [i1, i2],
+                    [i2, i0],
+                ];
+
+                for (const [uRaw, vRaw] of edges) {
+                    const ku = vertexGeomKey(uRaw);
+                    const kv = vertexGeomKey(vRaw);
+                    const key = ku < kv ? `${ku}|${kv}` : `${kv}|${ku}`;
+                    componentEdgeCounts.set(
+                        key,
+                        (componentEdgeCounts.get(key) || 0) + 1,
+                    );
+                }
+            }
+
+            let hasBoundaryEdges = false;
+            for (const count of componentEdgeCounts.values()) {
+                if (count === 1) {
+                    hasBoundaryEdges = true;
+                    break;
+                }
+            }
+
+            let volume = 0;
+            for (const tri of componentTriangles) {
+                const i0 = idx[tri * 3];
+                const i1 = idx[tri * 3 + 1];
+                const i2 = idx[tri * 3 + 2];
+
+                const ax = pos.getX(i0), ay = pos.getY(i0), az = pos.getZ(i0);
+                const bx = pos.getX(i1), by = pos.getY(i1), bz = pos.getZ(i1);
+                const cx = pos.getX(i2), cy = pos.getY(i2), cz = pos.getZ(i2);
+
+                volume +=
+                    (ax * (by * cz - bz * cy) +
+                        ay * (bz * cx - bx * cz) +
+                        az * (bx * cy - by * cx)) /
+                    6;
+            }
+
+            if (
+                !hasBoundaryEdges &&
+                Number.isFinite(volume) &&
+                Math.abs(volume) > EXTRUSION_CONSTANTS.VOLUME_EPSILON
+            ) {
+                if (volume < 0) {
+                    for (const tri of componentTriangles) {
+                        const i = tri * 3;
+                        const b = idx[i + 1];
+                        idx[i + 1] = idx[i + 2];
+                        idx[i + 2] = b;
+                    }
+                    return true;
+                }
+                return false;
+            }
+
+            const vertexSet = new Set();
+            for (const tri of componentTriangles) {
+                vertexSet.add(idx[tri * 3]);
+                vertexSet.add(idx[tri * 3 + 1]);
+                vertexSet.add(idx[tri * 3 + 2]);
+            }
+
+            let cx = 0, cy = 0, cz = 0;
+            let count = 0;
+            for (const vi of vertexSet) {
+                cx += pos.getX(vi);
+                cy += pos.getY(vi);
+                cz += pos.getZ(vi);
+                count++;
+            }
+            if (count > 0) {
+                const inv = 1 / count;
+                cx *= inv;
+                cy *= inv;
+                cz *= inv;
+            }
+
+            let dotSum = 0;
+            let inwardFaces = 0;
+            let outwardFaces = 0;
+            let minX = Infinity,
+                minY = Infinity,
+                minZ = Infinity,
+                maxX = -Infinity,
+                maxY = -Infinity,
+                maxZ = -Infinity;
+
+            for (const tri of componentTriangles) {
+                const i0 = idx[tri * 3];
+                const i1 = idx[tri * 3 + 1];
+                const i2 = idx[tri * 3 + 2];
+                for (const vi of [i0, i1, i2]) {
+                    const vx = pos.getX(vi);
+                    const vy = pos.getY(vi);
+                    const vz = pos.getZ(vi);
+                    if (vx < minX) minX = vx;
+                    if (vy < minY) minY = vy;
+                    if (vz < minZ) minZ = vz;
+                    if (vx > maxX) maxX = vx;
+                    if (vy > maxY) maxY = vy;
+                    if (vz > maxZ) maxZ = vz;
+                }
+            }
+            const boxCx = (minX + maxX) / 2;
+            const boxCy = (minY + maxY) / 2;
+            const boxCz = (minZ + maxZ) / 2;
+
+            for (const tri of componentTriangles) {
+                const i0 = idx[tri * 3];
+                const i1 = idx[tri * 3 + 1];
+                const i2 = idx[tri * 3 + 2];
+
+                const ax = pos.getX(i0), ay = pos.getY(i0), az = pos.getZ(i0);
+                const bx = pos.getX(i1), by = pos.getY(i1), bz = pos.getZ(i1);
+                const cxTri = pos.getX(i2), cyTri = pos.getY(i2), czTri = pos.getZ(i2);
+
+                const abx = bx - ax, aby = by - ay, abz = bz - az;
+                const acx = cxTri - ax, acy = cyTri - ay, acz = czTri - az;
+
+                const nx = aby * acz - abz * acy;
+                const ny = abz * acx - abx * acz;
+                const nz = abx * acy - aby * acx;
+
+                const fcx = (ax + bx + cxTri) / 3;
+                const fcy = (ay + by + cyTri) / 3;
+                const fcz = (az + bz + czTri) / 3;
+
+                dotSum += nx * (fcx - cx) + ny * (fcy - cy) + nz * (fcz - cz);
+
+                const boxDot =
+                    nx * (fcx - boxCx) +
+                    ny * (fcy - boxCy) +
+                    nz * (fcz - boxCz);
+                if (boxDot < 0) {
+                    inwardFaces++;
+                } else {
+                    outwardFaces++;
+                }
+            }
+
+            // For open / ribbon-like components, signed volume and centroid-dot can
+            // be ambiguous. Face majority against component bbox center is robust
+            // for detecting visually inverted shells.
+            if (inwardFaces > outwardFaces) {
+                for (const tri of componentTriangles) {
+                    const i = tri * 3;
+                    const b = idx[i + 1];
+                    idx[i + 1] = idx[i + 2];
+                    idx[i + 2] = b;
+                }
+                return true;
+            }
+
+            if (dotSum < 0) {
+                for (const tri of componentTriangles) {
+                    const i = tri * 3;
+                    const b = idx[i + 1];
+                    idx[i + 1] = idx[i + 2];
+                    idx[i + 2] = b;
+                }
+                return true;
+            }
+
+            return false;
+        };
+
+        if (idx && idx.length >= 3) {
+            const triCount = Math.floor(idx.length / 3);
+            const parent = Array.from({ length: triCount }, (_, i) => i);
+            const rank = new Uint8Array(triCount);
+
+            const find = (x) => {
+                while (parent[x] !== x) {
+                    parent[x] = parent[parent[x]];
+                    x = parent[x];
+                }
+                return x;
+            };
+
+            const unite = (a, b) => {
+                const ra = find(a);
+                const rb = find(b);
+                if (ra === rb) return;
+                if (rank[ra] < rank[rb]) {
+                    parent[ra] = rb;
+                } else if (rank[ra] > rank[rb]) {
+                    parent[rb] = ra;
+                } else {
+                    parent[rb] = ra;
+                    rank[ra]++;
+                }
+            };
+
+            const edgeOwner = new Map();
+            for (let tri = 0; tri < triCount; tri++) {
+                const a = idx[tri * 3];
+                const b = idx[tri * 3 + 1];
+                const c = idx[tri * 3 + 2];
+                const edges = [
+                    [a, b],
+                    [b, c],
+                    [c, a],
+                ];
+
+                for (const [uRaw, vRaw] of edges) {
+                    const ku = vertexGeomKey(uRaw);
+                    const kv = vertexGeomKey(vRaw);
+                    const key = ku < kv ? `${ku}|${kv}` : `${kv}|${ku}`;
+                    if (!edgeOwner.has(key)) {
+                        edgeOwner.set(key, tri);
+                    } else {
+                        unite(tri, edgeOwner.get(key));
+                    }
+                }
+            }
+
+            const components = new Map();
+            for (let tri = 0; tri < triCount; tri++) {
+                const root = find(tri);
+                if (!components.has(root)) components.set(root, []);
+                components.get(root).push(tri);
+            }
+
+            let flippedAny = false;
+            for (const componentTriangles of components.values()) {
+                flippedAny =
+                    applyComponentFlip(componentTriangles) || flippedAny;
+            }
+
+            if (flippedAny) {
+                geometry.index.needsUpdate = true;
+                geometry.computeVertexNormals();
+                geometry.normalizeNormals();
+                this.log.debug(
+                    `Flipped normals by connected components (${label})`,
+                    { components: components.size },
+                );
+                return true;
+            }
+        }
+
+        if (flippedByWindingConsistency) {
+            this.log.debug(`Flipped normals by winding consistency (${label})`);
+            return true;
+        }
+
         const volume = this._computeSignedVolume(geometry);
             if (Number.isFinite(volume) && Math.abs(volume) > EXTRUSION_CONSTANTS.VOLUME_EPSILON) {
             if (volume < 0) {
@@ -2923,7 +3266,6 @@ export default class ExtrusionBuilder {
             return false;
         }
 
-        const pos = geometry.attributes.position;
         const normal = geometry.attributes.normal;
 
         let cx = 0, cy = 0, cz = 0;

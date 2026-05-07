@@ -1,0 +1,1234 @@
+{
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\vite.config.js": {
+    "mtime": 1778070950.806596,
+    "hash": "ea0b9a25f7f0c635706e437b242df970"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\vitest.config.js": {
+    "mtime": 1778070950.806596,
+    "hash": "43c88e30c4883d076c63e5eb6a607cc9"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\__graphify_step3a.py": {
+    "mtime": 1778070950.6336036,
+    "hash": "6232020f5d272c993cbac0a2fee69961"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\__graphify_step3b_cache.py": {
+    "mtime": 1778070950.6336036,
+    "hash": "b414d33b974a84dd60cd2a10b0f507c2"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\__graphify_step3_merge.py": {
+    "mtime": 1778070950.6326034,
+    "hash": "5db0c0b1c008525a9821d77fe986ac3b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\__graphify_step4_build.py": {
+    "mtime": 1778070950.6336036,
+    "hash": "e25eb58a3bb2d4a5080944b9d2b9c6cf"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\__graphify_step5_report.py": {
+    "mtime": 1778070950.6351128,
+    "hash": "fd51fff1edd5c589f8cbcbc90d7d22cd"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\__graphify_step5_report_minimal.py": {
+    "mtime": 1778070950.6361203,
+    "hash": "34c91dc0fbae5347097a59ba8e3002f2"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\__graphify_step5_viz.py": {
+    "mtime": 1778070950.6361203,
+    "hash": "19328569de850849df6db664d3941438"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\script.js": {
+    "mtime": 1778073884.9278247,
+    "hash": "3949b4c6aabaad8fafc96c2f9f859823"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\app\\main.js": {
+    "mtime": 1778070950.691495,
+    "hash": "f613e47a2d4d37f05bce6b4e307366ed"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\bits\\BitRegistry.js": {
+    "mtime": 1778070950.6928184,
+    "hash": "7815d8be11aad476afd84db6cc178f9d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\bits\\BitsModule.js": {
+    "mtime": 1778070950.6928184,
+    "hash": "29b31e8b0539946e7ee31479aa74d671"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\bits\\ExtensionCalculator.js": {
+    "mtime": 1778070950.6928184,
+    "hash": "a223dcd504081fef4c900390caf7c068"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\bits\\PhantomBitCalculator.js": {
+    "mtime": 1778070950.6941276,
+    "hash": "bbd4254d218784f69811df99c43401ad"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\canvas\\CanvasManager.js": {
+    "mtime": 1778072441.2067292,
+    "hash": "c9203d92cca4bec828269aa94d27387f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\canvas\\CanvasModule.js": {
+    "mtime": 1778070950.6941276,
+    "hash": "7d2c54468d60471fe4f9259ac2a7fa72"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\canvas\\PanelCoordinateHelper.js": {
+    "mtime": 1778070950.6955247,
+    "hash": "c365d62a6cfd6339b00d5a069608cfb5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\canvas\\SVGElementFactory.js": {
+    "mtime": 1778070950.69603,
+    "hash": "09a606931004d1a0ce2d97809080cf0d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\canvas\\zoomUtils.js": {
+    "mtime": 1778070950.6965487,
+    "hash": "b2940c44edd65322e49bd24acfe9168b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\config\\AppConfig.js": {
+    "mtime": 1778070950.6965487,
+    "hash": "c88279470b4092d037d8b8b330532eba"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\config\\constants.js": {
+    "mtime": 1778070950.6965487,
+    "hash": "543c2c06a9e578f9cc226b41b0e449c3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\app.js": {
+    "mtime": 1778070950.6994443,
+    "hash": "c5f66539a9adeb347c7fba93b3d9a624"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\BaseModule.js": {
+    "mtime": 1778070950.6979012,
+    "hash": "9f605636347f7b7a64fa332f433f9a9a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\dependencyContainer.js": {
+    "mtime": 1778070950.6994443,
+    "hash": "ebe65df8e5ac1f8754a525c153cf4a59"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\eventBus.js": {
+    "mtime": 1778070950.6994443,
+    "hash": "5e272bca5f847ca636675372a3d4e1f3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\index.js": {
+    "mtime": 1778070950.7005522,
+    "hash": "391cfd37af9140e19fa14879dd6b8739"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\LoggerFactory.js": {
+    "mtime": 1778070950.6982064,
+    "hash": "e9f0b55e91bf0e6d7ef9a7388ac3839c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\ManagerFactory.js": {
+    "mtime": 1778070950.6982064,
+    "hash": "d87128ee93e70d6d15f799fbd71d0674"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\core\\platform.js": {
+    "mtime": 1778070950.7005522,
+    "hash": "23c09e9c38cf76a8b48e4a08257fbd0e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\data\\bitsStore.js": {
+    "mtime": 1778070950.7019992,
+    "hash": "cc2317273c420c162009fc24026eabf1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\data\\defaultBits.js": {
+    "mtime": 1778070950.7019992,
+    "hash": "ecb474b980da426f77babbb12b9d76b4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\data\\VariablesManager.js": {
+    "mtime": 1778070950.7019992,
+    "hash": "7682cdb2203418e3291e7a5125b2d81b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\EditorCanvas.js": {
+    "mtime": 1778070950.7035,
+    "hash": "1242dc33cca535d68ae09d7cd2378527"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\EditorStateManager.js": {
+    "mtime": 1778070950.7035,
+    "hash": "06891b516f8d39a6bc2fd3bf342f25a3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\EditorToolbar.js": {
+    "mtime": 1778072496.7403953,
+    "hash": "a32639f0a81058774070d5f7289c689b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\EditorVisualConfig.js": {
+    "mtime": 1778070950.7045662,
+    "hash": "365e58893c1d0bbf631ee68cc9442287"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\keyboardShortcuts.js": {
+    "mtime": 1778070950.705737,
+    "hash": "660d4b8406f4be76505c01f641f3dcca"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\ProfileEditor.js": {
+    "mtime": 1778070950.705737,
+    "hash": "9902275a7292f0e6e8fb3491457af712"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\geometry\\rectGeometry.js": {
+    "mtime": 1778070950.705737,
+    "hash": "b1346624009e6d5cd5a36e12c5de89ca"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\snaps\\SnapManager.js": {
+    "mtime": 1778070950.705737,
+    "hash": "6eba6e1696e5e125d0e9fd0b05dfe881"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\ArcTool.js": {
+    "mtime": 1778070950.7072453,
+    "hash": "9df3208588bde593aaa2304186ac0eb9"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\BaseTool.js": {
+    "mtime": 1778070950.7072453,
+    "hash": "53ff72df7cff83f6d321ccb5d6ea0b95"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\CircleTool.js": {
+    "mtime": 1778070950.7084374,
+    "hash": "dabffcbdf01ec177e44ab4bcfb40b72e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\CursorTool.js": {
+    "mtime": 1778070950.7084374,
+    "hash": "4cc1b8aa46f79ea231cb5aa837f099ab"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\EllipseTool.js": {
+    "mtime": 1778070950.7084374,
+    "hash": "26c4f240d38550b72dda23548f99ca96"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\FilletTool.js": {
+    "mtime": 1778070950.7094421,
+    "hash": "591bdab1ba0a2456f8fd8132cbffd7ed"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\FlipTool.js": {
+    "mtime": 1778070950.71045,
+    "hash": "959c6fe78aabd923deb24ab2338d2ad3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\LineTool.js": {
+    "mtime": 1778070950.71045,
+    "hash": "4a6ce6019b5a3948f5f61fd341af06db"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\MirrorTool.js": {
+    "mtime": 1778070950.71045,
+    "hash": "f54a8c12ec8a6ee387bf216f23aab432"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\MoveTool.js": {
+    "mtime": 1778070950.7118433,
+    "hash": "8c916a32e404a935cba595200a158b88"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\OffsetTool.js": {
+    "mtime": 1778070950.7129302,
+    "hash": "0c2102df03a6bb401dc60f65c7fe41b5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\RectTool.js": {
+    "mtime": 1778070950.7140298,
+    "hash": "ed06807c41af94040583daa5c215a101"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\RotateTool.js": {
+    "mtime": 1778070950.7155614,
+    "hash": "5af02a826530df9499e54a4a2a7b8d11"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\shared\\copyPreviewUtils.js": {
+    "mtime": 1778070950.7155614,
+    "hash": "0e717be6c914b75bacbe4ff6932dd5b7"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\shared\\filletGeometry.js": {
+    "mtime": 1778070950.7155614,
+    "hash": "cbd8ac6c2f2dd6ca70c233c4ddf55ecc"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\shared\\segmentSanitizer.js": {
+    "mtime": 1778070950.717082,
+    "hash": "05920d983ef90cf98ff003793518b290"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\shared\\selectionUtils.js": {
+    "mtime": 1778070950.717606,
+    "hash": "9ac2a160537cb6e6f6a50d59cb70cdca"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\tools\\shared\\transformGeometry.js": {
+    "mtime": 1778070950.717606,
+    "hash": "484981635eb7a15b06112e1a8dbdf82a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\editor\\transforms\\TransformCommands.js": {
+    "mtime": 1778070950.717606,
+    "hash": "58ef9a8f16ec13928f56f7e395c6559f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\export\\ExportModule.js": {
+    "mtime": 1778070950.7201676,
+    "hash": "7818e4ba395c4c19f3fa4456d772a4f6"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\export\\STLExporter.js": {
+    "mtime": 1778070950.7201676,
+    "hash": "2df047bdc86182eb0bc9c788af5b22fe"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\interaction\\InteractionManager.js": {
+    "mtime": 1778070950.7226868,
+    "hash": "3fa6ed00f6c82b4fb874f22fb29b2aaf"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\BitDataHelper.js": {
+    "mtime": 1778070950.7226868,
+    "hash": "3d15854175144fe7c6447a4d53a42fdb"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\BooleanOperationStrategy.js": {
+    "mtime": 1778070950.7236936,
+    "hash": "add390605dd2bfd824ea5657e8f82569"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\CustomOffsetProcessor.js": {
+    "mtime": 1778073884.9217937,
+    "hash": "f6e26a025eff1dbbbf3684fa758fecf0"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\NativeSelfIntersectionResolver.js": {
+    "mtime": 1778070950.7236936,
+    "hash": "e4ecfc9179d92a440a69a676a2034b62"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\OffsetCapper.js": {
+    "mtime": 1778070950.7236936,
+    "hash": "946bd34603f24686116153ada24faf87"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\OffsetContourBuilder.js": {
+    "mtime": 1778070950.7250946,
+    "hash": "4088ea40fb25a7a66d4b1c95841073c4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\OffsetCurveEvaluator.js": {
+    "mtime": 1778070950.7250946,
+    "hash": "5dcb84f8faaf3b3890f096b9d9bf34d5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\OffsetEngine.js": {
+    "mtime": 1778070950.7264683,
+    "hash": "d2f95f0906381ea0da1f16771b8a97da"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\OffsetRules.js": {
+    "mtime": 1778070950.7264683,
+    "hash": "2826cc5d3c61d992caa46a06ee59c19f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\OffsetTrimmer.js": {
+    "mtime": 1778070950.7264683,
+    "hash": "31e03c9655817ea33d9118141d730b5b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\PaperBooleanProcessor.js": {
+    "mtime": 1778070950.7264683,
+    "hash": "888636edbc8fabaca6c3954f12aaf26b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\UpdatePipeline.js": {
+    "mtime": 1778070950.7278464,
+    "hash": "f2434e1e2381c801e571aa319bd627a4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\panel\\BitsManager.js": {
+    "mtime": 1778070950.728875,
+    "hash": "0f446e00d8090b96b8030bb55c88a31f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\panel\\BitsTableManager.js": {
+    "mtime": 1778070950.7297237,
+    "hash": "90ca3f68b642b31afa7f1764be393b6c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\panel\\PanelManager.js": {
+    "mtime": 1778070950.730388,
+    "hash": "30025062255ae95e0cf5fa5ea109fee8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\panel\\PathEditor.js": {
+    "mtime": 1778070950.7328975,
+    "hash": "32e2bbb33cfd4106e1985d0cce1eaf44"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\scheduling\\CSGScheduler.js": {
+    "mtime": 1778070950.7328975,
+    "hash": "d32ab8df2a47f46ceb80854243a0154c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\selection\\SelectionManager.js": {
+    "mtime": 1778070950.7365327,
+    "hash": "505f3e031704e9ba0403a592534ba1ba"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\shared\\config\\generateCSS.js": {
+    "mtime": 1778070950.7365327,
+    "hash": "08eabaa319c9d2975184e1152bb07c54"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\shared\\theme\\ThemeManager.js": {
+    "mtime": 1778070950.7375393,
+    "hash": "c9cd5f79975e6ac6ffd2a5ef5f53b9ad"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\state\\AppState.js": {
+    "mtime": 1778070950.7385485,
+    "hash": "910c87d11b772ffd65d9cf8dffce0df8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\BitGroupManager.js": {
+    "mtime": 1778070950.7395473,
+    "hash": "bd79635aee97a83e40852da648c023db"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\BREPVisualizer.js": {
+    "mtime": 1778070950.7395473,
+    "hash": "afe4565078fcfd1a1c959cef2779165b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\CSGEngine.js": {
+    "mtime": 1778070950.7406096,
+    "hash": "b86bfbef7e9c38e5b8ec06f46896f6ef"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\Edge.js": {
+    "mtime": 1778070950.7416084,
+    "hash": "8ababf947f034a9be4df2323847a8291"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\ExtrusionBuilder.js": {
+    "mtime": 1778139167.2326005,
+    "hash": "98c3befbf29c18b3ef57261870d2dcb5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\Face.js": {
+    "mtime": 1778070950.7428825,
+    "hash": "fef3362cb344f388ad30f73241e1432c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\FaceIDGenerator.js": {
+    "mtime": 1778070950.743888,
+    "hash": "8cd0103eda08867cfe0fd5780c585f29"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\ManifoldCSG.js": {
+    "mtime": 1778070950.743888,
+    "hash": "d7cdd08fc8d3b0661459c90e9433780f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\MaterialManager.js": {
+    "mtime": 1778070950.7448883,
+    "hash": "01e522cd0bd5714bd06d45aa6db5fa28"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\MeshAnalysisUtils.js": {
+    "mtime": 1778070950.7460537,
+    "hash": "76d51eadc063eb2e4c85e51fc48f3019"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\SceneManager.js": {
+    "mtime": 1778070950.7470627,
+    "hash": "26c669c1111a4fc027888d94c41bbca4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\SelectionManager.js": {
+    "mtime": 1778070950.7470627,
+    "hash": "51eb4331acee331ce1c99f9da5c2cc46"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\SemanticEdgesGeometry.js": {
+    "mtime": 1778070950.7470627,
+    "hash": "a24e97029620ac58fba8b6f5e41d7aa8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\ThreeModule.js": {
+    "mtime": 1778070950.7485166,
+    "hash": "928aa4e059ad86cac50e6bba1e87a03b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\Vertex.js": {
+    "mtime": 1778070950.749022,
+    "hash": "97d6c6d6feb540885dd3070422a5217a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\ViewCubeGizmo.js": {
+    "mtime": 1778070950.749546,
+    "hash": "3fd93f662efbcb5b492c904557163814"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\utils\\MeshEdgeMatcher.js": {
+    "mtime": 1778070950.7500598,
+    "hash": "ff848af0556e3df078b080341aa34808"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\EditorPanelLayout.js": {
+    "mtime": 1778070950.7511044,
+    "hash": "55c6af91cf658551f42048bf6de6b9d8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\IconButton.js": {
+    "mtime": 1778070950.7511044,
+    "hash": "b5f4c56a813da6715c0a4153158c29c9"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\IconLoader.js": {
+    "mtime": 1778081490.1240523,
+    "hash": "73bc05a5fd0333ebc65887594590db45"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\panel-event-helpers.js": {
+    "mtime": 1778070950.753777,
+    "hash": "57c0cb801beea7c7fb4488eefcf3a69a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\PanelDOMBuilder.js": {
+    "mtime": 1778070950.7526417,
+    "hash": "3c01b537d1663bd53869f03ea92f3409"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\PanelDragManager.js": {
+    "mtime": 1778070950.7526417,
+    "hash": "d7325a230fad11de5027b0bacdaf8b2c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\PanelResizeManager.js": {
+    "mtime": 1778070950.7526417,
+    "hash": "a3ba9bc231f5c2bb7895f4f5b46213bc"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\pressEvents.js": {
+    "mtime": 1778070950.753777,
+    "hash": "447af447a2e1d051f2052435da3b129d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\ThemeToggleInit.js": {
+    "mtime": 1778070950.753777,
+    "hash": "b0b3eb66b08348d93de1dfb7df82fc6b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\ui\\UIModule.js": {
+    "mtime": 1778070950.753777,
+    "hash": "1865b8435be920b599617d9eeb4d1fda"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\arcApproximation.js": {
+    "mtime": 1778070950.7557776,
+    "hash": "5f7d0d306237a96e42198f262d82de5b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\ColorUtils.js": {
+    "mtime": 1778070950.75478,
+    "hash": "cfaddfba70daf5c163bbfc4c34afac43"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\empty-shim.js": {
+    "mtime": 1778070950.7557776,
+    "hash": "130c14065b10c96aea53acdfad0af8ae"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\fillet.js": {
+    "mtime": 1778070950.756785,
+    "hash": "e82feed3197fe39c5fb9752f1f585633"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\formulaPolicy.js": {
+    "mtime": 1778070950.7577763,
+    "hash": "5c4ececc4dfcb72dde27e9f259017864"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\meshRepair.js": {
+    "mtime": 1778070950.7577763,
+    "hash": "aa78a10ef0dde274433caa6f041c954f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\offsetSeries.js": {
+    "mtime": 1778070950.7587795,
+    "hash": "ccbdae91e326f222f99dfc2a0c611acd"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\utils.js": {
+    "mtime": 1778070950.759297,
+    "hash": "73b96abede8aeb1fe6468920bafee6a3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\validation.js": {
+    "mtime": 1778070950.7603106,
+    "hash": "400e05b35b50dc0f281299a088bbcaa3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\variableTokens.js": {
+    "mtime": 1778070950.7603106,
+    "hash": "c9789ea2b5e416a35036a3e182b119d3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\utils\\yPolicy.js": {
+    "mtime": 1778070950.761305,
+    "hash": "26952d4eaa0fc58a88439f950d082113"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\custom-offset-trim-default.spec.js": {
+    "mtime": 1778070950.7783518,
+    "hash": "1c8157b8bc725891a598cfdb7516767f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\diag-near-degenerate.mjs": {
+    "mtime": 1778070950.7783518,
+    "hash": "35d140c40951127841859a47c2dc6f1d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\editor-keyboard-shortcuts.spec.js": {
+    "mtime": 1778070950.779352,
+    "hash": "ff2cb580639e13f3988dc864e131acf3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\f3-functional-qa.spec.js": {
+    "mtime": 1778070950.7798645,
+    "hash": "ebddb57d6680d0a3e8519702177a8318"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-center-stability.spec.js": {
+    "mtime": 1778070950.7803717,
+    "hash": "b60c232db1ea14f4111fb1113dacb374"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-degenerate-contour.spec.js": {
+    "mtime": 1778070950.7824113,
+    "hash": "3d7ff9e6385001120eb32fc4e0506886"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-degenerate-outward.spec.js": {
+    "mtime": 1778070950.7829354,
+    "hash": "3676adb53ae8176f6d8f82ab0ff2b054"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-degenerate-radius3.spec.js": {
+    "mtime": 1778070950.7829354,
+    "hash": "b1bbb8bd8dcfd0ecbc5ca7b10bce0554"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-degeneration-gap-bridge.spec.js": {
+    "mtime": 1778070950.783941,
+    "hash": "c11cebe4336df6e62852961b0b90e937"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-direct.spec.js": {
+    "mtime": 1778070950.7844477,
+    "hash": "cd802b11b002ea131f6b63b2ec850b84"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-large-flag.spec.js": {
+    "mtime": 1778070950.7844477,
+    "hash": "52bc96f2fe00bfeb50357813322efb15"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-arc-roundtrip.spec.js": {
+    "mtime": 1778070950.7844477,
+    "hash": "6d29ad429db62b550bae6bce85646ce9"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-build-contour-debug.spec.js": {
+    "mtime": 1778070950.7844477,
+    "hash": "a610cd2c74e9bb87d3d0512050954ecb"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-ccw-cw-contours.spec.js": {
+    "mtime": 1778070950.785976,
+    "hash": "0915831413abe65f0762130ab9c6253c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-closed-open-selfintersect-loop-regression.spec.js": {
+    "mtime": 1778070950.785976,
+    "hash": "ab5a0048c0cc584f93371c9977f6b388"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-closed-self-intersection-split.spec.js": {
+    "mtime": 1778070950.785976,
+    "hash": "1545845911cf102e2146657f1478c6e8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-closed-vs-open-u-bridge.spec.js": {
+    "mtime": 1778070950.7869842,
+    "hash": "dd3ca93429fca58fb687611874e059b1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-contour10-post-d13-continuation.spec.js": {
+    "mtime": 1778070950.7869842,
+    "hash": "4099d51a25578fafe1008a817f54f3e1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-converging-line-arc.spec.js": {
+    "mtime": 1778070950.7879872,
+    "hash": "51b752f91b8a105ead202bbbc59ebf9b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-cursor-direction-invariance.spec.js": {
+    "mtime": 1778070950.7879872,
+    "hash": "58433ebbb6071f7f56c6791a15a15f4c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-cursor-side.spec.js": {
+    "mtime": 1778070950.7879872,
+    "hash": "b1b289c83f03d901f1ce9417fc8230a8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-d13-collapse-continuation.spec.js": {
+    "mtime": 1778070950.7889874,
+    "hash": "7716e409b871e250972a4c89661c4455"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-engine-parse.spec.js": {
+    "mtime": 1778070950.789497,
+    "hash": "6d6de7d543611010088777b23b5099fb"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-engine-stitch-parallelism.spec.js": {
+    "mtime": 1778070950.789497,
+    "hash": "efd3f7ad536ad5738e6ac1333336e4ab"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-invariants.spec.js": {
+    "mtime": 1778070950.7905033,
+    "hash": "4754b2232fdf4f16d3cb588e6d2ad33c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-inward-degeneration-trim.spec.js": {
+    "mtime": 1778070950.7905033,
+    "hash": "a682b960f40cb704f8b11a0f24b8f2c3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-line-near-degenerate-inversion.spec.js": {
+    "mtime": 1778070950.7905033,
+    "hash": "93953035c48533dac801e6d2403f5c3c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-minimal-test.spec.js": {
+    "mtime": 1778070950.7915063,
+    "hash": "8af0607b66202c04e7e8e9825a888b1a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-modes.spec.js": {
+    "mtime": 1778070950.7915063,
+    "hash": "eaed42f538b02797360970e4f0405fd6"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-open-line-arc-bridge-regression.spec.js": {
+    "mtime": 1778070950.7925103,
+    "hash": "928178cf9dc33226c978e0d868850f5d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-open-line-arc-reverse-shape-invariance.spec.js": {
+    "mtime": 1778070950.7925103,
+    "hash": "31041b2d99b4dcc350495514bfb8545b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-parse-debug.spec.js": {
+    "mtime": 1778070950.7935083,
+    "hash": "93856a4d97805559c790b96a712c74e2"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-rule0-parallelism.spec.js": {
+    "mtime": 1778070950.7935083,
+    "hash": "614ea7fbe6488dd537c51be1037a8627"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-rule1-arc-serialization.spec.js": {
+    "mtime": 1778070950.7945063,
+    "hash": "81dca3abaacc6ccfde7ff12725952804"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-rule3-ubridge.spec.js": {
+    "mtime": 1778070950.7945063,
+    "hash": "8565e68584d17ac9fa60ea3a237a4841"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-rules.spec.js": {
+    "mtime": 1778070950.7955086,
+    "hash": "d601e3fedf0554e2e3606e6afe807a55"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-sequential-degeneration.spec.js": {
+    "mtime": 1778070950.7955086,
+    "hash": "e938ca35018f76d541fff54783d6d4b1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-topology.spec.js": {
+    "mtime": 1778070950.7970195,
+    "hash": "27f2f89a782699cd845d3ec984ebbc8d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-user-arc-grow.spec.js": {
+    "mtime": 1778070950.7975447,
+    "hash": "4b3550c2adef3451eb17f542d19f1a2a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset-user-example.spec.js": {
+    "mtime": 1778070950.7980697,
+    "hash": "522d2ac0c7ac1501b6d607223ee7770a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\parent-contour-id-null-safety.spec.js": {
+    "mtime": 1778070950.8015954,
+    "hash": "cb1231ef530fd13e508c69ec5fa88dac"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\path-editor-add-element-preview-fallback.spec.js": {
+    "mtime": 1778070950.8015954,
+    "hash": "76f0029b9600ea334bff7c6ad574fdb7"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\path-editor-plain-paste.spec.js": {
+    "mtime": 1778070950.8025968,
+    "hash": "b2dc7b7b34682ab4562065096cf50505"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\path-editor-shape-inplace-transforms.spec.js": {
+    "mtime": 1778070950.8025968,
+    "hash": "11da0a7bc420393208bbf3724306bcb1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\rt-modifier-consistency.spec.js": {
+    "mtime": 1778070950.8025968,
+    "hash": "d52d5390efadb09088206c06801edf5d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\rt-modifier-edit-entry.spec.js": {
+    "mtime": 1778070950.8035989,
+    "hash": "6de3864cc2652c360c36ce0458c0eec5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\rt-modifier-sync-logic.spec.js": {
+    "mtime": 1778070950.8035989,
+    "hash": "1f2b4ec41ff191ba18af863c119b42a2"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\setup.js": {
+    "mtime": 1778070950.8045986,
+    "hash": "3cfe15c321ee19acf50eb29ce28412b5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\shape-not-deleted-on-modifier-edit.spec.js": {
+    "mtime": 1778070950.8045986,
+    "hash": "67c003d94b4bea7b5fcc76ba3948de68"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\shape-structure-preservation.spec.js": {
+    "mtime": 1778070950.8045986,
+    "hash": "827eaccea7aa5910ec295c6d0a345536"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\smoke.spec.js": {
+    "mtime": 1778070950.805599,
+    "hash": "dcbd0db8a50bd0bbdc329361319fab6f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\task-6-offsetengine-qa.spec.js": {
+    "mtime": 1778070950.805599,
+    "hash": "2514626a88c2c2f61a73219cf3220d77"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\verify-gap-bridge.js": {
+    "mtime": 1778070950.806596,
+    "hash": "09774d9dbef463cabaa5172485fc1865"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\_debug_offset.spec.js": {
+    "mtime": 1778070950.7773514,
+    "hash": "e6f185128838feeb2d4a001428ef693d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__diag_app_path.spec.js": {
+    "mtime": 1778070950.7648864,
+    "hash": "baad6bb05dd036cdfbde0b10f1bea406"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__diag_d15_geometry.spec.js": {
+    "mtime": 1778070950.76628,
+    "hash": "4822059c447a0ee576a7aedfcf002a31"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__diag_d2.mjs": {
+    "mtime": 1778070950.76628,
+    "hash": "aac7d443fad9bc3cbf31cbdbfc160caf"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__diag_offset.mjs": {
+    "mtime": 1778070950.76628,
+    "hash": "15928a69e4256abd62038b7c5563ab4d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__diag_outward.mjs": {
+    "mtime": 1778070950.7677896,
+    "hash": "78a8dc8984957b3251e8768aba74214a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__diag_outward.spec.js": {
+    "mtime": 1778070950.7677896,
+    "hash": "d5f517aa57107f112c3fc9d49fd69d43"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__diag_outward2.spec.js": {
+    "mtime": 1778070950.7693353,
+    "hash": "239556b436e700a9054c8c60b6b2a27b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__fix_open_contour.js": {
+    "mtime": 1778070950.7693353,
+    "hash": "526455371313cc54634b84c8e4c52b1c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__patch_step45.mjs": {
+    "mtime": 1778070950.7703533,
+    "hash": "05a84f340a5507d5bac48789ba3bdc85"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__probe73.mjs": {
+    "mtime": 1778070950.7703533,
+    "hash": "873dda1c8601d9db3ade780344e41402"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__probe_close70.mjs": {
+    "mtime": 1778070950.7713535,
+    "hash": "534048301ffe4074fb97fa969d259ba8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__probe_contour11.mjs": {
+    "mtime": 1778070950.7713535,
+    "hash": "b4f7e55c8747720e209c4694dd7bd990"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__probe_d70.mjs": {
+    "mtime": 1778070950.7723448,
+    "hash": "3115fd525f6147463f06c7adbac22528"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__probe_inward.spec.js": {
+    "mtime": 1778070950.7733548,
+    "hash": "eb6714a86d97810cb494e49cc3730d7e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__probe_large70.mjs": {
+    "mtime": 1778070950.7733548,
+    "hash": "9ba64515e7217296958ffa3f9efd7b43"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__probe_offset70.mjs": {
+    "mtime": 1778070950.7743516,
+    "hash": "b89e246076eeb685259d65b0e9d69959"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__tmp_debug_closedsplit.spec.js": {
+    "mtime": 1778070950.7743516,
+    "hash": "793494c5ad820e5839426f2d24dfe18d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__tmp_diag_issues.spec.js": {
+    "mtime": 1778070950.7753458,
+    "hash": "37c494c312833fb998afe33c7fbb6d35"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__tmp_path4_trim.mjs": {
+    "mtime": 1778070950.7753458,
+    "hash": "90ec10f1b0794767417118e40c6f46b3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__tmp_probe_contour10_13_14.spec.js": {
+    "mtime": 1778070950.7753458,
+    "hash": "20b325e91077f48fec8f89dd63d8b089"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__tmp_probe_contour46_to_47.spec.js": {
+    "mtime": 1778070950.7763507,
+    "hash": "e3682b67b6f1ad72acd32e6f2a147c16"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\__tmp_probe_lineflip.mjs": {
+    "mtime": 1778070950.7773514,
+    "hash": "e744ea0fb230fc33fdbcd425c73d4452"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\helpers\\topology-helpers.js": {
+    "mtime": 1778070950.7803717,
+    "hash": "4f00c229b32a8498d0c08bd5ce9ce5e4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset\\arc-degenerate-tiny-sweep.spec.js": {
+    "mtime": 1778070950.7980697,
+    "hash": "b5376a564503ba22d5de52e5821afa3b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset\\debug_angles.spec.js": {
+    "mtime": 1778070950.7980697,
+    "hash": "638a9897fda83ad974be5a8384d9172e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset\\debug_canonical.spec.js": {
+    "mtime": 1778070950.7995892,
+    "hash": "f47da2d384a0dfad3f132663f7840f21"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset\\debug_canonical2.spec.js": {
+    "mtime": 1778070950.7995892,
+    "hash": "63d104f8957b5289752ace9535067f40"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset\\debug_canonical3.spec.js": {
+    "mtime": 1778070950.7995892,
+    "hash": "a3873d520596ef51c5022db8437938a4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset\\debug_case_a.spec.js": {
+    "mtime": 1778070950.8005936,
+    "hash": "ce1fd3e2df52bb868221be2e5012eacc"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\tests\\offset\\debug_offset_arc.spec.js": {
+    "mtime": 1778070950.8005936,
+    "hash": "f462aaa6e08390dd4c5e5e427f4c505c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\AGENT.MD": {
+    "mtime": 1778070950.6277037,
+    "hash": "4e57346ff1855a62f8adbc83a0cd3ed0"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\AGENTS.md": {
+    "mtime": 1778070950.629057,
+    "hash": "96e44f4bd6f7b5ad85fa235069d1ddc2"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\CLAUDE.md": {
+    "mtime": 1778070950.6295779,
+    "hash": "116738ec2658a686da1bd7e6c90b64d7"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\DESIGN.md": {
+    "mtime": 1778070950.631596,
+    "hash": "014789f82b259c10607eb3793498b6b5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\index.html": {
+    "mtime": 1778070950.6892645,
+    "hash": "80bd56fab8f8db2752572843a813b0a3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\mempalace.yaml": {
+    "mtime": 1778070950.6892645,
+    "hash": "370b0ce8b8d75bdff90bd26a78470610"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\qmd.yaml": {
+    "mtime": 1778070950.691495,
+    "hash": "c4a129694a087cc7c913e3df0480bc9d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\TODO.MD": {
+    "mtime": 1778087795.0878406,
+    "hash": "6ce0806a1b166a493c25e056da0d377d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\WIKI.md": {
+    "mtime": 1778070950.6326034,
+    "hash": "e9eb598a940961f68f9a0278dcec9d63"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\all-icons-gallery.html": {
+    "mtime": 1778070950.6382456,
+    "hash": "b96557dcc1b09f77f0d746a34f276d3d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\preview.html": {
+    "mtime": 1778070950.6686735,
+    "hash": "c87cf2682bdb92550269d1d030f9c298"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\README.md": {
+    "mtime": 1778070950.637124,
+    "hash": "2fc1503afbd7a34d2a48257bea281fac"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\preview.html": {
+    "mtime": 1778070950.663272,
+    "hash": "6d4fb4b8fa5bdbb672d206be22fcb074"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\API_REFERENCE.md": {
+    "mtime": 1778070950.672691,
+    "hash": "3d56c6ab6207e4f245f8ea20ef3688b4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\ARCHITECTURE.md": {
+    "mtime": 1778070950.672691,
+    "hash": "2634cecc4ef1b463f7b561b255c3c596"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\ARC_APPROXIMATION_2D_3D.md": {
+    "mtime": 1778070950.672691,
+    "hash": "e0e55d76399cc5b9feadb38614ade3be"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\CHANGELOG.md": {
+    "mtime": 1778070950.6736896,
+    "hash": "7f15a963fac00eb2d39f28d39af9f210"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\CHANGES.md": {
+    "mtime": 1778070950.6736896,
+    "hash": "db823bd16a45f7279afaecaa8019eb6d"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\CSG_IMPLEMENTATION.md": {
+    "mtime": 1778070950.6746893,
+    "hash": "18270101a5124e5e89e66532b0c77f49"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\DEVELOPMENT_CHECKLIST.md": {
+    "mtime": 1778070950.6746893,
+    "hash": "8fbd7f784b4764b8d8a95680b2da338e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\DOCUMENTATION_SUMMARY.md": {
+    "mtime": 1778070950.675689,
+    "hash": "41bca65d8a593db4172c790b30260494"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\EDITORPANELLAYOUT_REFACTOR.md": {
+    "mtime": 1778070950.675689,
+    "hash": "343ca26dfb35f548db51d54cd3cae994"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\INTEGRATION_GUIDE.md": {
+    "mtime": 1778070950.675689,
+    "hash": "f965f2e5ee90b1c5c64b379cda6d3322"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\MESH_REPAIR_GUIDE.md": {
+    "mtime": 1778070950.675689,
+    "hash": "5e0053fc82e8cd8db6624be54073add5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\MESH_REPAIR_IMPLEMENTATION.md": {
+    "mtime": 1778070950.675689,
+    "hash": "5b60025ad9be4af8bd590a88893f27f1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\MESH_REPAIR_QUICK_REF.md": {
+    "mtime": 1778070950.6771953,
+    "hash": "5dc508db6dc0d114b4b569dbf78210c1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\offset-processor-hardening-summary.md": {
+    "mtime": 1778070950.681207,
+    "hash": "99558055654353ff88430c30db8d735f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\OFFSET_ENGINE_REFACTOR_PLAN.md": {
+    "mtime": 1778070950.6771953,
+    "hash": "2a80cc1c2f6e469e833c29e3db16714e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\PROJECT_COMPLETION_REPORT.md": {
+    "mtime": 1778070950.6782048,
+    "hash": "be47b62d8e5f48513862b699519c47c1"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\README.md": {
+    "mtime": 1778070950.6782048,
+    "hash": "c05f1d12a305fbdf797cd75de920a6ca"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\RT_MODIFIER_FIX.md": {
+    "mtime": 1778070950.6782048,
+    "hash": "a084923026fc60d8806e21269b4ec0ce"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\docs\\TESTING_GUIDE.md": {
+    "mtime": 1778070950.6797159,
+    "hash": "1e1adee2faf7ca81842d3890d390aaaa"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\bits.svg": {
+    "mtime": 1778070950.6382456,
+    "hash": "5821fae50d866359300890c997b2304e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\clear.svg": {
+    "mtime": 1778070950.639755,
+    "hash": "784ba71beda4b2e39c852b737760e9c2"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\export-dxf.svg": {
+    "mtime": 1778070950.6657944,
+    "hash": "b5e9a3fe0fa86c0cc8c64ede6f9f908a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\fit-scale.svg": {
+    "mtime": 1778070950.6657944,
+    "hash": "519cbbaf1090bfe18f2c083fed6a7bc8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\grid.svg": {
+    "mtime": 1778070950.6657944,
+    "hash": "151e3638c370f49053492e8b0e3bd1f6"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\load.svg": {
+    "mtime": 1778070950.6673005,
+    "hash": "6c65c156f1d7a3d3cc44391196ed4e77"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\part.svg": {
+    "mtime": 1778070950.6673005,
+    "hash": "fcf3597249b9cb0602eb7ad6351e71b3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\save-as.svg": {
+    "mtime": 1778070950.6686735,
+    "hash": "7dcaef83f6e2955c026dded227b7faa8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\save.svg": {
+    "mtime": 1778070950.6696818,
+    "hash": "a5b80a5cf09a42bd1f94ce3e416bbb6c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\shank.svg": {
+    "mtime": 1778070950.6696818,
+    "hash": "d0ff95a765e422e3c0583575c1fd69a7"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\zoom-in.svg": {
+    "mtime": 1778070950.6706886,
+    "hash": "158b7b26f037bc91945a5a794c10be3b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\zoom-out.svg": {
+    "mtime": 1778070950.6706886,
+    "hash": "2ada8635f51031ce9f6514a49ec8056f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\zoom-selected.svg": {
+    "mtime": 1778070950.6706886,
+    "hash": "068db91079e28b3d54d29699695a1294"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\bits.svg": {
+    "mtime": 1778070950.639755,
+    "hash": "5821fae50d866359300890c997b2304e"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\clear.svg": {
+    "mtime": 1778070950.639755,
+    "hash": "784ba71beda4b2e39c852b737760e9c2"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\export-dxf.svg": {
+    "mtime": 1778070950.649642,
+    "hash": "b5e9a3fe0fa86c0cc8c64ede6f9f908a"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\fit-scale.svg": {
+    "mtime": 1778070950.650161,
+    "hash": "519cbbaf1090bfe18f2c083fed6a7bc8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\grid.svg": {
+    "mtime": 1778070950.650161,
+    "hash": "151e3638c370f49053492e8b0e3bd1f6"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\load.svg": {
+    "mtime": 1778070950.650681,
+    "hash": "6c65c156f1d7a3d3cc44391196ed4e77"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\part.svg": {
+    "mtime": 1778070950.6521976,
+    "hash": "fcf3597249b9cb0602eb7ad6351e71b3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\save-as.svg": {
+    "mtime": 1778070950.6521976,
+    "hash": "7dcaef83f6e2955c026dded227b7faa8"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\save.svg": {
+    "mtime": 1778070950.653205,
+    "hash": "a5b80a5cf09a42bd1f94ce3e416bbb6c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\shank.svg": {
+    "mtime": 1778070950.6542125,
+    "hash": "d0ff95a765e422e3c0583575c1fd69a7"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\zoom-in.svg": {
+    "mtime": 1778070950.6542125,
+    "hash": "158b7b26f037bc91945a5a794c10be3b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\zoom-out.svg": {
+    "mtime": 1778070950.6552055,
+    "hash": "2ada8635f51031ce9f6514a49ec8056f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\zoom-selected.svg": {
+    "mtime": 1778070950.6552055,
+    "hash": "068db91079e28b3d54d29699695a1294"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\arc.svg": {
+    "mtime": 1778083801.9658432,
+    "hash": "eec4f2e3a7bf89133719cfd61f3485e6"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\aux-line.svg": {
+    "mtime": 1778070950.6412733,
+    "hash": "d8794a21e2c5358cbfd3b5761e176c7c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\bool.svg": {
+    "mtime": 1778070950.6412733,
+    "hash": "08873b4f34c9409511500460e5f85d19"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\chamfer.svg": {
+    "mtime": 1778085439.5690472,
+    "hash": "07177d99259bc5d22ce6cd247cbbe08f"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\circle.svg": {
+    "mtime": 1778083877.0355246,
+    "hash": "27f4763b317ecfe640506a1014ee08e4"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\clipper-offset.svg": {
+    "mtime": 1778070950.6422808,
+    "hash": "9ce04ab35ff8113508e0d8bf6dfd2597"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\close.svg": {
+    "mtime": 1778070950.6422808,
+    "hash": "51626a829759e318620f4498bce2e577"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\cursor.svg": {
+    "mtime": 1778084158.8373027,
+    "hash": "d3c8f95653d59211d32d0f68d3a4da07"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\ellipse.svg": {
+    "mtime": 1778083925.5851967,
+    "hash": "05b5a4649f703091ddc8749b5314a4a6"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\explode.svg": {
+    "mtime": 1778070950.6432796,
+    "hash": "b7c2490cbea11cf361d09b2e3bfa84d5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\extend.svg": {
+    "mtime": 1778070950.6432796,
+    "hash": "99332542bdf769532fafb3b7b712b300"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\fillet.svg": {
+    "mtime": 1778085377.5769765,
+    "hash": "6ddf7b6e0687c9f972ee88f543226e41"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\flip.svg": {
+    "mtime": 1778070950.645281,
+    "hash": "9aee20df8c3b7f9fbc4104033de7c777"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\group.svg": {
+    "mtime": 1778070950.645281,
+    "hash": "34fb05cb1047d260c16b594353da1a41"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\join.svg": {
+    "mtime": 1778070950.6466184,
+    "hash": "3c271c82757718316fc4e5a3c94eb495"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\line.svg": {
+    "mtime": 1778082919.613578,
+    "hash": "43607f1b90a16ce58f6c1e6187960e63"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\mirror.svg": {
+    "mtime": 1778081967.128733,
+    "hash": "69a8911986680fdfbacff5a4bc0dab26"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\move.svg": {
+    "mtime": 1778070950.6476247,
+    "hash": "f7cc0eaccbdf6c953cf8687358904180"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\offset.svg": {
+    "mtime": 1778070950.6476247,
+    "hash": "1577c997343b6e34f36c644ec37f6352"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\rect.svg": {
+    "mtime": 1778084025.3195813,
+    "hash": "3016ac81bf37d309fbc3acc122ae0dc3"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\rotate.svg": {
+    "mtime": 1778070950.6486247,
+    "hash": "c94fde2c8b3bf8d3ab12423e922df313"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\default\\editor\\trim.svg": {
+    "mtime": 1778070950.6486247,
+    "hash": "2206657dff079e1a4e73eb0c17bdd9ba"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\arc.svg": {
+    "mtime": 1778070950.6562054,
+    "hash": "81d51df5cfa3ce8d67f67b820ebfe20c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\aux-line.svg": {
+    "mtime": 1778070950.6562054,
+    "hash": "d8794a21e2c5358cbfd3b5761e176c7c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\bool.svg": {
+    "mtime": 1778070950.657206,
+    "hash": "08873b4f34c9409511500460e5f85d19"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\chamfer.svg": {
+    "mtime": 1778070950.657206,
+    "hash": "00951e4bb785c12ab289bc4d72bd82e6"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\circle.svg": {
+    "mtime": 1778070950.658206,
+    "hash": "88f077297bed2de5fc024b4586d52a44"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\clipper-offset.svg": {
+    "mtime": 1778070950.658206,
+    "hash": "9ce04ab35ff8113508e0d8bf6dfd2597"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\close.svg": {
+    "mtime": 1778070950.659214,
+    "hash": "51626a829759e318620f4498bce2e577"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\cursor.svg": {
+    "mtime": 1778070950.659214,
+    "hash": "d03156a3f0569df58f45678fa7a0b4ee"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\ellipse.svg": {
+    "mtime": 1778070950.6597197,
+    "hash": "5f2006662b0394b40387c89a5288057c"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\explode.svg": {
+    "mtime": 1778070950.6597197,
+    "hash": "b7c2490cbea11cf361d09b2e3bfa84d5"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\extend.svg": {
+    "mtime": 1778070950.6597197,
+    "hash": "99332542bdf769532fafb3b7b712b300"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\fillet.svg": {
+    "mtime": 1778070950.6607268,
+    "hash": "027c11674ec9654484a71630c5a6b15b"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\flip.svg": {
+    "mtime": 1778070950.661232,
+    "hash": "9aee20df8c3b7f9fbc4104033de7c777"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\group.svg": {
+    "mtime": 1778070950.661232,
+    "hash": "34fb05cb1047d260c16b594353da1a41"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\join.svg": {
+    "mtime": 1778070950.661232,
+    "hash": "3c271c82757718316fc4e5a3c94eb495"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\line.svg": {
+    "mtime": 1778070950.661232,
+    "hash": "807de244a8bf8dc5b326045d34bbca57"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\mirror.svg": {
+    "mtime": 1778081746.708627,
+    "hash": "69a8911986680fdfbacff5a4bc0dab26"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\move.svg": {
+    "mtime": 1778070950.663272,
+    "hash": "f7cc0eaccbdf6c953cf8687358904180"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\offset.svg": {
+    "mtime": 1778070950.663272,
+    "hash": "1577c997343b6e34f36c644ec37f6352"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\rect.svg": {
+    "mtime": 1778070950.663272,
+    "hash": "e96e894cb2136f66b64e406d1e1cfd01"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\rotate.svg": {
+    "mtime": 1778070950.6647868,
+    "hash": "c94fde2c8b3bf8d3ab12423e922df313"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\assets\\icons\\editor\\trim.svg": {
+    "mtime": 1778070950.6647868,
+    "hash": "2206657dff079e1a4e73eb0c17bdd9ba"
+  }
+}

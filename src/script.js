@@ -2144,8 +2144,10 @@ function updateOffsetContours() {
         arcTolerance: ARC_APPROX_TOLERANCE, // RMS tolerance (same as DXF export)
         exportModule: exportModule, // For parseSVGPathSegments and optimizeSegmentsToArcs
         forceReverseOutput: forceReverseOutput,
-        // Main canvas should keep engine topology; Paper split is reserved for editor flow.
-        trimSelfIntersections: false,
+        // Use the same self-intersection trim behavior as the contour editor so
+        // main-canvas offsets and edit-mode preview stay consistent.
+        trimSelfIntersections: true,
+        editorLikeClosedSplit: true,
     });
 
     // Make offsetCalculator and helper functions available globally for ThreeModule
