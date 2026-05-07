@@ -36,7 +36,7 @@
     "hash": "19328569de850849df6db664d3941438"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\script.js": {
-    "mtime": 1778073884.9278247,
+    "mtime": 1778139935.5085182,
     "hash": "3949b4c6aabaad8fafc96c2f9f859823"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\app\\main.js": {
@@ -260,7 +260,7 @@
     "hash": "add390605dd2bfd824ea5657e8f82569"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\CustomOffsetProcessor.js": {
-    "mtime": 1778073884.9217937,
+    "mtime": 1778139935.5065136,
     "hash": "f6e26a025eff1dbbbf3684fa758fecf0"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\operations\\NativeSelfIntersectionResolver.js": {
@@ -352,8 +352,8 @@
     "hash": "8ababf947f034a9be4df2323847a8291"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\ExtrusionBuilder.js": {
-    "mtime": 1778139167.2326005,
-    "hash": "98c3befbf29c18b3ef57261870d2dcb5"
+    "mtime": 1778140194.082068,
+    "hash": "d040c7b449b0e4e62153e08568bae25d"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\Face.js": {
     "mtime": 1778070950.7428825,
@@ -398,6 +398,10 @@
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\ViewCubeGizmo.js": {
     "mtime": 1778070950.749546,
     "hash": "3fd93f662efbcb5b492c904557163814"
+  },
+  "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\utils\\GeometryNormalOrientation.js": {
+    "mtime": 1778140106.8612454,
+    "hash": "20aa6bcb5b37aecc6e26a01aa6cb8bee"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\src\\three\\utils\\MeshEdgeMatcher.js": {
     "mtime": 1778070950.7500598,
@@ -852,8 +856,8 @@
     "hash": "c4a129694a087cc7c913e3df0480bc9d"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\TODO.MD": {
-    "mtime": 1778087795.0878406,
-    "hash": "6ce0806a1b166a493c25e056da0d377d"
+    "mtime": 1778139840.0735466,
+    "hash": "2b434e67a569ad7464f2ca1f1a2b9bb5"
   },
   "E:\\\u0420\u0430\u0431\u043e\u0442\u0430\\Programming\\JavaScript\\Projects\\facade_section_editor\\WIKI.md": {
     "mtime": 1778070950.6326034,
