@@ -1,4 +1,5 @@
 import { addUnifiedPressListener } from "../ui/pressEvents.js";
+import SVGThemeHelper from "../shared/theme/SVGThemeHelper.js";
 
 /**
  * BitWarningsBuilder - Строит массив предупреждений для бита
@@ -92,6 +93,13 @@ class BitsTableManager {
         if (config.callbacks) {
             this.setCallbacks(config.callbacks);
         }
+
+        // Listen for theme changes to refresh SVG colors in table
+        if (typeof window !== 'undefined') {
+            window.addEventListener('themechange', () => {
+                this.refreshTableSVGColors();
+            });
+        }
     }
 
     setCallbacks(callbacks) {
@@ -103,6 +111,47 @@ class BitsTableManager {
         addUnifiedPressListener(element, (e) => {
             e.stopPropagation();
             handler(e);
+        });
+    }
+
+    /**
+     * Refresh SVG colors in bits table when theme changes
+     */
+    refreshTableSVGColors() {
+        if (!this.sheetBody) return;
+
+        // Update colors for all SVG elements in alignment buttons
+        const alignmentSVGs = this.sheetBody.querySelectorAll('svg');
+        alignmentSVGs.forEach(svg => {
+            // Find rect (background) and update its colors
+            const rect = svg.querySelector('rect');
+            if (rect) {
+                SVGThemeHelper.setThemeColors(
+                    rect,
+                    "--color-bg-surface",
+                    "--color-text-muted"
+                );
+            }
+
+            // Find lines and update their colors  
+            const lines = svg.querySelectorAll('line');
+            lines.forEach(line => {
+                // Lines can be either primary color or action accent
+                const stroke = line.getAttribute('stroke-dasharray');
+                if (stroke) {
+                    // Dashed lines are text-primary
+                    SVGThemeHelper.setStrokeFromVariable(line, "--color-text-primary");
+                } else {
+                    // Solid lines are action-accent (anchor cross)
+                    SVGThemeHelper.setStrokeFromVariable(line, "--color-action-accent");
+                }
+            });
+
+            // Find shapes (squares in alignment) and update their colors
+            const shapes = svg.querySelectorAll('rect:not([width="20"])');
+            shapes.forEach(shape => {
+                SVGThemeHelper.setFillFromVariable(shape, "--color-text-primary");
+            });
         });
     }
 
@@ -260,7 +309,8 @@ class BitsTableManager {
         const dragCell = document.createElement("td");
         dragCell.className = "drag-handle";
         dragCell.draggable = true;
-        dragCell.textContent = "☰";
+        dragCell.innerHTML =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>';
         dragCell.addEventListener("dragstart", (e) =>
             this.handleDragStart(e, row)
         );
@@ -281,10 +331,8 @@ class BitsTableManager {
         const warnings = this.generateWarnings(bit);
         if (warnings.length > 0) {
             const warningDiv = document.createElement("div");
+            warningDiv.className = "bit-warning-text";
             warningDiv.textContent = warnings.join(", ");
-            warningDiv.style.fontSize = "8px";
-            warningDiv.style.color = "#9f9f9fff";
-            warningDiv.style.marginTop = "2px";
             nameCell.appendChild(warningDiv);
         }
 
@@ -324,10 +372,7 @@ class BitsTableManager {
         const alignCell = document.createElement("td");
         const alignBtn = document.createElement("button");
         alignBtn.type = "button";
-        alignBtn.style.background = "none";
-        alignBtn.style.border = "none";
-        alignBtn.style.padding = "0";
-        alignBtn.style.cursor = "pointer";
+        alignBtn.className = "bit-action-btn";
         alignBtn.appendChild(
             this.createAlignmentButton(bit.alignment || "center")
         );
@@ -340,10 +385,7 @@ class BitsTableManager {
 
         const opCell = document.createElement("td");
         const opSelect = document.createElement("select");
-        opSelect.style.width = "100%";
-        opSelect.style.padding = "2px";
-        opSelect.style.border = "1px solid #ccc";
-        opSelect.style.borderRadius = "3px";
+        opSelect.className = "bits-table-select";
 
         const groupOperations = this.getOperationsForGroup(bit.groupName);
         const operationLabels = {
@@ -380,9 +422,7 @@ class BitsTableManager {
         colorInput.id = `bit-color-input`;
         colorInput.type = "color";
         colorInput.value = bit.color || "#cccccc";
-        colorInput.style.border = "1px solid #ccc";
-        colorInput.style.borderRadius = "3px";
-        colorInput.style.cursor = "pointer";
+        colorInput.className = "bits-table-color";
 
         colorInput.addEventListener("input", () => {
             this.callbacks.onChangeColor(bitIndex, colorInput.value);
@@ -395,8 +435,9 @@ class BitsTableManager {
         const copyBtn = document.createElement("button");
         copyBtn.type = "button";
         copyBtn.className = "bit-action-btn";
-        copyBtn.textContent = "⧉";
         copyBtn.title = "Copy bit";
+        copyBtn.innerHTML =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
         this.bindPress(copyBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onCopyBit(bitIndex);
@@ -411,8 +452,10 @@ class BitsTableManager {
         visibilityBtn.className = `bit-action-btn bit-visibility-btn${
             isVisible ? "" : " is-hidden"
         }`;
-        visibilityBtn.textContent = isVisible ? "◎" : "◉";
         visibilityBtn.title = isVisible ? "Hide bit" : "Show bit";
+        visibilityBtn.innerHTML = isVisible
+            ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>'
+            : '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><line x1="2" y1="2" x2="22" y2="22"/></svg>';
         this.bindPress(visibilityBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onToggleVisibility(bitIndex);
@@ -423,9 +466,10 @@ class BitsTableManager {
         const delCell = document.createElement("td");
         const delBtn = document.createElement("button");
         delBtn.type = "button";
-        delBtn.className = "del-btn";
-        delBtn.textContent = "✕";
+        delBtn.className = "bit-action-btn del-btn";
         delBtn.title = "Delete bit from canvas";
+        delBtn.innerHTML =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
         this.bindPress(delBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onDeleteBit(bitIndex);
@@ -456,7 +500,8 @@ class BitsTableManager {
         const dragCell = document.createElement("td");
         dragCell.className = "drag-handle";
         dragCell.draggable = true;
-        dragCell.textContent = "☰";
+        dragCell.innerHTML =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>';
         dragCell.addEventListener("dragstart", (e) =>
             this.handleDragStart(e, row)
         );
@@ -505,10 +550,7 @@ class BitsTableManager {
 
         const opCell = document.createElement("td");
         const opSelect = document.createElement("select");
-        opSelect.style.width = "100%";
-        opSelect.style.padding = "2px";
-        opSelect.style.border = "1px solid #ccc";
-        opSelect.style.borderRadius = "3px";
+        opSelect.className = "bits-table-select";
         ["top", "bottom"].forEach((value) => {
             const option = document.createElement("option");
             option.value = value;
@@ -528,9 +570,7 @@ class BitsTableManager {
         const colorInput = document.createElement("input");
         colorInput.type = "color";
         colorInput.value = lcs.color || "#ff3b3b";
-        colorInput.style.border = "1px solid #ccc";
-        colorInput.style.borderRadius = "3px";
-        colorInput.style.cursor = "pointer";
+        colorInput.className = "bits-table-color";
         colorInput.addEventListener("change", () => {
             this.callbacks.onChangeLcs(lcs.id, { color: colorInput.value });
         });
@@ -541,8 +581,9 @@ class BitsTableManager {
         const copyBtn = document.createElement("button");
         copyBtn.type = "button";
         copyBtn.className = "bit-action-btn";
-        copyBtn.textContent = "⧉";
         copyBtn.title = "Copy LCS";
+        copyBtn.innerHTML =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
         this.bindPress(copyBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onCopyLcs(lcs.id);
@@ -558,8 +599,9 @@ class BitsTableManager {
         const delBtn = document.createElement("button");
         delBtn.type = "button";
         delBtn.className = "del-btn";
-        delBtn.textContent = "✕";
         delBtn.title = "Delete LCS";
+        delBtn.innerHTML =
+            '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
         this.bindPress(delBtn, (e) => {
             e.stopPropagation();
             this.callbacks.onDeleteLcs(lcs.id);

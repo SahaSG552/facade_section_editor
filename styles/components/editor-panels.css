@@ -1,15 +1,9 @@
 /* ── EditorPanelLayout ──────────────────────────────────────────────────────
    Unified draggable / collapsible panel system used in all editors.
-   
+   Uses CSS custom properties from the DESIGN.md design token system.
+
    CSS prefix: epl-
-   Theme variables:
-     --panel-border: border color (#d0ccc8)
-     --panel-bg: panel background (#faf8f7)
-     --panel-header-bg: header background (#ece9e6)
-     --panel-title-color: title text color (#3a3835)
-     --panel-chevron-color: chevron icon color (#999, #888)
-     --panel-drop-accent: drop zone highlight (#6b7cff)
-   
+   Theme variables: all sourced from :root CSS custom properties
    ────────────────────────────────────────────────────────────────────────── */
 
 /* Layout root */
@@ -33,7 +27,7 @@
     gap: 6px;
     flex: 0 0 auto;
     min-width: 0;
-    min-height: 24px; /* allow drop on empty column */
+    min-height: 24px;
 }
 
 /* In wide mode, columns share width. */
@@ -50,9 +44,9 @@
 /* ── Panel wrapper ────────────────────────────────────────────────────────── */
 
 .epl-panel {
-    border: 1px solid var(--panel-border, #d0ccc8);
-    border-radius: 6px;
-    background: var(--panel-bg, #faf8f7);
+    border: 1px solid hsl(var(--color-border-default));
+    border-radius: var(--radius-semantic-lg, 20px);
+    background: hsl(var(--color-bg-surface));
     overflow: hidden;
     transition: opacity 0.12s;
     height: auto;
@@ -64,11 +58,11 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 5px 10px 5px 6px;
+    padding: 5px 10px 5px 8px;
     cursor: default;
     user-select: none;
-    background: var(--panel-header-bg, #ece9e6);
-    border-bottom: 1px solid var(--panel-border, #d0ccc8);
+    background: hsl(var(--color-bg-elevated));
+    border-bottom: 1px solid hsl(var(--color-border-default));
     touch-action: none;
 }
 
@@ -80,17 +74,17 @@
     width: 22px;
     height: 22px;
     flex-shrink: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-semantic-sm, 4px);
     cursor: grab;
     font-size: 14px;
-    color: var(--panel-chevron-color, #999);
+    color: hsl(var(--color-text-muted));
     transition: background 0.1s, color 0.1s;
     touch-action: none;
 }
 
 .epl-panel-drag-handle:hover {
-    background: color-mix(in srgb, #141413 10%, transparent);
-    color: var(--panel-title-color, #3a3835);
+    background: hsl(var(--color-bg-surface) / 0.6);
+    color: hsl(var(--color-text-primary));
 }
 
 .epl-panel-drag-handle:active {
@@ -101,7 +95,7 @@
     flex: 1;
     font-size: 11px;
     font-weight: 600;
-    color: var(--panel-title-color, #3a3835);
+    color: hsl(var(--color-text-primary));
     text-transform: uppercase;
     letter-spacing: 0.04em;
     cursor: pointer;
@@ -109,7 +103,7 @@
 
 .epl-panel-chevron {
     font-size: 10px;
-    color: var(--panel-chevron-color, #888);
+    color: hsl(var(--color-text-muted));
     transition: transform 0.15s;
     cursor: pointer;
 }
@@ -178,8 +172,8 @@
     transform: translate(-50%, -50%);
     width: 44px;
     height: 3px;
-    border-radius: 999px;
-    background: color-mix(in srgb, #141413 28%, #f3f0ee 72%);
+    border-radius: var(--radius-semantic-pill, 999px);
+    background: hsl(var(--color-border-default) / 0.6);
 }
 
 .epl-resize-handle:hover {
@@ -187,7 +181,7 @@
 }
 
 .epl-resize-handle:hover::before {
-    background: color-mix(in srgb, #141413 55%, #f3f0ee 45%);
+    background: hsl(var(--color-text-muted) / 0.8);
 }
 
 /* ── Drag states ─────────────────────────────────────────────────────────── */
@@ -197,27 +191,27 @@
 }
 
 .epl-panel.epl-drop-before {
-    box-shadow: 0 -3px 0 0 var(--panel-drop-accent, #6b7cff);
+    box-shadow: 0 -3px 0 0 hsl(var(--color-state-focus));
 }
 
 .epl-panel.epl-drop-after {
-    box-shadow: 0 3px 0 0 var(--panel-drop-accent, #6b7cff);
+    box-shadow: 0 3px 0 0 hsl(var(--color-state-focus));
 }
 
 .epl-col.epl-col-target {
-    background: color-mix(in srgb, var(--panel-drop-accent, #6b7cff) 8%, transparent);
-    border: 1px dashed var(--panel-drop-accent, #6b7cff);
-    border-radius: 6px;
+    background: hsl(var(--color-state-focus) / 0.08);
+    border: 1px dashed hsl(var(--color-state-focus));
+    border-radius: var(--radius-semantic-lg, 20px);
 }
 
 /* ── Drag ghost ───────────────────────────────────────────────────────────── */
 
 .epl-ghost {
     opacity: 0.55;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-    border-radius: 6px;
+    box-shadow: var(--shadow-modal, 0 24px 48px rgba(0, 0, 0, 0.08));
+    border-radius: var(--radius-semantic-lg, 20px);
     overflow: hidden;
-    border: 1px solid var(--panel-drop-accent, #6b7cff);
+    border: 1px solid hsl(var(--color-state-focus));
 }
 
 /* ── Bit editor modal integration ────────────────────────────────────────────
@@ -255,4 +249,278 @@
 .epl-panel-body #part-params,
 .epl-panel-body #operations {
     overflow: visible;
+}
+
+/* ==========================================================================
+   Operations Table — Warm Palette
+   ========================================================================== */
+#operations table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    line-height: 1.4;
+    border-radius: var(--radius-md, 8px);
+    overflow: hidden;
+    background: hsl(var(--color-bg-surface));
+}
+
+#operations thead {
+    background: hsl(var(--color-bg-elevated));
+    border-bottom: 1px solid hsl(var(--color-border-default));
+}
+
+#operations thead th {
+    padding: 5px 4px;
+    font-weight: 600;
+    color: hsl(var(--color-text-secondary));
+    white-space: nowrap;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+#operations tbody tr {
+    transition: background-color 0.15s ease;
+    border-bottom: 1px solid hsl(var(--color-border-default) / 0.5);
+}
+
+#operations tbody tr:hover {
+    background: hsl(var(--color-bg-elevated));
+}
+
+#operations tbody tr:last-child {
+    border-bottom: none;
+}
+
+#operations tbody td {
+    padding: 3px 3px;
+    text-align: center;
+    vertical-align: middle;
+    color: hsl(var(--color-text-primary));
+    font-size: 11px;
+}
+
+#operations tbody td:first-child,
+#operations thead th:first-child {
+    padding-left: 6px;
+}
+
+#operations tbody td:last-child,
+#operations thead th:last-child {
+    padding-right: 6px;
+}
+
+/* Header action buttons (Cop / Hid / Del) */
+.table-header-btn {
+    background: none;
+    border: 1px solid hsl(var(--color-border-default) / 0.6);
+    border-radius: var(--radius-sm, 4px);
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    color: hsl(var(--color-text-secondary));
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    font-family: inherit;
+}
+
+.table-header-btn:hover {
+    background: hsl(var(--color-bg-elevated));
+    color: hsl(var(--color-text-primary));
+    border-color: hsl(var(--color-border-default));
+}
+
+/* Row action buttons (copy/hide/delete) */
+.bit-action-btn {
+    background: none;
+    border: none;
+    padding: 2px 4px;
+    cursor: pointer;
+    color: hsl(var(--color-text-secondary));
+    transition: color 0.15s ease;
+    font-family: inherit;
+    line-height: 1;
+}
+
+.bit-action-btn:hover {
+    color: hsl(var(--color-text-primary));
+}
+
+.bit-action-btn.del-btn:hover {
+    color: hsl(var(--color-red-600));
+}
+
+/* Operations header & toolbar */
+#operations-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px 4px;
+    gap: 4px;
+}
+
+#operations-header h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: hsl(var(--color-text-primary));
+}
+
+#operations-toolbar {
+    display: flex;
+    gap: 2px;
+}
+
+#operations-toolbar button {
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm, 4px);
+    padding: 3px 6px;
+    cursor: pointer;
+    color: hsl(var(--color-text-muted));
+    font-size: 13px;
+    transition: all 0.15s ease;
+}
+
+#operations-toolbar button:hover {
+    background: hsl(var(--color-bg-elevated));
+    color: hsl(var(--color-text-primary));
+}
+
+/* Operations log */
+#operations-log {
+    padding: 4px 6px;
+    font-size: 10px;
+    color: hsl(var(--color-text-muted));
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 16px;
+    border-bottom: 1px solid hsl(var(--color-border-default) / 0.5);
+    transition: opacity 0.5s ease;
+}
+
+#operations-log.fade-out {
+    opacity: 0;
+}
+
+/* ==========================================================================
+   Bit Library Panel — Group Icons & Action Buttons
+   ========================================================================== */
+
+/* Bit group entry in the library sidebar */
+.bit-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    border-bottom: 1px solid hsl(var(--color-border-default) / 0.3);
+    transition: background-color 0.15s ease;
+}
+
+.bit-group:hover {
+    background: hsl(var(--color-bg-elevated));
+}
+
+/* Flyout bit list on hover */
+.bit-list {
+    display: none;
+    position: fixed;
+    background: hsl(var(--color-bg-elevated));
+    border: 1px solid hsl(var(--color-border-default));
+    border-radius: var(--radius-md, 8px);
+    padding: 6px;
+    gap: 4px;
+    z-index: 1000;
+    box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.08));
+    flex-direction: row;
+    min-width: 140px;
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
+    overflow-y: hidden;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Individual bit entry in flyout */
+.bit-list .bit {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    position: relative;
+    padding: 8px 6px 28px;
+    margin-right: 5px;
+    min-width: 66px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm, 4px);
+    cursor: pointer;
+    color: hsl(var(--color-text-primary));
+    transition: background-color 0.15s ease;
+    white-space: normal;
+}
+
+.bit-list .bit span {
+    min-height: 12px;
+    height: 12px;
+    line-height: 12px;
+    width: 60px;
+    max-width: 60px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bit-list .bit:hover {
+    background: hsl(var(--color-bg-surface));
+}
+
+/* Add new bit button */
+.bit-list .bit.add-bit {
+    border-top: none;
+    border-left: 1px solid hsl(var(--color-border-default) / 0.3);
+    margin-top: 0;
+    margin-left: 4px;
+    padding-top: 8px;
+    padding-left: 10px;
+    margin-right: 0;
+    color: hsl(var(--color-text-secondary));
+}
+
+.bit-list .bit.add-bit:hover {
+    color: hsl(var(--color-text-primary));
+}
+
+/* Action icon buttons (edit/copy/remove) */
+.bit-list .action-icons {
+    display: none;
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    gap: 2px;
+    margin-left: 0;
+    padding: 2px;
+    border: 1px solid hsl(var(--color-border-default));
+    border-radius: var(--radius-md, 8px);
+    background: hsl(var(--color-bg-elevated));
+    z-index: 2000;
+    opacity: 1;
+    transition: opacity 0.15s ease;
+}
+
+.bit-list .bit:hover .action-icons {
+    display: flex;
+}
+
+.bit-list .action-icons:hover {
+    display: flex;
+}
+
+.bit-list .action-icons svg {
+    display: block;
 }

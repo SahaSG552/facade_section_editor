@@ -23,6 +23,7 @@ import {
     evalAngle,
     modListToSvgTransform,
 } from "../editor/transforms/TransformCommands.js";
+import SVGThemeHelper from "../shared/theme/SVGThemeHelper.js";
 
 /**
  * Merge a new numeric SVG path with the original formula path.
@@ -516,6 +517,13 @@ export default class BitsManager {
     constructor(canvasManager) {
         this.canvasManager = canvasManager;
         this.bitGroups = document.getElementById("bit-groups");
+
+        // Listen for theme changes to refresh bit group icons
+        if (typeof window !== 'undefined') {
+            window.addEventListener('themechange', () => {
+                this.refreshBitGroups();
+            });
+        }
     }
 
     // Create SVG icon
@@ -529,8 +537,11 @@ export default class BitsManager {
         circle.setAttribute("cx", size / 2);
         circle.setAttribute("cy", size / 2);
         circle.setAttribute("r", size / 2 - 1);
-        circle.setAttribute("fill", "white");
-        circle.setAttribute("stroke", "black");
+        SVGThemeHelper.setThemeColors(
+            circle,
+            "--color-bg-surface",
+            "--color-text-muted"
+        );
         circle.setAttribute("stroke-width", "2");
         svg.appendChild(circle);
 
@@ -640,12 +651,30 @@ export default class BitsManager {
                     break;
             }
             if (innerShape) {
-                // Use the bit's color if available, otherwise white
+                // Use the bit's color if available, otherwise surface bg
                 const fillColor = params?.fillColor
                     ? this.getBitFillColor(params, false)
-                    : "white";
-                innerShape.setAttribute("fill", fillColor);
-                innerShape.setAttribute("stroke", "var(--bit-outline, #000000)");
+                    : "var(--color-bg-surface)";
+                
+                // Handle fill color
+                if (typeof fillColor === 'string' && fillColor.startsWith('--')) {
+                    // CSS variable
+                    SVGThemeHelper.setFillFromVariable(innerShape, fillColor);
+                } else if (typeof fillColor === 'string' && fillColor.startsWith('var(')) {
+                    // CSS variable in var() format
+                    const varName = fillColor.match(/var\((--[^)]+)\)/)?.[1];
+                    if (varName) {
+                        SVGThemeHelper.setFillFromVariable(innerShape, varName);
+                    } else {
+                        innerShape.style.fill = fillColor;
+                    }
+                } else {
+                    // Direct color value
+                    innerShape.style.fill = fillColor;
+                }
+                
+                // Handle stroke color
+                SVGThemeHelper.setStrokeFromVariable(innerShape, "--color-text-primary");
                 innerShape.setAttribute("stroke-width", "2");
             }
         }
@@ -663,40 +692,48 @@ export default class BitsManager {
         svg.setAttribute("width", "15");
         svg.setAttribute("height", "15");
         svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("data-action", action);
 
         const circle = document.createElementNS(svgNS, "circle");
         circle.setAttribute("cx", "12");
         circle.setAttribute("cy", "12");
         circle.setAttribute("r", "11");
-        circle.setAttribute("fill", "white");
+        SVGThemeHelper.setFillFromVariable(circle, "--color-bg-surface");
         circle.setAttribute("stroke-width", "2");
 
         const path = document.createElementNS(svgNS, "path");
-        path.setAttribute("fill", "black");
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke-width", "2");
+        path.setAttribute("stroke-linecap", "round");
+        path.setAttribute("stroke-linejoin", "round");
+        SVGThemeHelper.setStrokeFromVariable(path, "--color-text-primary");
 
+        let strokeColor = "--color-green-500"; // default for edit
         switch (action) {
             case "edit":
-                circle.setAttribute("stroke", "green");
+                strokeColor = "--color-green-500";
                 path.setAttribute(
                     "d",
-                    "M16.293 2.293l3.414 3.414-13 13-3.414-3.414 13-13zM18 10v8h-8v-8h8z",
+                    "M12 20h9 M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z",
                 );
                 break;
             case "copy":
-                circle.setAttribute("stroke", "orange");
+                strokeColor = "--color-orange-500";
                 path.setAttribute(
                     "d",
-                    "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
+                    "M9 9h11v11H9z M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1",
                 );
                 break;
             case "remove":
-                circle.setAttribute("stroke", "red");
+                strokeColor = "--color-red-500";
                 path.setAttribute(
                     "d",
-                    "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
+                    "M3 6h18 M8 6V4h8v2 M7 6v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6 M10 11v6 M14 11v6",
                 );
                 break;
         }
+        
+        SVGThemeHelper.setStrokeFromVariable(circle, strokeColor);
 
         svg.appendChild(circle);
         svg.appendChild(path);
@@ -888,7 +925,7 @@ export default class BitsManager {
                             }
                         }
                         part.setAttribute("fill", fillColor);
-                        part.setAttribute("stroke", "var(--bit-outline, #000000)");
+                        SVGThemeHelper.setStrokeFromVariable(part, "--color-text-primary");
                         part.setAttribute("stroke-width", strokeWidth);
                         part.classList.add("bit-shape");
                         parts.push(part);
@@ -922,7 +959,7 @@ export default class BitsManager {
         }
 
         if (bitShape) {
-            bitShape.setAttribute("stroke", "var(--bit-outline, #000000)");
+            SVGThemeHelper.setStrokeFromVariable(bitShape, "--color-text-primary");
             bitShape.setAttribute("stroke-width", strokeWidth);
             bitShape.classList.add("bit-shape");
             group.appendChild(bitShape);
@@ -942,7 +979,7 @@ export default class BitsManager {
             shankShape.setAttribute("width", bit.shankDiameter);
             shankShape.setAttribute("height", shankLength);
             shankShape.setAttribute("fill", "rgba(64, 64, 64, 0.1)");
-            shankShape.setAttribute("stroke", "var(--bit-outline, #000000)");
+            SVGThemeHelper.setStrokeFromVariable(shankShape, "--color-text-primary");
             shankShape.setAttribute("stroke-width", strokeWidth);
             shankShape.classList.add("shank-shape");
             group.appendChild(shankShape);
@@ -1003,6 +1040,10 @@ export default class BitsManager {
         const allBits = await getBits();
         const groupOrder = Object.keys(allBits);
 
+        if (this.bitGroups) {
+            this.bitGroups.innerHTML = "";
+        }
+
         groupOrder.forEach((groupName) => {
             // sort by diameter asc, then length asc (work on a shallow copy to avoid mutating storage)
             const bits = (allBits[groupName] || []).slice().sort((a, b) => {
@@ -1018,13 +1059,23 @@ export default class BitsManager {
 
             const bitList = document.createElement("div");
             bitList.className = "bit-list";
+            bitList.style.flexDirection = "row";
 
             bits.forEach((bit, index) => {
                 const bitDiv = document.createElement("div");
                 bitDiv.className = "bit";
 
                 const bitName = document.createElement("span");
+                bitName.className = "bit-name";
                 bitName.textContent = bit.name;
+                bitName.addEventListener("mouseenter", () => {
+                    // Show native tooltip only when the label is visually truncated.
+                    if (bitName.scrollWidth > bitName.clientWidth) {
+                        bitName.title = bit.name;
+                    } else {
+                        bitName.removeAttribute("title");
+                    }
+                });
                 bitDiv.appendChild(bitName);
 
                 const bitIcon = this.createSVGIcon(groupName, bit, 40);
@@ -1067,6 +1118,7 @@ export default class BitsManager {
             addButton.className = "bit add-bit";
 
             const addBitName = document.createElement("span");
+            addBitName.className = "bit-name";
             addBitName.textContent = "New";
             addButton.appendChild(addBitName);
             const addBitIcon = this.createSVGIcon("newBit", "newBit", 40);
@@ -1082,16 +1134,37 @@ export default class BitsManager {
 
             groupDiv.addEventListener("mouseenter", (e) => {
                 const rect = groupDiv.getBoundingClientRect();
+                const viewportPad = 8;
+                const anchorLeft = rect.right + 5;
+                const availableWidth = Math.max(
+                    140,
+                    window.innerWidth - anchorLeft - viewportPad,
+                );
+
                 bitList.style.display = "flex";
-                bitList.style.left = rect.right + 5 + "px";
+                bitList.style.left = `${anchorLeft}px`;
                 bitList.style.top = rect.top + rect.height / 2 + "px";
                 bitList.style.transform = "translateY(-50%)";
+                bitList.style.maxWidth = `${availableWidth}px`;
+                bitList.scrollLeft = 0;
 
                 // Позиционировать невидимую зону для hover bridge
                 const afterElement =
                     groupDiv.getAttribute("data-after-element");
                 // Установить ::after динамически через JS (для невидимой зоны)
             });
+
+            bitList.addEventListener(
+                "wheel",
+                (event) => {
+                    if (Math.abs(event.deltaY) < 0.1 && Math.abs(event.deltaX) < 0.1) {
+                        return;
+                    }
+                    event.preventDefault();
+                    bitList.scrollLeft += event.deltaY + event.deltaX;
+                },
+                { passive: false },
+            );
 
             groupDiv.addEventListener("mouseleave", (e) => {
                 // Не скрывать меню сразу - дать пользователю время дотянуться до него
@@ -1107,7 +1180,11 @@ export default class BitsManager {
             });
 
             bitList.addEventListener("mouseleave", () => {
-                bitList.style.display = "none";
+                setTimeout(() => {
+                    if (!bitList.matches(":hover") && !groupDiv.matches(":hover")) {
+                        bitList.style.display = "none";
+                    }
+                }, 200);
             });
 
             this.bitGroups.appendChild(groupDiv);
@@ -1115,8 +1192,44 @@ export default class BitsManager {
     }
 
     async refreshBitGroups() {
-        this.bitGroups.innerHTML = "";
         await this.createBitGroups();
+    }
+
+    /**
+     * Refresh colors of all SVG elements in bit groups when theme changes
+     * This is more efficient than full refresh
+     */
+    refreshBitGroupColors() {
+        if (!this.bitGroups) return;
+        
+        // Update colors for bit group and bit item circles (excluding action icons)
+        const circles = this.bitGroups.querySelectorAll(
+            '.bit-group > svg circle, .bit-list > .bit > svg circle'
+        );
+        circles.forEach((circle) => {
+            SVGThemeHelper.setThemeColors(
+                circle,
+                "--color-bg-surface",
+                "--color-text-muted"
+            );
+        });
+
+        // Update action icons with semantic per-action stroke colors.
+        const actionIcons = this.bitGroups.querySelectorAll('.action-icons svg');
+        actionIcons.forEach((icon) => {
+            const action = icon.getAttribute('data-action');
+            const circle = icon.querySelector('circle');
+            const path = icon.querySelector('path');
+            if (!circle || !path) return;
+
+            let strokeVar = '--color-green-500';
+            if (action === 'copy') strokeVar = '--color-orange-500';
+            if (action === 'remove') strokeVar = '--color-red-500';
+
+            SVGThemeHelper.setFillFromVariable(circle, '--color-bg-surface');
+            SVGThemeHelper.setStrokeFromVariable(circle, strokeVar);
+            SVGThemeHelper.setStrokeFromVariable(path, '--color-text-primary');
+        });
     }
 
     async handleCopyClick(e, bit) {

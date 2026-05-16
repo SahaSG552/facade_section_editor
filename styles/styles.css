@@ -1,6 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* Breakpoint definitions for reference */
+/* ==========================================================================
+   DESIGN TOKENS — Warm Editorial Palette (DESIGN.md)
+   Canvas Cream #F3F0EE | Ink Black #141413 | Signal Orange #CF4500
+   ========================================================================== */
+
+/* Breakpoint definitions */
 :root {
   --breakpoint-xs: 320px;
   --breakpoint-sm: 480px;
@@ -8,345 +13,85 @@
   --breakpoint-lg: 1024px;
   --breakpoint-xl: 1280px;
   --breakpoint-2xl: 1536px;
-  --color-color-blue-50: 210 40% 98%;
-  --color-color-blue-100: 210 40% 90%;
-  --color-color-blue-200: 211 35% 80%;
-  --color-color-blue-300: 212 30% 65%;
-  --color-color-blue-400: 212 35% 55%;
-  --color-color-blue-500: 212 100% 50%;
-  --color-color-blue-600: 212 100% 45%;
-  --color-color-blue-700: 212 100% 40%;
-  --color-color-blue-800: 212 100% 35%;
-  --color-color-blue-900: 210 60% 15%;
-  --color-color-gray-50: 0 0% 98%;
-  --color-color-gray-100: 0 0% 96%;
-  --color-color-gray-200: 0 0% 90%;
-  --color-color-gray-300: 0 0% 80%;
-  --color-color-gray-400: 0 0% 65%;
-  --color-color-gray-500: 0 0% 50%;
-  --color-color-gray-600: 0 0% 45%;
-  --color-color-gray-700: 0 0% 35%;
-  --color-color-gray-800: 0 0% 15%;
-  --color-color-gray-900: 0 0% 9%;
-  --color-color-gray-950: 0 0% 5%;
-  --color-color-red-50: 0 85% 98%;
-  --color-color-red-100: 0 85% 92%;
-  --color-color-red-200: 0 75% 85%;
-  --color-color-red-300: 0 70% 70%;
-  --color-color-red-400: 0 75% 60%;
-  --color-color-red-500: 0 80% 55%;
-  --color-color-red-600: 0 85% 50%;
-  --color-color-red-700: 0 90% 45%;
-  --color-color-red-800: 0 85% 40%;
-  --color-color-red-900: 0 70% 35%;
-  --color-color-green-50: 140 60% 96%;
-  --color-color-green-100: 140 55% 88%;
-  --color-color-green-200: 140 50% 78%;
-  --color-color-green-300: 140 45% 65%;
-  --color-color-green-400: 140 50% 50%;
-  --color-color-green-500: 140 55% 45%;
-  --color-color-green-600: 140 60% 40%;
-  --color-color-green-700: 140 65% 35%;
-  --color-color-green-800: 140 60% 30%;
-  --color-color-green-900: 140 50% 25%;
-  --color-color-yellow-50: 45 100% 96%;
-  --color-color-yellow-100: 45 100% 88%;
-  --color-color-yellow-200: 45 95% 78%;
-  --color-color-yellow-300: 45 90% 65%;
-  --color-color-yellow-400: 45 90% 55%;
-  --color-color-yellow-500: 40 95% 50%;
-  --color-color-yellow-600: 38 90% 45%;
-  --color-color-yellow-700: 35 85% 40%;
-  --color-color-yellow-800: 32 80% 35%;
-  --color-color-yellow-900: 30 70% 30%;
-  --color-color-canvas-gridLight: 0 0% 0%;
-  --color-color-canvas-gridDark: 0 0% 40%;
-  --color-color-canvas-bitOutlineLight: 0 0% 0%;
-  --color-color-canvas-bitOutlineDark: 0 0% 88%;
-  --color-color-canvas-sceneBgLight: 0 0% 96%;
-  --color-color-canvas-sceneBgDark: 0 0% 10%;
-  --color-color-canvas-symmetryAxis: 212 60% 45%;
-  --color-color-path-commandBg: 0 75% 55%;
-  --color-color-path-commandHover: 0 70% 60%;
-  --color-color-path-modCommandBg: 40 90% 50%;
-  --color-color-path-modCommandHover: 38 85% 55%;
-  --color-color-path-paramBg: 170 50% 55%;
-  --color-color-path-paramHover: 168 45% 60%;
-  --color-color-path-deleteColor: 35 85% 40%;
-  --color-space-xs: 4px;
-  --color-space-sm: 8px;
-  --color-space-md: 16px;
-  --color-space-lg: 24px;
-  --color-space-xl: 32px;
-  --color-space-2xl: 48px;
-  --color-space-3xl: 64px;
-  --color-font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --color-font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --color-font-size-xs: 10px;
-  --color-font-size-sm: 11px;
-  --color-font-size-base: 12px;
-  --color-font-size-lg: 13px;
-  --color-font-size-xl: 14px;
-  --color-font-size-2xl: 16px;
-  --color-font-size-3xl: 18px;
-  --color-font-weight-normal: 400;
-  --color-font-weight-medium: 500;
-  --color-font-weight-semibold: 600;
-  --color-font-weight-bold: 700;
-  --color-font-lineHeight-tight: 1.2;
-  --color-font-lineHeight-normal: 1.5;
-  --color-font-lineHeight-relaxed: 1.75;
-  --color-radius-none: 0px;
-  --color-radius-sm: 4px;
-  --color-radius-md: 8px;
-  --color-radius-lg: 12px;
-  --color-radius-xl: 16px;
-  --color-radius-full: 9999px;
-  --color-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --color-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
-  --color-shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
-  --color-shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
-  --color-shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
-  --color-opacity-disabled: 0.5;
-  --color-opacity-overlay: 0.5;
-  --color-opacity-hover: 0.08;
-  --color-opacity-active: 0.12;
-  --color-opacity-selected: 0.16;
-  --color-opacity-subtle: 0.04;
-  --space-xs: 4px;
-  --space-sm: 8px;
-  --space-md: 16px;
-  --space-lg: 24px;
-  --space-xl: 32px;
-  --space-2xl: 48px;
-  --space-3xl: 64px;
-  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --font-size-xs: 10px;
-  --font-size-sm: 11px;
-  --font-size-base: 12px;
-  --font-size-lg: 13px;
-  --font-size-xl: 14px;
-  --font-size-2xl: 16px;
-  --font-size-3xl: 18px;
-  --font-weight-normal: 400;
-  --font-weight-medium: 500;
-  --font-weight-semibold: 600;
-  --font-weight-bold: 700;
-  --font-lineHeight-tight: 1.2;
-  --font-lineHeight-normal: 1.5;
-  --font-lineHeight-relaxed: 1.75;
-  --radius-none: 0px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 9999px;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
-  --shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
-  --opacity-disabled: 0.5;
-  --opacity-overlay: 0.5;
-  --opacity-hover: 0.08;
-  --opacity-active: 0.12;
-  --opacity-selected: 0.16;
-  --opacity-subtle: 0.04;
-  --color-bg-default: 0 0% 98%;
-  --color-bg-surface: 0 0% 96%;
-  --color-bg-elevated: 0 0% 90%;
-  --color-bg-inverse: 0 0% 9%;
-  --color-text-primary: 0 0% 9%;
-  --color-text-secondary: 0 0% 45%;
-  --color-text-muted: 0 0% 50%;
-  --color-text-inverse: 0 0% 98%;
-  --color-text-onAction: 0 0% 98%;
-  --color-border-default: 0 0% 90%;
-  --color-border-emphasis: 0 0% 80%;
-  --color-border-inverse: 0 0% 45%;
-  --color-action-primary: 212 100% 50%;
-  --color-action-primaryHover: 212 100% 45%;
-  --color-action-primaryActive: 212 100% 40%;
-  --color-action-secondary: transparent;
-  --color-action-secondaryBorder: 0 0% 80%;
-  --color-action-secondaryHover: 0 0% 96%;
-  --color-action-ghost: transparent;
-  --color-action-ghostHover: 0 0% 96%;
-  --color-state-focus: 212 100% 50%;
-  --color-state-focusRing: 212 100% 50%;
-  --color-state-error: 0 80% 55%;
-  --color-state-errorBg: 0 80% 92%;
-  --color-state-success: 140 55% 45%;
-  --color-state-successBg: 140 55% 88%;
-  --color-state-warning: 40 95% 50%;
-  --color-state-warningBg: 45 100% 88%;
-  --color-canvas-grid: 0 0% 0%;
-  --color-canvas-bitOutline: 0 0% 0%;
-  --color-canvas-sceneBackground: 0 0% 96%;
-  --color-canvas-symmetryAxis: 212 60% 45%;
-  --color-path-command-bg: 0 75% 55%;
-  --color-path-command-hover: 0 70% 60%;
-  --color-path-modCommand-bg: 40 90% 50%;
-  --color-path-modCommand-hover: 38 85% 55%;
-  --color-path-param-bg: 170 50% 55%;
-  --color-path-param-hover: 168 45% 60%;
-  --color-path-delete: 35 85% 40%;
-  --spacing-component-paddingSm: 4px;
-  --spacing-component-paddingMd: 8px;
-  --spacing-component-paddingLg: 16px;
-  --spacing-component-gapSm: 4px;
-  --spacing-component-gapMd: 8px;
-  --spacing-component-gapLg: 16px;
-  --spacing-layout-panelPadding: 16px;
-  --spacing-layout-sectionGap: 24px;
-  --spacing-layout-headerPadding: 8px 24px;
-  --typography-body-size: 12px;
-  --typography-body-lineHeight: 1.5;
-  --typography-body-weight: 400;
-  --typography-heading-size: 18px;
-  --typography-heading-lineHeight: 1.2;
-  --typography-heading-weight: 600;
-  --typography-label-size: 11px;
-  --typography-label-weight: 500;
-  --typography-caption-size: 10px;
-  --typography-caption-weight: 400;
-  --shadow-semantic-card: 0 1px 3px rgba(0, 0, 0, 0.1);
-  --shadow-semantic-dropdown: 0 2px 10px rgba(0, 0, 0, 0.15);
-  --shadow-semantic-modal: 0 4px 20px rgba(0, 0, 0, 0.2);
-  --shadow-semantic-tooltip: 0 10px 40px rgba(0, 0, 0, 0.25);
-  --radius-semantic-sm: 4px;
-  --radius-semantic-md: 8px;
-  --radius-semantic-lg: 12px;
-  --radius-semantic-full: 9999px;
-  /* Legacy aliases for backward compatibility */
-  --background: 0 0% 100%;
-  --foreground: 0 0% 0%;
-  --card: 0 0% 100%;
-  --card-foreground: 0 0% 0%;
-  --primary: 212 100% 50%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 96%;
-  --secondary-foreground: 0 0% 0%;
-  --muted: 0 0% 96%;
-  --muted-foreground: 0 0% 45%;
-  --accent: 0 0% 96%;
-  --accent-foreground: 0 0% 0%;
-  --border: 0 0% 90%;
-  --input: 0 0% 96%;
-  --ring: 212 100% 50%;
-  --radius: 12px;
-  --bit-outline: #000000;
-  --grid-color: #000000;
-  --scene-background: #f5f5f5;
 }
 
-[data-theme="dark"] {
-  --color-color-blue-50: 210 40% 98%;
-  --color-color-blue-100: 210 40% 90%;
-  --color-color-blue-200: 211 35% 80%;
-  --color-color-blue-300: 212 30% 65%;
-  --color-color-blue-400: 212 35% 55%;
-  --color-color-blue-500: 212 100% 50%;
-  --color-color-blue-600: 212 100% 45%;
-  --color-color-blue-700: 212 100% 40%;
-  --color-color-blue-800: 212 100% 35%;
-  --color-color-blue-900: 210 60% 15%;
-  --color-color-gray-50: 0 0% 98%;
-  --color-color-gray-100: 0 0% 96%;
-  --color-color-gray-200: 0 0% 90%;
-  --color-color-gray-300: 0 0% 80%;
-  --color-color-gray-400: 0 0% 65%;
-  --color-color-gray-500: 0 0% 50%;
-  --color-color-gray-600: 0 0% 45%;
-  --color-color-gray-700: 0 0% 35%;
-  --color-color-gray-800: 0 0% 15%;
-  --color-color-gray-900: 0 0% 9%;
-  --color-color-gray-950: 0 0% 5%;
-  --color-color-red-50: 0 85% 98%;
-  --color-color-red-100: 0 80% 92%;
-  --color-color-red-200: 0 75% 85%;
-  --color-color-red-300: 0 70% 70%;
-  --color-color-red-400: 0 75% 60%;
-  --color-color-red-500: 0 80% 55%;
-  --color-color-red-600: 0 85% 50%;
-  --color-color-red-700: 0 90% 45%;
-  --color-color-red-800: 0 85% 40%;
-  --color-color-red-900: 0 70% 35%;
-  --color-color-green-50: 140 60% 96%;
-  --color-color-green-100: 140 55% 88%;
-  --color-color-green-200: 140 50% 78%;
-  --color-color-green-300: 140 45% 65%;
-  --color-color-green-400: 140 50% 50%;
-  --color-color-green-500: 140 55% 45%;
-  --color-color-green-600: 140 60% 40%;
-  --color-color-green-700: 140 65% 35%;
-  --color-color-green-800: 140 60% 30%;
-  --color-color-green-900: 140 50% 25%;
-  --color-color-yellow-50: 45 100% 96%;
-  --color-color-yellow-100: 45 100% 88%;
-  --color-color-yellow-200: 45 95% 78%;
-  --color-color-yellow-300: 45 90% 65%;
-  --color-color-yellow-400: 45 90% 55%;
-  --color-color-yellow-500: 40 95% 50%;
-  --color-color-yellow-600: 38 90% 45%;
-  --color-color-yellow-700: 35 85% 40%;
-  --color-color-yellow-800: 32 80% 35%;
-  --color-color-yellow-900: 30 70% 30%;
-  --color-color-canvas-gridLight: 0 0% 0%;
-  --color-color-canvas-gridDark: 0 0% 40%;
-  --color-color-canvas-bitOutlineLight: 0 0% 0%;
-  --color-color-canvas-bitOutlineDark: 0 0% 88%;
-  --color-color-canvas-sceneBgLight: 0 0% 96%;
-  --color-color-canvas-sceneBgDark: 0 0% 10%;
-  --color-color-canvas-symmetryAxis: 212 60% 45%;
-  --color-color-path-commandBg: 0 75% 55%;
-  --color-color-path-commandHover: 0 70% 60%;
-  --color-color-path-modCommandBg: 40 90% 50%;
-  --color-color-path-modCommandHover: 38 85% 55%;
-  --color-color-path-paramBg: 170 50% 55%;
-  --color-color-path-paramHover: 168 45% 60%;
-  --color-color-path-deleteColor: 35 85% 40%;
-  --color-space-xs: 4px;
-  --color-space-sm: 8px;
-  --color-space-md: 16px;
-  --color-space-lg: 24px;
-  --color-space-xl: 32px;
-  --color-space-2xl: 48px;
-  --color-space-3xl: 64px;
-  --color-font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --color-font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
-  --color-font-size-xs: 10px;
-  --color-font-size-sm: 11px;
-  --color-font-size-base: 12px;
-  --color-font-size-lg: 13px;
-  --color-font-size-xl: 14px;
-  --color-font-size-2xl: 16px;
-  --color-font-size-3xl: 18px;
-  --color-font-weight-normal: 400;
-  --color-font-weight-medium: 500;
-  --color-font-weight-semibold: 600;
-  --color-font-weight-bold: 700;
-  --color-font-lineHeight-tight: 1.2;
-  --color-font-lineHeight-normal: 1.5;
-  --color-font-lineHeight-relaxed: 1.75;
-  --color-radius-none: 0px;
-  --color-radius-sm: 4px;
-  --color-radius-md: 8px;
-  --color-radius-lg: 12px;
-  --color-radius-xl: 16px;
-  --color-radius-full: 9999px;
-  --color-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --color-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
-  --color-shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
-  --color-shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
-  --color-shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
-  --color-opacity-disabled: 0.5;
-  --color-opacity-overlay: 0.5;
-  --color-opacity-hover: 0.08;
-  --color-opacity-active: 0.12;
-  --color-opacity-selected: 0.16;
-  --color-opacity-subtle: 0.04;
+/* ── Light Theme ──────────────────────────────────────────────────────────── */
+:root {
+  --color-gray-50: 30 6% 94%;
+  --color-gray-100: 30 4% 96%;
+  --color-gray-200: 30 5% 98%;
+  --color-gray-300: 30 5% 90%;
+  --color-gray-400: 36 10% 80%;
+  --color-gray-500: 30 5% 65%;
+  --color-gray-600: 30 2% 41%;
+  --color-gray-700: 30 3% 25%;
+  --color-gray-800: 240 1% 15%;
+  --color-gray-900: 30 3% 8%;
+  --color-gray-950: 30 3% 4%;
+  --color-orange-50: 20 80% 96%;
+  --color-orange-100: 20 75% 90%;
+  --color-orange-200: 20 70% 80%;
+  --color-orange-300: 18 75% 70%;
+  --color-orange-400: 18 89% 59%;
+  --color-orange-500: 20 90% 50%;
+  --color-orange-600: 20 100% 40%;
+  --color-orange-700: 20 88% 32%;
+  --color-orange-800: 20 85% 25%;
+  --color-orange-900: 20 80% 18%;
+  --color-red-50: 10 85% 97%;
+  --color-red-100: 10 80% 91%;
+  --color-red-200: 10 75% 84%;
+  --color-red-300: 10 70% 70%;
+  --color-red-400: 10 75% 60%;
+  --color-red-500: 10 80% 55%;
+  --color-red-600: 10 85% 48%;
+  --color-red-700: 10 90% 42%;
+  --color-red-800: 10 85% 36%;
+  --color-red-900: 10 70% 30%;
+  --color-green-50: 120 30% 96%;
+  --color-green-100: 120 28% 88%;
+  --color-green-200: 120 25% 78%;
+  --color-green-300: 120 22% 65%;
+  --color-green-400: 120 28% 50%;
+  --color-green-500: 120 30% 45%;
+  --color-green-600: 120 32% 38%;
+  --color-green-700: 120 35% 32%;
+  --color-green-800: 120 30% 26%;
+  --color-green-900: 120 25% 20%;
+  --color-yellow-50: 40 100% 96%;
+  --color-yellow-100: 40 100% 88%;
+  --color-yellow-200: 40 95% 78%;
+  --color-yellow-300: 38 90% 65%;
+  --color-yellow-400: 38 90% 55%;
+  --color-yellow-500: 36 95% 50%;
+  --color-yellow-600: 34 90% 45%;
+  --color-yellow-700: 32 85% 38%;
+  --color-yellow-800: 30 80% 32%;
+  --color-yellow-900: 28 70% 26%;
+  --color-blue-50: 223 50% 96%;
+  --color-blue-100: 223 48% 88%;
+  --color-blue-200: 223 45% 78%;
+  --color-blue-300: 223 50% 68%;
+  --color-blue-400: 223 52% 58%;
+  --color-blue-500: 223 54% 48%;
+  --color-blue-600: 223 50% 42%;
+  --color-blue-700: 223 48% 36%;
+  --color-blue-800: 223 45% 30%;
+  --color-blue-900: 223 40% 24%;
+  --color-canvas-gridLight: 30 5% 70%;
+  --color-canvas-gridDark: 30 5% 35%;
+  --color-canvas-bitOutlineLight: 30 3% 8%;
+  --color-canvas-bitOutlineDark: 30 4% 85%;
+  --color-canvas-sceneBgLight: 30 4% 96%;
+  --color-canvas-sceneBgDark: 30 3% 10%;
+  --color-canvas-symmetryAxis: 18 89% 59%;
+  --color-path-commandBg: 10 75% 55%;
+  --color-path-commandHover: 10 70% 60%;
+  --color-path-modCommandBg: 38 90% 50%;
+  --color-path-modCommandHover: 36 85% 55%;
+  --color-path-paramBg: 120 28% 50%;
+  --color-path-paramHover: 120 25% 55%;
+  --color-path-deleteColor: 32 85% 38%;
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
@@ -354,6 +99,8 @@
   --space-xl: 32px;
   --space-2xl: 48px;
   --space-3xl: 64px;
+  --space-4xl: 96px;
+  --space-5xl: 128px;
   --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
   --font-size-xs: 10px;
@@ -363,6 +110,7 @@
   --font-size-xl: 14px;
   --font-size-2xl: 16px;
   --font-size-3xl: 18px;
+  --font-size-4xl: 24px;
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
@@ -373,59 +121,65 @@
   --radius-none: 0px;
   --radius-sm: 4px;
   --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-full: 9999px;
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 4px 20px rgba(0, 0, 0, 0.2);
-  --shadow-xl: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --radius-lg: 20px;
+  --radius-xl: 40px;
+  --radius-pill: 999px;
+  --radius-full: 50%;
+  --shadow-none: none;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.08);
+  --shadow-2xl: 0 70px 110px rgba(0, 0, 0, 0.25);
   --opacity-disabled: 0.5;
   --opacity-overlay: 0.5;
-  --opacity-hover: 0.08;
-  --opacity-active: 0.12;
-  --opacity-selected: 0.16;
+  --opacity-hover: 0.06;
+  --opacity-active: 0.10;
+  --opacity-selected: 0.14;
   --opacity-subtle: 0.04;
-  --color-bg-default: 0 0% 9%;
-  --color-bg-surface: 0 0% 15%;
-  --color-bg-elevated: 0 0% 35%;
-  --color-bg-inverse: 0 0% 98%;
-  --color-text-primary: 0 0% 98%;
-  --color-text-secondary: 0 0% 65%;
-  --color-text-muted: 0 0% 50%;
-  --color-text-inverse: 0 0% 9%;
-  --color-text-onAction: 0 0% 9%;
-  --color-border-default: 0 0% 35%;
-  --color-border-emphasis: 0 0% 45%;
-  --color-border-inverse: 0 0% 80%;
-  --color-action-primary: 212 100% 50%;
-  --color-action-primaryHover: 212 100% 45%;
-  --color-action-primaryActive: 212 100% 40%;
+  --color-bg-default: 30 6% 94%;
+  --color-bg-surface: 30 4% 96%;
+  --color-bg-elevated: 30 5% 98%;
+  --color-bg-inverse: 30 3% 8%;
+  --color-text-primary: 30 3% 8%;
+  --color-text-secondary: 30 3% 25%;
+  --color-text-muted: 30 2% 41%;
+  --color-text-inverse: 30 6% 94%;
+  --color-text-onAction: 30 5% 98%;
+  --color-text-link: 223 54% 48%;
+  --color-border-default: 36 10% 80%;
+  --color-border-emphasis: 30 5% 90%;
+  --color-border-inverse: 30 2% 41%;
+  --color-action-primary: 30 3% 8%;
+  --color-action-primaryHover: 240 1% 15%;
+  --color-action-primaryActive: 30 3% 4%;
   --color-action-secondary: transparent;
-  --color-action-secondaryBorder: 0 0% 80%;
-  --color-action-secondaryHover: 0 0% 15%;
+  --color-action-secondaryBorder: 36 10% 80%;
+  --color-action-secondaryHover: 30 4% 96%;
   --color-action-ghost: transparent;
-  --color-action-ghostHover: 0 0% 15%;
-  --color-state-focus: 212 100% 50%;
-  --color-state-focusRing: 212 100% 50%;
-  --color-state-error: 0 80% 55%;
-  --color-state-errorBg: 0 80% 92%;
-  --color-state-success: 140 55% 45%;
-  --color-state-successBg: 140 55% 88%;
-  --color-state-warning: 40 95% 50%;
-  --color-state-warningBg: 45 100% 88%;
-  --color-canvas-grid: 0 0% 40%;
-  --color-canvas-bitOutline: 0 0% 88%;
-  --color-canvas-sceneBackground: 0 0% 10%;
-  --color-canvas-symmetryAxis: 212 60% 45%;
-  --color-path-command-bg: 0 75% 60%;
-  --color-path-command-hover: 0 70% 70%;
-  --color-path-modCommand-bg: 45 90% 55%;
-  --color-path-modCommand-hover: 45 90% 65%;
-  --color-path-param-bg: 140 50% 50%;
-  --color-path-param-hover: 140 45% 65%;
-  --color-path-delete: 35 85% 40%;
+  --color-action-ghostHover: 30 4% 96%;
+  --color-action-accent: 20 100% 40%;
+  --color-action-accentHover: 20 90% 50%;
+  --color-action-accentActive: 20 88% 32%;
+  --color-state-focus: 18 89% 59%;
+  --color-state-focusRing: 18 89% 59%;
+  --color-state-error: 10 80% 55%;
+  --color-state-errorBg: 10 80% 91%;
+  --color-state-success: 120 30% 45%;
+  --color-state-successBg: 120 28% 88%;
+  --color-state-warning: 36 95% 50%;
+  --color-state-warningBg: 40 100% 88%;
+  --color-canvas-grid: 30 5% 70%;
+  --color-canvas-bitOutline: 30 3% 8%;
+  --color-canvas-sceneBackground: 30 4% 96%;
+  --color-canvas-symmetryAxis: 18 89% 59%;
+  --color-path-command-bg: 10 75% 55%;
+  --color-path-command-hover: 10 70% 60%;
+  --color-path-modCommand-bg: 38 90% 50%;
+  --color-path-modCommand-hover: 36 85% 55%;
+  --color-path-param-bg: 120 28% 50%;
+  --color-path-param-hover: 120 25% 55%;
+  --color-path-delete: 32 85% 38%;
   --spacing-component-paddingSm: 4px;
   --spacing-component-paddingMd: 8px;
   --spacing-component-paddingLg: 16px;
@@ -445,33 +199,254 @@
   --typography-label-weight: 500;
   --typography-caption-size: 10px;
   --typography-caption-weight: 400;
-  --shadow-semantic-card: 0 1px 3px rgba(0, 0, 0, 0.1);
-  --shadow-semantic-dropdown: 0 2px 10px rgba(0, 0, 0, 0.15);
-  --shadow-semantic-modal: 0 4px 20px rgba(0, 0, 0, 0.2);
-  --shadow-semantic-tooltip: 0 10px 40px rgba(0, 0, 0, 0.25);
+  --shadow-semantic-card: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-semantic-dropdown: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --shadow-semantic-modal: 0 24px 48px rgba(0, 0, 0, 0.08);
+  --shadow-semantic-tooltip: 0 70px 110px rgba(0, 0, 0, 0.25);
+  --radius-semantic-none: 0px;
   --radius-semantic-sm: 4px;
   --radius-semantic-md: 8px;
-  --radius-semantic-lg: 12px;
-  --radius-semantic-full: 9999px;
-  /* Legacy aliases for backward compatibility */
-  --background: 0 0% 9%;
-  --foreground: 0 0% 98%;
-  --card: 0 0% 9%;
-  --card-foreground: 0 0% 98%;
-  --primary: 212 100% 50%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 0 0% 15%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 15%;
-  --muted-foreground: 0 0% 65%;
-  --accent: 0 0% 15%;
-  --accent-foreground: 0 0% 98%;
-  --border: 0 0% 15%;
-  --input: 0 0% 15%;
-  --ring: 212 100% 50%;
-  --bit-outline: #e0e0e0;
-  --grid-color: #666666;
-  --scene-background: #1a1a1a;
+  --radius-semantic-lg: 20px;
+  --radius-semantic-xl: 40px;
+  --radius-semantic-pill: 999px;
+  --radius-semantic-full: 50%;
+  /* ── Legacy aliases (backward compat) ──────────────────────────────────── */
+  --background: 30 6% 94%;
+  --foreground: 30 3% 8%;
+  --card: 30 4% 96%;
+  --card-foreground: 30 3% 8%;
+  --primary: 30 3% 8%;
+  --primary-foreground: 30 5% 98%;
+  --secondary: 30 5% 98%;
+  --secondary-foreground: 30 3% 8%;
+  --muted: 30 5% 90%;
+  --muted-foreground: 30 2% 41%;
+  --accent: 30 5% 90%;
+  --accent-foreground: 30 3% 8%;
+  --border: 36 10% 80%;
+  --input: 30 5% 98%;
+  --ring: 18 89% 59%;
+  --radius: 20px;
+  --bit-outline: hsl(var(--color-canvas-bitOutlineLight));
+  --grid-color: #B8B0A8;
+  --scene-background: hsl(var(--color-canvas-sceneBgLight));
+  --edge-color: hsl(var(--color-canvas-bitOutlineLight));
+}
+
+/* ── Dark Theme ───────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  --color-gray-50: 30 6% 94%;
+  --color-gray-100: 30 4% 96%;
+  --color-gray-200: 30 5% 98%;
+  --color-gray-300: 30 5% 90%;
+  --color-gray-400: 36 10% 80%;
+  --color-gray-500: 30 5% 65%;
+  --color-gray-600: 30 2% 41%;
+  --color-gray-700: 30 3% 25%;
+  --color-gray-800: 240 1% 15%;
+  --color-gray-900: 30 3% 8%;
+  --color-gray-950: 30 3% 4%;
+  --color-orange-50: 20 80% 96%;
+  --color-orange-100: 20 75% 90%;
+  --color-orange-200: 20 70% 80%;
+  --color-orange-300: 18 75% 70%;
+  --color-orange-400: 18 89% 59%;
+  --color-orange-500: 20 90% 50%;
+  --color-orange-600: 20 100% 40%;
+  --color-orange-700: 20 88% 32%;
+  --color-orange-800: 20 85% 25%;
+  --color-orange-900: 20 80% 18%;
+  --color-red-50: 10 85% 97%;
+  --color-red-100: 10 80% 91%;
+  --color-red-200: 10 75% 84%;
+  --color-red-300: 10 70% 70%;
+  --color-red-400: 10 75% 60%;
+  --color-red-500: 10 80% 55%;
+  --color-red-600: 10 85% 48%;
+  --color-red-700: 10 90% 42%;
+  --color-red-800: 10 85% 36%;
+  --color-red-900: 10 70% 30%;
+  --color-green-50: 120 30% 96%;
+  --color-green-100: 120 28% 88%;
+  --color-green-200: 120 25% 78%;
+  --color-green-300: 120 22% 65%;
+  --color-green-400: 120 28% 50%;
+  --color-green-500: 120 30% 45%;
+  --color-green-600: 120 32% 38%;
+  --color-green-700: 120 35% 32%;
+  --color-green-800: 120 30% 26%;
+  --color-green-900: 120 25% 20%;
+  --color-yellow-50: 40 100% 96%;
+  --color-yellow-100: 40 100% 88%;
+  --color-yellow-200: 40 95% 78%;
+  --color-yellow-300: 38 90% 65%;
+  --color-yellow-400: 38 90% 55%;
+  --color-yellow-500: 36 95% 50%;
+  --color-yellow-600: 34 90% 45%;
+  --color-yellow-700: 32 85% 38%;
+  --color-yellow-800: 30 80% 32%;
+  --color-yellow-900: 28 70% 26%;
+  --color-blue-50: 223 50% 96%;
+  --color-blue-100: 223 48% 88%;
+  --color-blue-200: 223 45% 78%;
+  --color-blue-300: 223 50% 68%;
+  --color-blue-400: 223 52% 58%;
+  --color-blue-500: 223 54% 48%;
+  --color-blue-600: 223 50% 42%;
+  --color-blue-700: 223 48% 36%;
+  --color-blue-800: 223 45% 30%;
+  --color-blue-900: 223 40% 24%;
+  --color-canvas-gridLight: 30 5% 70%;
+  --color-canvas-gridDark: 30 5% 35%;
+  --color-canvas-bitOutlineLight: 30 3% 8%;
+  --color-canvas-bitOutlineDark: 30 4% 85%;
+  --color-canvas-sceneBgLight: 30 4% 96%;
+  --color-canvas-sceneBgDark: 30 3% 10%;
+  --color-canvas-symmetryAxis: 18 89% 59%;
+  --color-path-commandBg: 10 75% 55%;
+  --color-path-commandHover: 10 70% 60%;
+  --color-path-modCommandBg: 38 90% 50%;
+  --color-path-modCommandHover: 36 85% 55%;
+  --color-path-paramBg: 120 28% 50%;
+  --color-path-paramHover: 120 25% 55%;
+  --color-path-deleteColor: 32 85% 38%;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+  --space-4xl: 96px;
+  --space-5xl: 128px;
+  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-base: 12px;
+  --font-size-lg: 13px;
+  --font-size-xl: 14px;
+  --font-size-2xl: 16px;
+  --font-size-3xl: 18px;
+  --font-size-4xl: 24px;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --font-lineHeight-tight: 1.2;
+  --font-lineHeight-normal: 1.5;
+  --font-lineHeight-relaxed: 1.75;
+  --radius-none: 0px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 20px;
+  --radius-xl: 40px;
+  --radius-pill: 999px;
+  --radius-full: 50%;
+  --shadow-none: none;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --shadow-xl: 0 24px 48px rgba(0, 0, 0, 0.08);
+  --shadow-2xl: 0 70px 110px rgba(0, 0, 0, 0.25);
+  --opacity-disabled: 0.5;
+  --opacity-overlay: 0.5;
+  --opacity-hover: 0.06;
+  --opacity-active: 0.10;
+  --opacity-selected: 0.14;
+  --opacity-subtle: 0.04;
+  --color-bg-default: 30 3% 4%;
+  --color-bg-surface: 30 3% 8%;
+  --color-bg-elevated: 240 1% 15%;
+  --color-bg-inverse: 30 6% 94%;
+  --color-text-primary: 30 6% 94%;
+  --color-text-secondary: 30 5% 90%;
+  --color-text-muted: 30 5% 65%;
+  --color-text-inverse: 30 3% 8%;
+  --color-text-onAction: 30 3% 8%;
+  --color-border-default: 30 3% 25%;
+  --color-border-emphasis: 30 2% 41%;
+  --color-border-inverse: 30 5% 90%;
+  --color-action-primary: 30 6% 94%;
+  --color-action-primaryHover: 30 5% 98%;
+  --color-action-primaryActive: 30 5% 90%;
+  --color-action-secondary: transparent;
+  --color-action-secondaryBorder: 30 2% 41%;
+  --color-action-secondaryHover: 240 1% 15%;
+  --color-action-ghost: transparent;
+  --color-action-ghostHover: 240 1% 15%;
+  --color-action-accent: 18 89% 59%;
+  --color-action-accentHover: 18 75% 70%;
+  --color-action-accentActive: 20 90% 50%;
+  --color-state-focus: 18 89% 59%;
+  --color-state-focusRing: 18 89% 59%;
+  --color-state-error: 10 80% 55%;
+  --color-state-errorBg: 10 80% 91%;
+  --color-state-success: 120 30% 45%;
+  --color-state-successBg: 120 28% 88%;
+  --color-state-warning: 36 95% 50%;
+  --color-state-warningBg: 40 100% 88%;
+  --color-canvas-grid: 30 5% 35%;
+  --color-canvas-bitOutline: 30 4% 85%;
+  --color-canvas-sceneBackground: 30 3% 10%;
+  --color-canvas-symmetryAxis: 18 89% 59%;
+  --color-path-command-bg: 10 75% 60%;
+  --color-path-command-hover: 10 70% 70%;
+  --color-path-modCommand-bg: 38 90% 55%;
+  --color-path-modCommand-hover: 38 90% 65%;
+  --color-path-param-bg: 120 28% 50%;
+  --color-path-param-hover: 120 22% 65%;
+  --color-path-delete: 32 85% 38%;
+  --spacing-component-paddingSm: 4px;
+  --spacing-component-paddingMd: 8px;
+  --spacing-component-paddingLg: 16px;
+  --spacing-component-gapSm: 4px;
+  --spacing-component-gapMd: 8px;
+  --spacing-component-gapLg: 16px;
+  --spacing-layout-panelPadding: 16px;
+  --spacing-layout-sectionGap: 24px;
+  --spacing-layout-headerPadding: 8px 24px;
+  --typography-body-size: 12px;
+  --typography-body-lineHeight: 1.5;
+  --typography-body-weight: 400;
+  --typography-heading-size: 18px;
+  --typography-heading-lineHeight: 1.2;
+  --typography-heading-weight: 600;
+  --typography-label-size: 11px;
+  --typography-label-weight: 500;
+  --typography-caption-size: 10px;
+  --typography-caption-weight: 400;
+  --shadow-semantic-card: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --shadow-semantic-dropdown: 0 10px 30px rgba(0, 0, 0, 0.08);
+  --shadow-semantic-modal: 0 24px 48px rgba(0, 0, 0, 0.08);
+  --shadow-semantic-tooltip: 0 70px 110px rgba(0, 0, 0, 0.25);
+  --radius-semantic-none: 0px;
+  --radius-semantic-sm: 4px;
+  --radius-semantic-md: 8px;
+  --radius-semantic-lg: 20px;
+  --radius-semantic-xl: 40px;
+  --radius-semantic-pill: 999px;
+  --radius-semantic-full: 50%;
+  /* ── Legacy aliases (backward compat) ──────────────────────────────────── */
+  --background: 30 3% 4%;
+  --foreground: 30 6% 94%;
+  --card: 30 3% 8%;
+  --card-foreground: 30 6% 94%;
+  --primary: 30 6% 94%;
+  --primary-foreground: 30 3% 8%;
+  --secondary: 240 1% 15%;
+  --secondary-foreground: 30 6% 94%;
+  --muted: 30 3% 25%;
+  --muted-foreground: 30 5% 65%;
+  --accent: 240 1% 15%;
+  --accent-foreground: 30 6% 94%;
+  --border: 30 3% 25%;
+  --input: 240 1% 15%;
+  --ring: 18 89% 59%;
+  --bit-outline: hsl(var(--color-canvas-bitOutlineDark));
+  --grid-color: #5C5A55;
+  --scene-background: hsl(var(--color-canvas-sceneBgDark));
+  --edge-color: hsl(var(--color-canvas-bitOutlineDark));
 }
 
 body,
@@ -483,6 +458,29 @@ html {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--color-text-muted) / 0.55) hsl(var(--color-bg-surface));
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: hsl(var(--color-bg-surface));
+}
+
+*::-webkit-scrollbar-thumb {
+  background: hsl(var(--color-text-muted) / 0.55);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--color-text-secondary) / 0.7);
 }
 
 #app-header {
@@ -755,12 +753,12 @@ html {
 /* ===== ZOOM TOOLBAR ===== */
 #zoom-toolbar {
   display: flex;
-  gap: 5px;
+  gap: 4px;
   margin-bottom: 10px;
   margin-top: -50px;
   background-color: hsl(var(--card));
-  padding: 5px;
-  border-radius: var(--radius);
+  padding: 4px;
+  border-radius: 20px;
   border: 1px solid hsl(var(--border));
   width: auto;
   max-width: 100%;
@@ -770,13 +768,13 @@ html {
 }
 
 #zoom-toolbar button {
-  padding: 5px 8px;
+  padding: 4px 8px;
   font-size: 11px;
   border: 1px solid hsl(var(--border));
   background-color: hsl(var(--card));
   color: hsl(var(--card-foreground));
   cursor: pointer;
-  border-radius: var(--radius);
+  border-radius: 8px;
   flex: 0 0 auto;
   white-space: nowrap;
   overflow: hidden;
@@ -818,6 +816,26 @@ html {
   font-size: 11px;
   margin: auto;
   flex: 0 0 auto;
+}
+
+#zoom-toolbar select {
+  font-size: 12px;
+  width: 55px;
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--input));
+  color: hsl(var(--foreground));
+  border-radius: 8px;
+  padding: 2px 4px;
+}
+
+#zoom-toolbar select:focus {
+  outline: 1px solid hsl(var(--ring));
+  outline-offset: 0;
+}
+
+#zoom-toolbar select option {
+  background-color: hsl(var(--card));
+  color: hsl(var(--card-foreground));
 }
 
 #canvas {
@@ -956,6 +974,32 @@ html {
   left: 0;
   top: 0;
   transform: none;
+  flex-direction: row;
+  align-items: flex-start;
+  max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--color-text-muted) / 0.55) hsl(var(--color-bg-elevated));
+}
+
+.bit-list::-webkit-scrollbar {
+  height: 4px;
+}
+
+.bit-list::-webkit-scrollbar-track {
+  background: hsl(var(--color-bg-elevated));
+}
+
+.bit-list::-webkit-scrollbar-thumb {
+  background: hsl(var(--color-text-muted) / 0.55);
+  border-radius: 999px;
+}
+
+.bit-list::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--color-text-secondary) / 0.7);
 }
 
 
@@ -973,16 +1017,17 @@ html {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  margin-right: 8px;
+  justify-content: flex-start;
+  margin-right: 5px;
   position: relative;
   flex-shrink: 0;
   pointer-events: auto;
-  padding: 8px;
+  padding: 8px 6px 28px;
+  min-width: 66px;
   border-radius: var(--radius);
   transition: background-color 0.2s;
   cursor: pointer;
-  gap: 5px;
+  gap: 4px;
 }
 
 .bit:hover {
@@ -996,9 +1041,23 @@ html {
 .bit span {
   font-size: 10px;
   margin-bottom: 3px;
+  min-height: 12px;
+  height: 12px;
+  line-height: 12px;
+  width: 60px;
   text-align: center;
-  max-width: 70px;
-  word-break: break-word;
+  max-width: 60px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+}
+
+.bit.add-bit {
+  border-left: 1px solid hsl(var(--color-border-default) / 0.35);
+  margin-left: 4px;
+  padding-top: 8px;
+  padding-left: 10px;
 }
 
 .bit svg {
@@ -1023,7 +1082,7 @@ html {
 .action-icons {
   display: none;
   position: absolute;
-  bottom: -18px;
+  bottom: 2px;
   left: 50%;
   transform: translateX(-50%);
   background-color: hsl(var(--card));
@@ -1031,7 +1090,7 @@ html {
   border-radius: var(--radius);
   padding: 2px;
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-  z-index: 31;
+  z-index: 2000;
   pointer-events: auto;
 }
 
@@ -1069,10 +1128,10 @@ html {
 /* ===== OPERATIONS TOOLBAR ===== */
 #operations-toolbar {
   display: flex;
-  gap: 5px;
-  background-color: hsl(var(--muted));
-  padding: 5px;
-  border-radius: var(--radius);
+  gap: 4px;
+  background-color: hsl(var(--card));
+  padding: 4px;
+  border-radius: 20px;
   border: 1px solid hsl(var(--border));
   width: auto;
   max-width: 100%;
@@ -1081,13 +1140,13 @@ html {
 }
 
 #operations-toolbar button {
-  padding: 5px 10px;
+  padding: 4px 10px;
   font-size: 12px;
   border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--card));
+  background-color: hsl(var(--color-bg-surface));
   color: hsl(var(--card-foreground));
   cursor: pointer;
-  border-radius: var(--radius);
+  border-radius: 8px;
   flex: 0 0 auto;
   white-space: nowrap;
   overflow: hidden;
@@ -1354,6 +1413,76 @@ html {
   cursor: pointer;
   font-size: 14px;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: hsl(var(--color-text-secondary));
+  transition: color 0.15s ease;
+}
+
+.bit-action-btn:hover {
+  color: hsl(var(--color-text-primary));
+}
+
+.bit-action-btn svg {
+  display: block;
+}
+
+/* Vertical-align action button cells in tables */
+td:has(.bit-action-btn) {
+  vertical-align: middle;
+}
+
+/* Bits table select (operations dropdown) */
+.bits-table-select {
+  background: hsl(var(--color-bg-elevated));
+  color: hsl(var(--color-text-primary));
+  border: 1px solid hsl(var(--color-border-default));
+  border-radius: var(--radius-sm, 4px);
+  padding: 1px 2px;
+  font-size: 11px;
+  max-width: 100%;
+  font-family: inherit;
+}
+
+.bits-table-select option {
+  background: hsl(var(--color-bg-elevated));
+  color: hsl(var(--color-text-primary));
+}
+
+.bits-table-select:focus {
+  outline: none;
+  border-color: hsl(var(--color-state-focus));
+}
+
+/* Bits table color input */
+.bits-table-color {
+  width: 24px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid hsl(var(--color-border-default));
+  border-radius: var(--radius-sm, 4px);
+  cursor: pointer;
+  background: none;
+}
+
+/* Themed table input fields */
+#bits-sheet-body input[type="text"] {
+  background: hsl(var(--color-bg-elevated));
+  color: hsl(var(--color-text-primary));
+  border: 1px solid hsl(var(--color-border-default));
+  border-radius: var(--radius-sm, 4px);
+  padding: 1px 3px;
+  font-size: 11px;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+
+#bits-sheet-body input[type="text"]:focus {
+  outline: none;
+  border-color: hsl(var(--color-state-focus));
 }
 
 .bit-visibility-btn.is-hidden {
@@ -1365,11 +1494,17 @@ html {
   box-sizing: border-box;
   font-size: 11px;
   padding: 2px;
-  border: 1px solid hsl(var(--border));
-  background-color: hsl(var(--input));
-  color: hsl(var(--foreground));
+  border: 1px solid hsl(var(--color-border-default));
+  background: hsl(var(--color-bg-elevated));
+  color: hsl(var(--color-text-primary));
   height: 24px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm, 4px);
+  font-family: inherit;
+}
+
+#operations td input:focus {
+  outline: none;
+  border-color: hsl(var(--color-state-focus));
 }
 
 /* ===== MODAL ===== */

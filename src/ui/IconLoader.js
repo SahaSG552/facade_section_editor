@@ -103,7 +103,10 @@ export default class IconLoader {
                 throw new Error(`Failed to load icon: ${response.status}`);
             }
             
-            const svgContent = await response.text();
+            let svgContent = await response.text();
+            
+            // Sanitize SVG: replace hardcoded fill/stroke with currentColor so icons adapt to theme
+            svgContent = this._sanitizeSVG(svgContent);
             
             log.debug(`Loaded icon ${name}, length: ${svgContent.length}, first 100 chars: ${svgContent.substring(0, 100)}`);
             
@@ -120,6 +123,27 @@ export default class IconLoader {
             const fallback = this._fallbacks.get(name) || "?";
             return `<span class="icon-fallback">${fallback}</span>`;
         }
+    }
+
+    /**
+     * Sanitize SVG content to replace hardcoded colors with currentColor
+     * This ensures icons adapt to the current theme (light/dark)
+     * @param {string} svgContent - Raw SVG markup
+     * @returns {string} Sanitized SVG markup
+     */
+    _sanitizeSVG(svgContent) {
+        // Match fill="..." or stroke="..." where the value is NOT "none", "currentColor", or "transparent"
+        // Preserve intentionally colored icons by skipping those with only non-black fills
+        // Use a simple approach: strip fill attributes entirely (let CSS control fill),
+        // and convert stroke colors to currentColor
+        return svgContent
+            // Remove fill attributes (except fill="none" and fill="transparent")
+            .replace(/\s+fill="(?!none|transparent|currentColor)([^"]*)"/gi, '')
+            // Convert stroke to currentColor (preserve stroke="none")
+            .replace(/\s+stroke="(?!none|transparent|currentColor)([^"]*)"/gi, ' stroke="currentColor"')
+            // Also handle single-quoted attributes
+            .replace(/\s+fill='(?!none|transparent|currentColor)([^']*)'/gi, '')
+            .replace(/\s+stroke='(?!none|transparent|currentColor)([^']*)'/gi, " stroke='currentColor'");
     }
 
     /**

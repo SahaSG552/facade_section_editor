@@ -2284,9 +2284,19 @@ export default class ReplicadCanvasModule extends BaseModule {
         }
     }
 
+    /**
+     * Read current theme-aware edge color from CSS variable
+     * @returns {string} CSS color string
+     */
+    _getThemeEdgeColor() {
+        return getComputedStyle(document.documentElement)
+            .getPropertyValue('--edge-color').trim() || '#333333';
+    }
+
     _addEdgeOverlay(mesh, mode) {
         if (!mesh?.isMesh || !mesh.geometry) return;
 
+        const edgeColor = this._getThemeEdgeColor();
         const thresholdAngle = mode === "shadedEdges" ? 1 : 15;
         const edgeGeometry = new THREE.EdgesGeometry(mesh.geometry, thresholdAngle);
 
@@ -2294,7 +2304,7 @@ export default class ReplicadCanvasModule extends BaseModule {
             const dashed = new THREE.LineSegments(
                 edgeGeometry.clone(),
                 new THREE.LineDashedMaterial({
-                    color: 0x333333,
+                    color: edgeColor,
                     dashSize: 3,
                     gapSize: 2,
                     transparent: true,
@@ -2310,7 +2320,7 @@ export default class ReplicadCanvasModule extends BaseModule {
             const visible = new THREE.LineSegments(
                 edgeGeometry,
                 new THREE.LineBasicMaterial({
-                    color: 0x333333,
+                    color: edgeColor,
                     transparent: true,
                     opacity: 0.85,
                     depthTest: true,
@@ -2328,7 +2338,7 @@ export default class ReplicadCanvasModule extends BaseModule {
         const lines = new THREE.LineSegments(
             edgeGeometry,
             new THREE.LineBasicMaterial({
-                color: 0x333333,
+                color: edgeColor,
                 transparent: false,
                 opacity: 1,
                 depthTest: true,
@@ -2447,6 +2457,26 @@ export default class ReplicadCanvasModule extends BaseModule {
 
         eventBus.on("canvas:updated", () => {
             if (this._enabled) this.updateView();
+        });
+
+        // Listen for theme changes — update 3D scene background and edge overlays
+        window.addEventListener('themechange', () => {
+            if (!this.scene) return;
+
+            // Update scene background
+            const bg = getComputedStyle(document.documentElement)
+                .getPropertyValue('--scene-background').trim() || '#f0ede8';
+            this.scene.background = new THREE.Color(bg);
+
+            // Update edge overlay colors
+            const edgeColor = this._getThemeEdgeColor();
+            if (this.modelGroup) {
+                this.modelGroup.traverse((node) => {
+                    if (node.userData?.isBrepEdgeOverlay && node.material) {
+                        node.material.color.set(edgeColor);
+                    }
+                });
+            }
         });
     }
 

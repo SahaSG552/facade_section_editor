@@ -122,6 +122,14 @@ class MaterialManager {
         this.isWebGPURenderer = !!(
             this.renderer && (this.renderer.isWebGPURenderer || this.renderer.isWebGPU)
         );
+
+        // Listen for theme changes — update edge colors dynamically
+        window.addEventListener('themechange', () => {
+            const edgeColor = getComputedStyle(document.documentElement)
+                .getPropertyValue('--edge-color').trim() || '#333333';
+            this.setEdgesColor(edgeColor);
+        });
+
         this.log.info("MaterialManager initialized");
     }
 

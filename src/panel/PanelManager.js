@@ -1,4 +1,5 @@
 import LoggerFactory from "../core/LoggerFactory.js";
+import SVGThemeHelper from "../shared/theme/SVGThemeHelper.js";
 
 const svgNS = "http://www.w3.org/2000/svg";
 const log = LoggerFactory.createLogger("PanelManager");
@@ -46,7 +47,35 @@ class PanelManager {
         this.updatePhantomBits = config.updatePhantomBits || (() => {});
         this.updateBitsSheet = config.updateBitsSheet || (() => {});
 
+        // Listen for theme changes to update SVG colors
+        if (typeof window !== 'undefined') {
+            window.addEventListener('themechange', () => {
+                this.updatePanelColors();
+            });
+        }
+
         log.info("PanelManager initialized");
+    }
+
+    /**
+     * Update SVG element colors when theme changes
+     */
+    updatePanelColors() {
+        if (this.partSection) {
+            SVGThemeHelper.setFillFromVariable(this.partSection, "--color-bg-surface");
+            SVGThemeHelper.setStrokeFromVariable(this.partSection, "--color-text-primary");
+            this.partSection.setAttribute("fill-opacity", "0.35");
+        }
+        if (this.partFront) {
+            SVGThemeHelper.setFillFromVariable(this.partFront, "--color-bg-surface");
+            SVGThemeHelper.setStrokeFromVariable(this.partFront, "--color-text-primary");
+            this.partFront.setAttribute("fill-opacity", "0.28");
+        }
+        // Update anchor indicator if it exists
+        const indicator = document.getElementById("panel-anchor-indicator");
+        if (indicator) {
+            this.updatePanelAnchorIndicator();
+        }
     }
 
     /**
@@ -242,8 +271,9 @@ class PanelManager {
         this.partSection.setAttribute("y", panelOrigin.y);
         this.partSection.setAttribute("width", this.panelWidth);
         this.partSection.setAttribute("height", this.panelThickness);
-        this.partSection.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
-        this.partSection.setAttribute("stroke", "black");
+        SVGThemeHelper.setFillFromVariable(this.partSection, "--color-bg-surface");
+        SVGThemeHelper.setStrokeFromVariable(this.partSection, "--color-text-primary");
+        this.partSection.setAttribute("fill-opacity", "0.35");
 
         this.updatePartFront();
         this.updatePanelAnchorIndicator();
@@ -261,8 +291,9 @@ class PanelManager {
         // Preserve user-edited contour and only keep style/stroke in sync.
         const existingPath = String(this.partFront?.getAttribute("d") ?? "").trim();
         if (this.partFrontManuallyEdited && existingPath) {
-            this.partFront.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
-            this.partFront.setAttribute("stroke", "black");
+            SVGThemeHelper.setFillFromVariable(this.partFront, "--color-bg-surface");
+            SVGThemeHelper.setStrokeFromVariable(this.partFront, "--color-text-primary");
+            this.partFront.setAttribute("fill-opacity", "0.28");
             this.partFront.setAttribute(
                 "stroke-width",
                 this.getAdaptiveStrokeWidth(),
@@ -290,8 +321,9 @@ class PanelManager {
         ].join(" ");
 
         this.partFront.setAttribute("d", pathData);
-        this.partFront.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
-        this.partFront.setAttribute("stroke", "black");
+        SVGThemeHelper.setFillFromVariable(this.partFront, "--color-bg-surface");
+        SVGThemeHelper.setStrokeFromVariable(this.partFront, "--color-text-primary");
+        this.partFront.setAttribute("fill-opacity", "0.28");
         this.partFront.setAttribute(
             "stroke-width",
             this.getAdaptiveStrokeWidth(),
@@ -327,7 +359,7 @@ class PanelManager {
         horizontal.setAttribute("y1", anchorY);
         horizontal.setAttribute("x2", anchorX + crossSize);
         horizontal.setAttribute("y2", anchorY);
-        horizontal.setAttribute("stroke", "red");
+        SVGThemeHelper.setStrokeFromVariable(horizontal, "--color-action-accent");
         horizontal.setAttribute("stroke-width", thickness);
         indicator.appendChild(horizontal);
 
@@ -336,7 +368,7 @@ class PanelManager {
         vertical.setAttribute("y1", anchorY - crossSize);
         vertical.setAttribute("x2", anchorX);
         vertical.setAttribute("y2", anchorY + crossSize);
-        vertical.setAttribute("stroke", "red");
+        SVGThemeHelper.setStrokeFromVariable(vertical, "--color-action-accent");
         vertical.setAttribute("stroke-width", thickness);
         indicator.appendChild(vertical);
     }

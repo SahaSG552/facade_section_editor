@@ -166,6 +166,13 @@ export default class SceneManager {
 
         this.setupResizeObserver();
 
+        // Listen for theme changes — update scene background dynamically
+        window.addEventListener('themechange', () => {
+            const bg = getComputedStyle(document.documentElement)
+                .getPropertyValue('--scene-background').trim() || '#f5f5f5';
+            this.setBackgroundColor(bg);
+        });
+
         this.log.info("Initialized successfully");
     }
 

@@ -48,6 +48,7 @@ import { BitRegistry, bitRegistry } from "./bits/BitRegistry.js";
 import { PanelCoordinateHelper } from "./canvas/PanelCoordinateHelper.js";
 import { ManagerFactory } from "./core/ManagerFactory.js";
 import variablesManager from "./data/VariablesManager.js";
+import SVGThemeHelper from "./shared/theme/SVGThemeHelper.js";
 
 // Icon loading system
 import { loadIconsForButtons } from "./ui/IconButton.js";
@@ -385,8 +386,7 @@ function initializeSVG() {
     // Create part path
     partPath = document.createElementNS(svgNS, "path");
     partPath.id = "part-path";
-    partPath.setAttribute("fill", "rgba(71, 64, 64, 0.16)");
-    partPath.setAttribute("stroke", "black");
+    SVGThemeHelper.setThemeColors(partPath, "--color-bg-surface", "--color-border-default");
     partPath.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     partPath.style.display = "none";
     panelLayer.appendChild(partPath);
@@ -1026,7 +1026,7 @@ function updatePanelShape() {
         partSection.setAttribute("y", panelY);
         partSection.setAttribute("width", panelWidth);
         partSection.setAttribute("height", panelThickness);
-        partSection.setAttribute("fill", "rgba(155, 155, 155, 0.16)");
+        SVGThemeHelper.setFillFromVariable(partSection, "--color-bg-surface");
     }
 }
 
@@ -2243,7 +2243,7 @@ function updateOffsetContours() {
                     // Only display pass 0 (base offset - black) in 2D
                     // Other passes stored for 3D but not displayed
                     if (passIndex === 0) {
-                        offsetContour.setAttribute("stroke", "black");
+                        SVGThemeHelper.setStrokeFromVariable(offsetContour, "--color-text-muted");
                         offsetContour.setAttribute(
                             "stroke-width",
                             getAdaptiveStrokeWidth()
@@ -2593,8 +2593,7 @@ function createAlignmentButton(alignment) {
     const bg = document.createElementNS(svgNS, "rect");
     bg.setAttribute("width", "20");
     bg.setAttribute("height", "20");
-    bg.setAttribute("fill", "white");
-    bg.setAttribute("stroke", "black");
+    SVGThemeHelper.setThemeColors(bg, "--color-bg-surface", "--color-text-muted");
     bg.setAttribute("stroke-width", "1");
     svg.appendChild(bg);
 
@@ -2606,7 +2605,7 @@ function createAlignmentButton(alignment) {
         line.setAttribute("y1", "3");
         line.setAttribute("x2", "10");
         line.setAttribute("y2", "17");
-        line.setAttribute("stroke", "black");
+        SVGThemeHelper.setStrokeFromVariable(line, "--color-text-primary");
         line.setAttribute("stroke-width", "1");
         line.setAttribute("stroke-dasharray", "2,2");
         svg.appendChild(line);
@@ -2617,7 +2616,7 @@ function createAlignmentButton(alignment) {
         square.setAttribute("y", "8");
         square.setAttribute("width", "6");
         square.setAttribute("height", "4");
-        square.setAttribute("fill", "black");
+        SVGThemeHelper.setFillFromVariable(square, "--color-text-primary");
         svg.appendChild(square);
     } else if (alignment === "left") {
         // Left line (vertical dashed)
@@ -2626,7 +2625,7 @@ function createAlignmentButton(alignment) {
         line.setAttribute("y1", "3");
         line.setAttribute("x2", "5");
         line.setAttribute("y2", "17");
-        line.setAttribute("stroke", "black");
+        SVGThemeHelper.setStrokeFromVariable(line, "--color-text-primary");
         line.setAttribute("stroke-width", "1");
         line.setAttribute("stroke-dasharray", "2,2");
         svg.appendChild(line);
@@ -2637,7 +2636,7 @@ function createAlignmentButton(alignment) {
         square.setAttribute("y", "8");
         square.setAttribute("width", "6");
         square.setAttribute("height", "4");
-        square.setAttribute("fill", "black");
+        SVGThemeHelper.setFillFromVariable(square, "--color-text-primary");
         svg.appendChild(square);
     } else if (alignment === "right") {
         // Right line (vertical dashed)
@@ -2646,7 +2645,7 @@ function createAlignmentButton(alignment) {
         line.setAttribute("y1", "3");
         line.setAttribute("x2", "15");
         line.setAttribute("y2", "17");
-        line.setAttribute("stroke", "black");
+        SVGThemeHelper.setStrokeFromVariable(line, "--color-text-primary");
         line.setAttribute("stroke-width", "1");
         line.setAttribute("stroke-dasharray", "2,2");
         svg.appendChild(line);
@@ -2657,7 +2656,7 @@ function createAlignmentButton(alignment) {
         square.setAttribute("y", "8");
         square.setAttribute("width", "6");
         square.setAttribute("height", "4");
-        square.setAttribute("fill", "black");
+        SVGThemeHelper.setFillFromVariable(square, "--color-text-primary");
         svg.appendChild(square);
     }
 
@@ -2676,8 +2675,7 @@ function createpanelAnchorButton(anchor) {
     const bg = document.createElementNS(svgNS, "rect");
     bg.setAttribute("width", "20");
     bg.setAttribute("height", "20");
-    bg.setAttribute("fill", "rgba(155, 155, 155, 0.5)");
-    bg.setAttribute("stroke", "black");
+    SVGThemeHelper.setThemeColors(bg, "--color-bg-surface", "--color-border-default");
     bg.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     svg.appendChild(bg);
 
@@ -2697,7 +2695,7 @@ function createpanelAnchorButton(anchor) {
     horizontal.setAttribute("y1", crossY);
     horizontal.setAttribute("x2", crossX + crossSize);
     horizontal.setAttribute("y2", crossY);
-    horizontal.setAttribute("stroke", "red");
+    SVGThemeHelper.setStrokeFromVariable(horizontal, "--color-action-accent");
     horizontal.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     svg.appendChild(horizontal);
 
@@ -2706,7 +2704,7 @@ function createpanelAnchorButton(anchor) {
     vertical.setAttribute("y1", crossY - crossSize);
     vertical.setAttribute("x2", crossX);
     vertical.setAttribute("y2", crossY + crossSize);
-    vertical.setAttribute("stroke", "red");
+    SVGThemeHelper.setStrokeFromVariable(vertical, "--color-action-accent");
     vertical.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     svg.appendChild(vertical);
 
@@ -3635,7 +3633,7 @@ function redrawBitsOnCanvas() {
         horizontal.setAttribute("y1", anchorY);
         horizontal.setAttribute("x2", anchorX + crossSize);
         horizontal.setAttribute("y2", anchorY);
-        horizontal.setAttribute("stroke", "red");
+        SVGThemeHelper.setStrokeFromVariable(horizontal, "--color-action-accent");
         horizontal.setAttribute("stroke-width", getAdaptiveStrokeWidth());
         anchorPoint.appendChild(horizontal);
 
@@ -3644,7 +3642,7 @@ function redrawBitsOnCanvas() {
         vertical.setAttribute("y1", anchorY - crossSize);
         vertical.setAttribute("x2", anchorX);
         vertical.setAttribute("y2", anchorY + crossSize);
-        vertical.setAttribute("stroke", "red");
+        SVGThemeHelper.setStrokeFromVariable(vertical, "--color-action-accent");
         vertical.setAttribute("stroke-width", getAdaptiveStrokeWidth());
         anchorPoint.appendChild(vertical);
 
