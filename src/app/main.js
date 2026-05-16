@@ -8,6 +8,7 @@ import BitsModule from "../bits/BitsModule.js";
 import ExportModule from "../export/ExportModule.js";
 import UIModule from "../ui/UIModule.js";
 import ThreeModule from "../three/ThreeModule.js";
+import ReplicadCanvasModule from "../three/ReplicadCanvasModule.js";
 
 // Register all modules
 app.registerModule((container) => new CanvasModule(), "canvas");
@@ -15,6 +16,7 @@ app.registerModule((container) => new BitsModule(), "bits");
 app.registerModule((container) => new ExportModule(), "export");
 app.registerModule((container) => new UIModule(), "ui");
 app.registerModule((container) => new ThreeModule(), "three");
+app.registerModule((container) => new ReplicadCanvasModule(), "replicad");
 
 // Export main app instance and modules for use in main script
 export { app };
@@ -23,3 +25,4 @@ export { default as BitsModule } from "../bits/BitsModule.js";
 export { default as ExportModule } from "../export/ExportModule.js";
 export { default as UIModule } from "../ui/UIModule.js";
 export { default as ThreeModule } from "../three/ThreeModule.js";
+export { default as ReplicadCanvasModule } from "../three/ReplicadCanvasModule.js";

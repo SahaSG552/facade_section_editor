@@ -39,6 +39,8 @@
     "jsdom": "^27.3.0",
     "manifold-3d": "^3.3.2",
     "paper": "^0.12.18",
+    "replicad": "^0.23.1",
+    "replicad-opencascadejs": "^0.23.0",
     "three": "^0.182.0",
     "three-bvh-csg": "^0.0.17",
     "three-mesh-bvh": "^0.9.4",

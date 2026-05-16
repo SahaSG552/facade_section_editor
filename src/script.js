@@ -98,6 +98,7 @@ let panelManager;
 let selectionManager;
 let partFrontProfileEditor;
 let partFrontPathEditor;
+let replicadModule;
 let partFrontOverlayResizeHandler = null;
 let partFrontEditorFrame = null;
 const PART_FRONT_VARIABLE_GROUP = "__part_front";
@@ -2108,6 +2109,31 @@ async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = fa
  * // - Window.offsetContours accessible for 3D rendering
  * updateOffsetContours();
  */
+
+/**
+ * Update BREP module if it's currently active.
+ * Called automatically after offset contours or bit positions change.
+ */
+function updateReplicadIfActive() {
+    syncExternal3DState();
+
+    // Safely check if replicadModule exists and is active
+    if (replicadModule && typeof replicadModule.isActive === 'function' && replicadModule.isActive()) {
+        replicadModule.updateView();
+    }
+}
+
+function syncExternal3DState() {
+    // Keep ThreeModule/Replicad consumers in sync with script-level runtime state.
+    window.bitsOnCanvas = getVisibleBits();
+    window.offsetContours = offsetContours;
+    window.partFront = partFront || null;
+    window.panelWidth = panelWidth;
+    window.panelHeight = panelHeight;
+    window.panelThickness = panelThickness;
+    window.panelAnchor = panelAnchor;
+}
+
 function updateOffsetContours() {
     if (!appState.is2DActive()) {
         log.debug("Skip updateOffsetContours: 2D inactive");
@@ -2121,6 +2147,7 @@ function updateOffsetContours() {
 
     // Update global reference
     window.offsetContours = offsetContours;
+    syncExternal3DState();
 
     // Always calculate relative to top anchor for consistent offset calculations
     let panelX, panelY;
@@ -2192,14 +2219,19 @@ function updateOffsetContours() {
                         : offsets[offsets.length - passIndex]; // Pass 1+: reverse order
 
                 // Calculate offset contour using the selected offset engine
-                const offsetData = offsetCalculator.calculateOffsetFromSVG(
+                const offsetDetail = offsetCalculator.calculateOffsetDetailedFromSVG(
                     partFront,
                     offsetDistance
                 );
+                const pathData =
+                    typeof offsetDetail?.pathData === "string"
+                        ? offsetDetail.pathData
+                        : "";
+                const offsetEngineContours = Array.isArray(offsetDetail?.contours)
+                    ? offsetDetail.contours
+                    : [];
 
-                if (offsetData) {
-                    const pathData =
-                        typeof offsetData === "string" ? offsetData : "";
+                if (pathData) {
 
                     const offsetContour = document.createElementNS(
                         svgNS,
@@ -2231,6 +2263,7 @@ function updateOffsetContours() {
                         pass: passIndex,
                         passIndex: passIndex, // Add passIndex for compatibility
                         pathData: pathData, // Store pathData for 3D
+                        offsetEngineContours,
                         depth:
                             passIndex === passes - 1 ? topAnchorCoords.y : null,
                         isWorkOffset: false, // Not a work offset
@@ -2253,24 +2286,33 @@ function updateOffsetContours() {
             const isZeroOffset =
                 Math.abs(workOffsetDistance) < ARC_RADIUS_TOLERANCE; // tolerance
 
-            let workOffsetData;
+            let workOffsetDetail;
             if (isZeroOffset) {
                 // Work offset coincides with original contour - use partFront path directly
-                workOffsetData = partFront.getAttribute("d");
+                workOffsetDetail = {
+                    pathData: partFront.getAttribute("d") || "",
+                    contours: [],
+                };
                 log.debug(
                     `[VC] Work offset = 0, using original partFront contour`
                 );
             } else {
                 // Use offset engine to preserve curves
-                workOffsetData = offsetCalculator.calculateOffsetFromSVG(
+                workOffsetDetail = offsetCalculator.calculateOffsetDetailedFromSVG(
                     partFront,
                     workOffsetDistance
                 );
             }
 
-            if (workOffsetData) {
-                const workPathData =
-                    typeof workOffsetData === "string" ? workOffsetData : "";
+            const workPathData =
+                typeof workOffsetDetail?.pathData === "string"
+                    ? workOffsetDetail.pathData
+                    : "";
+            const workOffsetEngineContours = Array.isArray(workOffsetDetail?.contours)
+                ? workOffsetDetail.contours
+                : [];
+
+            if (workPathData) {
 
                 const workOffsetContour = document.createElementNS(
                     svgNS,
@@ -2300,6 +2342,7 @@ function updateOffsetContours() {
                     pass: passes, // Work offset is after all passes
                     passIndex: passes,
                     pathData: workPathData,
+                    offsetEngineContours: workOffsetEngineContours,
                     depth: bitY, // Full depth
                     isWorkOffset: true, // Flag for DXF export and 3D filtering
                 });
@@ -2323,16 +2366,19 @@ function updateOffsetContours() {
 
             // Create offsets for PO operation
             {
-                const mainOffsetData = offsetCalculator.calculateOffsetFromSVG(
+                const mainOffsetDetail = offsetCalculator.calculateOffsetDetailedFromSVG(
                     partFront,
                     mainOffsetDistance
                 );
+                const mainPathData =
+                    typeof mainOffsetDetail?.pathData === "string"
+                        ? mainOffsetDetail.pathData
+                        : "";
+                const mainOffsetEngineContours = Array.isArray(mainOffsetDetail?.contours)
+                    ? mainOffsetDetail.contours
+                    : [];
 
-                if (mainOffsetData) {
-                    const mainPathData =
-                        typeof mainOffsetData === "string"
-                            ? mainOffsetData
-                            : "";
+                if (mainPathData) {
 
                     const mainOffsetContour = document.createElementNS(
                         svgNS,
@@ -2360,6 +2406,7 @@ function updateOffsetContours() {
                         operation: "PO",
                         isPOMain: true,
                         pathData: mainPathData,
+                        offsetEngineContours: mainOffsetEngineContours,
                     });
                 }
             }
@@ -2371,17 +2418,20 @@ function updateOffsetContours() {
                 // Phantom center is at: bit.x + pocketOffset
                 const phantomCenterX = bit.x + pocketOffset;
                 const phantomOffsetDistance = phantomCenterX + diameter / 2;
-                const phantomOffsetData =
-                    offsetCalculator.calculateOffsetFromSVG(
+                const phantomOffsetDetail =
+                    offsetCalculator.calculateOffsetDetailedFromSVG(
                         partFront,
                         phantomOffsetDistance
                     );
+                const phantomPathData =
+                    typeof phantomOffsetDetail?.pathData === "string"
+                        ? phantomOffsetDetail.pathData
+                        : "";
+                const phantomOffsetEngineContours = Array.isArray(phantomOffsetDetail?.contours)
+                    ? phantomOffsetDetail.contours
+                    : [];
 
-                if (phantomOffsetData) {
-                    const phantomPathData =
-                        typeof phantomOffsetData === "string"
-                            ? phantomOffsetData
-                            : "";
+                if (phantomPathData) {
 
                     const phantomOffsetContour = document.createElementNS(
                         svgNS,
@@ -2414,6 +2464,7 @@ function updateOffsetContours() {
                         operation: "PO",
                         isPOPhantom: true,
                         pathData: phantomPathData,
+                        offsetEngineContours: phantomOffsetEngineContours,
                     });
                 }
 
@@ -2445,14 +2496,19 @@ function updateOffsetContours() {
             // AL uses bit.x as is
 
             // Use offset calculator (preserves Bezier curves)
-            const offsetData = offsetCalculator.calculateOffsetFromSVG(
+            const offsetDetail = offsetCalculator.calculateOffsetDetailedFromSVG(
                 partFront,
                 offsetDistance
             );
+            const pathData =
+                typeof offsetDetail?.pathData === "string"
+                    ? offsetDetail.pathData
+                    : "";
+            const offsetEngineContours = Array.isArray(offsetDetail?.contours)
+                ? offsetDetail.contours
+                : [];
 
-            if (offsetData) {
-                const pathData =
-                    typeof offsetData === "string" ? offsetData : "";
+            if (pathData) {
 
                 const offsetContour = document.createElementNS(svgNS, "path");
                 offsetContour.setAttribute("d", pathData);
@@ -2471,23 +2527,28 @@ function updateOffsetContours() {
                     bitIndex: index,
                     offsetDistance: offsetDistance,
                     operation: bit.operation,
+                    pathData: pathData,
+                    offsetEngineContours,
                 });
 
                 // For OU/IN operations: create additional centered contour for 3D rendering
                 // (3D should use center path like AL, not offset path)
                 if (bit.operation === "OU" || bit.operation === "IN") {
                     const centerOffsetDistance = bit.x; // Always use center for 3D
-                    const centerOffsetData =
-                        offsetCalculator.calculateOffsetFromSVG(
+                    const centerOffsetDetail =
+                        offsetCalculator.calculateOffsetDetailedFromSVG(
                             partFront,
                             centerOffsetDistance
                         );
+                    const centerPathData =
+                        typeof centerOffsetDetail?.pathData === "string"
+                            ? centerOffsetDetail.pathData
+                            : "";
+                    const centerOffsetEngineContours = Array.isArray(centerOffsetDetail?.contours)
+                        ? centerOffsetDetail.contours
+                        : [];
 
-                    if (centerOffsetData) {
-                        const centerPathData =
-                            typeof centerOffsetData === "string"
-                                ? centerOffsetData
-                                : "";
+                    if (centerPathData) {
 
                         // Create invisible element (not added to DOM)
                         const centerContour = document.createElementNS(
@@ -2505,12 +2566,16 @@ function updateOffsetContours() {
                             operation: bit.operation,
                             for3D: true, // Flag: use this contour for 3D rendering
                             pathData: centerPathData,
+                            offsetEngineContours: centerOffsetEngineContours,
                         });
                     }
                 }
             }
         }
     });
+
+    // Update BREP view if it's active
+    updateReplicadIfActive();
 }
 
 // Alignment states: 'center', 'left', 'right'
@@ -2839,6 +2904,11 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
                 scheduleCsgIfNeeded(newBit.bitData?.id);
             }
         });
+    }
+    
+    // Update BREP view if active
+    if (replicadModule && replicadModule.isActive?.()) {
+        replicadModule.updateView();
     }
 }
 
@@ -4549,18 +4619,27 @@ async function initializeModularSystem() {
     }
 }
 
-// Setup view toggle buttons (2D/3D/Both)
+// Setup view toggle buttons (2D/3D/Both/BREP)
 function setupViewToggle(threeModule) {
     const view2DBtn = document.getElementById("view-2d");
     const view3DBtn = document.getElementById("view-3d");
     const viewBothBtn = document.getElementById("view-both");
+    const viewBREPBtn = document.getElementById("view-brep");
     const appContainer = document.getElementById("app");
+
+    // Resolve the ReplicadCanvasModule from the app container (registered in main.js)
+    replicadModule = null;
+    try {
+        replicadModule = app.container.get("replicad");
+    } catch (_) {
+        // Module may not be available in fallback mode
+    }
 
     let currentView = "2d"; // Default view
 
     // Function to update active button state
     function updateActiveButton(activeBtn) {
-        [view2DBtn, view3DBtn, viewBothBtn].forEach(
+        [view2DBtn, view3DBtn, viewBothBtn, viewBREPBtn].filter(Boolean).forEach(
             (btn) => {
                 btn.classList.remove("active");
             }
@@ -4572,17 +4651,38 @@ function setupViewToggle(threeModule) {
     function switchView(view) {
         currentView = view;
 
-        const mode = view === "3d" ? "3d" : view === "both" ? "both" : "2d";
+        // BREP mode uses its own renderer; keep appState in "2d" so ThreeModule stays inactive
+        const mode = view === "3d" ? "3d" : view === "both" ? "both" : view === "brep" ? "2d" : "2d";
         appState.setViewMode(mode);
 
         // Remove all view classes
         appContainer.classList.remove(
             "view-3d",
-            "view-both"
+            "view-both",
+            "view-brep"
         );
 
         // Add current view class
         appContainer.classList.add(`view-${view}`);
+
+        // Toggle BREP module
+        if (replicadModule) {
+            const brepActive = view === "brep";
+            syncExternal3DState();
+            replicadModule.setEnabled(brepActive);
+            
+            // Update BREP view with current data if switching to BREP
+            if (brepActive) {
+                // Ensure panel and offsets are up-to-date before rendering BREP
+                updatePanelShape();
+                updateOffsetContours();
+                syncExternal3DState();
+                
+                setTimeout(() => {
+                    replicadModule.updateView();
+                }, 50);
+            }
+        }
 
         // Update 3D view with current data if switching to 3D or both
         if (threeModule && (view === "3d" || view === "both")) {
@@ -4631,6 +4731,14 @@ function setupViewToggle(threeModule) {
         switchView("both");
         updateActiveButton(viewBothBtn);
     });
+
+    // BREP mode button (Replicad)
+    if (viewBREPBtn) {
+        viewBREPBtn.addEventListener("click", () => {
+            switchView("brep");
+            updateActiveButton(viewBREPBtn);
+        });
+    }
 
     // Set initial view (just update classes without resize)
     appContainer.classList.add("view-2d");

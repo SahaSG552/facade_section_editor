@@ -357,10 +357,27 @@ export default class ThreeModule extends BaseModule {
                 this.exportToSTL("facade");
             });
 
+            // Export to STEP button (Replicad BREP – only visible when BREP module loaded)
+            const exportStepBtn = document.createElement("button");
+            exportStepBtn.textContent = "📐 STEP";
+            exportStepBtn.title = "Export B-Rep geometry to STEP (requires BREP mode)";
+            exportStepBtn.style.padding = "4px 10px";
+            exportStepBtn.style.backgroundColor = "#2196F3";
+            exportStepBtn.style.color = "white";
+            exportStepBtn.style.border = "none";
+            exportStepBtn.style.borderRadius = "4px";
+            exportStepBtn.style.cursor = "pointer";
+            exportStepBtn.style.fontSize = "12px";
+            exportStepBtn.style.fontWeight = "bold";
+            exportStepBtn.addEventListener("click", () => {
+                this.exportToSTEP();
+            });
+
             row1.appendChild(select);
             row1.appendChild(selectLabel);
             // row1.appendChild(wfLabel); // Hiding wireframe for cleaner UI as per request
             row1.appendChild(exportBtn);
+            row1.appendChild(exportStepBtn);
 
             // Row 2: Colors
             const row2 = document.createElement("div");
@@ -2891,6 +2908,38 @@ export default class ThreeModule extends BaseModule {
      */
     showCSGResult() {
         this.csgEngine.showCSGResult();
+    }
+
+    /**
+     * Export B-Rep geometry to STEP via ReplicadCanvasModule.
+     * Only works when the BREP module has a current shape (i.e. BREP mode was used).
+     * @param {string} filename - Optional filename prefix
+     */
+    exportToSTEP(filename = "facade") {
+        try {
+            // Reach the replicad module registered in app container
+            const replicadModule = window._replicadModule;
+            if (!replicadModule) {
+                this.log.warn("exportToSTEP: BREP module not available. Switch to BREP mode first.");
+                alert("STEP export is available in BREP mode.\nClick the BREP button to switch, then export.");
+                return;
+            }
+            const blob = replicadModule.exportSTEP();
+            if (!blob) {
+                this.log.warn("exportToSTEP: no current BREP shape. Build the model in BREP mode first.");
+                alert("No BREP shape to export. Open BREP mode and wait for the model to load.");
+                return;
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${filename}.step`;
+            a.click();
+            URL.revokeObjectURL(url);
+            this.log.info(`exportToSTEP: exported ${filename}.step`);
+        } catch (err) {
+            this.log.error("exportToSTEP failed:", err);
+        }
     }
 
     /**

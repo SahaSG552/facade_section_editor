@@ -39,6 +39,9 @@
                 <button id="view-both" class="view-toggle-btn" title="2D + 3D Views">
                     2D/3D
                 </button>
+                <button id="view-brep" class="view-toggle-btn" title="BREP Mode (Replicad)">
+                    BREP
+                </button>
             </div>
             <button id="theme-toggle" title="Toggle Theme">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -105,6 +108,9 @@
         </div>
         <div id="three-canvas-container">
             <!-- Three.js canvas will be inserted here -->
+            <div id="replicad-canvas-container" style="display:none;position:absolute;top:0;left:0;width:100%;height:100%;z-index:2;">
+                <!-- Replicad BREP canvas will be inserted here -->
+            </div>
         </div>
         <div id="right-menu">
             <div id="part-params">

@@ -452,6 +452,23 @@ class CanvasManager {
 
     updateViewBox() {
         const rect = this.canvas.getBoundingClientRect();
+        const minZoom = Number.isFinite(this.config?.minZoom)
+            ? this.config.minZoom
+            : 0.05;
+        const maxZoom = Number.isFinite(this.config?.maxZoom)
+            ? this.config.maxZoom
+            : 50;
+
+        if (!Number.isFinite(this.zoomLevel) || this.zoomLevel <= 0) {
+            this.zoomLevel = Math.max(minZoom, Math.min(maxZoom, 1));
+        }
+        if (!Number.isFinite(this.panX)) {
+            this.panX = Number.isFinite(rect.width) ? rect.width / 2 : 0;
+        }
+        if (!Number.isFinite(this.panY)) {
+            this.panY = Number.isFinite(rect.height) ? rect.height / 2 : 0;
+        }
+
         const viewBoxWidth = rect.width / this.zoomLevel;
         const viewBoxHeight = rect.height / this.zoomLevel;
         const viewBoxX = this.panX - viewBoxWidth / 2;

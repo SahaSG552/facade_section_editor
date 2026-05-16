@@ -31,8 +31,29 @@ function stripManifoldWasmBadSourceMap() {
     };
 }
 
+function serveReplicadWasm() {
+    return {
+        name: "serve-replicad-wasm",
+        configResolved(config) {
+            this.config = config;
+        },
+        configureServer(server) {
+            // Add custom middleware to serve WASM with correct MIME type
+            return () => {
+                server.middlewares.use((req, res, next) => {
+                    if (req.url.includes(".wasm")) {
+                        res.setHeader("Content-Type", "application/wasm");
+                        res.setHeader("Access-Control-Allow-Origin", "*");
+                    }
+                    next();
+                });
+            };
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [stripManifoldWasmBadSourceMap(), ...(isHost ? [basicSsl()] : [])],
+    plugins: [stripManifoldWasmBadSourceMap(), serveReplicadWasm(), ...(isHost ? [basicSsl()] : [])],
     resolve: {
         alias: {
             // Provide empty shim for Node.js 'module' package in browser
@@ -41,7 +62,7 @@ export default defineConfig({
     },
     optimizeDeps: {
         include: ["clipper2-lib-js"],
-        exclude: ["manifold-3d"],
+        exclude: ["manifold-3d", "replicad", "replicad-opencascadejs"],
         esbuildOptions: {
             // Allow manifold-3d to be bundled even with Node.js imports
             platform: "browser",
@@ -63,6 +84,7 @@ export default defineConfig({
                 manualChunks: {
                     "three-vendor": ["three", "three-bvh-csg"],
                     manifold: ["manifold-3d"],
+                    replicad: ["replicad"],
                 },
             },
         },

@@ -741,6 +741,17 @@ html {
   height: 100%;
 }
 
+/* BREP mode – show the three-canvas-container (replicad overlays inside it) */
+#app.view-brep #canvas-container {
+  display: none;
+}
+
+#app.view-brep #three-canvas-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
 /* ===== ZOOM TOOLBAR ===== */
 #zoom-toolbar {
   display: flex;

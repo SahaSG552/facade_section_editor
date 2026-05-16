@@ -139,10 +139,20 @@ export function zoomToBBox(canvasManager, bbox, padding = 0) {
     const pixelWidth = rect.width;
     const pixelHeight = rect.height;
 
+    const hasViewport = Number.isFinite(pixelWidth) && Number.isFinite(pixelHeight) && pixelWidth > 0 && pixelHeight > 0;
+    const safeContentWidth = Number.isFinite(contentWidth) && contentWidth > 0 ? contentWidth : 1;
+    const safeContentHeight = Number.isFinite(contentHeight) && contentHeight > 0 ? contentHeight : 1;
+
+    const minZoom = Number.isFinite(canvasManager?.config?.minZoom) ? canvasManager.config.minZoom : 0.05;
+    const maxZoom = Number.isFinite(canvasManager?.config?.maxZoom) ? canvasManager.config.maxZoom : 50;
+
     // Calculate zoom level to fit the content
-    const zoomX = pixelWidth / contentWidth;
-    const zoomY = pixelHeight / contentHeight;
-    canvasManager.zoomLevel = Math.min(zoomX, zoomY);
+    const zoomX = hasViewport ? pixelWidth / safeContentWidth : canvasManager.zoomLevel;
+    const zoomY = hasViewport ? pixelHeight / safeContentHeight : canvasManager.zoomLevel;
+    const nextZoom = Math.min(zoomX, zoomY);
+    canvasManager.zoomLevel = Number.isFinite(nextZoom)
+        ? Math.max(minZoom, Math.min(maxZoom, nextZoom))
+        : Math.max(minZoom, Math.min(maxZoom, Number(canvasManager.zoomLevel) || 1));
 
     // Center on the bbox center
     canvasManager.panX = bbox.center.x;
@@ -279,11 +289,26 @@ export function fitToBounds(canvasManager, bounds) {
     if (!bounds) {
         // Default fit
         const rect = canvasManager.canvas.getBoundingClientRect();
-        canvasManager.zoomLevel = 1;
+        const minZoom = Number.isFinite(canvasManager?.config?.minZoom) ? canvasManager.config.minZoom : 0.05;
+        const maxZoom = Number.isFinite(canvasManager?.config?.maxZoom) ? canvasManager.config.maxZoom : 50;
+        canvasManager.zoomLevel = Math.max(minZoom, Math.min(maxZoom, 1));
         canvasManager.panX = rect.width / 2;
         canvasManager.panY = rect.height / 2;
     } else {
         const { minX, maxX, minY, maxY, padding = 20 } = bounds;
+        const hasFiniteBounds = [minX, maxX, minY, maxY].every((v) => Number.isFinite(v));
+
+        if (!hasFiniteBounds) {
+            const rect = canvasManager.canvas.getBoundingClientRect();
+            const minZoom = Number.isFinite(canvasManager?.config?.minZoom) ? canvasManager.config.minZoom : 0.05;
+            const maxZoom = Number.isFinite(canvasManager?.config?.maxZoom) ? canvasManager.config.maxZoom : 50;
+            canvasManager.zoomLevel = Math.max(minZoom, Math.min(maxZoom, Number(canvasManager.zoomLevel) || 1));
+            canvasManager.panX = Number.isFinite(canvasManager.panX) ? canvasManager.panX : rect.width / 2;
+            canvasManager.panY = Number.isFinite(canvasManager.panY) ? canvasManager.panY : rect.height / 2;
+            canvasManager.updateViewBox();
+            return;
+        }
+
         const contentWidth = maxX - minX + 2 * padding;
         const contentHeight = maxY - minY + 2 * padding;
 
@@ -291,9 +316,19 @@ export function fitToBounds(canvasManager, bounds) {
         const pixelWidth = rect.width;
         const pixelHeight = rect.height;
 
-        const zoomX = pixelWidth / contentWidth;
-        const zoomY = pixelHeight / contentHeight;
-        canvasManager.zoomLevel = Math.min(zoomX, zoomY);
+        const hasViewport = Number.isFinite(pixelWidth) && Number.isFinite(pixelHeight) && pixelWidth > 0 && pixelHeight > 0;
+        const safeContentWidth = Number.isFinite(contentWidth) && contentWidth > 0 ? contentWidth : 1;
+        const safeContentHeight = Number.isFinite(contentHeight) && contentHeight > 0 ? contentHeight : 1;
+
+        const minZoom = Number.isFinite(canvasManager?.config?.minZoom) ? canvasManager.config.minZoom : 0.05;
+        const maxZoom = Number.isFinite(canvasManager?.config?.maxZoom) ? canvasManager.config.maxZoom : 50;
+
+        const zoomX = hasViewport ? pixelWidth / safeContentWidth : canvasManager.zoomLevel;
+        const zoomY = hasViewport ? pixelHeight / safeContentHeight : canvasManager.zoomLevel;
+        const nextZoom = Math.min(zoomX, zoomY);
+        canvasManager.zoomLevel = Number.isFinite(nextZoom)
+            ? Math.max(minZoom, Math.min(maxZoom, nextZoom))
+            : Math.max(minZoom, Math.min(maxZoom, Number(canvasManager.zoomLevel) || 1));
 
         canvasManager.panX = (minX + maxX) / 2;
         canvasManager.panY = (minY + maxY) / 2;

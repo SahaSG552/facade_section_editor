@@ -435,6 +435,71 @@ export function calculateOffsetFromPathData(pathData, offset, options = {}) {
 }
 
 /**
+ * Calculate detailed offset result (path + contour segments).
+ * Path output keeps legacy behavior from calculateOffsetFromPathData.
+ * Contours come from OffsetEngine for downstream geometry consumers.
+ *
+ * @param {string} pathData - SVG path data
+ * @param {number} offset - Offset distance
+ * @param {Object} options - Offset options
+ * @returns {{pathData:string, contours:Array<Object>, metadata?:Object}}
+ */
+export function calculateOffsetDetailedFromPathData(pathData, offset, options = {}) {
+    if (!pathData) {
+        return { pathData: "", contours: [] };
+    }
+
+    const resolvedPathData = calculateOffsetFromPathData(pathData, offset, options);
+    if (!resolvedPathData) {
+        return { pathData: "", contours: [] };
+    }
+
+    try {
+        const inputHasClose =
+            HAS_CLOSE_COMMAND_RE.test(pathData) ||
+            isPathGeometricallyClosed(pathData);
+        const originalMathArea = inputHasClose ? signedArea(pathData) : 0;
+
+        let effectiveOffset = -offset;
+        if (
+            inputHasClose &&
+            Number.isFinite(originalMathArea) &&
+            Math.abs(originalMathArea) > 1e-9
+        ) {
+            effectiveOffset = originalMathArea > 0 ? offset : -offset;
+        }
+
+        const engine = new OffsetEngine();
+        const detailed = engine._processPathSync(pathData, effectiveOffset, {
+            joinType: options.join || "sharp",
+            capType: options.cap || "flat",
+            exportModule: options.exportModule,
+            trimSelfIntersections:
+                typeof options.trimSelfIntersections === "boolean"
+                    ? options.trimSelfIntersections
+                    : true,
+            sideResolution: options.sideResolution,
+            cursorPoint: options.cursorPoint,
+            offsetSignMode: "direct",
+            useArcApproximation: options.useArcApproximation || false,
+            arcTolerance: options.arcTolerance || ARC_APPROX_TOLERANCE,
+        });
+
+        return {
+            pathData: resolvedPathData,
+            contours: Array.isArray(detailed?.contours) ? detailed.contours : [],
+            metadata: detailed?.metadata,
+        };
+    } catch (err) {
+        log.warn("calculateOffsetDetailedFromPathData: contours unavailable", err);
+        return {
+            pathData: resolvedPathData,
+            contours: [],
+        };
+    }
+}
+
+/**
  * Calculate offset for SVG element.
  * @param {SVGElement} svgElement - SVG rect or path element
  * @param {number} offset - Offset distance
@@ -477,6 +542,48 @@ export function calculateOffsetFromSVG(svgElement, offset, options = {}) {
 }
 
 /**
+ * Calculate detailed offset for SVG element (path + contour segments).
+ * @param {SVGElement} svgElement - SVG rect or path element
+ * @param {number} offset - Offset distance
+ * @param {Object} options - Offset options
+ * @returns {{pathData:string, contours:Array<Object>, metadata?:Object}}
+ */
+export function calculateOffsetDetailedFromSVG(svgElement, offset, options = {}) {
+    if (!svgElement) {
+        log.warn("calculateOffsetDetailedFromSVG: no SVG element provided");
+        return { pathData: "", contours: [] };
+    }
+
+    let pathData = "";
+    const tag = svgElement.tagName.toLowerCase();
+
+    if (tag === "path") {
+        pathData = svgElement.getAttribute("d") || "";
+    } else if (tag === "rect") {
+        const x = parseFloat(svgElement.getAttribute("x")) || 0;
+        const y = parseFloat(svgElement.getAttribute("y")) || 0;
+        const width = parseFloat(svgElement.getAttribute("width")) || 0;
+        const height = parseFloat(svgElement.getAttribute("height")) || 0;
+        pathData = `M ${x} ${y} L ${x + width} ${y} L ${x + width} ${y + height} L ${x} ${y + height} Z`;
+    } else if (tag === "polygon") {
+        const points = (svgElement.getAttribute("points") || "").trim().split(/[\s,]+/).map(Number);
+        if (points.length < 4) return { pathData: "", contours: [] };
+        const pairs = [];
+        for (let i = 0; i < points.length; i += 2) {
+            pairs.push(`${points[i]} ${points[i + 1]}`);
+        }
+        pathData = `M ${pairs.join(" L ")} Z`;
+    }
+
+    if (!pathData) {
+        log.warn("calculateOffsetDetailedFromSVG: failed to extract path data");
+        return { pathData: "", contours: [] };
+    }
+
+    return calculateOffsetDetailedFromPathData(pathData, offset, options);
+}
+
+/**
  * Custom offset calculator with a PaperOffset-compatible API.
  */
 export class CustomOffsetCalculator {
@@ -486,6 +593,10 @@ export class CustomOffsetCalculator {
 
     calculateOffsetFromSVG(svgElement, offset) {
         return calculateOffsetFromSVG(svgElement, offset, this.options);
+    }
+
+    calculateOffsetDetailedFromSVG(svgElement, offset) {
+        return calculateOffsetDetailedFromSVG(svgElement, offset, this.options);
     }
 
     calculateOffsetContoursFromPathData(pathData, offset) {
