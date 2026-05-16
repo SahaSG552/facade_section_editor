@@ -386,7 +386,9 @@ function initializeSVG() {
     // Create part path
     partPath = document.createElementNS(svgNS, "path");
     partPath.id = "part-path";
-    SVGThemeHelper.setThemeColors(partPath, "--color-bg-surface", "--color-border-default");
+    SVGThemeHelper.setFillFromVariable(partPath, "--color-bg-surface");
+    SVGThemeHelper.setStrokeFromVariable(partPath, "--color-text-primary");
+    partPath.setAttribute("fill-opacity", "0.35");
     partPath.setAttribute("stroke-width", getAdaptiveStrokeWidth());
     partPath.style.display = "none";
     panelLayer.appendChild(partPath);
@@ -764,6 +766,24 @@ function initializeSVG() {
     updateGridAnchor();
 
     // Update canvas bit with new parameters (for real-time editing)
+        // Redraw canvas bits when theme changes so bit/shank colors update
+        window.addEventListener('themechange', () => {
+            const bitsLayer = document.getElementById('bits-layer');
+            if (!bitsLayer) return;
+            bitsLayer.querySelectorAll('.bit-shape').forEach(el => {
+                SVGThemeHelper.setStrokeFromVariable(el, '--color-text-primary');
+            });
+            bitsLayer.querySelectorAll('.shank-shape').forEach(el => {
+                SVGThemeHelper.setFillFromVariable(el, '--color-text-primary');
+                SVGThemeHelper.setStrokeFromVariable(el, '--color-text-primary');
+            });
+            if (partPath) {
+                SVGThemeHelper.setFillFromVariable(partPath, '--color-bg-surface');
+                SVGThemeHelper.setStrokeFromVariable(partPath, '--color-text-primary');
+            }
+        });
+
+        // Update canvas bit with new parameters (for real-time editing)
     function updateCanvasBitWithParams(bitId, newParams, groupName) {
         bitsOnCanvas.forEach((bit, index) => {
             if (bit.bitData.id === bitId) {
@@ -1027,6 +1047,8 @@ function updatePanelShape() {
         partSection.setAttribute("width", panelWidth);
         partSection.setAttribute("height", panelThickness);
         SVGThemeHelper.setFillFromVariable(partSection, "--color-bg-surface");
+        SVGThemeHelper.setStrokeFromVariable(partSection, "--color-text-primary");
+        partSection.setAttribute("fill-opacity", "0.35");
     }
 }
 

@@ -240,36 +240,27 @@ export default class InteractionManager {
                         }
 
                         if (hit) {
-                            const bitCenterX = bit.baseAbsX + dx;
-                            const bitCenterY = bit.baseAbsY + dy;
-                            const distance = Math.sqrt(
-                                (svgCoords.x - bitCenterX) ** 2 +
-                                (svgCoords.y - bitCenterY) ** 2
-                            );
+                            clickedOnBit = true;
 
-                            if (distance <= this.bitTolerance) {
-                                clickedOnBit = true;
-
-                                if (selectedBitIndices.includes(i)) {
-                                    // Start dragging selected bit
-                                    this.isDraggingBit = true;
-                                    this.draggedBitIndex = i;
-                                    this.callbacks
-                                        .getCsgScheduler?.()
-                                        ?.cancel();
-                                    this.log.debug(
-                                        "Cancelled pending CSG due to drag start"
-                                    );
-                                    this.dragStartX = svgCoords.x;
-                                    this.dragStartY = svgCoords.y;
-                                    this.dragStarted = false;
-                                    this.canvas.style.cursor = "pointer";
-                                    return;
-                                } else {
-                                    // Select unselected bit
-                                    this.callbacks.selectBit?.(i);
-                                    return;
-                                }
+                            if (selectedBitIndices.includes(i)) {
+                                // Start dragging selected bit
+                                this.isDraggingBit = true;
+                                this.draggedBitIndex = i;
+                                this.callbacks
+                                    .getCsgScheduler?.()
+                                    ?.cancel();
+                                this.log.debug(
+                                    "Cancelled pending CSG due to drag start"
+                                );
+                                this.dragStartX = svgCoords.x;
+                                this.dragStartY = svgCoords.y;
+                                this.dragStarted = false;
+                                this.canvas.style.cursor = "pointer";
+                                return;
+                            } else {
+                                // Select unselected bit
+                                this.callbacks.selectBit?.(i);
+                                return;
                             }
                         }
                     }

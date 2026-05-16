@@ -978,7 +978,8 @@ export default class BitsManager {
             shankShape.setAttribute("y", y - bit.totalLength);
             shankShape.setAttribute("width", bit.shankDiameter);
             shankShape.setAttribute("height", shankLength);
-            shankShape.setAttribute("fill", "rgba(64, 64, 64, 0.1)");
+            SVGThemeHelper.setFillFromVariable(shankShape, "--color-text-primary");
+            shankShape.setAttribute("fill-opacity", "0.08");
             SVGThemeHelper.setStrokeFromVariable(shankShape, "--color-text-primary");
             shankShape.setAttribute("stroke-width", strokeWidth);
             shankShape.classList.add("shank-shape");
