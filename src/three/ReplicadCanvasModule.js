@@ -27,6 +27,7 @@ import BaseModule from "../core/BaseModule.js";
 import LoggerFactory from "../core/LoggerFactory.js";
 import eventBus from "../core/eventBus.js";
 import { appConfig } from "../config/AppConfig.js";
+import { calculateOffsetFromPathData } from "../operations/CustomOffsetProcessor.js";
 import ViewCubeGizmo from "./ViewCubeGizmo.js";
 
 // ---------------------------------------------------------------------------
@@ -454,6 +455,25 @@ function sampleSvgPathPoints(pathData, sampleStep = 2) {
     }
 }
 
+function getAdaptiveSvgPathSampleStep(pathData, targetSegmentLength = 5, minStep = 0.5, maxStep = 4) {
+    if (!pathData || typeof document === "undefined") return 2;
+
+    try {
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", pathData);
+
+        const totalLength = path.getTotalLength();
+        if (!Number.isFinite(totalLength) || totalLength <= 0) return 2;
+
+        const segmentLength = Math.max(0.5, Number(targetSegmentLength) || 5);
+        const sampleCount = Math.max(8, Math.ceil(totalLength / segmentLength));
+        const adaptiveStep = totalLength / sampleCount;
+        return Math.max(minStep, Math.min(maxStep, adaptiveStep));
+    } catch {
+        return 2;
+    }
+}
+
 /**
  * Compute the bounding box of an SVG path string by temporarily injecting it
  * into the live DOM and using getBBox(). Returns null if not available.
@@ -601,6 +621,28 @@ function parseSvgCommands(pathData) {
     return commands;
 }
 
+/**
+ * Build a true geometric outset path for offset=0 fallback spine.
+ * This avoids shape distortion from scaling and keeps corner joins consistent.
+ * @param {string} pathData
+ * @param {number} [distance=0.01]
+ * @param {object|null} [exportModule=null] - Export module with DXF parser dependencies.
+ * @returns {string}
+ */
+function buildOutsetPathData(pathData, distance = 0.01, exportModule = null) {
+    const d = Number(distance);
+    if (!pathData || !Number.isFinite(d) || d <= 0) return pathData;
+    if (!exportModule?.dxfExporter?.parseSVGPathSegments) return pathData;
+    const outsetPath = calculateOffsetFromPathData(pathData, -d, {
+        join: "sharp",
+        cap: "flat",
+        exportModule,
+        trimSelfIntersections: true,
+        editorLikeClosedSplit: true,
+    });
+    return typeof outsetPath === "string" && outsetPath.trim() ? outsetPath : pathData;
+}
+
 function summarizeSvgPath(pathData) {
     const commands = parseSvgCommands(pathData);
     const counts = {
@@ -674,6 +716,7 @@ function summarizeSvgPath(pathData) {
 
 function buildSketchFromSvgPathCommands(pathData, bboxRef, Sketcher, {
     close = true,
+    forceTopologicalClose = false,
     plane = "XZ",
     panelAnchor = "top-left",
     depth = 0,
@@ -878,11 +921,120 @@ function buildSketchFromSvgPathCommands(pathData, bboxRef, Sketcher, {
     if (!sketch) return null;
     // When path has Z and close is requested, close only if needed.
     // If geometry is already closed, avoid adding a redundant zero-length closing edge.
-    if (sawZ && close) return closedByGeometry ? sketch.done() : sketch.close();
+    if (sawZ && close) {
+        if (forceTopologicalClose) return sketch.close();
+        return closedByGeometry ? sketch.done() : sketch.close();
+    }
     // For non-Z paths, close only if close=true and path isn't already closed
-    const shouldClose = close && !closedByGeometry;
+    const shouldClose = close && (forceTopologicalClose || !closedByGeometry);
     return shouldClose ? sketch.close() : sketch.done();
 }
+
+/**
+ * Test whether two finite 2-D line segments [a1,a2] and [b1,b2] intersect.
+ * Returns the intersection point {x,y} or null.
+ * @param {{x:number,y:number}} a1
+ * @param {{x:number,y:number}} a2
+ * @param {{x:number,y:number}} b1
+ * @param {{x:number,y:number}} b2
+ */
+function lineSegIntersect2D(a1, a2, b1, b2) {
+    const dx1 = a2.x - a1.x, dy1 = a2.y - a1.y;
+    const dx2 = b2.x - b1.x, dy2 = b2.y - b1.y;
+    const denom = dx1 * dy2 - dy1 * dx2;
+    if (Math.abs(denom) < 1e-10) return null; // parallel / collinear
+    const t = ((b1.x - a1.x) * dy2 - (b1.y - a1.y) * dx2) / denom;
+    const u = ((b1.x - a1.x) * dy1 - (b1.y - a1.y) * dx1) / denom;
+    if (t > 1e-8 && t < 1 - 1e-8 && u > 1e-8 && u < 1 - 1e-8) {
+        return { x: a1.x + t * dx1, y: a1.y + t * dy1 };
+    }
+    return null;
+}
+
+/**
+ * Sample a segment to a 2-point polyline segment for approximate intersection
+ * testing. Arcs are approximated as their chord (start→end).
+ */
+function segToChord(seg) {
+    return [
+        { x: Number(seg.start.x), y: Number(seg.start.y) },
+        { x: Number(seg.end.x),   y: Number(seg.end.y)   },
+    ];
+}
+
+/**
+ * Remove self-intersecting loops from an array of offset-engine segments.
+ *
+ * When an offset path is computed with a distance larger than the local
+ * curvature radius (e.g. offsetting a shape by 30 mm past a 20 mm corner
+ * radius), the resulting contour self-intersects at that corner, creating
+ * a "loop" that makes the BREP non-manifold. This function iterates through
+ * LINE segment pairs only (arc segments are skipped as outer/inner candidates
+ * to avoid false-positive detection from chord approximation), finds the first
+ * forward self-intersection, clips both line segments at the crossing point
+ * and removes the intervening loop segments. Repeats until no more crossings.
+ *
+ * @param {Array<{type:string,start:{x:number,y:number},end:{x:number,y:number}}>} segments
+ * @returns {Array} cleaned segment array (same reference types preserved)
+ */
+function removeLoopsFromSegments(segments) {
+    if (!Array.isArray(segments) || segments.length < 3) return segments;
+
+    let working = segments.slice();
+    const MIN_SEG_LENGTH = 1e-3; // mm – drop segments shorter than this
+
+    for (let pass = 0; pass < 20; pass++) {
+        let found = false;
+        outer: for (let i = 0; i < working.length; i++) {
+            const sA = working[i];
+            // Only test line segments as the outer candidate to avoid
+            // false positives from arc chord approximation.
+            if (!sA?.start || !sA?.end) continue;
+            if (sA.type !== "line") continue;
+            const a1 = { x: Number(sA.start.x), y: Number(sA.start.y) };
+            const a2 = { x: Number(sA.end.x),   y: Number(sA.end.y)   };
+
+            for (let j = i + 2; j < working.length; j++) {
+                // Skip the wrap-around pair (last → first are adjacent).
+                if (i === 0 && j === working.length - 1) continue;
+
+                const sB = working[j];
+                // Inner candidate must also be a line segment.
+                if (!sB?.start || !sB?.end) continue;
+                if (sB.type !== "line") continue;
+                const b1 = { x: Number(sB.start.x), y: Number(sB.start.y) };
+                const b2 = { x: Number(sB.end.x),   y: Number(sB.end.y)   };
+
+                const pt = lineSegIntersect2D(a1, a2, b1, b2);
+                if (!pt) continue;
+
+                // Self-intersection found: line segments i and j cross at pt.
+                // Clip sA to end at pt, clip sB to start at pt,
+                // discard everything between i+1 and j-1 (the loop interior).
+                const ptObj = { x: pt.x, y: pt.y };
+                const clippedA = { ...sA, end: ptObj };
+                const clippedB = { ...sB, start: ptObj };
+
+                const lenA = Math.hypot(clippedA.end.x - clippedA.start.x, clippedA.end.y - clippedA.start.y);
+                const lenB = Math.hypot(clippedB.end.x - clippedB.start.x, clippedB.end.y - clippedB.start.y);
+
+                const before = working.slice(0, i);
+                const after  = working.slice(j + 1);
+                working = [
+                    ...before,
+                    ...(lenA >= MIN_SEG_LENGTH ? [clippedA] : []),
+                    ...(lenB >= MIN_SEG_LENGTH ? [clippedB] : []),
+                    ...after,
+                ];
+                found = true;
+                break outer;
+            }
+        }
+        if (!found) break;
+    }
+    return working;
+}
+
 
 function buildSketchFromOffsetSegments(segments, bboxRef, Sketcher, {
     close = true,
@@ -891,8 +1043,31 @@ function buildSketchFromOffsetSegments(segments, bboxRef, Sketcher, {
     depth = 0,
     panelThickness = appConfig.panel.thickness,
     applyDepthForXY = false,
+    strictContinuity = false,
+    strictArcs = false,
+    continuityEps = 1e-3,
+    diagnostics = null,
+    removeLoops = false,
 } = {}) {
     if (!Array.isArray(segments) || segments.length === 0) return null;
+
+    // Pre-process: remove self-intersecting loops before attempting BREP construction.
+    // This is needed when offset distance exceeds the local corner curvature radius.
+    const workingSegments = removeLoops ? removeLoopsFromSegments(segments) : segments;
+    if (!Array.isArray(workingSegments) || workingSegments.length === 0) return null;
+
+    const diag = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
+    if (diag) {
+        diag.segmentCount = workingSegments.length;
+        diag.strictContinuity = strictContinuity;
+        diag.strictArcs = strictArcs;
+        diag.snapCount = 0;
+        diag.bridgeCount = 0;
+        diag.arcFallbackCount = 0;
+        diag.failReason = null;
+        diag.failDetail = null;
+        diag.success = false;
+    }
 
     const centerX = bboxRef.x + bboxRef.width / 2;
     const bottomY = bboxRef.y + bboxRef.height;
@@ -919,6 +1094,8 @@ function buildSketchFromOffsetSegments(segments, bboxRef, Sketcher, {
 
     const isNear2D = (ax, ay, bx, by, eps = 1e-6) =>
         Math.abs(ax - bx) <= eps && Math.abs(ay - by) <= eps;
+    const segmentEps = 1e-5;
+    const stitchSnapEps = Math.max(segmentEps, Number(continuityEps) || 1e-3);
 
     const readArcParams = (seg) => {
         const data = seg?.arc || {};
@@ -990,13 +1167,20 @@ function buildSketchFromOffsetSegments(segments, bboxRef, Sketcher, {
     let curX = null;
     let curY = null;
 
-    for (const seg of segments) {
+    for (const seg of workingSegments) {
         const sx = Number(seg?.start?.x);
         const sy = Number(seg?.start?.y);
         const ex = Number(seg?.end?.x);
         const ey = Number(seg?.end?.y);
 
         if (!Number.isFinite(sx) || !Number.isFinite(sy) || !Number.isFinite(ex) || !Number.isFinite(ey)) {
+            if (strictContinuity) {
+                if (diag) {
+                    diag.failReason = "invalid-segment-endpoints";
+                    diag.failDetail = { sx, sy, ex, ey };
+                }
+                return null;
+            }
             continue;
         }
 
@@ -1010,22 +1194,49 @@ function buildSketchFromOffsetSegments(segments, bboxRef, Sketcher, {
             curY = sy;
         }
 
-        if (!isNear2D(curX, curY, sx, sy)) {
-            sketch = sketch.lineTo(mapPoint(sx, sy));
-            curX = sx;
-            curY = sy;
+        const gapToStart = Math.hypot((curX ?? sx) - sx, (curY ?? sy) - sy);
+        if (!isNear2D(curX, curY, sx, sy, segmentEps)) {
+            if (gapToStart <= stitchSnapEps) {
+                // Tiny numerical seam between adjacent segments: snap instead of creating
+                // a micro bridge edge that can self-overlap during sweep.
+                curX = sx;
+                curY = sy;
+                if (diag) diag.snapCount += 1;
+            } else {
+                if (strictContinuity) {
+                    if (diag) {
+                        diag.failReason = "segment-start-gap";
+                        diag.failDetail = { gap: gapToStart, eps: stitchSnapEps };
+                    }
+                    return null;
+                }
+                sketch = sketch.lineTo(mapPoint(sx, sy));
+                curX = sx;
+                curY = sy;
+                if (diag) diag.bridgeCount += 1;
+            }
         }
 
         if (seg?.type === "arc") {
             const arc = readArcParams(seg);
-            if (arc && !isNear2D(curX, curY, ex, ey)) {
+            if (arc && !isNear2D(curX, curY, ex, ey, segmentEps)) {
                 const rot = flipY ? -arc.rotation : arc.rotation;
                 const sweep = flipY ? !arc.sweep : arc.sweep;
                 sketch = sketch.ellipseTo(mapPoint(ex, ey), arc.rx, arc.ry, rot, arc.largeArc, sweep);
-            } else if (!isNear2D(curX, curY, ex, ey)) {
+            } else if (!isNear2D(curX, curY, ex, ey, segmentEps)) {
+                if (strictArcs) {
+                    if (diag) {
+                        diag.failReason = "arc-invalid-or-degenerate";
+                        diag.failDetail = { sx, sy, ex, ey };
+                    }
+                    return null;
+                }
                 sketch = sketch.lineTo(mapPoint(ex, ey));
+                if (diag) diag.arcFallbackCount += 1;
             }
-        } else if (!isNear2D(curX, curY, ex, ey)) {
+        } else if (!isNear2D(curX, curY, ex, ey, segmentEps)) {
+            // For line segments, reaching `end` is the segment itself, not a continuity gap.
+            // Strict continuity applies to segment-to-segment joins (`cur -> start`), handled above.
             sketch = sketch.lineTo(mapPoint(ex, ey));
         }
 
@@ -1035,15 +1246,253 @@ function buildSketchFromOffsetSegments(segments, bboxRef, Sketcher, {
 
     if (!sketch) return null;
 
-    const closedByGeometry =
-        startX !== null &&
-        startY !== null &&
-        curX !== null &&
-        curY !== null &&
-        isNear2D(curX, curY, startX, startY, 1e-3);
+    const closingGap =
+        startX !== null && startY !== null && curX !== null && curY !== null
+            ? Math.hypot(curX - startX, curY - startY)
+            : Infinity;
 
+    // Tight threshold: gap below this means currentPoint == startPoint (same float or
+    // sub-nanometre difference) → close() would add a degenerate zero-length edge.
+    const closedByGeometry = closingGap <= 1e-4;
+
+    // Tolerance for the strict-continuity closing check: gaps below this are "seam gaps"
+    // (either natural float rounding or normalizeSegmentsForSweep's 5µm seam-epsilon split)
+    // and should not fail the continuity check.  0.01mm is safely above SEAM_EPSILON (5µm).
+    const CLOSURE_GAP_TOLERANCE = 0.01;
+    if (strictContinuity && close && closingGap > CLOSURE_GAP_TOLERANCE) {
+        if (diag) {
+            diag.failReason = "not-closed-after-build";
+            diag.failDetail = { continuityEps: 1e-3 };
+        }
+        return null;
+    }
+
+    if (diag) {
+        diag.closedByGeometry = closedByGeometry;
+    }
+
+    // When the seam was split (normalizeSegmentsForSweep with epsilon split), the last
+    // segment ends at seg0.start which differs from sketch._startPoint (= seamPoint) by
+    // SEAM_EPSILON. closedByGeometry will be false → shouldClose = true → sketch.close()
+    // adds a real ~0.001mm edge → assembleWire succeeds.
+    // When closedByGeometry is true, sketch.close() internally skips the lineTo and just
+    // calls done() — same behaviour — so we can always use shouldClose logic safely.
     const shouldClose = close && !closedByGeometry;
-    return shouldClose ? sketch.close() : sketch.done();
+    let result = null;
+    try {
+        result = shouldClose ? sketch.close() : sketch.done();
+    } catch (err) {
+        if (diag) {
+            diag.failReason = "wire-assemble-failed";
+            diag.failDetail = { message: err?.message || String(err) };
+        }
+        return null;
+    }
+    if (diag) {
+        diag.success = true;
+    }
+    return result;
+}
+
+function normalizeSegmentsForSweep(segments, snapEps = 1e-2, options = {}) {
+    const {
+        splitSeam = true,
+    } = options || {};
+    if (!Array.isArray(segments) || segments.length === 0) return [];
+
+    let out = segments.map((seg) => ({
+        ...seg,
+        start: seg?.start ? { ...seg.start } : seg?.start,
+        end: seg?.end ? { ...seg.end } : seg?.end,
+        arc: seg?.arc ? { ...seg.arc } : seg?.arc,
+    }));
+
+    const isFinitePoint = (p) =>
+        p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y));
+    const dist = (a, b) => Math.hypot(Number(a.x) - Number(b.x), Number(a.y) - Number(b.y));
+
+    // Move seam to the longest linear edge to reduce OCC sweep artifacts at closure.
+    // Some closed wires are sensitive when seam sits on an arc/concave corner.
+    const isClosed = isFinitePoint(out[0]?.start)
+        && isFinitePoint(out[out.length - 1]?.end)
+        && dist(out[0].start, out[out.length - 1].end) <= Math.max(snapEps, 1e-3);
+    let didSeamSplit = false;
+    if (isClosed && out.length > 2) {
+        let bestIndex = -1;
+        let bestLen = -1;
+        let bestMidY = Infinity;
+        let bestMidX = Infinity;
+        const tieLenEps = Math.max(1e-6, snapEps * 1e-3);
+        for (let i = 0; i < out.length; i++) {
+            const seg = out[i];
+            if (seg?.type !== "line") continue;
+            if (!isFinitePoint(seg?.start) || !isFinitePoint(seg?.end)) continue;
+            const len = dist(seg.start, seg.end);
+            const midX = (Number(seg.start.x) + Number(seg.end.x)) / 2;
+            const midY = (Number(seg.start.y) + Number(seg.end.y)) / 2;
+            const longer = len > bestLen + tieLenEps;
+            const sameLen = Math.abs(len - bestLen) <= tieLenEps;
+            const betterTie = sameLen && (
+                midY < bestMidY - 1e-9
+                || (Math.abs(midY - bestMidY) <= 1e-9 && midX < bestMidX - 1e-9)
+            );
+            if (longer || betterTie) {
+                bestLen = len;
+                bestIndex = i;
+                bestMidY = midY;
+                bestMidX = midX;
+            }
+        }
+        if (bestIndex >= 0) {
+            if (bestIndex > 0) {
+                out = out.slice(bestIndex).concat(out.slice(0, bestIndex));
+            }
+
+            if (splitSeam) {
+                // Split the seam segment so the seam sits around the segment midpoint, not at
+                // the segment start. This avoids placing seam closure at arc/line junctions,
+                // which can trigger OCC pipe-shell truncation on specific VC phantom passes.
+                const seamSeg = out[0];
+                if (seamSeg?.type === "line" && isFinitePoint(seamSeg?.start) && isFinitePoint(seamSeg?.end)) {
+                    const seamLen = dist(seamSeg.start, seamSeg.end);
+                    const SEAM_EPSILON = 5e-3; // 5 µm — invisible, safely > OCC tolerance & closedByGeometry threshold
+                    if (seamLen > SEAM_EPSILON * 4) {
+                        const dx = (Number(seamSeg.end.x) - Number(seamSeg.start.x)) / seamLen;
+                        const dy = (Number(seamSeg.end.y) - Number(seamSeg.start.y)) / seamLen;
+                        const midLen = seamLen / 2;
+                        const midPoint = {
+                            x: Number(seamSeg.start.x) + dx * midLen,
+                            y: Number(seamSeg.start.y) + dy * midLen,
+                        };
+                        const seamPoint = {
+                            x: Number(seamSeg.start.x) + dx * (midLen + SEAM_EPSILON),
+                            y: Number(seamSeg.start.y) + dy * (midLen + SEAM_EPSILON),
+                        };
+                        // First half starts slightly after midpoint; second half is appended to
+                        // the end so sketch.close() adds only a tiny epsilon seam bridge.
+                        out[0] = { ...seamSeg, start: { ...seamPoint } };
+                        out.push({ ...seamSeg, end: { ...midPoint } });
+                        didSeamSplit = true;
+                    }
+                }
+            }
+        }
+    }
+
+    for (let i = 1; i < out.length; i++) {
+        const prev = out[i - 1];
+        const cur = out[i];
+        if (!isFinitePoint(prev?.end) || !isFinitePoint(cur?.start)) continue;
+        if (dist(prev.end, cur.start) <= snapEps) {
+            cur.start = { x: Number(prev.end.x), y: Number(prev.end.y) };
+        }
+    }
+
+    // Skip closure snap when seam was split: the gap between the last segment's end
+    // (original seamSeg.start) and first segment's start (seamPoint) must be preserved
+    // so buildSketchFromOffsetSegments sees closedByGeometry=false and calls close().
+    if (!didSeamSplit) {
+        const first = out[0];
+        const last = out[out.length - 1];
+        if (isFinitePoint(first?.start) && isFinitePoint(last?.end)) {
+            if (dist(last.end, first.start) <= snapEps) {
+                last.end = { x: Number(first.start.x), y: Number(first.start.y) };
+            }
+        }
+    }
+
+    return out;
+}
+
+function reverseSegmentsForSweep(segments) {
+    if (!Array.isArray(segments) || segments.length === 0) return [];
+
+    return [...segments]
+        .reverse()
+        .map((seg) => {
+            const out = {
+                ...seg,
+                start: seg?.end ? { ...seg.end } : seg?.end,
+                end: seg?.start ? { ...seg.start } : seg?.start,
+                arc: seg?.arc ? { ...seg.arc } : seg?.arc,
+            };
+
+            if (out?.type === "arc" && out.arc) {
+                if (out.arc.sweep !== undefined) out.arc.sweep = !Boolean(out.arc.sweep);
+                if (out.arc.sweepFlag !== undefined) out.arc.sweepFlag = Boolean(out.arc.sweepFlag) ? 0 : 1;
+            }
+
+            return out;
+        });
+}
+
+/**
+ * Computes the maximum world-space Y coordinate reachable by a spine segment array,
+ * including the topmost/bottommost point of any arc segment's full circle.
+ * Used to validate sweep completeness (missing arch detection).
+ *
+ * @param {Array} segments - normalizedContourSegments (Paper.js coordinates)
+ * @param {Object} bboxRef  - panel bounding box {x,y,width,height}
+ * @param {string} panelAnchor - "top-left" or "bottom-left"
+ * @returns {number} max world Y (Three.js Y-up), or -Infinity if no valid points
+ */
+function computeSpineMaxWorldY(segments, bboxRef, panelAnchor) {
+    const flipY = panelAnchor !== "bottom-left";
+    const bottomY = bboxRef.y + bboxRef.height;
+    const ty = (y) => flipY ? (bottomY - y) : (y - bboxRef.y);
+
+    let maxY = -Infinity;
+    for (const seg of (segments || [])) {
+        if (!seg) continue;
+        const sy = seg.start?.y != null ? ty(Number(seg.start.y)) : NaN;
+        const ey = seg.end?.y != null ? ty(Number(seg.end.y)) : NaN;
+        if (Number.isFinite(sy)) maxY = Math.max(maxY, sy);
+        if (Number.isFinite(ey)) maxY = Math.max(maxY, ey);
+        if (seg.type === "arc") {
+            const d = seg.data || seg.arc || {};
+            const r = Number(d.rx ?? d.radius ?? 0);
+            const cy_paper = Number(d.center?.y ?? d.centerY ?? NaN);
+            if (r > 0 && Number.isFinite(cy_paper)) {
+                const cy_world = ty(cy_paper);
+                // Conservative: arc can reach up to cy_world ± r on its full circle
+                maxY = Math.max(maxY, cy_world + r, cy_world - r);
+            }
+        }
+    }
+    return maxY;
+}
+
+function normalizeThreeColorInput(color, opacity = 1, transparent = false) {
+    if (typeof color !== "string") {
+        return { color, opacity, transparent };
+    }
+
+    const match = color.trim().match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*(?:,\s*(\d*\.?\d+)\s*)?\)$/i);
+    if (!match) {
+        return { color, opacity, transparent };
+    }
+
+    const red = Math.max(0, Math.min(255, Number(match[1])));
+    const green = Math.max(0, Math.min(255, Number(match[2])));
+    const blue = Math.max(0, Math.min(255, Number(match[3])));
+    const alphaRaw = match[4] === undefined ? 1 : Number(match[4]);
+    const alpha = Number.isFinite(alphaRaw) ? Math.max(0, Math.min(1, alphaRaw)) : 1;
+
+    return {
+        color: new THREE.Color(red / 255, green / 255, blue / 255),
+        opacity: opacity * alpha,
+        transparent: transparent || alpha < 1 || opacity < 1,
+    };
+}
+
+function fastHashString(input) {
+    let hash = 2166136261;
+    const str = String(input || "");
+    for (let i = 0; i < str.length; i++) {
+        hash ^= str.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16);
 }
 
 function parseProfilePointsFromBitData(bitData) {
@@ -1105,6 +1554,125 @@ function parseProfilePointsFromPathData(pathData) {
     } catch {
         return [];
     }
+}
+
+function normalizeClosedProfilePolyline(points, eps = 1e-4) {
+    if (!Array.isArray(points) || points.length < 3) return [];
+    const normalized = [];
+    for (const point of points) {
+        const x = Number(point?.x);
+        const y = Number(point?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        if (!normalized.length) {
+            normalized.push({ x, y });
+            continue;
+        }
+        const prev = normalized[normalized.length - 1];
+        if (Math.hypot(x - prev.x, y - prev.y) <= eps) continue;
+        normalized.push({ x, y });
+    }
+
+    if (normalized.length > 2) {
+        const first = normalized[0];
+        const last = normalized[normalized.length - 1];
+        if (Math.hypot(first.x - last.x, first.y - last.y) <= eps) {
+            normalized.pop();
+        }
+    }
+
+    return normalized.length >= 3 ? normalized : [];
+}
+
+function rotateClosedPoints(points, startIndex) {
+    if (!Array.isArray(points) || !points.length) return [];
+    const n = points.length;
+    const idx = ((startIndex % n) + n) % n;
+    if (idx === 0) return points.slice();
+    return points.slice(idx).concat(points.slice(0, idx));
+}
+
+function estimateVertexSmoothness(points, index) {
+    const n = points.length;
+    if (n < 3) return 0;
+    const prev = points[(index - 1 + n) % n];
+    const cur = points[index];
+    const next = points[(index + 1) % n];
+    const ax = prev.x - cur.x;
+    const ay = prev.y - cur.y;
+    const bx = next.x - cur.x;
+    const by = next.y - cur.y;
+    const la = Math.hypot(ax, ay);
+    const lb = Math.hypot(bx, by);
+    if (la <= 1e-6 || lb <= 1e-6) return 0;
+    const cosTheta = Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb)));
+    const angle = Math.acos(cosTheta);
+    // Closer to PI means smoother (less corner-like).
+    return Math.PI - Math.abs(Math.PI - angle);
+}
+
+function canonicalizeProfilePolylineStart(points) {
+    const normalized = normalizeClosedProfilePolyline(points);
+    if (normalized.length < 3) return normalized;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const point of normalized) {
+        if (point.x < minX) minX = point.x;
+        if (point.x > maxX) maxX = point.x;
+        if (point.y > maxY) maxY = point.y;
+    }
+    const centerX = (minX + maxX) / 2;
+    const yBand = Math.max(1e-3, (maxY - Math.min(...normalized.map((p) => p.y))) * 0.08);
+
+    let bestIndex = 0;
+    let bestScore = [Infinity, Infinity, -Infinity];
+    for (let i = 0; i < normalized.length; i++) {
+        const point = normalized[i];
+        const topDist = Math.abs(maxY - point.y);
+        const centerDist = Math.abs(point.x - centerX);
+        const smoothness = estimateVertexSmoothness(normalized, i);
+        const preferTopBand = topDist <= yBand ? 0 : 1;
+        const score = [preferTopBand, centerDist + topDist, -smoothness];
+        if (
+            score[0] < bestScore[0] ||
+            (score[0] === bestScore[0] && score[1] < bestScore[1]) ||
+            (score[0] === bestScore[0] && score[1] === bestScore[1] && score[2] < bestScore[2])
+        ) {
+            bestIndex = i;
+            bestScore = score;
+        }
+    }
+
+    return rotateClosedPoints(normalized, bestIndex);
+}
+
+function buildCanonicalProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOrigin = null) {
+    const sampled = parseProfilePointsFromPathData(pathData);
+    const ordered = canonicalizeProfilePolylineStart(sampled);
+    if (ordered.length < 3) return null;
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    for (const point of ordered) {
+        if (point.x < minX) minX = point.x;
+        if (point.x > maxX) maxX = point.x;
+        if (point.y < minY) minY = point.y;
+    }
+
+    const cx = (minX + maxX) / 2;
+    const anchorY = minY;
+    const toXZ = (point) => [cx - point.x, point.y - anchorY];
+    const origin = Array.isArray(profileOrigin) && profileOrigin.length === 3
+        ? profileOrigin
+        : [0, 0, pathZ];
+
+    let sketch = new Sketcher("XZ", origin).movePointerTo(toXZ(ordered[0]));
+    for (let i = 1; i < ordered.length; i++) {
+        sketch = sketch.lineTo(toXZ(ordered[i]));
+    }
+    return sketch.close();
 }
 
 function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOrigin = null) {
@@ -1222,12 +1790,16 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
     // - Preserve profile depth direction from SVG y into local Z.
     // Top-center of profile is fixed at local [0,0] (spine anchor).
     const toXZ = (x, y) => [cx - x, y - anchorY];
+    const isNear = (ax, ay, bx, by, eps = 1e-7) =>
+        Math.abs(ax - bx) <= eps && Math.abs(ay - by) <= eps;
 
     let sketch = null;
     curX = 0;
     curY = 0;
     startX = 0;
     startY = 0;
+    let sawZ = false;
+    let closedByGeometry = false;
     prevC2X = prevC2Y = prevQX = prevQY = null;
 
     for (const entry of commands) {
@@ -1247,6 +1819,7 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
             curY = y;
             startX = x;
             startY = y;
+            closedByGeometry = false;
             prevC2X = prevC2Y = prevQX = prevQY = null;
             continue;
         }
@@ -1256,17 +1829,26 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
         if (up === "L") {
             const x = rel ? curX + v[0] : v[0];
             const y = rel ? curY + v[1] : v[1];
-            sketch = sketch.lineTo(toXZ(x, y));
+            if (!isNear(curX, curY, x, y)) {
+                sketch = sketch.lineTo(toXZ(x, y));
+            }
             curX = x;
             curY = y;
+            closedByGeometry = isNear(curX, curY, startX, startY);
         } else if (up === "H") {
             const x = rel ? curX + v[0] : v[0];
-            sketch = sketch.lineTo(toXZ(x, curY));
+            if (!isNear(curX, curY, x, curY)) {
+                sketch = sketch.lineTo(toXZ(x, curY));
+            }
             curX = x;
+            closedByGeometry = isNear(curX, curY, startX, startY);
         } else if (up === "V") {
             const y = rel ? curY + v[0] : v[0];
-            sketch = sketch.lineTo(toXZ(curX, y));
+            if (!isNear(curX, curY, curX, y)) {
+                sketch = sketch.lineTo(toXZ(curX, y));
+            }
             curY = y;
+            closedByGeometry = isNear(curX, curY, startX, startY);
         } else if (up === "C") {
             const c1x = rel ? curX + v[0] : v[0];
             const c1y = rel ? curY + v[1] : v[1];
@@ -1280,6 +1862,7 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
             prevQX = prevQY = null;
             curX = x;
             curY = y;
+            closedByGeometry = isNear(curX, curY, startX, startY);
         } else if (up === "S") {
             const c1x = prevC2X !== null ? 2 * curX - prevC2X : curX;
             const c1y = prevC2Y !== null ? 2 * curY - prevC2Y : curY;
@@ -1293,6 +1876,7 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
             prevQX = prevQY = null;
             curX = x;
             curY = y;
+            closedByGeometry = isNear(curX, curY, startX, startY);
         } else if (up === "Q") {
             const qx = rel ? curX + v[0] : v[0];
             const qy = rel ? curY + v[1] : v[1];
@@ -1304,6 +1888,7 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
             prevC2X = prevC2Y = null;
             curX = x;
             curY = y;
+            closedByGeometry = isNear(curX, curY, startX, startY);
         } else if (up === "T") {
             const qx = prevQX !== null ? 2 * curX - prevQX : curX;
             const qy = prevQY !== null ? 2 * curY - prevQY : curY;
@@ -1315,6 +1900,7 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
             prevC2X = prevC2Y = null;
             curX = x;
             curY = y;
+            closedByGeometry = isNear(curX, curY, startX, startY);
         } else if (up === "A") {
             const rx = v[0];
             const ry = v[1];
@@ -1324,18 +1910,27 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
             const sweep = !v[4];
             const x = rel ? curX + v[5] : v[5];
             const y = rel ? curY + v[6] : v[6];
-            sketch = sketch.ellipseTo(toXZ(x, y), rx, ry, rot, largeArc, sweep);
+            if (!isNear(curX, curY, x, y)) {
+                sketch = sketch.ellipseTo(toXZ(x, y), rx, ry, rot, largeArc, sweep);
+            }
             curX = x;
             curY = y;
+            closedByGeometry = isNear(curX, curY, startX, startY);
             prevC2X = prevC2Y = prevQX = prevQY = null;
         } else if (up === "Z") {
+            sawZ = true;
+            // Preserve whether geometry was already closed before Z.
+            // If not, close() must add the missing terminal segment.
+            closedByGeometry = isNear(curX, curY, startX, startY);
             curX = startX;
             curY = startY;
             prevC2X = prevC2Y = prevQX = prevQY = null;
         }
     }
 
-    return sketch ? sketch.close() : null;
+    if (!sketch) return null;
+    if (sawZ) return closedByGeometry ? sketch.done() : sketch.close();
+    return closedByGeometry ? sketch.done() : sketch.close();
 }
 
 function getFirstPathPointInWorldXY(pathData, bboxRef, panelAnchor = "top-left", depth = 0, panelThickness = appConfig.panel.thickness) {
@@ -1444,8 +2039,268 @@ export default class ReplicadCanvasModule extends BaseModule {
         this._displayModeListener = null;
         this._updateInFlight = false;
         this._pendingUpdate = false;
+        this._renderFailureStreak = 0;
+        this._lastRenderErrorAt = 0;
+        this._lastRenderErrorKey = "";
+        this._lastWarnAt = 0;
+        this._lastWarnKey = "";
+        this._bitSweepCache = new Map();
+        this._bitSweepCacheStats = { hits: 0, misses: 0 };
+        this._lastBuildBitSignatures = [];
+        this._lastBitSignatureById = new Map();
+        this._lastCsgSignature = null;
+        this._lastCsgShape = null;
+        this._shapeMeshCache = new WeakMap();
+        this._shapeMeshHQCache = new WeakMap();
 
         this.log.info("ReplicadCanvasModule created");
+    }
+
+    _formatRenderError(err) {
+        if (typeof err === "number") {
+            return `OCCT numeric error: ${err}`;
+        }
+        if (typeof err === "string") {
+            return err;
+        }
+        if (err?.message) {
+            return err.message;
+        }
+        try {
+            return JSON.stringify(err);
+        } catch {
+            return String(err);
+        }
+    }
+
+    _logRenderErrorThrottled(context, err, extra = null) {
+        const now = Date.now();
+        const summary = this._formatRenderError(err);
+        const key = `${context}:${summary}`;
+        if (context === "_addShapeMesh.shape.mesh failed" && now - this._lastRenderErrorAt < 1500) {
+            return;
+        }
+        const isRepeat = this._lastRenderErrorKey === key;
+        const tooSoon = now - this._lastRenderErrorAt < 1200;
+        if (isRepeat && tooSoon) return;
+
+        this._lastRenderErrorAt = now;
+        this._lastRenderErrorKey = key;
+
+        if (extra) {
+            this.log.error(`${context}: ${summary}`, extra);
+        } else {
+            this.log.error(`${context}: ${summary}`);
+        }
+    }
+
+    _isShapeMeshable(shape) {
+        return Boolean(shape && typeof shape.mesh === "function");
+    }
+
+    _canTessellateShape(shape, {
+        silent = true,
+        tessOpts = { tolerance: 1.2, angularTolerance: 45 },
+        diagnostics = null,
+    } = {}) {
+        const diag = diagnostics && typeof diagnostics === "object" ? diagnostics : null;
+        if (!this._isShapeMeshable(shape)) {
+            if (diag) {
+                diag.ok = false;
+                diag.reason = "no-mesh-fn";
+            }
+            return false;
+        }
+
+        const cached = this._shapeMeshCache.get(shape);
+        if (cached?.vertices?.length) {
+            if (diag) {
+                diag.ok = true;
+                diag.reason = "cache";
+                diag.vertexCount = Math.floor((cached.vertices?.length || 0) / 3);
+            }
+            return true;
+        }
+
+        try {
+            const probe = shape.mesh(tessOpts);
+            if (probe?.vertices?.length) {
+                this._shapeMeshCache.set(shape, probe);
+                if (diag) {
+                    diag.ok = true;
+                    diag.reason = "mesh-ok";
+                    diag.vertexCount = Math.floor((probe.vertices?.length || 0) / 3);
+                }
+                return true;
+            }
+            if (diag) {
+                diag.ok = false;
+                diag.reason = "no-vertices";
+            }
+            if (!silent) {
+                this.log.warn("Shape tessellation probe returned no vertices", { tessOpts });
+            }
+            return false;
+        } catch (err) {
+            if (diag) {
+                diag.ok = false;
+                diag.reason = "mesh-throw";
+                diag.error = this._formatRenderError(err);
+            }
+            if (!silent) {
+                this._logRenderErrorThrottled("_canTessellateShape.shape.mesh failed", err, { tessOpts });
+            }
+            return false;
+        }
+    }
+
+    _logWarnThrottled(context, payload = null, windowMs = 1600) {
+        const now = Date.now();
+        const key = `${context}:${JSON.stringify(payload || {})}`;
+        if (this._lastWarnKey === key && now - this._lastWarnAt < windowMs) return;
+        this._lastWarnAt = now;
+        this._lastWarnKey = key;
+        if (payload) this.log.warn(context, payload);
+        else this.log.warn(context);
+    }
+
+    _getBitId(bit, bitIndex) {
+        // Use per-canvas-instance identity first to avoid collisions between
+        // multiple placements of the same library bit (same bitData.id).
+        return String(
+            bit?.operationNumber
+            ?? bit?.number
+            ?? bit?.id
+            ?? `${bitIndex}:${bit?.bitData?.id ?? (bit?.name || "unknown")}`
+        );
+    }
+
+    _signatureFromContour(contour, options = {}) {
+        const {
+            includeDepth = true,
+        } = options;
+        if (!contour) return "none";
+        const pathData = contour.pathData ? String(contour.pathData) : "";
+        const pathHash = pathData ? fastHashString(pathData) : "no-path";
+        const segCount = Array.isArray(contour.pathSegments) ? contour.pathSegments.length : 0;
+        const meta = [
+            contour.bitIndex,
+            contour.operation,
+            contour.pass,
+            contour.passIndex,
+            includeDepth ? contour.depth : "depth-agnostic",
+            contour.isWorkOffset ? 1 : 0,
+            contour.for3D ? 1 : 0,
+            contour.isPOMain ? 1 : 0,
+            segCount,
+            pathHash,
+        ];
+        return meta.join("|");
+    }
+
+    _buildBitSweepCacheKey(bit, bitIndex, op, contours, bboxRef, panelT, panelAnchor, options = {}) {
+        const {
+            includeBitDepth = true,
+            includeContourDepth = true,
+        } = options;
+        const bitData = bit?.bitData || {};
+        const profileHash = fastHashString(bitData?.profileSvg || bitData?.profilePath || "");
+        const contourSig = contours
+            .map((contour) => this._signatureFromContour(contour, { includeDepth: includeContourDepth }))
+            .sort()
+            .join(";");
+        const bboxSig = bboxRef
+            ? [bboxRef.x, bboxRef.y, bboxRef.width, bboxRef.height].map((n) => Number(n || 0).toFixed(3)).join(",")
+            : "no-bbox";
+
+        return [
+            `i:${bitIndex}`,
+            `op:${op}`,
+            `csg:${this._showPart ? 1 : 0}`,
+            `name:${bit?.name || "unknown"}`,
+            `y:${includeBitDepth ? Number(bit?.y ?? 0).toFixed(4) : "depth-agnostic"}`,
+            `d:${Number(bitData?.diameter ?? 0).toFixed(4)}`,
+            `a:${Number(bitData?.angle ?? 0).toFixed(4)}`,
+            `panelT:${Number(panelT ?? 0).toFixed(4)}`,
+            `anchor:${panelAnchor}`,
+            `bbox:${bboxSig}`,
+            `profile:${profileHash}`,
+            `contours:${fastHashString(contourSig)}`,
+        ].join("#");
+    }
+
+    _extractVcPassDepthMap(contours, bitY = 0) {
+        const vcContours = (Array.isArray(contours) ? contours : []).filter((contour) => !contour?.isWorkOffset);
+        const depthMap = new Map();
+        for (let i = 0; i < vcContours.length; i++) {
+            const contour = vcContours[i];
+            const passIndex = Number.isFinite(contour?.passIndex)
+                ? contour.passIndex
+                : Number.isFinite(contour?.pass)
+                    ? contour.pass
+                    : i;
+            const depth = Number.isFinite(contour?.depth) ? contour.depth : bitY;
+            depthMap.set(passIndex, depth);
+        }
+        return depthMap;
+    }
+
+    _groupBitShapeEntriesById(entries) {
+        const grouped = new Map();
+        for (const entry of entries || []) {
+            const bitId = this._getBitId(entry?.bit, 0);
+            if (!grouped.has(bitId)) grouped.set(bitId, []);
+            grouped.get(bitId).push(entry);
+        }
+        return grouped;
+    }
+
+    _resolveExportModule() {
+        return (
+            window?.dependencyContainer?.get?.("export") ||
+            window?.app?.container?.get?.("export") ||
+            null
+        );
+    }
+
+    /**
+     * Build the preferred spine candidate for CSG + zero-offset contours.
+     * Uses path-level outward offset (-0.01 by sign convention) to avoid coincident faces.
+     * @param {string} pathData
+     * @param {{x:number,y:number,width:number,height:number}} bboxRef
+     * @param {*} Sketcher
+     * @param {{panelAnchor:string,depth:number,panelThickness:number}} options
+     * @returns {{mode:string, sketch:object}|null}
+     */
+    _buildCsgZeroOffsetOutsetCandidate(pathData, bboxRef, Sketcher, {
+        panelAnchor,
+        depth,
+        panelThickness,
+    }) {
+        const exportModule = this._resolveExportModule();
+        const outsetPathData = buildOutsetPathData(pathData, 0.01, exportModule);
+        const hasActualOutset = String(outsetPathData || "").trim() !== String(pathData || "").trim();
+        if (!hasActualOutset) return null;
+
+        const outsetSketch = buildSketchFromSvgPathCommands(
+            outsetPathData,
+            bboxRef,
+            Sketcher,
+            {
+                close: true,
+                plane: "XY",
+                panelAnchor,
+                depth,
+                panelThickness,
+                applyDepthForXY: true,
+            }
+        );
+        if (!outsetSketch?.wire) return null;
+
+        return {
+            mode: "commands-analytic-outset+0.01",
+            sketch: outsetSketch,
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -1577,10 +2432,13 @@ export default class ReplicadCanvasModule extends BaseModule {
         }
 
         this._updateInFlight = true;
+        const perfTrace = Boolean(window?.__replicadPerfTrace);
+        const tUpdateStart = perfTrace ? performance.now() : 0;
 
         try {
             await this._lazyInit();
             this._ensureRenderer();
+            const tInitDone = perfTrace ? performance.now() : 0;
 
             const panelW = appConfig.panel.width;
             const panelH = appConfig.panel.height;
@@ -1606,8 +2464,19 @@ export default class ReplicadCanvasModule extends BaseModule {
                 bboxRef: this._bboxRef,
             });
 
-            this.panelShape = this._buildPanel(panelW, panelH, panelT, this._bboxRef);
-            if (!this.panelShape) return;
+            const previousPanelShape = this.panelShape;
+            const nextPanelShape = this._buildPanel(panelW, panelH, panelT, this._bboxRef);
+            if (nextPanelShape) {
+                this.panelShape = nextPanelShape;
+            } else if (previousPanelShape) {
+                this.panelShape = previousPanelShape;
+                this._logWarnThrottled("Panel rebuild failed, reusing previous panel shape", {
+                    panel: `${panelW}x${panelH}x${panelT}`,
+                });
+            } else {
+                return;
+            }
+            const tPanelDone = perfTrace ? performance.now() : 0;
 
             this.bitShapes = this._buildAllBits(
                 bits,
@@ -1617,13 +2486,29 @@ export default class ReplicadCanvasModule extends BaseModule {
                 panelH,
                 panelT,
                 panelAnchor,
+                changedBitIds,
             );
+            const tBitsDone = perfTrace ? performance.now() : 0;
 
             if (this._showPart && this.bitShapes.length > 0) {
                 this._applyCSG();
             } else {
                 this.currentShape = this.panelShape;
                 this._renderPanelAndPaths(bits, offsetContours, this._bboxRef, panelAnchor);
+            }
+
+            if (perfTrace) {
+                const tRenderDone = performance.now();
+                this.log.info("Replicad perf", {
+                    changedBitIds,
+                    lazyInitMs: Math.round(tInitDone - tUpdateStart),
+                    panelMs: Math.round(tPanelDone - tInitDone),
+                    bitsMs: Math.round(tBitsDone - tPanelDone),
+                    renderOrCsgMs: Math.round(tRenderDone - tBitsDone),
+                    totalMs: Math.round(tRenderDone - tUpdateStart),
+                    cacheHits: this._bitSweepCacheStats.hits,
+                    cacheMisses: this._bitSweepCacheStats.misses,
+                });
             }
         } catch (err) {
             this.log.error("updateView failed:", err);
@@ -1703,16 +2588,158 @@ export default class ReplicadCanvasModule extends BaseModule {
     // Bit shapes
     // -----------------------------------------------------------------------
 
-    _buildAllBits(bits, offsetContours, bboxRef, panelW, panelH, panelT, panelAnchor) {
+    _buildAllBits(bits, offsetContours, bboxRef, panelW, panelH, panelT, panelAnchor, changedBitIds = null) {
         const results = [];
+        const usedCacheKeys = new Set();
+        const bitSignatures = [];
+        const changedSet = changedBitIds
+            ? new Set((Array.isArray(changedBitIds) ? changedBitIds : [changedBitIds]).map((id) => String(id)))
+            : null;
+        const prevEntriesById = this._groupBitShapeEntriesById(this.bitShapes);
+        const perfTrace = Boolean(window?.__replicadPerfTrace);
+        const tBuildStart = perfTrace ? performance.now() : 0;
+        let builtCount = 0;
+        let reusedPrevCount = 0;
+        let cacheHitCount = 0;
+        let cacheMissCount = 0;
+        let skippedCount = 0;
         for (let i = 0; i < bits.length; i++) {
             const bit = bits[i];
+            const tBitStart = perfTrace ? performance.now() : 0;
             try {
                 // Contours for this specific bit only
                 const contours = offsetContours.filter((c) => c.bitIndex === i);
-                if (!contours.length) continue;
+                if (!contours.length) {
+                    skippedCount += 1;
+                    continue;
+                }
 
                 const op = (bit.operation || "AL").toUpperCase();
+                const depthInsensitive = op === "AL" || op === "PO" || op === "VC";
+                const cacheKey = this._buildBitSweepCacheKey(
+                    bit,
+                    i,
+                    op,
+                    contours,
+                    bboxRef,
+                    panelT,
+                    panelAnchor,
+                    {
+                        includeBitDepth: !depthInsensitive,
+                        includeContourDepth: !depthInsensitive,
+                    }
+                );
+                const csgBitSignature = this._buildBitSweepCacheKey(
+                    bit,
+                    i,
+                    op,
+                    contours,
+                    bboxRef,
+                    panelT,
+                    panelAnchor,
+                    {
+                        includeBitDepth: true,
+                        includeContourDepth: true,
+                    }
+                );
+                const bitId = this._getBitId(bit, i);
+                const libraryBitId = bit?.bitData?.id !== undefined && bit?.bitData?.id !== null
+                    ? String(bit.bitData.id)
+                    : null;
+                const prevEntries = prevEntriesById.get(bitId);
+                const prevSignature = this._lastBitSignatureById.get(bitId);
+                const unchangedBySignature = prevSignature === csgBitSignature;
+                usedCacheKeys.add(cacheKey);
+                bitSignatures.push(`${bitId}:${csgBitSignature}`);
+
+                const changedById = changedSet
+                    ? (changedSet.has(bitId) || (libraryBitId ? changedSet.has(libraryBitId) : false))
+                    : false;
+
+                const shouldReusePreviousDirectly =
+                    (changedSet && !changedById)
+                    || (!changedSet && unchangedBySignature);
+
+                if (shouldReusePreviousDirectly && Array.isArray(prevEntries) && prevEntries.length > 0) {
+                    reusedPrevCount += 1;
+                    for (const entry of prevEntries) {
+                        results.push({ bit, shape: entry.shape, operation: op });
+                    }
+                    if (perfTrace) {
+                        this.log.info("Replicad bit build", {
+                            bitId,
+                            bitName: bit?.name,
+                            operation: op,
+                            mode: "reuse-previous",
+                            contours: contours.length,
+                            ms: Math.round(performance.now() - tBitStart),
+                        });
+                    }
+                    continue;
+                }
+
+                const cachedShapes = this._bitSweepCache.get(cacheKey);
+                const cachedItems = Array.isArray(cachedShapes?.items) ? cachedShapes.items : [];
+                if (cachedItems.length > 0) {
+                    this._bitSweepCacheStats.hits += 1;
+                    cacheHitCount += 1;
+                    const translatedItems = [];
+
+                    if (cachedShapes?.kind === "single") {
+                        const oldDepth = Number(cachedShapes?.depth ?? 0);
+                        const newDepth = Number(bit?.y ?? 0);
+                        const oldZ = this._getSurfaceDepthZ(oldDepth, panelAnchor, panelT);
+                        const newZ = this._getSurfaceDepthZ(newDepth, panelAnchor, panelT);
+                        const deltaZ = newZ - oldZ;
+                        for (const item of cachedItems) {
+                            const shifted = Math.abs(deltaZ) > 1e-6
+                                ? item.shape.translate(0, 0, deltaZ)
+                                : item.shape;
+                            translatedItems.push({ ...item, shape: shifted });
+                        }
+                    } else if (cachedShapes?.kind === "vc-passes") {
+                        const depthMap = this._extractVcPassDepthMap(contours, Number(bit?.y ?? 0));
+                        for (const item of cachedItems) {
+                            const oldDepth = Number(item?.depth ?? 0);
+                            const nextDepth = depthMap.has(item.passIndex)
+                                ? Number(depthMap.get(item.passIndex))
+                                : oldDepth;
+                            const oldZ = this._getSurfaceDepthZ(oldDepth, panelAnchor, panelT);
+                            const newZ = this._getSurfaceDepthZ(nextDepth, panelAnchor, panelT);
+                            const deltaZ = newZ - oldZ;
+                            const shifted = Math.abs(deltaZ) > 1e-6
+                                ? item.shape.translate(0, 0, deltaZ)
+                                : item.shape;
+                            translatedItems.push({ ...item, shape: shifted, depth: nextDepth });
+                        }
+                    } else {
+                        translatedItems.push(...cachedItems);
+                    }
+
+                    for (const item of translatedItems) {
+                        results.push({ bit, shape: item.shape, operation: op });
+                    }
+
+                    this._bitSweepCache.set(cacheKey, {
+                        ...cachedShapes,
+                        items: translatedItems,
+                        depth: Number(bit?.y ?? 0),
+                    });
+                    if (perfTrace) {
+                        this.log.info("Replicad bit build", {
+                            bitId,
+                            bitName: bit?.name,
+                            operation: op,
+                            mode: "cache-hit",
+                            contours: contours.length,
+                            ms: Math.round(performance.now() - tBitStart),
+                        });
+                    }
+                    continue;
+                }
+
+                this._bitSweepCacheStats.misses += 1;
+                cacheMissCount += 1;
                 let shape;
                 if (op === "VC") {
                     shape = this._buildVC(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor);
@@ -1721,12 +2748,127 @@ export default class ReplicadCanvasModule extends BaseModule {
                 } else {
                     shape = this._buildAL(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor);
                 }
-                if (shape) results.push({ bit, shape, operation: op });
+
+                const builtItems = [];
+                if (Array.isArray(shape)) {
+                    for (const passShape of shape) {
+                        const passItem = passShape?.shape ? passShape : { shape: passShape };
+                        if (!passItem?.shape) continue;
+                        if (!this._isShapeMeshable(passItem.shape)) {
+                            this.log.warn("Skipping non-meshable VC pass shape", {
+                                bitName: bit?.name,
+                                operation: op,
+                            });
+                            continue;
+                        }
+                        builtItems.push({
+                            shape: passItem.shape,
+                            passIndex: Number.isFinite(passItem.passIndex) ? passItem.passIndex : null,
+                            depth: Number.isFinite(passItem.depth) ? passItem.depth : Number(bit?.y ?? 0),
+                        });
+                        results.push({ bit, shape: passItem.shape, operation: op });
+                        builtCount += 1;
+                    }
+                } else if (shape) {
+                    if (!this._isShapeMeshable(shape)) {
+                        this.log.warn("Skipping non-meshable bit shape", {
+                            bitName: bit?.name,
+                            operation: op,
+                        });
+                        continue;
+                    }
+                    builtItems.push({
+                        shape,
+                        passIndex: null,
+                        depth: Number(bit?.y ?? 0),
+                    });
+                    results.push({ bit, shape, operation: op });
+                    builtCount += 1;
+                }
+
+                if (builtItems.length > 0) {
+                    this._bitSweepCache.set(cacheKey, {
+                        kind: op === "VC" ? "vc-passes" : "single",
+                        depth: Number(bit?.y ?? 0),
+                        items: builtItems,
+                    });
+                } else if (Array.isArray(prevEntries) && prevEntries.length > 0) {
+                    // Fail-safe: keep previously valid geometry for this bit when rebuild fails.
+                    this._logWarnThrottled("Bit rebuild failed, reusing previous geometry", {
+                        bitId,
+                        bitName: bit?.name,
+                        operation: op,
+                    });
+                    for (const entry of prevEntries) {
+                        results.push({ bit, shape: entry.shape, operation: op });
+                    }
+                }
+
+                if (perfTrace) {
+                    this.log.info("Replicad bit build", {
+                        bitId,
+                        bitName: bit?.name,
+                        operation: op,
+                        mode: builtItems.length > 0 ? "rebuilt" : "reused-or-skipped",
+                        contours: contours.length,
+                        ms: Math.round(performance.now() - tBitStart),
+                    });
+                }
             } catch (err) {
                 this.log.error(`_buildAllBits[${i}] (${bit.name}) failed:`, err);
+                const bitId = this._getBitId(bit, i);
+                const prevEntries = prevEntriesById.get(bitId);
+                if (Array.isArray(prevEntries) && prevEntries.length > 0) {
+                    this._logWarnThrottled("Bit exception, reusing previous geometry", {
+                        bitId,
+                        bitName: bit?.name,
+                        operation: bit?.operation,
+                        message: err?.message,
+                    });
+                    for (const entry of prevEntries) {
+                        results.push({ bit, shape: entry.shape, operation: (bit.operation || "AL").toUpperCase() });
+                    }
+                }
             }
         }
-        return results;
+
+        if (perfTrace) {
+            this.log.info("Replicad bit build summary", {
+                bits: bits.length,
+                builtCount,
+                reusedPrevCount,
+                cacheHitCount,
+                cacheMissCount,
+                skippedCount,
+                totalMs: Math.round(performance.now() - tBuildStart),
+            });
+        }
+
+        for (const key of Array.from(this._bitSweepCache.keys())) {
+            if (!usedCacheKeys.has(key)) this._bitSweepCache.delete(key);
+        }
+
+        const deduped = [];
+        const seenShapes = new Set();
+        for (const entry of results) {
+            const shape = entry?.shape;
+            if (!shape) continue;
+            if (seenShapes.has(shape)) continue;
+            seenShapes.add(shape);
+            deduped.push(entry);
+        }
+
+        this._lastBuildBitSignatures = bitSignatures;
+        this._lastBitSignatureById = new Map(
+            bitSignatures.map((entry) => {
+                const sep = entry.indexOf(":");
+                return sep >= 0
+                    ? [entry.slice(0, sep), entry.slice(sep + 1)]
+                    : [entry, entry];
+            })
+        );
+
+        return deduped;
     }
 
     _selectStandardContour(contours) {
@@ -1802,7 +2944,10 @@ export default class ReplicadCanvasModule extends BaseModule {
             : [0, 0, pathZ];
 
         if (profilePath) {
-            const profileSketch = buildProfileSketchFromPathData(profilePath, Sketcher, pathZ, origin);
+            // Prefer analytic SVG command reconstruction first to preserve true arcs.
+            // Canonical sampled polyline is a fallback only when analytic build fails.
+            const profileSketch = buildProfileSketchFromPathData(profilePath, Sketcher, pathZ, origin)
+                || buildCanonicalProfileSketchFromPathData(profilePath, Sketcher, pathZ, origin);
             if (profileSketch) {
                 return profileSketch.wire;
             }
@@ -1844,6 +2989,41 @@ export default class ReplicadCanvasModule extends BaseModule {
         return profile.close().wire;
     }
 
+    _buildVCProfileWire(bitData, depth, pathZ, profileOrigin = null) {
+        const { Sketcher } = _replicad;
+        const origin = Array.isArray(profileOrigin) && profileOrigin.length === 3
+            ? profileOrigin
+            : [0, 0, pathZ];
+
+        const angle = Number(bitData?.angle ?? 90);
+        const diameter = Number(bitData?.diameter ?? 10);
+        const halfBase = Math.max(0, diameter / 2);
+        const halfAngleRad = (angle * Math.PI) / 360;
+        const tanHalf = Math.tan(halfAngleRad);
+        const depthNum = Math.max(0, Number(depth) || 0);
+
+        if (!Number.isFinite(tanHalf) || tanHalf <= 0 || !Number.isFinite(depthNum) || depthNum <= 0) {
+            return this._buildProfileWire(bitData, pathZ, profileOrigin);
+        }
+
+        // VC phantom passes must use an effective width derived from pass depth.
+        // Full bit profile at shallow depth can create OCC sweep truncation.
+        const halfWidth = Math.min(halfBase, depthNum * tanHalf);
+        const profileHeight = Math.max(depthNum, 1e-3);
+
+        if (!Number.isFinite(halfWidth) || halfWidth <= 1e-6) {
+            return this._buildProfileWire(bitData, pathZ, profileOrigin);
+        }
+
+        const profile = new Sketcher("XZ", origin)
+            .movePointerTo([0, 0])
+            .lineTo([-halfWidth, profileHeight])
+            .lineTo([halfWidth, profileHeight])
+            .close();
+
+        return profile.wire;
+    }
+
     /**
      * Build a single round-profile sweep cutter from a contour path.
      * Handles AL and PO operations.
@@ -1862,12 +3042,38 @@ export default class ReplicadCanvasModule extends BaseModule {
             const normalizedPathData = pickPrimarySubpath(pathData);
             const normalizedSummary = summarizeSvgPath(normalizedPathData);
             const contourSegments = this._getContourSegments(contour);
+            const contourOffsetDistance = Number(contour?.offsetDistance);
+            const isZeroOffsetContour = Number.isFinite(contourOffsetDistance)
+                ? Math.abs(contourOffsetDistance) <= 1e-3
+                : false;
+            const useCsgZeroOffsetOutset = Boolean(this._showPart && isZeroOffsetContour);
+            const commandSketchOptions = {
+                close: true,
+                plane: "XY",
+                panelAnchor,
+                depth,
+                panelThickness: panelT,
+                applyDepthForXY: true,
+            };
+            const isCornerTool = Number(bit?.bitData?.cornerRadius ?? 0) > 0;
+            const normalizedContourSegments = Array.isArray(contourSegments) && contourSegments.length > 0
+                ? normalizeSegmentsForSweep(contourSegments, 0.1, {
+                    splitSeam: false,
+                })
+                : contourSegments;
             const traceSweep = Boolean(window?.__replicadSweepTrace);
+            const sweepDiag = {
+                bit: bit?.name || bit?.bitData?.name || "unknown",
+                depth,
+                transitionMode,
+                candidates: [],
+                sweepAttempts: [],
+            };
             if (traceSweep) {
                 const tracePayload = {
-                    bit: bit?.name || bit?.bitData?.name || "unknown",
-                    depth,
-                    transitionMode,
+                    bit: sweepDiag.bit,
+                    depth: sweepDiag.depth,
+                    transitionMode: sweepDiag.transitionMode,
                     sourceSummary: summarizeSvgPath(pathData),
                     normalizedSummary,
                     normalizedChanged: String(pathData || "") !== String(normalizedPathData || ""),
@@ -1877,48 +3083,218 @@ export default class ReplicadCanvasModule extends BaseModule {
                 console.info("[ReplicadSweepTrace] sweep:spine", tracePayload);
             }
 
-            const pathSketch = Array.isArray(contourSegments) && contourSegments.length > 0
-                ? buildSketchFromOffsetSegments(
-                    contourSegments,
-                    bboxRef,
-                    Sketcher,
-                    {
-                        close: true,
-                        plane: "XY",
-                        panelAnchor,
-                        depth,
-                        panelThickness: panelT,
-                        applyDepthForXY: true,
+            const pathSketchCandidates = [];
+            let csgZeroOutsetCandidate = null;
+            if (useCsgZeroOffsetOutset) {
+                try {
+                    csgZeroOutsetCandidate = this._buildCsgZeroOffsetOutsetCandidate(
+                        normalizedPathData,
+                        bboxRef,
+                        Sketcher,
+                        {
+                            panelAnchor,
+                            depth,
+                            panelThickness: panelT,
+                        }
+                    );
+                    if (csgZeroOutsetCandidate?.sketch?.wire) {
+                        sweepDiag.candidates.push({
+                            mode: "commands-analytic-outset+0.01",
+                            hasWire: true,
+                            outset: true,
+                            forcedForCsgZeroOffset: true,
+                        });
                     }
-                )
-                : buildSketchFromSvgPathCommands(
-                    normalizedPathData,
-                    bboxRef,
-                    Sketcher,
-                    {
-                        close: true,
-                        plane: "XY",
-                        panelAnchor,
-                        depth,
-                        panelThickness: panelT,
-                        applyDepthForXY: true,
+                } catch {
+                    csgZeroOutsetCandidate = null;
+                }
+            }
+            if (Array.isArray(normalizedContourSegments) && normalizedContourSegments.length > 0) {
+                if (!isCornerTool) {
+                    const originalSegmentDiag = {};
+                    let originalSegmentSketch = null;
+                    try {
+                        originalSegmentSketch = buildSketchFromOffsetSegments(
+                            contourSegments,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                                strictContinuity: true,
+                                strictArcs: true,
+                                continuityEps: 1e-3,
+                                diagnostics: originalSegmentDiag,
+                                removeLoops: true,
+                            }
+                        );
+                    } catch (errSegOriginal) {
+                        originalSegmentDiag.failReason = "segments-original-builder-threw";
+                        originalSegmentDiag.failDetail = { message: errSegOriginal?.message || String(errSegOriginal) };
                     }
-                );
-            if (!pathSketch) return null;
+                    sweepDiag.candidates.push({
+                        mode: "segments-original",
+                        hasWire: Boolean(originalSegmentSketch?.wire),
+                        diagnostics: originalSegmentDiag,
+                    });
+                    pathSketchCandidates.push({ mode: "segments-original", sketch: originalSegmentSketch });
+                }
 
-            if (traceSweep) {
-                console.info("[ReplicadSweepTrace] sweep:spine-mode", {
-                    bit: bit?.name || bit?.bitData?.name || "unknown",
-                    mode: Array.isArray(contourSegments) && contourSegments.length > 0
-                        ? "offset-segments"
-                        : "commands-analytic",
-                    sampleStep: null,
+                const segmentDiag = {};
+                let segmentSketch = null;
+                try {
+                    segmentSketch = buildSketchFromOffsetSegments(
+                        normalizedContourSegments,
+                        bboxRef,
+                        Sketcher,
+                        {
+                            close: true,
+                            plane: "XY",
+                            panelAnchor,
+                            depth,
+                            panelThickness: panelT,
+                            applyDepthForXY: true,
+                            strictContinuity: true,
+                            strictArcs: true,
+                            continuityEps: 1e-3,
+                            diagnostics: segmentDiag,
+                            removeLoops: true,
+                        }
+                    );
+                } catch (errSegBuild) {
+                    segmentDiag.failReason = "segments-builder-threw";
+                    segmentDiag.failDetail = { message: errSegBuild?.message || String(errSegBuild) };
+                }
+                sweepDiag.candidates.push({
+                    mode: "segments-closed",
+                    hasWire: Boolean(segmentSketch?.wire),
+                    diagnostics: segmentDiag,
                 });
+                pathSketchCandidates.push({ mode: "segments-closed", sketch: segmentSketch });
+
+                const reversedSegmentDiag = {};
+                let reversedSegmentSketch = null;
+                if (!isCornerTool) {
+                    try {
+                        const reversedSegments = normalizeSegmentsForSweep(
+                            reverseSegmentsForSweep(normalizedContourSegments),
+                            0.1
+                        );
+                        reversedSegmentSketch = buildSketchFromOffsetSegments(
+                            reversedSegments,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                                strictContinuity: true,
+                                strictArcs: true,
+                                continuityEps: 1e-3,
+                                diagnostics: reversedSegmentDiag,
+                                removeLoops: true,
+                            }
+                        );
+                    } catch (errSegRev) {
+                        reversedSegmentDiag.failReason = "segments-reversed-builder-threw";
+                        reversedSegmentDiag.failDetail = { message: errSegRev?.message || String(errSegRev) };
+                    }
+                    sweepDiag.candidates.push({
+                        mode: "segments-closed-reversed",
+                        hasWire: Boolean(reversedSegmentSketch?.wire),
+                        diagnostics: reversedSegmentDiag,
+                    });
+                    pathSketchCandidates.push({ mode: "segments-closed-reversed", sketch: reversedSegmentSketch });
+
+                    let commandSketch = null;
+                    try {
+                        commandSketch = buildSketchFromSvgPathCommands(
+                            normalizedPathData,
+                            bboxRef,
+                            Sketcher,
+                            commandSketchOptions
+                        );
+                    } catch {
+                        commandSketch = null;
+                    }
+                    sweepDiag.candidates.push({
+                        mode: "commands-closed",
+                        hasWire: Boolean(commandSketch?.wire),
+                    });
+                    pathSketchCandidates.push({ mode: "commands-closed", sketch: commandSketch });
+                } else if (normalizedPathData) {
+                    // Keep command-based spine only as fallback for corner tools.
+                    let commandSketch = null;
+                    try {
+                        commandSketch = buildSketchFromSvgPathCommands(
+                            normalizedPathData,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                forceTopologicalClose: true,
+                                ...commandSketchOptions,
+                            }
+                        );
+                    } catch {
+                        commandSketch = null;
+                    }
+                    sweepDiag.candidates.push({
+                        mode: "commands-corner-closed",
+                        hasWire: Boolean(commandSketch?.wire),
+                    });
+                    pathSketchCandidates.push({ mode: "commands-corner-closed", sketch: commandSketch });
+                }
+            } else {
+                let commandSketch = null;
+                try {
+                    commandSketch = buildSketchFromSvgPathCommands(
+                        normalizedPathData,
+                        bboxRef,
+                        Sketcher,
+                        commandSketchOptions
+                    );
+                } catch {
+                    commandSketch = null;
+                }
+                sweepDiag.candidates.push({
+                    mode: "commands-analytic",
+                    hasWire: Boolean(commandSketch?.wire),
+                });
+                pathSketchCandidates.push({ mode: "commands-analytic", sketch: commandSketch });
+            }
+
+            if (csgZeroOutsetCandidate?.sketch?.wire) {
+                // CSG+offset~0: always try modified (-0.01) spine first.
+                // Keep other candidates only as fallback when sweep fails.
+                pathSketchCandidates.unshift(csgZeroOutsetCandidate);
+            }
+
+            let pathSketchCandidatesValid = pathSketchCandidates.filter((c) => !!c?.sketch?.wire);
+            if (!pathSketchCandidatesValid.length) {
+                this.log.warn("Round-profile sweep has no valid spine candidate", {
+                    ...sweepDiag,
+                    pathSummary: normalizedSummary,
+                    hasSegments: Array.isArray(contourSegments) && contourSegments.length > 0,
+                });
+                return null;
             }
 
             const pathZ = this._getSurfaceDepthZ(depth, panelAnchor, panelT);
-            const profileOrigin = getFirstSegmentPointInWorldXY(contourSegments, bboxRef, panelAnchor, depth, panelT)
+            // Profile anchor must match the spine candidate start to avoid local frame twist.
+            // For corner tools we force segment-based spines, so pin to normalized segment start.
+            const profileOrigin = (isCornerTool
+                ? getFirstSegmentPointInWorldXY(normalizedContourSegments, bboxRef, panelAnchor, depth, panelT)
+                : null)
+                ?? getFirstSegmentPointInWorldXY(normalizedContourSegments, bboxRef, panelAnchor, depth, panelT)
                 ?? getFirstPathPointInWorldXY(normalizedPathData, bboxRef, panelAnchor, depth, panelT)
+                ?? getFirstSegmentPointInWorldXY(contourSegments, bboxRef, panelAnchor, depth, panelT)
                 ?? [0, 0, pathZ];
             const profileWire = this._buildProfileWire(bit?.bitData, pathZ, profileOrigin);
             const replicadTransition = transitionMode;
@@ -1927,7 +3303,250 @@ export default class ReplicadCanvasModule extends BaseModule {
                 transitionMode: replicadTransition,
             };
 
-            const result = genericSweep(profileWire, pathSketch.wire, sweepOpts, false);
+            let result = null;
+            let selectedSpineMode = null;
+            let sweepError = null;
+            let needsSampledFallback = false;
+            const spineMaxY = Array.isArray(normalizedContourSegments) && normalizedContourSegments.length > 0
+                ? computeSpineMaxWorldY(normalizedContourSegments, bboxRef, panelAnchor)
+                : null;
+            for (const spineCandidate of pathSketchCandidatesValid) {
+                try {
+                    const candidateResult = genericSweep(profileWire, spineCandidate.sketch.wire, sweepOpts, false);
+                    if (!candidateResult) {
+                        sweepDiag.sweepAttempts.push({
+                            mode: spineCandidate.mode,
+                            sweepOpts,
+                            ok: false,
+                            resultState: "nullish",
+                        });
+                        result = null;
+                        continue;
+                    }
+                    if (Number.isFinite(spineMaxY) && spineMaxY > 50) {
+                        const shouldCheckCompleteness = normalizedSummary?.hasArc && spineCandidate.mode === "segments-original";
+                        if (shouldCheckCompleteness) {
+                            try {
+                                const probe = candidateResult.mesh({ tolerance: 2.0, angularTolerance: 45 });
+                                const verts = probe?.vertices || [];
+                                let resultMaxY = -Infinity;
+                                for (let vi = 1; vi < verts.length; vi += 3) {
+                                    if (verts[vi] > resultMaxY) resultMaxY = verts[vi];
+                                }
+                                const completeThreshold = spineMaxY - 50;
+                                if (Number.isFinite(resultMaxY) && resultMaxY < completeThreshold) {
+                                    sweepDiag.sweepAttempts.push({
+                                        mode: spineCandidate.mode,
+                                        sweepOpts,
+                                        ok: true,
+                                        incomplete: true,
+                                        cutterMaxY: Math.round(resultMaxY),
+                                        expectedMin: Math.round(completeThreshold),
+                                    });
+                                    if (traceSweep) {
+                                        console.info("[ReplicadSweepTrace] sweep-incomplete", {
+                                            bit: sweepDiag.bit,
+                                            depth,
+                                            spineMode: spineCandidate.mode,
+                                            cutterMaxY: Math.round(resultMaxY),
+                                            expectedMin: Math.round(completeThreshold),
+                                            spineMaxY: Math.round(spineMaxY),
+                                        });
+                                    }
+                                    needsSampledFallback = true;
+                                    result = null;
+                                    break;
+                                }
+                            } catch {
+                                // Keep the candidate if completeness probing fails.
+                            }
+                        }
+                    }
+                    if (needsSampledFallback) break;
+                    if (typeof candidateResult.mesh !== "function") {
+                        sweepDiag.sweepAttempts.push({
+                            mode: spineCandidate.mode,
+                            sweepOpts,
+                            ok: false,
+                            resultState: "non-meshable",
+                            resultKeys: Object.keys(candidateResult || {}).slice(0, 8),
+                        });
+                        result = null;
+                        continue;
+                    }
+                    result = candidateResult;
+                    sweepDiag.sweepAttempts.push({
+                        mode: spineCandidate.mode,
+                        sweepOpts,
+                        ok: true,
+                    });
+                    selectedSpineMode = spineCandidate.mode;
+                    break;
+                } catch (errSweep) {
+                    sweepDiag.sweepAttempts.push({
+                        mode: spineCandidate.mode,
+                        sweepOpts,
+                        ok: false,
+                        error: errSweep?.message,
+                    });
+                    sweepError = errSweep;
+                }
+                if (needsSampledFallback) break;
+            }
+
+            if (!result && needsSampledFallback && Array.isArray(normalizedContourSegments) && normalizedSummary?.hasArc) {
+                    let sampledSketch = null;
+                    try {
+                        sampledSketch = buildSketchFromSvgPath(
+                            normalizedPathData,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                sampleStep: 4.0,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                            }
+                        );
+                    } catch {
+                        sampledSketch = null;
+                    }
+
+                    sweepDiag.candidates.push({
+                        mode: "sampled-closed",
+                        hasWire: Boolean(sampledSketch?.wire),
+                        lazy: true,
+                    });
+
+                    if (sampledSketch?.wire) {
+                        pathSketchCandidatesValid = [{ mode: "sampled-closed", sketch: sampledSketch }];
+                        for (const spineCandidate of pathSketchCandidatesValid) {
+                            try {
+                                const candidateResult = genericSweep(profileWire, spineCandidate.sketch.wire, sweepOpts, false);
+                                if (!candidateResult) {
+                                    sweepDiag.sweepAttempts.push({
+                                        mode: spineCandidate.mode,
+                                        sweepOpts,
+                                        ok: false,
+                                        resultState: "nullish",
+                                    });
+                                    continue;
+                                }
+                                if (typeof candidateResult.mesh !== "function") {
+                                    sweepDiag.sweepAttempts.push({
+                                        mode: spineCandidate.mode,
+                                        sweepOpts,
+                                        ok: false,
+                                        resultState: "non-meshable",
+                                        resultKeys: Object.keys(candidateResult || {}).slice(0, 8),
+                                    });
+                                    continue;
+                                }
+                                result = candidateResult;
+                                sweepDiag.sweepAttempts.push({
+                                    mode: spineCandidate.mode,
+                                    sweepOpts,
+                                    ok: true,
+                                });
+                                selectedSpineMode = spineCandidate.mode;
+                                break;
+                            } catch (errSweep) {
+                                sweepDiag.sweepAttempts.push({
+                                    mode: spineCandidate.mode,
+                                    sweepOpts,
+                                    ok: false,
+                                    error: errSweep?.message,
+                                });
+                                sweepError = errSweep;
+                            }
+                        }
+                    }
+            }
+
+            if (!result) {
+                this.log.warn("Round-profile sweep failed for all spine candidates", {
+                    ...sweepDiag,
+                    pathSummary: normalizedSummary,
+                    hasSegments: Array.isArray(contourSegments) && contourSegments.length > 0,
+                    message: sweepError?.message,
+                });
+                return null;
+            }
+
+            if (traceSweep) {
+                console.info("[ReplicadSweepTrace] sweep:spine-mode", {
+                    bit: sweepDiag.bit,
+                    bitId: bit?.bitData?.id ?? null,
+                    x: Number(bit?.x ?? 0),
+                    y: Number(bit?.y ?? 0),
+                    depth,
+                    mode: selectedSpineMode,
+                    sampleStep: null,
+                });
+            }
+
+            if (window?.__replicadExhaustiveDiag) {
+                this.log.info("Round-profile sweep diagnostics", {
+                    bit: sweepDiag.bit,
+                    bitId: bit?.bitData?.id ?? null,
+                    x: Number(bit?.x ?? 0),
+                    y: Number(bit?.y ?? 0),
+                    depth,
+                    selectedSpineMode,
+                    candidates: sweepDiag.candidates,
+                    sweepAttempts: sweepDiag.sweepAttempts,
+                });
+            }
+
+            const segCandidateDiag = sweepDiag.candidates.find((c) => c.mode === "segments-closed")?.diagnostics;
+            const hasSegmentStitching =
+                Number(segCandidateDiag?.snapCount || 0) > 0 ||
+                Number(segCandidateDiag?.bridgeCount || 0) > 0 ||
+                Number(segCandidateDiag?.arcFallbackCount || 0) > 0;
+
+            if (useCsgZeroOffsetOutset && selectedSpineMode !== "commands-analytic-outset+0.01") {
+                this._logWarnThrottled("CSG zero-offset did not select outset spine", {
+                    bit: sweepDiag.bit,
+                    bitId: bit?.bitData?.id ?? null,
+                    x: Number(bit?.x ?? 0),
+                    y: Number(bit?.y ?? 0),
+                    depth,
+                    contourOffsetDistance,
+                    selectedSpineMode,
+                    candidates: window?.__replicadExhaustiveDiag ? sweepDiag.candidates : undefined,
+                });
+            }
+
+                if (
+                    selectedSpineMode !== "segments-original" &&
+                    selectedSpineMode !== "segments-closed" &&
+                    selectedSpineMode !== "segments-closed-reversed" &&
+                    selectedSpineMode !== "sampled-closed" &&
+                    selectedSpineMode !== "commands-analytic-outset+0.01"
+                ) {
+                this._logWarnThrottled("Round-profile sweep used fallback spine candidate", {
+                    bit: sweepDiag.bit,
+                    bitId: bit?.bitData?.id ?? null,
+                    x: Number(bit?.x ?? 0),
+                    y: Number(bit?.y ?? 0),
+                    depth,
+                    selectedSpineMode,
+                    segmentFailReason: segCandidateDiag?.failReason || null,
+                    segmentFailDetail: segCandidateDiag?.failDetail || null,
+                    candidates: window?.__replicadExhaustiveDiag ? sweepDiag.candidates : undefined,
+                    sweepAttempts: window?.__replicadExhaustiveDiag ? sweepDiag.sweepAttempts : undefined,
+                });
+            } else if (hasSegmentStitching) {
+                this._logWarnThrottled("Round-profile sweep built from segments with stitching diagnostics", {
+                    bit: sweepDiag.bit,
+                    depth,
+                    segmentDiagnostics: segCandidateDiag,
+                });
+            }
+
             return result;
         } catch (err) {
             this.log.error(`_sweepRoundProfile failed (bit=${bit?.name || bit?.bitData?.name || "unknown"}, d=${depth}):`, err);
@@ -1965,56 +3584,604 @@ export default class ReplicadCanvasModule extends BaseModule {
         const angle = bit.bitData?.angle ?? 90;
         const diameter = bit.bitData?.diameter ?? 10;
         const halfAngle = (angle * Math.PI) / 180 / 2;
-        const halfBase = diameter / 2;
-        const vcHeight = halfBase / Math.tan(halfAngle);
+        const convertToTopAnchorCoordinates =
+            typeof window?.convertToTopAnchorCoordinates === "function"
+                ? window.convertToTopAnchorCoordinates
+                : null;
+        const topAnchorCoords = convertToTopAnchorCoordinates
+            ? convertToTopAnchorCoordinates(bit)
+            : null;
+        const bitY = Number(topAnchorCoords?.y ?? bit.y ?? 0);
+        const bitHeight = (diameter / 2) * (1 / Math.tan(halfAngle));
+        const passes = bitHeight < bitY ? Math.ceil(bitY / bitHeight) : 1;
+
+        const partialResults = [];
+        for (let i = 0; i < passes; i++) {
+            partialResults.push((bitY * (i + 1)) / passes);
+        }
+        const depths = [...partialResults].reverse();
 
         if (!_replicadReady) return null;
         const { Sketcher, genericSweep } = _replicad;
 
-        let combined = null;
+        const cutters = [];
 
-        for (const contour of contours) {
+        // VC 3D should use intermediate passes only; work-offset contour is 2D/DXF only.
+        const vcContours = contours.filter((contour) => !contour?.isWorkOffset);
+
+        for (let passIndex = 0; passIndex < passes; passIndex++) {
+            const contour = vcContours.find((c) => {
+                if (typeof c?.passIndex === "number") {
+                    return c.passIndex === passIndex;
+                }
+                if (typeof c?.pass === "number") {
+                    return c.pass === passIndex;
+                }
+                return passIndex === 0;
+            });
+            if (!contour) continue;
+
+            const contourSegments = this._getContourSegments(contour);
+            const normalizedContourSegments = Array.isArray(contourSegments)
+                ? normalizeSegmentsForSweep(contourSegments, 0.1)
+                : contourSegments;
             const contourPathData = this._getContourPathData(contour);
-            if (!contourPathData) continue;
-            const depth = contour.depth ?? (bit.y ?? 0);
-            // Scale the V-tip to the actual cut depth
-            const scaledHalfBase = depth * Math.tan(halfAngle);
+            if ((!Array.isArray(contourSegments) || contourSegments.length === 0) && !contourPathData) {
+                continue;
+            }
+            const depth = Number.isFinite(depths[passIndex])
+                ? depths[passIndex]
+                : (contour.depth ?? bitY);
+            const passDiag = {
+                passIndex,
+                depth,
+                candidates: [],
+                sweepAttempts: [],
+            };
 
             try {
-                const pathSketch = buildSketchFromSvgPathCommands(
-                    contourPathData,
-                    bboxRef,
-                    Sketcher,
-                    {
-                        close: true,
-                        plane: "XY",
-                        panelAnchor,
-                        depth,
-                        panelThickness: panelT,
-                        applyDepthForXY: true,
+                const normalizedPathData = pickPrimarySubpath(contourPathData);
+                const pathSummary = summarizeSvgPath(normalizedPathData);
+                const allowVcFallbackSpines = false;
+
+                const pathSketchCandidates = [];
+                let segmentDiag = null;
+                // For VC we accept only closed spines. Open fallback can "succeed"
+                // but produce partial cutters (missing seam segment).
+                if (Array.isArray(contourSegments) && contourSegments.length > 0) {
+                    const originalSegmentDiag = {};
+                    let originalSegmentSketch = null;
+                    try {
+                        originalSegmentSketch = buildSketchFromOffsetSegments(
+                            contourSegments,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                                strictContinuity: true,
+                                strictArcs: true,
+                                continuityEps: 1e-3,
+                                diagnostics: originalSegmentDiag,
+                                removeLoops: true,
+                            }
+                        );
+                    } catch (errSegOriginal) {
+                        originalSegmentDiag.failReason = "segments-original-builder-threw";
+                        originalSegmentDiag.failDetail = { message: errSegOriginal?.message || String(errSegOriginal) };
+                        originalSegmentSketch = null;
                     }
-                );
-                if (!pathSketch) continue;
+                    passDiag.candidates.push({
+                        mode: "segments-original",
+                        hasWire: Boolean(originalSegmentSketch?.wire),
+                        diagnostics: originalSegmentDiag,
+                    });
+                    pathSketchCandidates.push({
+                        mode: "segments-original",
+                        sketch: originalSegmentSketch,
+                    });
+
+                    segmentDiag = {};
+                    let segmentSketch = null;
+                    try {
+                        segmentSketch = buildSketchFromOffsetSegments(
+                            normalizedContourSegments,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                                strictContinuity: true,
+                                strictArcs: true,
+                                continuityEps: 1e-3,
+                                diagnostics: segmentDiag,
+                                removeLoops: true,
+                            }
+                        );
+                    } catch (errSegBuild) {
+                        segmentDiag.failReason = "segments-builder-threw";
+                        segmentDiag.failDetail = { message: errSegBuild?.message || String(errSegBuild) };
+                        segmentSketch = null;
+                    }
+                    passDiag.candidates.push({
+                        mode: "segments-closed",
+                        hasWire: Boolean(segmentSketch?.wire),
+                        diagnostics: segmentDiag,
+                    });
+                    pathSketchCandidates.push({
+                        mode: "segments-closed",
+                        sketch: segmentSketch,
+                    });
+
+                    let reversedSegmentSketch = null;
+                    const reversedSegmentDiag = {};
+                    try {
+                        const reversedSegments = normalizeSegmentsForSweep(
+                            reverseSegmentsForSweep(normalizedContourSegments),
+                            0.1
+                        );
+                        reversedSegmentSketch = buildSketchFromOffsetSegments(
+                            reversedSegments,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                                strictContinuity: true,
+                                strictArcs: true,
+                                continuityEps: 1e-3,
+                                diagnostics: reversedSegmentDiag,
+                                removeLoops: true,
+                            }
+                        );
+                    } catch (errSegRev) {
+                        reversedSegmentDiag.failReason = "segments-reversed-builder-threw";
+                        reversedSegmentDiag.failDetail = { message: errSegRev?.message || String(errSegRev) };
+                        reversedSegmentSketch = null;
+                    }
+                    passDiag.candidates.push({
+                        mode: "segments-closed-reversed",
+                        hasWire: Boolean(reversedSegmentSketch?.wire),
+                        diagnostics: reversedSegmentDiag,
+                    });
+                    pathSketchCandidates.push({
+                        mode: "segments-closed-reversed",
+                        sketch: reversedSegmentSketch,
+                    });
+
+                    if (allowVcFallbackSpines) {
+                        // Optional fallback path retained for diagnostics, but disabled by
+                        // default due to heavy geometry and quality regression risk.
+                        let segmentLaxSketch = null;
+                        const segmentLaxDiag = {};
+                        try {
+                            segmentLaxSketch = buildSketchFromOffsetSegments(
+                                normalizedContourSegments,
+                                bboxRef,
+                                Sketcher,
+                                {
+                                    close: true,
+                                    plane: "XY",
+                                    panelAnchor,
+                                    depth,
+                                    panelThickness: panelT,
+                                    applyDepthForXY: true,
+                                    strictContinuity: false,
+                                    strictArcs: false,
+                                    continuityEps: 1e-3,
+                                    diagnostics: segmentLaxDiag,
+                                    removeLoops: true,
+                                }
+                            );
+                        } catch (errLax) {
+                            segmentLaxDiag.failReason = "lax-builder-threw";
+                            segmentLaxDiag.failDetail = { message: errLax?.message || String(errLax) };
+                            segmentLaxSketch = null;
+                        }
+                        passDiag.candidates.push({
+                            mode: "segments-lax",
+                            hasWire: Boolean(segmentLaxSketch?.wire),
+                            diagnostics: segmentLaxDiag,
+                        });
+                        pathSketchCandidates.push({
+                            mode: "segments-lax",
+                            sketch: segmentLaxSketch,
+                        });
+                    }
+                }
+
+                if (allowVcFallbackSpines && normalizedPathData) {
+                    let cmdSketch = null;
+                    try {
+                        cmdSketch = buildSketchFromSvgPathCommands(
+                            normalizedPathData,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                            }
+                        );
+                    } catch {
+                        cmdSketch = null;
+                    }
+                    passDiag.candidates.push({
+                        mode: "commands-closed",
+                        hasWire: Boolean(cmdSketch?.wire),
+                    });
+                    pathSketchCandidates.push({
+                        mode: "commands-closed",
+                        sketch: cmdSketch,
+                    });
+
+                    let sampledSketch = null;
+                    try {
+                        sampledSketch = buildSketchFromSvgPath(
+                            normalizedPathData,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                sampleStep: 1.0,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                            }
+                        );
+                    } catch {
+                        sampledSketch = null;
+                    }
+                    passDiag.candidates.push({
+                        mode: "sampled-closed",
+                        hasWire: Boolean(sampledSketch?.wire),
+                    });
+                    pathSketchCandidates.push({
+                        mode: "sampled-closed",
+                        sketch: sampledSketch,
+                    });
+                }
+
+                let pathSketchCandidatesValid = pathSketchCandidates.filter((c) => !!c?.sketch?.wire);
+
+                // --- Diagnostic dump for wire-assemble failures ---
+                if (segmentDiag?.failReason === "wire-assemble-failed" ||
+                    passDiag.candidates.some(c => c.diagnostics?.failReason === "wire-assemble-failed")) {
+                    const normSegs = normalizedContourSegments ?? [];
+                    const junctionGaps = normSegs.map((seg, i) => {
+                        const prev = normSegs[i === 0 ? normSegs.length - 1 : i - 1];
+                        const gap = prev?.end && seg?.start
+                            ? Math.hypot(Number(seg.start.x) - Number(prev.end.x), Number(seg.start.y) - Number(prev.end.y))
+                            : null;
+                        return { i, type: seg?.type ?? "line", gap: gap?.toFixed(8) ?? "N/A" };
+                    });
+                    const slotsReport = passDiag.candidates.map(c => ({
+                        mode: c.mode,
+                        hasWire: c.hasWire,
+                        fail: c.diagnostics?.failReason ?? null,
+                        detail: c.diagnostics?.failDetail ?? null,
+                        closedByGeometry: c.diagnostics?.closedByGeometry ?? null,
+                    }));
+                    console.group(`[VC-DIAG] passIndex:${passIndex} depth:${depth}`);
+                    console.log("segments:", normSegs.map((s, i) => ({
+                        i, type: s?.type ?? "line",
+                        sx: Number(s?.start?.x).toFixed(6), sy: Number(s?.start?.y).toFixed(6),
+                        ex: Number(s?.end?.x).toFixed(6), ey: Number(s?.end?.y).toFixed(6),
+                    })));
+                    console.log("junctionGaps:", junctionGaps);
+                    console.log("candidates:", slotsReport);
+                    console.groupEnd();
+                }
+
+                // If strict segment builder reached wire assembly but OCCT rejected it,
+                // commands-closed often drops a seam segment for this contour family.
+                // Prefer sampled fallback and skip commands in this specific failure mode.
+                if (allowVcFallbackSpines && segmentDiag?.failReason === "wire-assemble-failed") {
+                    const withoutCommands = pathSketchCandidatesValid.filter(
+                        (c) => c.mode !== "commands-closed"
+                    );
+                    if (withoutCommands.length > 0) {
+                        pathSketchCandidatesValid = withoutCommands;
+                    }
+                }
+
+                if (!pathSketchCandidatesValid.length) {
+                    this.log.warn("VC pass has no valid spine candidate", {
+                        ...passDiag,
+                        hasSegments: Array.isArray(contourSegments) && contourSegments.length > 0,
+                        pathSummary,
+                    });
+                    continue;
+                }
 
                 const pathZ = this._getSurfaceDepthZ(depth, panelAnchor, panelT);
-                const profileOrigin = getFirstPathPointInWorldXY(contourPathData, bboxRef, panelAnchor, depth, panelT)
+                const profileOrigin = getFirstSegmentPointInWorldXY(contourSegments, bboxRef, panelAnchor, depth, panelT)
+                    ?? getFirstPathPointInWorldXY(normalizedPathData, bboxRef, panelAnchor, depth, panelT)
                     ?? [0, 0, pathZ];
-                // Tip is pinned to spine start; shoulders are mirrored around X toward panel.
-                const profile = new Sketcher("XZ", profileOrigin)
-                    .movePointerTo([0, 0])
-                    .lineTo([-scaledHalfBase, -depth])
-                    .lineTo([scaledHalfBase, -depth])
-                    .close();
+                const profileWire = this._buildProfileWire(bit?.bitData, pathZ, profileOrigin);
 
-                const cutter = genericSweep(profile.wire, pathSketch.wire, { transitionMode: "right" });
+                let cutter = null;
+                let selectedSpineMode = null;
+                let needsSampledFallback = false;
+                const sweepOptionsCandidates = [
+                    { transitionMode: "right", forceProfileSpineOthogonality: true },
+                    { transitionMode: "right" },
+                ];
+                const spineMaxY = Array.isArray(normalizedContourSegments) && normalizedContourSegments.length > 0
+                    ? computeSpineMaxWorldY(normalizedContourSegments, bboxRef, panelAnchor)
+                    : null;
 
-                combined = combined ? combined.fuse(cutter) : cutter;
+                let sweepError = null;
+                for (const spineCandidate of pathSketchCandidatesValid) {
+                    for (const sweepOpts of sweepOptionsCandidates) {
+                        try {
+                            const candidateCutter = genericSweep(
+                                profileWire,
+                                spineCandidate.sketch.wire,
+                                sweepOpts,
+                                false
+                            );
+
+                            if (!candidateCutter) {
+                                passDiag.sweepAttempts.push({
+                                    mode: spineCandidate.mode,
+                                    sweepOpts,
+                                    ok: false,
+                                    resultState: "nullish",
+                                });
+                                cutter = null;
+                                continue;
+                            }
+
+                            if (Number.isFinite(spineMaxY) && spineMaxY > 50) {
+                                const shouldCheckCompleteness = pathSummary?.hasArc && spineCandidate.mode === "segments-original";
+                                if (shouldCheckCompleteness) {
+                                    try {
+                                        const probe = candidateCutter.mesh({ tolerance: 2.0, angularTolerance: 45 });
+                                        const verts = probe?.vertices || [];
+                                        let cutterMaxY = -Infinity;
+                                        for (let vi = 1; vi < verts.length; vi += 3) {
+                                            if (verts[vi] > cutterMaxY) cutterMaxY = verts[vi];
+                                        }
+                                        const completeThreshold = spineMaxY - 50;
+                                        if (Number.isFinite(cutterMaxY) && cutterMaxY < completeThreshold) {
+                                            passDiag.sweepAttempts.push({
+                                                mode: spineCandidate.mode,
+                                                sweepOpts,
+                                                ok: true,
+                                                incomplete: true,
+                                                cutterMaxY: Math.round(cutterMaxY),
+                                                expectedMin: Math.round(completeThreshold),
+                                            });
+                                            if (window?.__replicadSweepTrace) {
+                                                console.info("[ReplicadSweepTrace] vc:sweep-incomplete", {
+                                                    passIndex,
+                                                    depth,
+                                                    spineMode: spineCandidate.mode,
+                                                    cutterMaxY: Math.round(cutterMaxY),
+                                                    expectedMin: Math.round(completeThreshold),
+                                                    spineMaxY: Math.round(spineMaxY),
+                                                });
+                                            }
+                                            needsSampledFallback = true;
+                                            cutter = null;
+                                            break;
+                                        }
+                                    } catch {
+                                        // Validation error — keep the cutter as-is
+                                    }
+                                }
+                            }
+                            if (needsSampledFallback) break;
+
+                            if (typeof candidateCutter.mesh !== "function") {
+                                passDiag.sweepAttempts.push({
+                                    mode: spineCandidate.mode,
+                                    sweepOpts,
+                                    ok: false,
+                                    resultState: "non-meshable",
+                                    resultKeys: Object.keys(candidateCutter || {}).slice(0, 8),
+                                });
+                                cutter = null;
+                                continue;
+                            }
+
+                            cutter = candidateCutter;
+                            passDiag.sweepAttempts.push({
+                                mode: spineCandidate.mode,
+                                sweepOpts,
+                                ok: true,
+                            });
+
+                            if (window?.__replicadSweepTrace) {
+                                console.info("[ReplicadSweepTrace] vc:sweep-success", {
+                                    passIndex,
+                                    depth,
+                                    spineMode: spineCandidate.mode,
+                                    sweepOpts,
+                                });
+                            }
+                            selectedSpineMode = spineCandidate.mode;
+                            break;
+                        } catch (errSweep) {
+                            passDiag.sweepAttempts.push({
+                                mode: spineCandidate.mode,
+                                sweepOpts,
+                                ok: false,
+                                error: errSweep?.message,
+                            });
+                            sweepError = errSweep;
+                        }
+                        if (needsSampledFallback) break;
+                    }
+                    if (cutter || needsSampledFallback) break;
+                }
+
+                if (!cutter && needsSampledFallback && Array.isArray(normalizedContourSegments) && pathSummary?.hasArc) {
+                        let sampledSketch = null;
+                        try {
+                            sampledSketch = buildSketchFromSvgPath(
+                                normalizedPathData,
+                                bboxRef,
+                                Sketcher,
+                                {
+                                    close: true,
+                                    sampleStep: 4.0,
+                                    plane: "XY",
+                                    panelAnchor,
+                                    depth,
+                                    panelThickness: panelT,
+                                    applyDepthForXY: true,
+                                }
+                            );
+                        } catch {
+                            sampledSketch = null;
+                        }
+
+                        passDiag.candidates.push({
+                            mode: "sampled-closed",
+                            hasWire: Boolean(sampledSketch?.wire),
+                            lazy: true,
+                        });
+
+                        if (sampledSketch?.wire) {
+                            for (const sweepOpts of sweepOptionsCandidates) {
+                                try {
+                                    const sampledCutter = genericSweep(
+                                        profileWire,
+                                        sampledSketch.wire,
+                                        sweepOpts,
+                                        false
+                                    );
+                                    if (!sampledCutter) {
+                                        passDiag.sweepAttempts.push({
+                                            mode: "sampled-closed",
+                                            sweepOpts,
+                                            ok: false,
+                                            resultState: "nullish",
+                                        });
+                                        continue;
+                                    }
+                                    if (typeof sampledCutter.mesh !== "function") {
+                                        passDiag.sweepAttempts.push({
+                                            mode: "sampled-closed",
+                                            sweepOpts,
+                                            ok: false,
+                                            resultState: "non-meshable",
+                                            resultKeys: Object.keys(sampledCutter || {}).slice(0, 8),
+                                        });
+                                        continue;
+                                    }
+                                    cutter = sampledCutter;
+                                    passDiag.sweepAttempts.push({
+                                        mode: "sampled-closed",
+                                        sweepOpts,
+                                        ok: true,
+                                    });
+                                    selectedSpineMode = "sampled-closed";
+                                    break;
+                                } catch (errSweep) {
+                                    passDiag.sweepAttempts.push({
+                                        mode: "sampled-closed",
+                                        sweepOpts,
+                                        ok: false,
+                                        error: errSweep?.message,
+                                    });
+                                    sweepError = errSweep;
+                                }
+                            }
+                        }
+                }
+
+                if (!cutter) {
+                    const incompleteAttempts = passDiag.sweepAttempts
+                        .filter((a) => a?.incomplete)
+                        .map((a) => ({
+                            mode: a.mode,
+                            cutterMaxY: a.cutterMaxY,
+                            expectedMin: a.expectedMin,
+                        }));
+                    this.log.warn("VC pass sweep failed for all spine candidates", {
+                        passIndex,
+                        depth,
+                        hasSegments: Array.isArray(contourSegments) && contourSegments.length > 0,
+                        pathSummary,
+                        message: sweepError?.message,
+                        incompleteAttempts,
+                        passDiag,
+                    });
+                    continue;
+                }
+
+                const segCandidateDiag = passDiag.candidates.find((c) => c.mode === "segments-closed")?.diagnostics;
+                const hasSegmentStitching =
+                    Number(segCandidateDiag?.snapCount || 0) > 0 ||
+                    Number(segCandidateDiag?.bridgeCount || 0) > 0 ||
+                    Number(segCandidateDiag?.arcFallbackCount || 0) > 0;
+
+                if (
+                    selectedSpineMode !== "segments-original" &&
+                    selectedSpineMode !== "segments-closed" &&
+                    selectedSpineMode !== "segments-closed-reversed" &&
+                    selectedSpineMode !== "sampled-closed"
+                ) {
+                    this._logWarnThrottled("VC pass used fallback spine candidate", {
+                        passIndex,
+                        depth,
+                        selectedSpineMode,
+                        segmentFailReason: segCandidateDiag?.failReason || null,
+                        segmentFailDetail: segCandidateDiag?.failDetail || null,
+                        fallbackEnabled: allowVcFallbackSpines,
+                    });
+                } else if (hasSegmentStitching) {
+                    this._logWarnThrottled("VC pass built from segments with stitching diagnostics", {
+                        passIndex,
+                        depth,
+                        segmentDiagnostics: segCandidateDiag,
+                    });
+                }
+
+                if (!this._isShapeMeshable(cutter)) {
+                    this.log.warn("VC pass produced non-meshable cutter, skipping pass", {
+                        passIndex,
+                        depth,
+                        passDiag,
+                    });
+                    continue;
+                }
+
+                cutters.push({
+                    shape: cutter,
+                    passIndex,
+                    depth,
+                });
             } catch (err) {
                 this.log.warn(`VC pass contour failed:`, err);
             }
         }
 
-        return combined;
+        if (!cutters.length) return null;
+
+        // Keep VC cutters per-pass. Fusing is unstable for some valid pass solids,
+        // while CSG already handles subtracting each cutter independently.
+        return cutters;
     }
 
     // -----------------------------------------------------------------------
@@ -2024,17 +4191,223 @@ export default class ReplicadCanvasModule extends BaseModule {
     _applyCSG() {
         if (!this.panelShape) return;
         try {
-            let result = this.panelShape;
-            for (const { shape } of this.bitShapes) {
-                if (!shape) continue;
-                result = result.cut(shape);
+            const perfTrace = Boolean(window?.__replicadPerfTrace);
+            const tStart = perfTrace ? performance.now() : 0;
+            const panelSig = this._bboxRef
+                ? `${appConfig.panel.width}x${appConfig.panel.height}x${appConfig.panel.thickness}@${appConfig.panel.anchor}:${this._bboxRef.x},${this._bboxRef.y},${this._bboxRef.width},${this._bboxRef.height}`
+                : `${appConfig.panel.width}x${appConfig.panel.height}x${appConfig.panel.thickness}@${appConfig.panel.anchor}`;
+            const bitsSig = (this._lastBuildBitSignatures || []).join("||");
+            const csgSignature = `${panelSig}::${fastHashString(bitsSig)}`;
+
+            if (this._lastCsgSignature === csgSignature && this._lastCsgShape) {
+                if (!this._canTessellateShape(this._lastCsgShape, { silent: true })) {
+                    this._lastCsgShape = null;
+                    this._lastCsgSignature = null;
+                } else {
+                this.currentShape = this._lastCsgShape;
+                this._renderShape(this.currentShape, { highQuality: true });
+                this.log.debug("CSG reused from cache", { cutters: this.bitShapes.length });
+                return;
+                }
             }
+
+            let result = this.panelShape;
+            const seenShapes = new Set();
+            let cutIndex = 0;
+            let failedCuts = 0;
+            const retryQueue = [];
+            const tryCut = (shape, bit, currentCutIndex, phase = "primary") => {
+                const instanceBitId = this._getBitId(bit, currentCutIndex);
+                const libraryBitId = bit?.bitData?.id ?? null;
+                const tCutStart = perfTrace ? performance.now() : 0;
+                if (perfTrace) {
+                    this.log.info("Replicad CSG cut start", {
+                        cutIndex: currentCutIndex,
+                        phase,
+                        bitName: bit?.name,
+                        bitId: instanceBitId,
+                        libraryBitId,
+                        operation: bit?.operation,
+                    });
+                }
+                try {
+                    const next = result?.cut?.(shape);
+                    const tessDiag = {};
+                    const tessOk = this._canTessellateShape(next, { silent: true, diagnostics: tessDiag });
+                    if (next && this._isShapeMeshable(next) && tessOk) {
+                        result = next;
+                        if (perfTrace) {
+                            this.log.info("Replicad CSG cut done", {
+                                cutIndex: currentCutIndex,
+                                phase,
+                                bitName: bit?.name,
+                                bitId: instanceBitId,
+                                operation: bit?.operation,
+                                cutMs: Math.round(performance.now() - tCutStart),
+                            });
+                        }
+                        return true;
+                    }
+
+                    // Coincident/degenerate face recovery.
+                    // NOTE: shape.offset() does not exist on 3D shapes in replicad;
+                    // available 3D methods are: cut, fuse, intersect, translate, scale, rotate.
+                    // Strategy order:
+                    //  1. cut with optimisation:"sameFace" – tells OCC to handle exactly-coincident
+                    //     faces (e.g. offset=0 cutter shares its outer faces with the panel).
+                    //  2. scale the cutter down 0.1% – breaks coincidence by contracting the
+                    //     cutter XY footprint (mirrors the user-confirmed "-0.01 path offset" fix).
+                    //  3. scale the cutter up 0.1% – alternative for expansion-based separation.
+                    const recoveryStrategies = [
+                        {
+                            label: "sameFace-optimisation",
+                            run: () => result?.cut?.(shape, { optimisation: "sameFace" }),
+                        },
+                        {
+                            label: "scale-down-0.9999",
+                            run: () => {
+                                const s = typeof shape.scale === "function" ? shape.scale(0.9999) : null;
+                                return s ? result?.cut?.(s) : null;
+                            },
+                        },
+                        {
+                            label: "scale-up-1.0001",
+                            run: () => {
+                                const s = typeof shape.scale === "function" ? shape.scale(1.0001) : null;
+                                return s ? result?.cut?.(s) : null;
+                            },
+                        },
+                    ];
+                    for (const strategy of recoveryStrategies) {
+                        try {
+                            const next2 = strategy.run();
+                            const tessOk2 = next2 ? this._canTessellateShape(next2, { silent: true }) : false;
+                            if (next2 && this._isShapeMeshable(next2) && tessOk2) {
+                                result = next2;
+                                if (perfTrace) {
+                                    this.log.info(`Replicad CSG cut done (${strategy.label})`, {
+                                        cutIndex: currentCutIndex,
+                                        phase,
+                                        bitName: bit?.name,
+                                        bitId: instanceBitId,
+                                        operation: bit?.operation,
+                                        cutMs: Math.round(performance.now() - tCutStart),
+                                    });
+                                }
+                                this.log.debug(`CSG cut recovery succeeded: ${strategy.label}`, {
+                                    bitName: bit?.name,
+                                    cutIndex: currentCutIndex,
+                                });
+                                return true;
+                            }
+                        } catch (recoveryErr) {
+                            this.log.debug(`CSG cut recovery strategy "${strategy.label}" threw: ${recoveryErr?.message}`);
+                        }
+                    }
+
+                    if (perfTrace) {
+                        this.log.info("Replicad CSG cut done", {
+                            cutIndex: currentCutIndex,
+                            phase,
+                            bitName: bit?.name,
+                            bitId: instanceBitId,
+                            operation: bit?.operation,
+                            cutMs: Math.round(performance.now() - tCutStart),
+                        });
+                    }
+                    return {
+                        reason: "invalid-shape",
+                        tessProbe: tessDiag,
+                        bitId: instanceBitId,
+                        libraryBitId,
+                    };
+                } catch (err) {
+                    if (perfTrace) {
+                        this.log.info("Replicad CSG cut done", {
+                            cutIndex: currentCutIndex,
+                            phase,
+                            bitName: bit?.name,
+                            bitId: instanceBitId,
+                            operation: bit?.operation,
+                            cutMs: Math.round(performance.now() - tCutStart),
+                        });
+                    }
+                    return {
+                        reason: "exception",
+                        error: err?.message || String(err),
+                        bitId: instanceBitId,
+                        libraryBitId,
+                    };
+                }
+            };
+
+            for (const { shape, bit } of this.bitShapes) {
+                if (!shape) continue;
+                if (seenShapes.has(shape)) continue;
+                seenShapes.add(shape);
+                const cutResult = tryCut(shape, bit, cutIndex, "primary");
+                if (cutResult !== true) {
+                    retryQueue.push({ shape, bit, cutIndex, firstFailure: cutResult });
+                }
+                cutIndex += 1;
+            }
+
+            for (const queued of retryQueue) {
+                const retryResult = tryCut(queued.shape, queued.bit, queued.cutIndex, "retry");
+                if (retryResult === true) continue;
+
+                failedCuts += 1;
+                const failure = retryResult || queued.firstFailure || {};
+                this.log.warn("CSG cut returned invalid shape, cutter skipped", {
+                    cutIndex: queued.cutIndex,
+                    bitName: queued.bit?.name,
+                    bitId: failure.bitId ?? this._getBitId(queued.bit, queued.cutIndex),
+                    libraryBitId: failure.libraryBitId ?? queued.bit?.bitData?.id ?? null,
+                    x: Number(queued.bit?.x ?? 0),
+                    y: Number(queued.bit?.y ?? 0),
+                    operation: queued.bit?.operation,
+                    failureReason: failure.reason || "unknown",
+                    error: failure.error || null,
+                    tessProbe: failure.tessProbe || null,
+                });
+            }
+
+            if (!this._canTessellateShape(result, { silent: false })) {
+                this.log.warn("CSG result is non-tessellatable, falling back to panel shape", {
+                    cutters: this.bitShapes.length,
+                    failedCuts,
+                    bits: (this.bitShapes || []).map((entry, idx) => ({
+                        idx,
+                        bitName: entry?.bit?.name,
+                        bitId: this._getBitId(entry?.bit, idx),
+                        libraryBitId: entry?.bit?.bitData?.id ?? null,
+                        x: Number(entry?.bit?.x ?? 0),
+                        y: Number(entry?.bit?.y ?? 0),
+                        operation: entry?.bit?.operation,
+                    })),
+                });
+                this.currentShape = this.panelShape;
+                this._lastCsgShape = null;
+                this._lastCsgSignature = null;
+                this._renderShape(this.panelShape, { highQuality: true });
+                return;
+            }
+
             this.currentShape = result;
-            this._renderShape(result);
-            this.log.info("CSG complete", { cutters: this.bitShapes.length });
+            this._lastCsgShape = result;
+            this._lastCsgSignature = csgSignature;
+            this._renderShape(result, { highQuality: true });
+            this.log.info("CSG complete", { cutters: this.bitShapes.length, failedCuts });
+            if (perfTrace) {
+                this.log.info("Replicad CSG perf", {
+                    cutters: this.bitShapes.length,
+                    failedCuts,
+                    csgMs: Math.round(performance.now() - tStart),
+                });
+            }
         } catch (err) {
             this.log.error("CSG failed:", err);
-            this._renderShape(this.panelShape);
+            this._renderShape(this.panelShape, { highQuality: true });
         }
     }
 
@@ -2088,18 +4461,41 @@ export default class ReplicadCanvasModule extends BaseModule {
      * Tessellate a Replicad solid and add it to the Three.js scene.
      * @param {object} shape - Replicad solid
      */
-    _renderShape(shape) {
+    _renderShape(shape, options = {}) {
         if (!shape || !this.renderer) return;
-        this._clearModelGroup();
+        const stagedGroup = new THREE.Group();
+        const { highQuality = false } = options;
 
         try {
-            this._addShapeMesh(shape, 0xc8a97a, this.modelGroup);
+            const stagedMesh = this._addShapeMesh(shape, 0xc8a97a, stagedGroup, {
+                highQuality,
+            });
+            if (!stagedMesh) {
+                this.log.warn("_renderShape skipped: tessellation returned no mesh", {
+                    hasShape: Boolean(shape),
+                    highQuality,
+                });
+                return;
+            }
+
+            this._clearModelGroup();
+            for (const child of [...stagedGroup.children]) {
+                stagedGroup.remove(child);
+                this.modelGroup.add(child);
+            }
             this._applyRenderStyle(this.displayMode);
             this._maybeFitCameraToSceneMeshes();
 
             this.log.debug("Shape rendered");
         } catch (err) {
             this.log.error("_renderShape failed:", err);
+            for (const child of [...stagedGroup.children]) {
+                child.traverse?.((node) => {
+                    if (node.geometry) node.geometry.dispose();
+                    if (node.material) node.material.dispose();
+                });
+                stagedGroup.remove(child);
+            }
         }
     }
 
@@ -2110,36 +4506,64 @@ export default class ReplicadCanvasModule extends BaseModule {
 
         try {
             this._addShapeMesh(this.panelShape, 0xc8a97a, this.modelGroup);
+            const partFrontPath = String(window.partFront?.getAttribute("d") || "").trim();
+            if (partFrontPath) {
+                this._addWirePath(partFrontPath, bboxRef, 0x2f2f2f, panelAnchor, 0, true);
+            }
+            let skippedSweepMeshes = 0;
 
             // Keep cutter sweeps visible when Part/CSG is disabled so sweep geometry
             // can be visually validated before boolean subtraction.
+            const seenPreviewShapes = new Set();
             for (const entry of this.bitShapes || []) {
                 if (!entry?.shape) continue;
+                if (seenPreviewShapes.has(entry.shape)) continue;
+                seenPreviewShapes.add(entry.shape);
                 const previewColor = entry?.bit?.color || "#acbe50";
-                this._addShapeMesh(entry.shape, previewColor, this.modelGroup, {
-                    transparent: true,
-                    opacity: 0.42,
-                    depthWrite: false,
-                    roughness: 0.45,
-                    metalness: 0.12,
-                    isSolidFace: true,
-                    isCutterPreview: true,
-                });
+                try {
+                    const mesh = this._addShapeMesh(entry.shape, previewColor, this.modelGroup, {
+                        transparent: true,
+                        opacity: 0.42,
+                        depthWrite: false,
+                        roughness: 0.45,
+                        metalness: 0.12,
+                        isSolidFace: true,
+                        isCutterPreview: true,
+                    });
+                    if (!mesh) skippedSweepMeshes += 1;
+                } catch (err) {
+                    skippedSweepMeshes += 1;
+                    this._logRenderErrorThrottled("_renderPanelAndPaths.sweepMesh", err, {
+                        bitName: entry?.bit?.name,
+                        operation: entry?.operation,
+                    });
+                }
             }
 
             for (const contour of offsetContours || []) {
                 if (!contour?.pathData) continue;
+                if (contour.operation === "VC" && contour.isWorkOffset) continue;
                 const bit = bits?.[contour.bitIndex];
                 const pathColor = bit?.color || "#808080";
-                this._addWirePath(contour.pathData, bboxRef, pathColor, panelAnchor, bit?.y ?? 0, true);
+                const contourDepth = Number.isFinite(contour?.depth) ? contour.depth : (bit?.y ?? 0);
+                this._addWirePath(contour.pathData, bboxRef, pathColor, panelAnchor, contourDepth, true);
             }
 
             this._applyRenderStyle(this.displayMode);
 
             this._maybeFitCameraToSceneMeshes();
+            this._renderFailureStreak = 0;
+            if (skippedSweepMeshes > 0) {
+                this.log.warn("Panel rendered with skipped sweep meshes", { skippedSweepMeshes });
+            }
             this.log.debug("Panel+paths rendered", { contours: (offsetContours || []).length });
         } catch (err) {
-            this.log.error("_renderPanelAndPaths failed:", err);
+            this._renderFailureStreak += 1;
+            this._logRenderErrorThrottled("_renderPanelAndPaths failed", err, {
+                streak: this._renderFailureStreak,
+                bitShapes: this.bitShapes?.length || 0,
+                contourCount: offsetContours?.length || 0,
+            });
             this._renderShape(this.panelShape);
         }
     }
@@ -2165,11 +4589,74 @@ export default class ReplicadCanvasModule extends BaseModule {
             colorWrite = true,
             isSolidFace = true,
             isCutterPreview = false,
+            highQuality = false,
         } = options;
 
-        const meshData = shape.mesh({ tolerance: 0.1, angularTolerance: 10 });
+        if (!shape || typeof shape.mesh !== "function") {
+            this._logRenderErrorThrottled("_addShapeMesh.invalid shape", "Shape has no mesh() function");
+            return null;
+        }
+
+        const perfTrace = Boolean(window?.__replicadPerfTrace);
+        const tMeshStart = perfTrace ? performance.now() : 0;
+        const meshCache = highQuality ? this._shapeMeshHQCache : this._shapeMeshCache;
+        let meshData = meshCache.get(shape) || null;
+        const tessellationCandidates = highQuality
+            ? [
+                { tolerance: 0.03, angularTolerance: 5 },
+                { tolerance: 0.07, angularTolerance: 10 },
+                { tolerance: 0.18, angularTolerance: 15 },
+                { tolerance: 0.35, angularTolerance: 20 },
+            ]
+            : [
+                { tolerance: 0.1, angularTolerance: 10 },
+                { tolerance: 0.35, angularTolerance: 20 },
+                { tolerance: 0.7, angularTolerance: 30 },
+            ];
+        const tessellationAttempts = [];
+
         if (!meshData?.vertices) {
-            this.log.warn("No mesh data from Replicad shape");
+            for (const tessOpts of tessellationCandidates) {
+                const tAttemptStart = perfTrace ? performance.now() : 0;
+                try {
+                    meshData = shape.mesh(tessOpts);
+                    tessellationAttempts.push({
+                        ...tessOpts,
+                        ok: Boolean(meshData?.vertices?.length),
+                        ms: perfTrace ? Math.round(performance.now() - tAttemptStart) : undefined,
+                    });
+                    if (meshData?.vertices?.length) {
+                        meshCache.set(shape, meshData);
+                        break;
+                    }
+                } catch (err) {
+                    tessellationAttempts.push({
+                        ...tessOpts,
+                        ok: false,
+                        ms: perfTrace ? Math.round(performance.now() - tAttemptStart) : undefined,
+                    });
+                    meshData = null;
+                    this._logRenderErrorThrottled("_addShapeMesh.shape.mesh failed", err, {
+                        tessOpts,
+                    });
+                }
+            }
+        }
+
+        if (!meshData?.vertices) {
+            this.log.warn("No mesh data from Replicad shape after tessellation retries");
+            return null;
+        }
+
+        const vertexCount = Math.floor((meshData.vertices?.length || 0) / 3);
+        const triangleCount = Math.floor((meshData.triangles?.length || 0) / 3);
+        const MAX_VERTICES = 1_200_000;
+        const MAX_TRIANGLES = 2_000_000;
+        if (vertexCount > MAX_VERTICES || triangleCount > MAX_TRIANGLES) {
+            this._logRenderErrorThrottled("_addShapeMesh.mesh too large", "Skipping oversized tessellation", {
+                vertexCount,
+                triangleCount,
+            });
             return null;
         }
 
@@ -2183,13 +4670,15 @@ export default class ReplicadCanvasModule extends BaseModule {
         }
         if (!meshData.normals) geo.computeVertexNormals();
 
+        const normalizedColor = normalizeThreeColorInput(color, opacity, transparent);
+
         const mat = new THREE.MeshStandardMaterial({
-            color,
+            color: normalizedColor.color,
             roughness,
             metalness,
             side: THREE.DoubleSide,
-            transparent,
-            opacity,
+            transparent: normalizedColor.transparent,
+            opacity: normalizedColor.opacity,
             depthWrite,
             colorWrite,
         });
@@ -2197,13 +4686,22 @@ export default class ReplicadCanvasModule extends BaseModule {
         const mesh = new THREE.Mesh(geo, mat);
         mesh.userData.isBrepSolidFace = isSolidFace;
         mesh.userData.isCutterPreview = isCutterPreview;
-        mesh.userData.previewOpacity = opacity;
+        mesh.userData.previewOpacity = normalizedColor.opacity;
         parentGroup.add(mesh);
+        if (perfTrace) {
+            this.log.info("Replicad mesh", {
+                isCutterPreview,
+                vertexCount,
+                triangleCount,
+                meshMs: Math.round(performance.now() - tMeshStart),
+                tessellationAttempts,
+            });
+        }
         return mesh;
     }
 
     _addWirePath(pathData, bboxRef, color = 0x2b4c7e, panelAnchor = "top-left", depth = 0, closed = true) {
-        const points2D = sampleSvgPathPoints(pathData, 2);
+        const points2D = sampleSvgPathPoints(pathData, getAdaptiveSvgPathSampleStep(pathData, 5));
         if (points2D.length < 2) return null;
 
         const centerX = bboxRef.x + bboxRef.width / 2;
@@ -2228,11 +4726,13 @@ export default class ReplicadCanvasModule extends BaseModule {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
 
+        const normalizedColor = normalizeThreeColorInput(color, 0.95, true);
+
         const material = new THREE.LineBasicMaterial({
-            color,
+            color: normalizedColor.color,
             linewidth: 1,
-            transparent: true,
-            opacity: 0.95,
+            transparent: normalizedColor.transparent,
+            opacity: normalizedColor.opacity,
             depthTest: false,
         });
         const line = closed ? new THREE.LineLoop(geometry, material) : new THREE.Line(geometry, material);
@@ -2489,12 +4989,139 @@ export default class ReplicadCanvasModule extends BaseModule {
      * @returns {Blob|null}
      */
     exportSTEP() {
-        if (!this.currentShape) {
-            this.log.warn("exportSTEP: no current shape");
-            return null;
-        }
         try {
-            return this.currentShape.blobSTEP();
+            if (!this.panelShape) {
+                this.log.warn("exportSTEP: no panel shape");
+                return null;
+            }
+
+            const exportStepFn = _replicad?.exportSTEP;
+            const normalizeHexColor = (value, fallback) => {
+                if (typeof value !== "string") return fallback;
+                const c = value.trim();
+                return /^#([0-9a-fA-F]{6})$/.test(c) ? c : fallback;
+            };
+            const normalizeShapeForStep = (shape, operation) => {
+                let out = shape;
+                try {
+                    if (out && typeof out.simplify === "function") {
+                        out = out.simplify();
+                    }
+                } catch {
+                    // Keep original if simplify fails.
+                }
+
+                // Keep AL welding opt-in only: in some OCCT builds this can introduce
+                // export-only artifacts near corner transitions.
+                const weldAL = Boolean(window?.__replicadStepWeldAL);
+                if (weldAL && String(operation || "").toUpperCase() === "AL" && typeof _replicad?.makeSolid === "function") {
+                    try {
+                        const faces = Array.isArray(out?.faces)
+                            ? out.faces
+                            : Array.isArray(out?.faces?.all)
+                                ? out.faces.all
+                                : null;
+                        if (faces?.length) {
+                            out = _replicad.makeSolid(faces);
+                        }
+                    } catch {
+                        // Keep simplified/original shape if makeSolid fails.
+                    }
+                }
+
+                return out;
+            };
+            const panelExportColor = "#c8a97a";
+
+            // Part mode (CSG enabled): export panel with boolean subtraction of all sweeps.
+            if (this._showPart) {
+                if (this.currentShape && this.currentShape !== this.panelShape) {
+                    if (this._canTessellateShape(this.currentShape, { silent: true })) {
+                        try {
+                            return this.currentShape?.blobSTEP?.() || null;
+                        } catch {
+                            // Fall through to recompute robustly.
+                        }
+                    }
+                }
+
+                let result = this.panelShape;
+                let failedCuts = 0;
+                for (const { shape, bit } of this.bitShapes || []) {
+                    if (!shape) continue;
+                    try {
+                        const next = result?.cut?.(shape);
+                        const tessDiag = {};
+                        const tessOk = this._canTessellateShape(next, { silent: true, diagnostics: tessDiag });
+                        if (next && this._isShapeMeshable(next) && tessOk) {
+                            result = next;
+                        } else {
+                            failedCuts += 1;
+                            this.log.warn("exportSTEP part mode: cut returned empty shape", {
+                                bitName: bit?.name,
+                                bitId: bit?.bitData?.id ?? null,
+                                x: Number(bit?.x ?? 0),
+                                y: Number(bit?.y ?? 0),
+                                operation: bit?.operation,
+                                nextExists: Boolean(next),
+                                nextHasMeshFn: Boolean(next && typeof next.mesh === "function"),
+                                tessProbe: tessDiag,
+                            });
+                        }
+                    } catch (err) {
+                        failedCuts += 1;
+                        this.log.warn("exportSTEP part mode: cut failed, skipped", {
+                            bitName: bit?.name,
+                            bitId: bit?.bitData?.id ?? null,
+                            x: Number(bit?.x ?? 0),
+                            y: Number(bit?.y ?? 0),
+                            operation: bit?.operation,
+                            error: err?.message || String(err),
+                        });
+                    }
+                }
+                if (failedCuts > 0) {
+                    this.log.warn("exportSTEP part mode completed with skipped cutters", { failedCuts });
+                }
+                try {
+                    return result?.blobSTEP?.() || null;
+                } catch {
+                    this.log.warn("exportSTEP part mode: result STEP export failed, fallback to panel");
+                    return this.panelShape?.blobSTEP?.() || null;
+                }
+            }
+
+            // Material mode (CSG disabled): export all visible BREP solids as one STEP:
+            // panel + all bit sweeps (per-pass for VC).
+            const shapesForStep = [
+                { shape: this.panelShape, name: "panel", color: panelExportColor },
+                ...(this.bitShapes || [])
+                    .filter((entry) => entry?.shape)
+                    .map((entry, idx) => ({
+                        shape: normalizeShapeForStep(entry.shape, entry?.operation),
+                        name: `${entry?.bit?.name || "bit"}-${idx + 1}`,
+                        color: normalizeHexColor(entry?.bit?.color, "#acbe50"),
+                    })),
+            ];
+
+            if (!shapesForStep.length) {
+                this.log.warn("exportSTEP: no shapes to export");
+                return null;
+            }
+
+            if (typeof exportStepFn === "function") {
+                return exportStepFn(shapesForStep);
+            }
+
+            // Fallback for older replicad builds without exportSTEP(shapes)
+            // support: export a compound of all solids.
+            if (typeof _replicad?.makeCompound === "function") {
+                const compound = _replicad.makeCompound(shapesForStep.map((s) => s.shape));
+                return compound?.blobSTEP?.() || null;
+            }
+
+            // Last fallback: export panel only.
+            return this.panelShape.blobSTEP();
         } catch (err) {
             this.log.error("exportSTEP failed:", err);
             return null;

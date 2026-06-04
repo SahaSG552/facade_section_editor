@@ -672,6 +672,14 @@ function initializeSVG() {
             groupName,
             bitsManager.createBitShapeElement.bind(bitsManager)
         );
+    // Keep bit insertion working even if another BitsManager instance refreshes the UI.
+    window.__facadeOnDrawBitShape = (bit, groupName, managerInstance) =>
+        drawBitShape(
+            bit,
+            groupName,
+            managerInstance?.createBitShapeElement?.bind(managerInstance)
+                ?? bitsManager.createBitShapeElement.bind(bitsManager)
+        );
     bitsManager.onUpdateCanvasBits = (bitId) => updateCanvasBitsForBitId(bitId);
     bitsManager.onDeleteCanvasBits = (bitId) =>
         deleteCanvasBitsByLibraryBitId(bitId);
@@ -903,12 +911,7 @@ function initializeSVG() {
 
     bindPressById("toggle-right-menu", () => uiModule.toggleRightMenu());
 
-    // Setup theme toggle button
-    const themeToggle = document.getElementById("theme-toggle");
-    addUnifiedPressListener(themeToggle, () => {
-        const uiModule = app.getModule("ui");
-        uiModule.toggleTheme();
-    });
+    // Theme toggle is handled centrally by ThemeToggleInit + ThemeManager.
 }
 
 // Helper function to update canvas after panel toggle
@@ -1605,10 +1608,18 @@ function _restorePartFrontEditorStateFromStorage() {
 
     // Restore custom variables before elements so formulas can resolve
     if (Array.isArray(payload.customVariables)) {
+        const existingCustomVarNames = new Set(
+            variablesManager
+                .getCustomVariables(PART_FRONT_VARIABLE_GROUP)
+                .map((v) => String(v?.varName ?? "").trim())
+                .filter(Boolean)
+        );
         for (const v of payload.customVariables) {
             const varName = String(v?.varName ?? '').trim();
             if (!varName) continue;
+            if (existingCustomVarNames.has(varName)) continue;
             variablesManager.addCustomVariable(PART_FRONT_VARIABLE_GROUP, v);
+            existingCustomVarNames.add(varName);
         }
     }
 
@@ -2136,13 +2147,50 @@ async function handlePocketOffsetChange(index, newPocketOffset, isZeroWidth = fa
  * Update BREP module if it's currently active.
  * Called automatically after offset contours or bit positions change.
  */
-function updateReplicadIfActive() {
+let replicadUpdateTimer = null;
+let pendingReplicadChangedIds = null;
+
+function mergeChangedIds(existing, incoming) {
+    if (!incoming) return existing;
+    const incomingArr = Array.isArray(incoming) ? incoming : [incoming];
+    const next = new Set((existing || []).map((id) => String(id)));
+    incomingArr.forEach((id) => {
+        if (id !== undefined && id !== null) next.add(String(id));
+    });
+    return Array.from(next);
+}
+
+function updateReplicadIfActive(changedBitIds = null, options = {}) {
+    const { immediate = false } = options;
     syncExternal3DState();
 
     // Safely check if replicadModule exists and is active
-    if (replicadModule && typeof replicadModule.isActive === 'function' && replicadModule.isActive()) {
-        replicadModule.updateView();
+    if (!(replicadModule && typeof replicadModule.isActive === 'function' && replicadModule.isActive())) {
+        return;
     }
+
+    pendingReplicadChangedIds = mergeChangedIds(pendingReplicadChangedIds, changedBitIds);
+
+    const flushUpdate = () => {
+        replicadUpdateTimer = null;
+        const ids = pendingReplicadChangedIds && pendingReplicadChangedIds.length
+            ? pendingReplicadChangedIds
+            : null;
+        pendingReplicadChangedIds = null;
+        replicadModule.updateView(ids);
+    };
+
+    if (immediate) {
+        if (replicadUpdateTimer) {
+            clearTimeout(replicadUpdateTimer);
+            replicadUpdateTimer = null;
+        }
+        flushUpdate();
+        return;
+    }
+
+    if (replicadUpdateTimer) clearTimeout(replicadUpdateTimer);
+    replicadUpdateTimer = setTimeout(flushUpdate, 120);
 }
 
 function syncExternal3DState() {
@@ -2223,6 +2271,8 @@ function updateOffsetContours() {
             for (let i = 0; i < passes; i++) {
                 partialResults.push((bitY * (i + 1)) / passes);
             }
+            // Depths must match Three/Replicad pass ordering: main pass first (full depth)
+            const passDepths = [...partialResults].reverse();
             // Calculate offsets for each pass
             const offsets = partialResults.map((value) => {
                 const offsetValue = value * Math.tan(angleToRad(angle / 2));
@@ -2286,8 +2336,7 @@ function updateOffsetContours() {
                         passIndex: passIndex, // Add passIndex for compatibility
                         pathData: pathData, // Store pathData for 3D
                         offsetEngineContours,
-                        depth:
-                            passIndex === passes - 1 ? topAnchorCoords.y : null,
+                        depth: passDepths[passIndex] ?? null,
                         isWorkOffset: false, // Not a work offset
                     });
                 }
@@ -2509,6 +2558,17 @@ function updateOffsetContours() {
             }
         } else {
             // Standard operations: AL, OU, IN
+            const resolveOffsetDetailForDistance = (distance) => {
+                const isZeroOffset = Math.abs(Number(distance) || 0) < ARC_RADIUS_TOLERANCE;
+                if (isZeroOffset) {
+                    return {
+                        pathData: partFront?.getAttribute("d") || "",
+                        contours: [],
+                    };
+                }
+                return offsetCalculator.calculateOffsetDetailedFromSVG(partFront, distance);
+            };
+
             let offsetDistance = bit.x;
             if (bit.operation === "OU") {
                 offsetDistance = bit.x + (bit.bitData.diameter || 0) / 2;
@@ -2518,10 +2578,7 @@ function updateOffsetContours() {
             // AL uses bit.x as is
 
             // Use offset calculator (preserves Bezier curves)
-            const offsetDetail = offsetCalculator.calculateOffsetDetailedFromSVG(
-                partFront,
-                offsetDistance
-            );
+            const offsetDetail = resolveOffsetDetailForDistance(offsetDistance);
             const pathData =
                 typeof offsetDetail?.pathData === "string"
                     ? offsetDetail.pathData
@@ -2557,11 +2614,7 @@ function updateOffsetContours() {
                 // (3D should use center path like AL, not offset path)
                 if (bit.operation === "OU" || bit.operation === "IN") {
                     const centerOffsetDistance = bit.x; // Always use center for 3D
-                    const centerOffsetDetail =
-                        offsetCalculator.calculateOffsetDetailedFromSVG(
-                            partFront,
-                            centerOffsetDistance
-                        );
+                    const centerOffsetDetail = resolveOffsetDetailForDistance(centerOffsetDistance);
                     const centerPathData =
                         typeof centerOffsetDetail?.pathData === "string"
                             ? centerOffsetDetail.pathData
@@ -2928,7 +2981,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
     
     // Update BREP view if active
     if (replicadModule && replicadModule.isActive?.()) {
-        replicadModule.updateView();
+        replicadModule.updateView(newBit.bitData?.id ? [newBit.bitData.id] : null);
     }
 }
 
@@ -3617,6 +3670,8 @@ async function updateBitPosition(index, newX, newY) {
             scheduleCsgIfNeeded(changedBitIds);
         }
     }
+
+    updateReplicadIfActive(changedBitIds);
 }
 
 // Redraw bits on canvas preserving their group transforms
@@ -4080,6 +4135,7 @@ async function togglePartView() {
     appConfig.ui.showPart = showPart;
 
     appState.setShowPart(showPart);
+    eventBus.emit("part:toggle", showPart);
     log.info("togglePartView: showPart changed", { showPart });
 
     const partBtn = document.getElementById("part-btn");
@@ -4699,7 +4755,7 @@ function setupViewToggle(threeModule) {
                 syncExternal3DState();
                 
                 setTimeout(() => {
-                    replicadModule.updateView();
+                    updateReplicadIfActive(null, { immediate: true });
                 }, 50);
             }
         }
