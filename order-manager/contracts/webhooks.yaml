@@ -1,0 +1,65 @@
+# Webhook Schemas for Order Manager
+# Used to notify external systems (CRM, ERP, etc.) about order events
+
+openapi: 3.1.0
+info:
+  title: Order Manager Webhooks
+  version: 1.0.0
+
+components:
+  schemas:
+    OrderEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum:
+            - order.created
+            - order.updated
+            - order.status_changed
+            - preview.ready
+            - preview.failed
+            - import.completed
+            - import.failed
+        timestamp:
+          type: string
+          format: date-time
+        orderId:
+          type: string
+        payload:
+          type: object
+          properties:
+            oldStatus:
+              type: string
+            newStatus:
+              type: string
+            previewUrl:
+              type: string
+            errorMessage:
+              type: string
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id: string
+        eventId: string
+        url: string
+        status: string
+        responseCode: integer
+        attempt: integer
+        nextRetry: string
+
+    WebhookSubscription:
+      type: object
+      properties:
+        id: string
+        url: string
+        events:
+          type: array
+          items:
+            type: string
+        secret: string
+        active: boolean

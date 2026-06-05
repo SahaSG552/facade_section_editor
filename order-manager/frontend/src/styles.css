@@ -1,0 +1,183 @@
+:root {
+  font-family: "Segoe UI", "Noto Sans", sans-serif;
+  color: #1f2937;
+  background: #f4f6f8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.layout {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.subtitle {
+  color: #5b6778;
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.menu-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.pill {
+  border: 1px solid #c8d2df;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #f9fbff;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #dbe1e7;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.auth-layout {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(520px, 100%);
+}
+
+.two-col {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.single-col {
+  grid-template-columns: 1fr;
+}
+
+.grid {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+input,
+select,
+button {
+  font: inherit;
+}
+
+input,
+select {
+  padding: 9px 10px;
+  border: 1px solid #c7d2df;
+  border-radius: 8px;
+}
+
+.btn {
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #0f4fa8;
+  color: #fff;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  background: #475569;
+}
+
+.small {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.danger {
+  background: #b42318;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.table-wrap {
+  overflow: auto;
+  margin-top: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  font-size: 14px;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px;
+}
+
+.status {
+  margin: 0;
+  white-space: pre-wrap;
+  background: #ecfdf3;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.status.error {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+@media (max-width: 700px) {
+  .two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
