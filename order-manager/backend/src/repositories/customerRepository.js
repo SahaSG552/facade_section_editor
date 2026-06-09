@@ -34,15 +34,22 @@ export class CustomerRepository {
     return result.rows[0] || null;
   }
 
+  async findByEmail(email) {
+    const db = await getDb();
+    const result = await db.query('SELECT * FROM customers WHERE lower(email) = lower($1) LIMIT 1', [email]);
+    return result.rows[0] || null;
+  }
+
   async create(customerData) {
     const db = await getDb();
     const query = `
-      INSERT INTO customers (external_id, name, email, phone, address, tax_id)
-      VALUES ($1, $2, $3, $4, $5, $6)
+      INSERT INTO customers (external_id, code, name, email, phone, address, tax_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
       RETURNING *
     `;
     const result = await db.query(query, [
       customerData.externalId || null,
+      customerData.code || null,
       customerData.name,
       customerData.email || null,
       customerData.phone || null,
@@ -61,6 +68,10 @@ export class CustomerRepository {
     if (customerData.name) {
       fields.push(`name = $${paramIndex++}`);
       values.push(customerData.name);
+    }
+    if (customerData.code !== undefined) {
+      fields.push(`code = $${paramIndex++}`);
+      values.push(customerData.code);
     }
     if (customerData.email !== undefined) {
       fields.push(`email = $${paramIndex++}`);

@@ -9,6 +9,8 @@ import { materialsRoutes } from './routes/materials.js';
 import { authRoutes } from './routes/auth.js';
 import { rolesRoutes } from './routes/roles.js';
 import { usersRoutes } from './routes/users.js';
+import { orderStatusesRoutes } from './routes/orderStatuses.js';
+import { designsRoutes } from './routes/designs.js';
 
 dotenv.config();
 
@@ -58,13 +60,20 @@ fastify.addHook('onRequest', async (request, reply) => {
 
 // Auth middleware
 fastify.addHook('preHandler', async (request, reply) => {
+  const pathname = request.url.split('?')[0];
+  const publicPaths = new Set([
+    '/',
+    '/favicon.ico',
+    '/health',
+    '/ready',
+    '/api/v1/version',
+    '/api/v1/auth/login',
+    '/api/v1/auth/register',
+  ]);
+
   const isPublicPath =
     request.method === 'OPTIONS' ||
-    request.url === '/health' ||
-    request.url === '/ready' ||
-    request.url === '/api/v1/version' ||
-    request.url === '/api/v1/auth/login' ||
-    request.url === '/api/v1/auth/register';
+    publicPaths.has(pathname);
 
   if (isPublicPath) {
     return;
@@ -75,6 +84,19 @@ fastify.addHook('preHandler', async (request, reply) => {
   } catch {
     return reply.code(401).send({ error: 'Unauthorized' });
   }
+});
+
+// Root endpoint
+fastify.get('/', async () => {
+  return {
+    service: 'order-manager',
+    status: 'ok',
+    docs: {
+      health: '/health',
+      ready: '/ready',
+      version: '/api/v1/version',
+    },
+  };
 });
 
 // Health check endpoint
@@ -100,6 +122,8 @@ await fastify.register(materialsRoutes, { prefix: '/api/v1' });
 await fastify.register(authRoutes, { prefix: '/api/v1' });
 await fastify.register(rolesRoutes, { prefix: '/api/v1' });
 await fastify.register(usersRoutes, { prefix: '/api/v1' });
+await fastify.register(orderStatusesRoutes, { prefix: '/api/v1' });
+await fastify.register(designsRoutes, { prefix: '/api/v1' });
 
 const start = async () => {
   try {

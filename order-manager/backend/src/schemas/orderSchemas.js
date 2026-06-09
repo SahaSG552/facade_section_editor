@@ -1,10 +1,12 @@
 // JSON Schemas for request validation
 export const createOrderSchema = {
   type: 'object',
-  required: ['customerId'],
   properties: {
     customerId: { type: 'string', format: 'uuid' },
-    status: { type: 'string', enum: ['draft', 'confirmed', 'in_production', 'shipped', 'delivered', 'cancelled'] },
+    orderName: { type: 'string', minLength: 1, maxLength: 50 },
+    orderKind: { type: 'string', enum: ['normal', 'd', 'r'], default: 'normal' },
+    splitFromOrderId: { type: 'string', format: 'uuid' },
+    status: { type: 'string', maxLength: 80 },
     notes: { type: 'string', maxLength: 1000 },
     createdBy: { type: 'string', format: 'uuid' },
     items: {
@@ -32,7 +34,7 @@ export const createOrderSchema = {
 export const updateOrderSchema = {
   type: 'object',
   properties: {
-    status: { type: 'string', enum: ['draft', 'confirmed', 'in_production', 'shipped', 'delivered', 'cancelled'] },
+    status: { type: 'string', maxLength: 80 },
     notes: { type: 'string', maxLength: 1000 },
   },
 };
@@ -42,6 +44,6 @@ export const listOrdersQuerySchema = {
   properties: {
     page: { type: 'integer', minimum: 1, default: 1 },
     limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
-    status: { type: 'string', enum: ['draft', 'confirmed', 'in_production', 'shipped', 'delivered', 'cancelled'] },
+    status: { type: 'string', maxLength: 80 },
   },
 };

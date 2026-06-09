@@ -28,6 +28,7 @@ export async function customersRoutes(fastify, options) {
         required: ['name'],
         properties: {
           externalId: { type: 'string' },
+          code: { type: 'string', minLength: 1, maxLength: 20 },
           name: { type: 'string' },
           email: { type: 'string', format: 'email' },
           phone: { type: 'string' },
