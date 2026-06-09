@@ -311,6 +311,72 @@ select {
   justify-content: flex-end;
 }
 
+.editor-summary {
+  border: 1px solid #d7dee7;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.column-admin-panel {
+  margin-top: 14px;
+}
+
+.column-admin-panel input,
+.column-admin-panel select {
+  width: 100%;
+}
+
+.admin-col-row {
+  cursor: grab;
+}
+
+.admin-col-row.drag-over {
+  outline: 2px dashed #2563eb;
+  outline-offset: -2px;
+}
+
+.col-drag-handle {
+  width: 24px;
+  text-align: center;
+  color: #64748b;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: grab;
+  user-select: none;
+}
+
+.editor-columns-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.editor-columns-overlay.is-hidden {
+  display: none;
+}
+
+.editor-columns-dialog {
+  width: min(1100px, 96vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: 0 20px 70px rgba(2, 6, 23, 0.35);
+}
+
+.editor-columns-dialog .column-admin-panel {
+  margin-top: 0;
+}
+
 .editor-divider {
   width: 10px;
   cursor: col-resize;
