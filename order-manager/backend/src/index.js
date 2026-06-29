@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import { ordersRoutes } from './routes/orders.js';
 import { customersRoutes } from './routes/customers.js';
 import { materialsRoutes } from './routes/materials.js';
+import { coatingsRoutes } from './routes/coatings.js';
 import { authRoutes } from './routes/auth.js';
 import { rolesRoutes } from './routes/roles.js';
 import { usersRoutes } from './routes/users.js';
@@ -119,6 +120,7 @@ fastify.get('/api/v1/version', async (request, reply) => {
 await fastify.register(ordersRoutes, { prefix: '/api/v1' });
 await fastify.register(customersRoutes, { prefix: '/api/v1' });
 await fastify.register(materialsRoutes, { prefix: '/api/v1' });
+await fastify.register(coatingsRoutes, { prefix: '/api/v1' });
 await fastify.register(authRoutes, { prefix: '/api/v1' });
 await fastify.register(rolesRoutes, { prefix: '/api/v1' });
 await fastify.register(usersRoutes, { prefix: '/api/v1' });

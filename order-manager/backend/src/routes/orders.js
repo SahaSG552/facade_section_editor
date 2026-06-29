@@ -90,6 +90,8 @@ export async function ordersRoutes(fastify, options) {
       orderKind,
       splitFromOrderId,
       status,
+      startDate,
+      dueDate,
       notes,
       createdBy,
       items = [],
@@ -123,6 +125,8 @@ export async function ordersRoutes(fastify, options) {
           orderKind,
           splitFromOrderId,
           status,
+          startDate,
+          dueDate,
           notes,
           createdBy: createdBy || request.user?.sub || null,
           actorRoleCode: request.user?.roleCode || null,
@@ -143,12 +147,16 @@ export async function ordersRoutes(fastify, options) {
     },
   }, async (request, reply) => {
     const { id } = request.params;
-    const { status, notes } = request.body;
+    const { customerId, orderName, status, startDate, dueDate, notes } = request.body;
 
     let order;
     try {
       order = await orderRepo.update(id, {
+        customerId,
+        orderName,
         status,
+        startDate,
+        dueDate,
         notes,
         actorUserId: request.user?.sub || null,
         actorRoleCode: request.user?.roleCode || null,

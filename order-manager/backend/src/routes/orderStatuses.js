@@ -5,9 +5,21 @@ export async function orderStatusesRoutes(fastify) {
     const db = await getDb();
     const result = await db.query(
       `
-        SELECT id, code, name, stage, is_active, sort_order, is_system, created_at, updated_at
-        FROM order_statuses
-        ORDER BY sort_order, code
+        SELECT
+          os.id,
+          os.code,
+          os.name,
+          os.stage,
+          os.is_active,
+          os.sort_order,
+          os.is_system,
+          os.created_at,
+          os.updated_at,
+          COALESCE(array_agg(osr.user_id) FILTER (WHERE osr.user_id IS NOT NULL), '{}') AS responsible_user_ids
+        FROM order_statuses os
+        LEFT JOIN order_status_responsibles osr ON osr.status_id = os.id
+        GROUP BY os.id
+        ORDER BY os.sort_order, os.code
       `
     );
 
@@ -17,15 +29,17 @@ export async function orderStatusesRoutes(fastify) {
   fastify.post('/order-statuses', {
     preHandler: [fastify.requireAdmin],
   }, async (request, reply) => {
-    const { code, name, stage, isActive = true, sortOrder = 100 } = request.body || {};
+    const { code, name, stage, isActive = true, sortOrder = 100, responsibleUserIds = [] } = request.body || {};
 
     if (!code || !name || !stage) {
       return reply.code(400).send({ error: 'code, name and stage are required' });
     }
 
     const db = await getDb();
+    const client = await db.connect();
     try {
-      const result = await db.query(
+      await client.query('BEGIN');
+      const result = await client.query(
         `
           INSERT INTO order_statuses (code, name, stage, is_active, sort_order, is_system)
           VALUES ($1, $2, $3, $4, $5, false)
@@ -33,9 +47,31 @@ export async function orderStatusesRoutes(fastify) {
         `,
         [code, name, stage, Boolean(isActive), Number(sortOrder)]
       );
-      return reply.code(201).send(result.rows[0]);
+
+      const status = result.rows[0];
+      if (Array.isArray(responsibleUserIds) && responsibleUserIds.length > 0) {
+        for (const userId of responsibleUserIds) {
+          await client.query(
+            `
+              INSERT INTO order_status_responsibles (status_id, user_id)
+              VALUES ($1, $2)
+              ON CONFLICT (status_id, user_id) DO NOTHING
+            `,
+            [status.id, userId]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+      return reply.code(201).send({
+        ...status,
+        responsible_user_ids: Array.isArray(responsibleUserIds) ? responsibleUserIds : [],
+      });
     } catch (error) {
+      await client.query('ROLLBACK');
       return reply.code(400).send({ error: error.message || 'Failed to create status' });
+    } finally {
+      client.release();
     }
   });
 
@@ -43,7 +79,7 @@ export async function orderStatusesRoutes(fastify) {
     preHandler: [fastify.requireAdmin],
   }, async (request, reply) => {
     const { id } = request.params;
-    const { name, stage, isActive, sortOrder } = request.body || {};
+    const { name, stage, isActive, sortOrder, responsibleUserIds } = request.body || {};
 
     const fields = [];
     const values = [];
@@ -66,26 +102,70 @@ export async function orderStatusesRoutes(fastify) {
       values.push(Number(sortOrder));
     }
 
-    if (fields.length === 0) {
+    if (fields.length === 0 && responsibleUserIds === undefined) {
       return reply.code(400).send({ error: 'No fields to update' });
     }
 
-    values.push(id);
     const db = await getDb();
-    const result = await db.query(
-      `
-        UPDATE order_statuses
-        SET ${fields.join(', ')}
-        WHERE id = $${i}
-        RETURNING id, code, name, stage, is_active, sort_order, is_system, created_at, updated_at
-      `,
-      values
-    );
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
 
-    if (result.rows.length === 0) {
-      return reply.code(404).send({ error: 'Status not found' });
+      let result;
+      if (fields.length > 0) {
+        values.push(id);
+        result = await client.query(
+          `
+            UPDATE order_statuses
+            SET ${fields.join(', ')}
+            WHERE id = $${i}
+            RETURNING id, code, name, stage, is_active, sort_order, is_system, created_at, updated_at
+          `,
+          values
+        );
+      } else {
+        result = await client.query(
+          `
+            SELECT id, code, name, stage, is_active, sort_order, is_system, created_at, updated_at
+            FROM order_statuses
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [id]
+        );
+      }
+
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return reply.code(404).send({ error: 'Status not found' });
+      }
+
+      if (responsibleUserIds !== undefined) {
+        await client.query('DELETE FROM order_status_responsibles WHERE status_id = $1', [id]);
+        if (Array.isArray(responsibleUserIds) && responsibleUserIds.length > 0) {
+          for (const userId of responsibleUserIds) {
+            await client.query(
+              `
+                INSERT INTO order_status_responsibles (status_id, user_id)
+                VALUES ($1, $2)
+                ON CONFLICT (status_id, user_id) DO NOTHING
+              `,
+              [id, userId]
+            );
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+      return {
+        ...result.rows[0],
+        responsible_user_ids: Array.isArray(responsibleUserIds) ? responsibleUserIds : undefined,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      return reply.code(400).send({ error: error.message || 'Failed to update status' });
+    } finally {
+      client.release();
     }
-
-    return result.rows[0];
   });
 }

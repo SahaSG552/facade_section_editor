@@ -56,20 +56,6 @@ class AppState {
         this.log.debug(`state changed: ${key} ->`, value);
     }
 
-    // Convenience helpers
-    setPanelSize(width, height) {
-        this.set("panelWidth", width);
-        this.set("panelHeight", height);
-    }
-
-    setPanelThickness(thickness) {
-        this.set("panelThickness", thickness);
-    }
-
-    setPanelAnchor(anchor) {
-        this.set("panelAnchor", anchor);
-    }
-
     setShowPart(show) {
         this.set("showPart", show);
     }
@@ -84,10 +70,6 @@ class AppState {
 
     setGridSize(size) {
         this.set("gridSize", size);
-    }
-
-    setDraggingBit(isDragging) {
-        this.set("isDraggingBit", isDragging);
     }
 
     setViewMode(mode) {

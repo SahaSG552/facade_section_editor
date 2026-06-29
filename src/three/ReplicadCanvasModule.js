@@ -621,6 +621,158 @@ function parseSvgCommands(pathData) {
     return commands;
 }
 
+function reverseSvgCommands(commands) {
+    if (!commands.length) return [];
+    
+    const absCommands = [];
+    let curX = 0, curY = 0;
+    let startX = 0, startY = 0;
+    
+    for (const entry of commands) {
+        const raw = entry.cmd;
+        const up = raw.toUpperCase();
+        const rel = raw !== up;
+        const v = entry.values;
+        let newCmd = up;
+        let newV = [];
+        
+        if (up === 'M') {
+            curX = rel ? curX + v[0] : v[0];
+            curY = rel ? curY + v[1] : v[1];
+            startX = curX; startY = curY;
+            newV = [curX, curY];
+        } else if (up === 'L') {
+            curX = rel ? curX + v[0] : v[0];
+            curY = rel ? curY + v[1] : v[1];
+            newV = [curX, curY];
+        } else if (up === 'A') {
+            curX = rel ? curX + v[5] : v[5];
+            curY = rel ? curY + v[6] : v[6];
+            newV = [v[0], v[1], v[2], v[3], v[4], curX, curY];
+        } else if (up === 'Z') {
+            curX = startX; curY = startY;
+            newCmd = 'L'; // Treat Z as an explicit L for easy reversal
+            newV = [curX, curY];
+        }
+        absCommands.push({ cmd: newCmd, values: newV });
+    }
+    
+    const reversed = [];
+    const points = [{ x: absCommands[0].values[0], y: absCommands[0].values[1] }];
+    for (let i = 1; i < absCommands.length; i++) {
+        const v = absCommands[i].values;
+        points.push({ x: v[v.length - 2], y: v[v.length - 1] });
+    }
+    
+    reversed.push({ cmd: 'M', values: [points[points.length - 1].x, points[points.length - 1].y] });
+    
+    for (let i = absCommands.length - 1; i >= 1; i--) {
+        const cmd = absCommands[i];
+        const prevPt = points[i - 1];
+        
+        if (cmd.cmd === 'L') {
+            reversed.push({ cmd: 'L', values: [prevPt.x, prevPt.y] });
+        } else if (cmd.cmd === 'A') {
+            const sweep = cmd.values[4] === 1 ? 0 : 1;
+            reversed.push({ cmd: 'A', values: [cmd.values[0], cmd.values[1], cmd.values[2], cmd.values[3], sweep, prevPt.x, prevPt.y] });
+        }
+    }
+    reversed.push({ cmd: 'Z', values: [] });
+    
+    return reversed;
+}
+
+function commandsToPathData(commands) {
+    return commands.map(c => c.cmd + ' ' + c.values.map(v => Number(v.toFixed(6))).join(' ')).join(' ');
+}
+
+/**
+ * Normalizes an SVG profile to ensure its starting point (seam) is located at the top Shank (max Y).
+ * Sweeping a profile starting at a singularity (like the sharp tip of a V-bit or center of a ball-nose)
+ * often causes pole degeneracy and internal twisting in OpenCASCADE MakePipeShell.
+ */
+function normalizeSvgStartPoint(commands) {
+    if (commands.length < 3) return commands;
+    
+    const absCommands = [];
+    let curX = 0, curY = 0;
+    let startX = 0, startY = 0;
+    
+    for (const entry of commands) {
+        const raw = entry.cmd;
+        const up = raw.toUpperCase();
+        const rel = raw !== up;
+        const v = entry.values;
+        let newCmd = up;
+        let newV = [];
+        
+        if (up === 'M') {
+            curX = rel ? curX + v[0] : v[0];
+            curY = rel ? curY + v[1] : v[1];
+            startX = curX; startY = curY;
+            newV = [curX, curY];
+        } else if (up === 'L') {
+            curX = rel ? curX + v[0] : v[0];
+            curY = rel ? curY + v[1] : v[1];
+            newV = [curX, curY];
+        } else if (up === 'H') {
+            curX = rel ? curX + v[0] : v[0];
+            newCmd = 'L';
+            newV = [curX, curY];
+        } else if (up === 'V') {
+            curY = rel ? curY + v[0] : v[0];
+            newCmd = 'L';
+            newV = [curX, curY];
+        } else if (up === 'A') {
+            curX = rel ? curX + v[5] : v[5];
+            curY = rel ? curY + v[6] : v[6];
+            newV = [v[0], v[1], v[2], v[3], v[4], curX, curY];
+        } else if (up === 'Z') {
+            curX = startX; curY = startY;
+            newCmd = 'L'; 
+            newV = [curX, curY];
+        }
+        absCommands.push({ cmd: newCmd, values: newV, targetX: curX, targetY: curY });
+    }
+
+    const lastCmd = absCommands[absCommands.length - 1];
+    const firstCmd = absCommands[0];
+    const isClosed = Math.abs(lastCmd.targetX - firstCmd.targetX) < 1e-4 && Math.abs(lastCmd.targetY - firstCmd.targetY) < 1e-4;
+    
+    if (!isClosed) {
+        absCommands.push({ cmd: 'L', values: [firstCmd.targetX, firstCmd.targetY], targetX: firstCmd.targetX, targetY: firstCmd.targetY });
+    }
+
+    let maxY = -Infinity;
+    let maxIdx = 0;
+    // We only iterate up to length-1 because the last point is the same as the first point
+    for (let i = 0; i < absCommands.length - 1; i++) {
+        if (absCommands[i].targetY > maxY) {
+            maxY = absCommands[i].targetY;
+            maxIdx = i;
+        }
+    }
+
+    if (maxIdx === 0) {
+        return commands; 
+    }
+
+    const rolled = [];
+    const maxPt = absCommands[maxIdx];
+    rolled.push({ cmd: 'M', values: [maxPt.targetX, maxPt.targetY] });
+
+    for (let i = maxIdx + 1; i < absCommands.length; i++) {
+        rolled.push({ cmd: absCommands[i].cmd, values: [...absCommands[i].values] });
+    }
+    
+    for (let i = 1; i <= maxIdx; i++) {
+        rolled.push({ cmd: absCommands[i].cmd, values: [...absCommands[i].values] });
+    }
+
+    rolled.push({ cmd: 'Z', values: [] });
+    return rolled;
+}
+
 /**
  * Build a true geometric outset path for offset=0 fallback spine.
  * This avoids shape distortion from scaling and keeps corner joins consistent.
@@ -1376,6 +1528,46 @@ function normalizeSegmentsForSweep(segments, snapEps = 1e-2, options = {}) {
                     }
                 }
             }
+        } else if (isClosed && out.length > 0) {
+            // All-arc fallback: no linear segments found. Find the longest arc.
+            let bestArcIdx = -1;
+            let bestArcChord = -1;
+            for (let i = 0; i < out.length; i++) {
+                const seg = out[i];
+                if (seg?.type === "arc" && isFinitePoint(seg?.start) && isFinitePoint(seg?.end)) {
+                    const chord = dist(seg.start, seg.end);
+                    if (chord > bestArcChord) {
+                        bestArcChord = chord;
+                        bestArcIdx = i;
+                    }
+                }
+            }
+            if (bestArcIdx >= 0) {
+                if (bestArcIdx > 0) {
+                    out = out.slice(bestArcIdx).concat(out.slice(0, bestArcIdx));
+                }
+                
+                if (splitSeam) {
+                    const seamArc = out[0];
+                    const chordLen = dist(seamArc.start, seamArc.end);
+                    const SEAM_EPSILON = 5e-3;
+                    if (chordLen > SEAM_EPSILON * 4) {
+                        const dx = (Number(seamArc.end.x) - Number(seamArc.start.x)) / chordLen;
+                        const dy = (Number(seamArc.end.y) - Number(seamArc.start.y)) / chordLen;
+                        
+                        // Shift the start point of the arc slightly along the chord.
+                        // Sketch.close() will add a tiny micro-linear seam bridge between the
+                        // last segment and this new start point, anchoring the sweep seam
+                        // safely away from the arc-arc junction.
+                        const newStart = {
+                            x: Number(seamArc.start.x) + dx * SEAM_EPSILON,
+                            y: Number(seamArc.start.y) + dy * SEAM_EPSILON,
+                        };
+                        out[0] = { ...seamArc, start: newStart };
+                        didSeamSplit = true;
+                    }
+                }
+            }
         }
     }
 
@@ -1424,6 +1616,168 @@ function reverseSegmentsForSweep(segments) {
 
             return out;
         });
+}
+
+/**
+ * Heals a segment array to be G1 (tangent) continuous at every sharp line→line corner
+ * by inserting an analytically computed tangent micro-arc. This is the canonical OCC
+ * fix for BRepOffsetAPI_MakePipeShell instability:
+ *   - Removes inverted round-corner caps at 90° junctions (RoundCorner mode builds a
+ *     sphere whose orientation can invert on sharp corners).
+ *   - Stabilises sweeps when the offset distance causes tight arc radii — OCC is much
+ *     more tolerant with a G1 spine than with a spine that has angular discontinuities.
+ *
+ * Geometry (Paper.js Y-down coordinates):
+ *   Given corner point P, incoming direction u (from P toward prev point) and outgoing
+ *   direction v (from P toward next point), the micro-arc is computed as:
+ *     halfAngle = arccos(u·v) / 2  (angle between the two "away-from-corner" vectors)
+ *     trimDist   = microRadius / tan(halfAngle)
+ *     T1 = P + u * trimDist  (tangent point on incoming segment)
+ *     T2 = P + v * trimDist  (tangent point on outgoing segment)
+ *     sweepFlag determined by cross-product u×v (Paper.js Y-down convention)
+ *
+ * No sampling is performed — all inserted segments are true arcs.
+ *
+ * @param {Array<Object>} segments      - Input segments [{type,start,end,arc?}]
+ * @param {number}        microRadius   - Fillet radius in Paper.js units (mm). Should
+ *                                        be tiny (e.g. bitRadius * 0.02, min 0.05 mm).
+ * @param {number}        [sharpThresholdDeg=170] - Corners sharper than this angle (°)
+ *                                        between the two lines get a micro-arc inserted.
+ * @returns {Array<Object>} New segment array (may have more segments than input)
+ */
+function healSpineSegmentsG1(segments, microRadius, sharpThresholdDeg = 170) {
+    if (!Array.isArray(segments) || segments.length < 2) return segments;
+    const r = Math.max(Number(microRadius) || 0, 0);
+    if (r < 1e-6) return segments;
+
+    const thresholdRad = (sharpThresholdDeg * Math.PI) / 180;
+    const isFinitePoint = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y);
+
+    // Collect which junction indices are line→line and sharper than threshold
+    // Junction i: between segments[i-1] and segments[i]
+    const out = [];
+
+    for (let i = 0; i < segments.length; i++) {
+        const prev = segments[(i - 1 + segments.length) % segments.length];
+        const cur  = segments[i];
+
+        const isLinePrev = prev?.type === "line";
+        const isLineCur  = cur?.type === "line";
+
+        // Only heal line→line corners; arcs already provide G1 continuity
+        if (!isLinePrev || !isLineCur) {
+            out.push({ ...cur, start: cur?.start ? { ...cur.start } : cur?.start, end: cur?.end ? { ...cur.end } : cur?.end });
+            continue;
+        }
+        if (!isFinitePoint(prev.end) || !isFinitePoint(cur.start)) {
+            out.push({ ...cur, start: cur?.start ? { ...cur.start } : cur?.start, end: cur?.end ? { ...cur.end } : cur?.end });
+            continue;
+        }
+
+        // Corner point P = prev.end ≈ cur.start
+        const Px = Number(prev.end.x);
+        const Py = Number(prev.end.y);
+
+        // Direction from corner back along incoming segment (toward prev.start)
+        const prevLen = Math.hypot(Px - Number(prev.start.x), Py - Number(prev.start.y));
+        if (prevLen < 1e-9) {
+            out.push({ ...cur, start: { ...cur.start }, end: { ...cur.end } });
+            continue;
+        }
+        const ux = (Number(prev.start.x) - Px) / prevLen;
+        const uy = (Number(prev.start.y) - Py) / prevLen;
+
+        // Direction from corner along outgoing segment (toward cur.end)
+        const curLen = Math.hypot(Number(cur.end.x) - Px, Number(cur.end.y) - Py);
+        if (curLen < 1e-9) {
+            out.push({ ...cur, start: { ...cur.start }, end: { ...cur.end } });
+            continue;
+        }
+        const vx = (Number(cur.end.x) - Px) / curLen;
+        const vy = (Number(cur.end.y) - Py) / curLen;
+
+        // Interior angle between the two "away-from-corner" vectors u and v
+        const dot = Math.max(-1, Math.min(1, ux * vx + uy * vy));
+        const interiorAngle = Math.acos(dot); // 0 = same direction (no corner), π = U-turn
+
+        // Skip nearly-straight junctions (angle < threshold)
+        if (interiorAngle < (Math.PI - thresholdRad)) {
+            out.push({ ...cur, start: { ...cur.start }, end: { ...cur.end } });
+            continue;
+        }
+
+        // Compute trim distance: how far from corner to place tangent points
+        const halfAngle = interiorAngle / 2;
+        const tanHalf = Math.tan(halfAngle);
+        if (!Number.isFinite(tanHalf) || Math.abs(tanHalf) < 1e-9) {
+            out.push({ ...cur, start: { ...cur.start }, end: { ...cur.end } });
+            continue;
+        }
+
+        const trimDist = r / tanHalf;
+
+        // Ensure trim doesn't exceed segment lengths (use at most 40% of each)
+        const maxTrimPrev = prevLen * 0.4;
+        const maxTrimCur  = curLen  * 0.4;
+        const safeTrim = Math.min(trimDist, maxTrimPrev, maxTrimCur);
+
+        if (safeTrim < 1e-6) {
+            out.push({ ...cur, start: { ...cur.start }, end: { ...cur.end } });
+            continue;
+        }
+
+        // Tangent points
+        const T1x = Px + ux * safeTrim;
+        const T1y = Py + uy * safeTrim;
+        const T2x = Px + vx * safeTrim;
+        const T2y = Py + vy * safeTrim;
+
+        // Adjusted micro-radius (may be smaller if we clamped safeTrim)
+        const actualRadius = safeTrim * tanHalf;
+        if (actualRadius < 1e-6) {
+            out.push({ ...cur, start: { ...cur.start }, end: { ...cur.end } });
+            continue;
+        }
+
+        // Sweep direction: cross product u×v in Paper.js Y-down space
+        // cross > 0 → turning left (CCW visually in Y-down) → sweepFlag=1 (SVG CCW)
+        // cross < 0 → turning right (CW visually in Y-down) → sweepFlag=0 (SVG CW)
+        const cross = ux * vy - uy * vx;
+        const sweepFlag = cross > 0 ? 1 : 0;
+
+        // Trim the previous segment (already pushed — modify its end)
+        const lastOut = out[out.length - 1];
+        if (lastOut) {
+            lastOut.end = { x: T1x, y: T1y };
+        }
+
+        // Insert micro-arc segment from T1 to T2
+        out.push({
+            type: "arc",
+            start: { x: T1x, y: T1y },
+            end:   { x: T2x, y: T2y },
+            arc: {
+                radius:  actualRadius,
+                rx:      actualRadius,
+                ry:      actualRadius,
+                sweepFlag,
+                sweep:   sweepFlag === 1,
+                largeArcFlag: false,
+                largeArc: false,
+                rotation: 0,
+                xRotation: 0,
+            },
+        });
+
+        // Push current segment starting from T2 (trimmed)
+        out.push({
+            ...cur,
+            start: { x: T2x, y: T2y },
+            end:   { ...cur.end },
+        });
+    }
+
+    return out;
 }
 
 /**
@@ -1911,7 +2265,25 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
             const x = rel ? curX + v[5] : v[5];
             const y = rel ? curY + v[6] : v[6];
             if (!isNear(curX, curY, x, y)) {
-                sketch = sketch.ellipseTo(toXZ(x, y), rx, ry, rot, largeArc, sweep);
+                const dx = x - curX;
+                const dy = y - curY;
+                const dist = Math.hypot(dx, dy);
+                // OpenCASCADE MakePipeShell can fail or twist on exactly 180-degree arcs (pole degeneracy).
+                // Automatically split exact semi-circles into two 90-degree arcs to ensure robust parameterization.
+                if (Math.abs(dist - 2 * rx) < 1e-3 && Math.abs(rx - ry) < 1e-3) {
+                    const cx_arc = (curX + x) / 2;
+                    const cy_arc = (curY + y) / 2;
+                    const v1x = curX - cx_arc;
+                    const v1y = curY - cy_arc;
+                    const origSweep = v[4];
+                    const midX = cx_arc + (origSweep === 1 ? -v1y : v1y);
+                    const midY = cy_arc + (origSweep === 1 ? v1x : -v1x);
+                    
+                    sketch = sketch.ellipseTo(toXZ(midX, midY), rx, ry, rot, false, sweep);
+                    sketch = sketch.ellipseTo(toXZ(x, y), rx, ry, rot, false, sweep);
+                } else {
+                    sketch = sketch.ellipseTo(toXZ(x, y), rx, ry, rot, largeArc, sweep);
+                }
             }
             curX = x;
             curY = y;
@@ -1929,8 +2301,18 @@ function buildProfileSketchFromPathData(pathData, Sketcher, pathZ = 0, profileOr
     }
 
     if (!sketch) return null;
-    if (sawZ) return closedByGeometry ? sketch.done() : sketch.close();
-    return closedByGeometry ? sketch.done() : sketch.close();
+    const finalSketch = sawZ ? (closedByGeometry ? sketch.done() : sketch.close()) : (closedByGeometry ? sketch.done() : sketch.close());
+
+    let area = 0;
+    for (let i = 0; i < boundsCloud.length; i++) {
+        const p1 = toXZ(boundsCloud[i].x, boundsCloud[i].y);
+        const next = boundsCloud[(i + 1) % boundsCloud.length];
+        const p2 = toXZ(next.x, next.y);
+        area += p1[0] * p2[1] - p2[0] * p1[1];
+    }
+    finalSketch.__signedArea = area / 2;
+
+    return finalSketch;
 }
 
 function getFirstPathPointInWorldXY(pathData, bboxRef, panelAnchor = "top-left", depth = 0, panelThickness = appConfig.panel.thickness) {
@@ -2938,17 +3320,44 @@ export default class ReplicadCanvasModule extends BaseModule {
 
     _buildProfileWire(bitData, pathZ, profileOrigin = null) {
         const { Sketcher } = _replicad;
-        const profilePath = String(bitData?.profilePath || "").trim();
+        let profilePath = String(bitData?.profilePath || "").trim();
         const origin = Array.isArray(profileOrigin) && profileOrigin.length === 3
             ? profileOrigin
             : [0, 0, pathZ];
 
         if (profilePath) {
+            try {
+                let commands = parseSvgCommands(profilePath);
+                commands = normalizeSvgStartPoint(commands);
+                profilePath = commandsToPathData(commands);
+            } catch (errNorm) {
+                console.warn("[ReplicadCanvasModule] Failed to normalize SVG start point", errNorm);
+            }
+
             // Prefer analytic SVG command reconstruction first to preserve true arcs.
             // Canonical sampled polyline is a fallback only when analytic build fails.
-            const profileSketch = buildProfileSketchFromPathData(profilePath, Sketcher, pathZ, origin)
+            let profileSketch = buildProfileSketchFromPathData(profilePath, Sketcher, pathZ, origin)
                 || buildCanonicalProfileSketchFromPathData(profilePath, Sketcher, pathZ, origin);
+            
             if (profileSketch) {
+                // MakePipeShell requires the profile's outer wire to be CCW (Counter-Clockwise).
+                // CW wires act as holes and cause inverted/failed sweeps (especially with RoundCorner).
+                if (typeof profileSketch.__signedArea === "number" && profileSketch.__signedArea < 0) {
+                    try {
+                        const commands = parseSvgCommands(profilePath);
+                        const reversedCommands = reverseSvgCommands(commands);
+                        const reversedPathData = commandsToPathData(reversedCommands);
+                        
+                        const reversedSketch = buildProfileSketchFromPathData(reversedPathData, Sketcher, pathZ, origin)
+                            || buildCanonicalProfileSketchFromPathData(reversedPathData, Sketcher, pathZ, origin);
+                            
+                        if (reversedSketch) {
+                            profileSketch = reversedSketch;
+                        }
+                    } catch (errRev) {
+                        console.warn("[ReplicadCanvasModule] Failed to reverse CW SVG profile path", errRev);
+                    }
+                }
                 return profileSketch.wire;
             }
         }
@@ -3061,6 +3470,15 @@ export default class ReplicadCanvasModule extends BaseModule {
                     splitSeam: false,
                 })
                 : contourSegments;
+
+            // G1-healed spine: insert analytical micro-arcs at sharp line→line corners
+            // so OCC MakePipeShell never has to build degenerate spheres at discontinuities.
+            // micro-radius = max(bitDiameter * 1%, 0.05mm) — invisible, within machining tolerance.
+            const bitDiameter = Number(bit?.bitData?.diameter ?? bit?.bitData?.cornerRadius ?? 5);
+            const g1MicroRadius = Math.max(bitDiameter * 0.01, 0.05);
+            const healedContourSegments = Array.isArray(normalizedContourSegments) && normalizedContourSegments.length > 0
+                ? healSpineSegmentsG1(normalizedContourSegments, g1MicroRadius)
+                : normalizedContourSegments;
             const traceSweep = Boolean(window?.__replicadSweepTrace);
             const sweepDiag = {
                 bit: bit?.name || bit?.bitData?.name || "unknown",
@@ -3144,6 +3562,43 @@ export default class ReplicadCanvasModule extends BaseModule {
                     pathSketchCandidates.push({ mode: "segments-original", sketch: originalSegmentSketch });
                 }
 
+                // G1-healed candidate: spine with micro-arcs at sharp corners.
+                // Tried before the raw normalizedContourSegments so OCC gets a G1 spine first.
+                if (!isCornerTool && Array.isArray(healedContourSegments) && healedContourSegments.length > 0) {
+                    const healedSegmentDiag = {};
+                    let healedSegmentSketch = null;
+                    try {
+                        healedSegmentSketch = buildSketchFromOffsetSegments(
+                            healedContourSegments,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: true,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                                strictContinuity: false,
+                                strictArcs: true,
+                                continuityEps: 1e-3,
+                                diagnostics: healedSegmentDiag,
+                                removeLoops: true,
+                            }
+                        );
+                    } catch (errHeal) {
+                        healedSegmentDiag.failReason = "segments-g1healed-builder-threw";
+                        healedSegmentDiag.failDetail = { message: errHeal?.message || String(errHeal) };
+                    }
+                    sweepDiag.candidates.push({
+                        mode: "segments-g1healed",
+                        hasWire: Boolean(healedSegmentSketch?.wire),
+                        diagnostics: healedSegmentDiag,
+                        g1MicroRadius,
+                    });
+                    pathSketchCandidates.push({ mode: "segments-g1healed", sketch: healedSegmentSketch });
+                }
+
                 const segmentDiag = {};
                 let segmentSketch = null;
                 try {
@@ -3180,12 +3635,12 @@ export default class ReplicadCanvasModule extends BaseModule {
                 let reversedSegmentSketch = null;
                 if (!isCornerTool) {
                     try {
-                        const reversedSegments = normalizeSegmentsForSweep(
-                            reverseSegmentsForSweep(normalizedContourSegments),
+                        const reversedHealedSegments = normalizeSegmentsForSweep(
+                            reverseSegmentsForSweep(healedContourSegments ?? normalizedContourSegments),
                             0.1
                         );
                         reversedSegmentSketch = buildSketchFromOffsetSegments(
-                            reversedSegments,
+                            reversedHealedSegments,
                             bboxRef,
                             Sketcher,
                             {
@@ -3195,7 +3650,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                                 depth,
                                 panelThickness: panelT,
                                 applyDepthForXY: true,
-                                strictContinuity: true,
+                                strictContinuity: false,
                                 strictArcs: true,
                                 continuityEps: 1e-3,
                                 diagnostics: reversedSegmentDiag,
@@ -3297,173 +3752,79 @@ export default class ReplicadCanvasModule extends BaseModule {
                 ?? getFirstSegmentPointInWorldXY(contourSegments, bboxRef, panelAnchor, depth, panelT)
                 ?? [0, 0, pathZ];
             const profileWire = this._buildProfileWire(bit?.bitData, pathZ, profileOrigin);
+            // Sweep options cascade: try the user-requested transition mode first, then
+            // progressively more stable fallbacks — all native OCC, no polyline sampling.
+            //   1. User mode (round/right) + orthogonality correction  → desired appearance
+            //   2. right + correction                                   → no sphere caps, stable
+            //   3. transformed + correction                             → most robust OCC mode
+            //   4. transformed, no correction                           → last analytical resort
             const replicadTransition = transitionMode;
-            const sweepOpts = {
-                forceProfileSpineOthogonality: true,
-                transitionMode: replicadTransition,
-            };
+            const sweepOptsCascade = [
+                { transitionMode: replicadTransition, forceProfileSpineOthogonality: true },
+                ...(replicadTransition !== "right"
+                    ? [{ transitionMode: "right", forceProfileSpineOthogonality: true }]
+                    : []),
+                { transitionMode: "transformed", forceProfileSpineOthogonality: true },
+                { transitionMode: "transformed", forceProfileSpineOthogonality: false },
+            ];
 
             let result = null;
             let selectedSpineMode = null;
+            let selectedSweepOpts = null;
             let sweepError = null;
-            let needsSampledFallback = false;
             const spineMaxY = Array.isArray(normalizedContourSegments) && normalizedContourSegments.length > 0
                 ? computeSpineMaxWorldY(normalizedContourSegments, bboxRef, panelAnchor)
                 : null;
-            for (const spineCandidate of pathSketchCandidatesValid) {
-                try {
-                    const candidateResult = genericSweep(profileWire, spineCandidate.sketch.wire, sweepOpts, false);
-                    if (!candidateResult) {
-                        sweepDiag.sweepAttempts.push({
-                            mode: spineCandidate.mode,
-                            sweepOpts,
-                            ok: false,
-                            resultState: "nullish",
-                        });
-                        result = null;
-                        continue;
-                    }
-                    if (Number.isFinite(spineMaxY) && spineMaxY > 50) {
-                        const shouldCheckCompleteness = normalizedSummary?.hasArc && spineCandidate.mode === "segments-original";
-                        if (shouldCheckCompleteness) {
-                            try {
-                                const probe = candidateResult.mesh({ tolerance: 2.0, angularTolerance: 45 });
-                                const verts = probe?.vertices || [];
-                                let resultMaxY = -Infinity;
-                                for (let vi = 1; vi < verts.length; vi += 3) {
-                                    if (verts[vi] > resultMaxY) resultMaxY = verts[vi];
-                                }
-                                const completeThreshold = spineMaxY - 50;
-                                if (Number.isFinite(resultMaxY) && resultMaxY < completeThreshold) {
-                                    sweepDiag.sweepAttempts.push({
-                                        mode: spineCandidate.mode,
-                                        sweepOpts,
-                                        ok: true,
-                                        incomplete: true,
-                                        cutterMaxY: Math.round(resultMaxY),
-                                        expectedMin: Math.round(completeThreshold),
-                                    });
-                                    if (traceSweep) {
-                                        console.info("[ReplicadSweepTrace] sweep-incomplete", {
-                                            bit: sweepDiag.bit,
-                                            depth,
-                                            spineMode: spineCandidate.mode,
-                                            cutterMaxY: Math.round(resultMaxY),
-                                            expectedMin: Math.round(completeThreshold),
-                                            spineMaxY: Math.round(spineMaxY),
-                                        });
-                                    }
-                                    needsSampledFallback = true;
-                                    result = null;
-                                    break;
-                                }
-                            } catch {
-                                // Keep the candidate if completeness probing fails.
-                            }
-                        }
-                    }
-                    if (needsSampledFallback) break;
-                    if (typeof candidateResult.mesh !== "function") {
-                        sweepDiag.sweepAttempts.push({
-                            mode: spineCandidate.mode,
-                            sweepOpts,
-                            ok: false,
-                            resultState: "non-meshable",
-                            resultKeys: Object.keys(candidateResult || {}).slice(0, 8),
-                        });
-                        result = null;
-                        continue;
-                    }
-                    result = candidateResult;
-                    sweepDiag.sweepAttempts.push({
-                        mode: spineCandidate.mode,
-                        sweepOpts,
-                        ok: true,
-                    });
-                    selectedSpineMode = spineCandidate.mode;
-                    break;
-                } catch (errSweep) {
-                    sweepDiag.sweepAttempts.push({
-                        mode: spineCandidate.mode,
-                        sweepOpts,
-                        ok: false,
-                        error: errSweep?.message,
-                    });
-                    sweepError = errSweep;
-                }
-                if (needsSampledFallback) break;
-            }
 
-            if (!result && needsSampledFallback && Array.isArray(normalizedContourSegments) && normalizedSummary?.hasArc) {
-                    let sampledSketch = null;
+            // Double-loop: outer iterates sweep configurations, inner iterates spine candidates.
+            // First successful (non-null, meshable) result wins.
+            outerLoop: for (const sweepOpts of sweepOptsCascade) {
+                for (const spineCandidate of pathSketchCandidatesValid) {
                     try {
-                        sampledSketch = buildSketchFromSvgPath(
-                            normalizedPathData,
-                            bboxRef,
-                            Sketcher,
-                            {
-                                close: true,
-                                sampleStep: 4.0,
-                                plane: "XY",
-                                panelAnchor,
-                                depth,
-                                panelThickness: panelT,
-                                applyDepthForXY: true,
-                            }
-                        );
-                    } catch {
-                        sampledSketch = null;
-                    }
-
-                    sweepDiag.candidates.push({
-                        mode: "sampled-closed",
-                        hasWire: Boolean(sampledSketch?.wire),
-                        lazy: true,
-                    });
-
-                    if (sampledSketch?.wire) {
-                        pathSketchCandidatesValid = [{ mode: "sampled-closed", sketch: sampledSketch }];
-                        for (const spineCandidate of pathSketchCandidatesValid) {
-                            try {
-                                const candidateResult = genericSweep(profileWire, spineCandidate.sketch.wire, sweepOpts, false);
-                                if (!candidateResult) {
-                                    sweepDiag.sweepAttempts.push({
-                                        mode: spineCandidate.mode,
-                                        sweepOpts,
-                                        ok: false,
-                                        resultState: "nullish",
-                                    });
-                                    continue;
-                                }
-                                if (typeof candidateResult.mesh !== "function") {
-                                    sweepDiag.sweepAttempts.push({
-                                        mode: spineCandidate.mode,
-                                        sweepOpts,
-                                        ok: false,
-                                        resultState: "non-meshable",
-                                        resultKeys: Object.keys(candidateResult || {}).slice(0, 8),
-                                    });
-                                    continue;
-                                }
-                                result = candidateResult;
-                                sweepDiag.sweepAttempts.push({
-                                    mode: spineCandidate.mode,
-                                    sweepOpts,
-                                    ok: true,
-                                });
-                                selectedSpineMode = spineCandidate.mode;
-                                break;
-                            } catch (errSweep) {
-                                sweepDiag.sweepAttempts.push({
-                                    mode: spineCandidate.mode,
-                                    sweepOpts,
-                                    ok: false,
-                                    error: errSweep?.message,
-                                });
-                                sweepError = errSweep;
-                            }
+                        const candidateResult = genericSweep(profileWire, spineCandidate.sketch.wire, sweepOpts, false);
+                        if (!candidateResult) {
+                            sweepDiag.sweepAttempts.push({
+                                mode: spineCandidate.mode,
+                                sweepOpts,
+                                ok: false,
+                                resultState: "nullish",
+                            });
+                            continue;
                         }
+                        if (typeof candidateResult.mesh !== "function") {
+                            sweepDiag.sweepAttempts.push({
+                                mode: spineCandidate.mode,
+                                sweepOpts,
+                                ok: false,
+                                resultState: "non-meshable",
+                                resultKeys: Object.keys(candidateResult || {}).slice(0, 8),
+                            });
+                            continue;
+                        }
+                        // Remove coincident faces that OCC sometimes leaves on closed-spine sweeps
+                        // (ShapeUpgrade_UnifySameDomain — preserves arcs/lines, no sampling).
+                        let cleanResult = candidateResult;
+                        try { cleanResult = candidateResult.simplify(); } catch { /* non-fatal */ }
+                        result = cleanResult;
+                        sweepDiag.sweepAttempts.push({
+                            mode: spineCandidate.mode,
+                            sweepOpts,
+                            ok: true,
+                            simplified: cleanResult !== candidateResult,
+                        });
+                        selectedSpineMode = spineCandidate.mode;
+                        selectedSweepOpts = sweepOpts;
+                        break outerLoop;
+                    } catch (errSweep) {
+                        sweepDiag.sweepAttempts.push({
+                            mode: spineCandidate.mode,
+                            sweepOpts,
+                            ok: false,
+                            error: errSweep?.message,
+                        });
+                        sweepError = errSweep;
                     }
+                }
             }
 
             if (!result) {
@@ -3484,7 +3845,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                     y: Number(bit?.y ?? 0),
                     depth,
                     mode: selectedSpineMode,
-                    sampleStep: null,
+                    sweepOpts: selectedSweepOpts,
+                    g1MicroRadius,
                 });
             }
 
@@ -3522,9 +3884,9 @@ export default class ReplicadCanvasModule extends BaseModule {
 
                 if (
                     selectedSpineMode !== "segments-original" &&
+                    selectedSpineMode !== "segments-g1healed" &&
                     selectedSpineMode !== "segments-closed" &&
                     selectedSpineMode !== "segments-closed-reversed" &&
-                    selectedSpineMode !== "sampled-closed" &&
                     selectedSpineMode !== "commands-analytic-outset+0.01"
                 ) {
                 this._logWarnThrottled("Round-profile sweep used fallback spine candidate", {
@@ -3534,6 +3896,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                     y: Number(bit?.y ?? 0),
                     depth,
                     selectedSpineMode,
+                    selectedSweepOpts,
                     segmentFailReason: segCandidateDiag?.failReason || null,
                     segmentFailDetail: segCandidateDiag?.failDetail || null,
                     candidates: window?.__replicadExhaustiveDiag ? sweepDiag.candidates : undefined,
@@ -3919,18 +4282,22 @@ export default class ReplicadCanvasModule extends BaseModule {
 
                 let cutter = null;
                 let selectedSpineMode = null;
-                let needsSampledFallback = false;
-                const sweepOptionsCandidates = [
+                let selectedSweepOpts = null;
+                // Cascade: user mode first (right for VC), then transformed fallbacks.
+                // No polyline sampling — all native OCC analytical modes.
+                const sweepOptionsCascade = [
                     { transitionMode: "right", forceProfileSpineOthogonality: true },
                     { transitionMode: "right" },
+                    { transitionMode: "transformed", forceProfileSpineOthogonality: true },
+                    { transitionMode: "transformed", forceProfileSpineOthogonality: false },
                 ];
                 const spineMaxY = Array.isArray(normalizedContourSegments) && normalizedContourSegments.length > 0
                     ? computeSpineMaxWorldY(normalizedContourSegments, bboxRef, panelAnchor)
                     : null;
 
                 let sweepError = null;
-                for (const spineCandidate of pathSketchCandidatesValid) {
-                    for (const sweepOpts of sweepOptionsCandidates) {
+                outerLoopVC: for (const sweepOpts of sweepOptionsCascade) {
+                    for (const spineCandidate of pathSketchCandidatesValid) {
                         try {
                             const candidateCutter = genericSweep(
                                 profileWire,
@@ -3946,50 +4313,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                                     ok: false,
                                     resultState: "nullish",
                                 });
-                                cutter = null;
                                 continue;
                             }
-
-                            if (Number.isFinite(spineMaxY) && spineMaxY > 50) {
-                                const shouldCheckCompleteness = pathSummary?.hasArc && spineCandidate.mode === "segments-original";
-                                if (shouldCheckCompleteness) {
-                                    try {
-                                        const probe = candidateCutter.mesh({ tolerance: 2.0, angularTolerance: 45 });
-                                        const verts = probe?.vertices || [];
-                                        let cutterMaxY = -Infinity;
-                                        for (let vi = 1; vi < verts.length; vi += 3) {
-                                            if (verts[vi] > cutterMaxY) cutterMaxY = verts[vi];
-                                        }
-                                        const completeThreshold = spineMaxY - 50;
-                                        if (Number.isFinite(cutterMaxY) && cutterMaxY < completeThreshold) {
-                                            passDiag.sweepAttempts.push({
-                                                mode: spineCandidate.mode,
-                                                sweepOpts,
-                                                ok: true,
-                                                incomplete: true,
-                                                cutterMaxY: Math.round(cutterMaxY),
-                                                expectedMin: Math.round(completeThreshold),
-                                            });
-                                            if (window?.__replicadSweepTrace) {
-                                                console.info("[ReplicadSweepTrace] vc:sweep-incomplete", {
-                                                    passIndex,
-                                                    depth,
-                                                    spineMode: spineCandidate.mode,
-                                                    cutterMaxY: Math.round(cutterMaxY),
-                                                    expectedMin: Math.round(completeThreshold),
-                                                    spineMaxY: Math.round(spineMaxY),
-                                                });
-                                            }
-                                            needsSampledFallback = true;
-                                            cutter = null;
-                                            break;
-                                        }
-                                    } catch {
-                                        // Validation error — keep the cutter as-is
-                                    }
-                                }
-                            }
-                            if (needsSampledFallback) break;
 
                             if (typeof candidateCutter.mesh !== "function") {
                                 passDiag.sweepAttempts.push({
@@ -3999,15 +4324,18 @@ export default class ReplicadCanvasModule extends BaseModule {
                                     resultState: "non-meshable",
                                     resultKeys: Object.keys(candidateCutter || {}).slice(0, 8),
                                 });
-                                cutter = null;
                                 continue;
                             }
 
-                            cutter = candidateCutter;
+                            // Remove coincident faces (ShapeUpgrade_UnifySameDomain — preserves arcs/lines).
+                            let cleanCutter = candidateCutter;
+                            try { cleanCutter = candidateCutter.simplify(); } catch { /* non-fatal */ }
+                            cutter = cleanCutter;
                             passDiag.sweepAttempts.push({
                                 mode: spineCandidate.mode,
                                 sweepOpts,
                                 ok: true,
+                                simplified: cleanCutter !== candidateCutter,
                             });
 
                             if (window?.__replicadSweepTrace) {
@@ -4019,7 +4347,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                                 });
                             }
                             selectedSpineMode = spineCandidate.mode;
-                            break;
+                            selectedSweepOpts = sweepOpts;
+                            break outerLoopVC;
                         } catch (errSweep) {
                             passDiag.sweepAttempts.push({
                                 mode: spineCandidate.mode,
@@ -4029,86 +4358,9 @@ export default class ReplicadCanvasModule extends BaseModule {
                             });
                             sweepError = errSweep;
                         }
-                        if (needsSampledFallback) break;
                     }
-                    if (cutter || needsSampledFallback) break;
                 }
 
-                if (!cutter && needsSampledFallback && Array.isArray(normalizedContourSegments) && pathSummary?.hasArc) {
-                        let sampledSketch = null;
-                        try {
-                            sampledSketch = buildSketchFromSvgPath(
-                                normalizedPathData,
-                                bboxRef,
-                                Sketcher,
-                                {
-                                    close: true,
-                                    sampleStep: 4.0,
-                                    plane: "XY",
-                                    panelAnchor,
-                                    depth,
-                                    panelThickness: panelT,
-                                    applyDepthForXY: true,
-                                }
-                            );
-                        } catch {
-                            sampledSketch = null;
-                        }
-
-                        passDiag.candidates.push({
-                            mode: "sampled-closed",
-                            hasWire: Boolean(sampledSketch?.wire),
-                            lazy: true,
-                        });
-
-                        if (sampledSketch?.wire) {
-                            for (const sweepOpts of sweepOptionsCandidates) {
-                                try {
-                                    const sampledCutter = genericSweep(
-                                        profileWire,
-                                        sampledSketch.wire,
-                                        sweepOpts,
-                                        false
-                                    );
-                                    if (!sampledCutter) {
-                                        passDiag.sweepAttempts.push({
-                                            mode: "sampled-closed",
-                                            sweepOpts,
-                                            ok: false,
-                                            resultState: "nullish",
-                                        });
-                                        continue;
-                                    }
-                                    if (typeof sampledCutter.mesh !== "function") {
-                                        passDiag.sweepAttempts.push({
-                                            mode: "sampled-closed",
-                                            sweepOpts,
-                                            ok: false,
-                                            resultState: "non-meshable",
-                                            resultKeys: Object.keys(sampledCutter || {}).slice(0, 8),
-                                        });
-                                        continue;
-                                    }
-                                    cutter = sampledCutter;
-                                    passDiag.sweepAttempts.push({
-                                        mode: "sampled-closed",
-                                        sweepOpts,
-                                        ok: true,
-                                    });
-                                    selectedSpineMode = "sampled-closed";
-                                    break;
-                                } catch (errSweep) {
-                                    passDiag.sweepAttempts.push({
-                                        mode: "sampled-closed",
-                                        sweepOpts,
-                                        ok: false,
-                                        error: errSweep?.message,
-                                    });
-                                    sweepError = errSweep;
-                                }
-                            }
-                        }
-                }
 
                 if (!cutter) {
                     const incompleteAttempts = passDiag.sweepAttempts
@@ -4138,14 +4390,15 @@ export default class ReplicadCanvasModule extends BaseModule {
 
                 if (
                     selectedSpineMode !== "segments-original" &&
+                    selectedSpineMode !== "segments-g1healed" &&
                     selectedSpineMode !== "segments-closed" &&
-                    selectedSpineMode !== "segments-closed-reversed" &&
-                    selectedSpineMode !== "sampled-closed"
+                    selectedSpineMode !== "segments-closed-reversed"
                 ) {
                     this._logWarnThrottled("VC pass used fallback spine candidate", {
                         passIndex,
                         depth,
                         selectedSpineMode,
+                        selectedSweepOpts,
                         segmentFailReason: segCandidateDiag?.failReason || null,
                         segmentFailDetail: segCandidateDiag?.failDetail || null,
                         fallbackEnabled: allowVcFallbackSpines,

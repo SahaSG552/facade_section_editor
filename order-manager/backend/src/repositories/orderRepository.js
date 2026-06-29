@@ -201,6 +201,8 @@ export class OrderRepository {
           status,
           status_code,
           current_stage,
+          start_date,
+          due_date,
           notes,
           created_by,
           customer_code,
@@ -209,7 +211,7 @@ export class OrderRepository {
           split_part,
           order_kind
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING *
       `;
 
@@ -228,6 +230,8 @@ export class OrderRepository {
         statusCode,
         statusCode,
         stage,
+        orderData.startDate || null,
+        orderData.dueDate || null,
         orderData.notes || null,
         orderData.createdBy || null,
         customerCode,
@@ -332,6 +336,22 @@ export class OrderRepository {
 
       fields.push(`current_stage = $${paramIndex++}`);
       values.push(nextStage);
+    }
+    if (orderData.customerId) {
+      fields.push(`customer_id = $${paramIndex++}`);
+      values.push(orderData.customerId);
+    }
+    if (orderData.orderName) {
+      fields.push(`order_number = $${paramIndex++}`);
+      values.push(String(orderData.orderName).trim());
+    }
+    if (orderData.startDate !== undefined) {
+      fields.push(`start_date = $${paramIndex++}`);
+      values.push(orderData.startDate || null);
+    }
+    if (orderData.dueDate !== undefined) {
+      fields.push(`due_date = $${paramIndex++}`);
+      values.push(orderData.dueDate || null);
     }
     if (orderData.notes !== undefined) {
       fields.push(`notes = $${paramIndex++}`);

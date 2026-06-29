@@ -45,6 +45,16 @@ export async function materialsRoutes(fastify, options) {
           costPerSqm: { type: 'number' },
           supplier: { type: 'string' },
           inStock: { type: 'number' },
+          quantity: { type: 'number' },
+          reserve: { type: 'number' },
+          category: { type: 'string', enum: ['board', 'leaf', 'linear', 'coating', 'paint'] },
+          boardHeight: { type: 'number' },
+          boardWidth: { type: 'number' },
+          leafHeight: { type: 'number' },
+          leafWidth: { type: 'number' },
+          hasGrain: { type: 'boolean' },
+          coating1Id: { type: 'string', format: 'uuid' },
+          coating2Id: { type: 'string', format: 'uuid' },
         },
       },
     },
@@ -59,7 +69,33 @@ export async function materialsRoutes(fastify, options) {
   });
 
   // PATCH /api/v1/materials/:id
-  fastify.patch('/materials/:id', async (request, reply) => {
+  fastify.patch('/materials/:id', {
+    schema: {
+      body: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          name: { type: 'string' },
+          description: { type: 'string' },
+          thickness: { type: 'number' },
+          density: { type: 'number' },
+          costPerSqm: { type: 'number' },
+          supplier: { type: 'string' },
+          inStock: { type: 'number' },
+          quantity: { type: 'number' },
+          reserve: { type: 'number' },
+          category: { type: 'string', enum: ['board', 'leaf', 'linear', 'coating', 'paint'] },
+          boardHeight: { type: 'number' },
+          boardWidth: { type: 'number' },
+          leafHeight: { type: 'number' },
+          leafWidth: { type: 'number' },
+          hasGrain: { type: 'boolean' },
+          coating1Id: { type: 'string', format: 'uuid' },
+          coating2Id: { type: 'string', format: 'uuid' },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const { id } = request.params;
     const material = await materialRepo.update(id, request.body);
     if (!material) {

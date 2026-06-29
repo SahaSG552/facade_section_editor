@@ -7,6 +7,8 @@ export const createOrderSchema = {
     orderKind: { type: 'string', enum: ['normal', 'd', 'r'], default: 'normal' },
     splitFromOrderId: { type: 'string', format: 'uuid' },
     status: { type: 'string', maxLength: 80 },
+    startDate: { type: 'string', format: 'date' },
+    dueDate: { type: 'string', format: 'date' },
     notes: { type: 'string', maxLength: 1000 },
     createdBy: { type: 'string', format: 'uuid' },
     items: {
@@ -34,7 +36,11 @@ export const createOrderSchema = {
 export const updateOrderSchema = {
   type: 'object',
   properties: {
+    customerId: { type: 'string', format: 'uuid' },
+    orderName: { type: 'string', minLength: 1, maxLength: 50 },
     status: { type: 'string', maxLength: 80 },
+    startDate: { type: 'string', format: 'date' },
+    dueDate: { type: 'string', format: 'date' },
     notes: { type: 'string', maxLength: 1000 },
   },
 };
