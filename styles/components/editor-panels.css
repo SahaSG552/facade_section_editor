@@ -242,13 +242,15 @@
 .epl-panel-body #operations {
     max-height: none;
     height: auto;
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: visible;
 }
 
 /* Ensure part params/operations are content-sized by default before resize */
 .epl-panel-body #part-params,
 .epl-panel-body #operations {
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: visible;
 }
 
 /* ==========================================================================
@@ -256,6 +258,7 @@
    ========================================================================== */
 #operations table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     font-size: 11px;
     line-height: 1.4;
@@ -279,6 +282,55 @@
     letter-spacing: 0.03em;
 }
 
+#operations thead th:nth-child(1),
+#operations tbody td:nth-child(1) {
+    width: 4%;
+}
+
+#operations thead th:nth-child(2),
+#operations tbody td:nth-child(2) {
+    width: 5%;
+}
+
+#operations thead th:nth-child(3),
+#operations tbody td:nth-child(3) {
+    width: auto;
+    min-width: 0;
+    width: 30%;
+}
+
+#operations thead th:nth-child(4),
+#operations tbody td:nth-child(4),
+#operations thead th:nth-child(5),
+#operations tbody td:nth-child(5),
+#operations thead th:nth-child(6),
+#operations tbody td:nth-child(6) {
+    width: auto;
+    min-width: 0;
+    width: 8%;
+}
+
+#operations thead th:nth-child(7),
+#operations tbody td:nth-child(7) {
+    width: 0;
+}
+
+#operations thead th:nth-child(8),
+#operations tbody td:nth-child(8) {
+    width: 7%;
+}
+
+#operations thead th:nth-child(9),
+#operations tbody td:nth-child(9),
+#operations thead th:nth-child(10),
+#operations tbody td:nth-child(10),
+#operations thead th:nth-child(11),
+#operations tbody td:nth-child(11),
+#operations thead th:nth-child(12),
+#operations tbody td:nth-child(12) {
+    width: 4%;
+}
+
 #operations tbody tr {
     transition: background-color 0.15s ease;
     border-bottom: 1px solid hsl(var(--color-border-default) / 0.5);
@@ -298,6 +350,24 @@
     vertical-align: middle;
     color: hsl(var(--color-text-primary));
     font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#operations tbody td input,
+#operations tbody td select {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+#operations tbody td:nth-child(3) {
+    text-align: left;
+}
+
+#operations tbody td:nth-child(3) > div {
+    white-space: normal;
+    word-break: break-word;
 }
 
 #operations tbody td:first-child,
@@ -311,9 +381,49 @@
 }
 
 /* Alignment column is auto-derived from operation (AL/VC=center, OU=right, IN/PO=left). */
-#operations thead th:nth-child(6),
-#operations tbody td:nth-child(6) {
+#operations thead th:nth-child(7),
+#operations tbody td:nth-child(7) {
     display: none;
+}
+
+#operations thead th:last-child,
+#operations tbody td:last-child {
+    display: table-cell;
+}
+
+.pattern-picker-menu {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px;
+    background: hsl(var(--color-bg-surface));
+    border: 1px solid hsl(var(--color-border-default));
+    border-radius: 10px;
+    box-shadow: 0 8px 24px hsl(var(--color-shadow-primary) / 0.16);
+}
+
+.pattern-picker-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 120px;
+    padding: 6px 8px;
+    border: 1px solid hsl(var(--color-border-default));
+    border-radius: 8px;
+    background: hsl(var(--color-bg-elevated));
+    color: hsl(var(--color-text-primary));
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.pattern-picker-option:hover {
+    background: hsl(var(--color-bg-surface));
+}
+
+.pattern-picker-icon {
+    width: 14px;
+    text-align: center;
+    font-weight: 600;
 }
 
 /* Header action buttons (Cop / Hid / Del) */

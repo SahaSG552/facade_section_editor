@@ -631,6 +631,7 @@ function initializeSVG() {
         evaluateMathExpression: evaluateMathExpression,
         createAlignmentButton: createAlignmentButton,
         getOperationsForGroup: getOperationsForGroup,
+        getOperationOptions: getOperationOptionsForBit,
         convertToTopAnchorCoordinates: convertToTopAnchorCoordinates,
         getPanelThickness: () => panelThickness,
         angleToRad: angleToRad,
@@ -641,6 +642,7 @@ function initializeSVG() {
         onChangePosition: updateBitPosition,
         onCycleAlignment: cycleAlignment,
         onChangeOperation: handleOperationChange,
+        onChangeStep: handleStepChange,
         onChangeColor: handleColorChange,
         onDeleteBit: deleteBitFromCanvas,
         onCopyBit: copyBitFromCanvas,
@@ -657,19 +659,24 @@ function initializeSVG() {
     });
 
     // Set up callbacks for BitsManager to communicate with main canvas
-    bitsManager.onDrawBitShape = (bit, groupName) =>
+    bitsManager.onDrawBitShape = async (bit, groupName, sourceEvent) => {
+        const patternType = await pickPatternTypeForBitInsert(sourceEvent);
+        if (!patternType) return;
         drawBitShape(
             bit,
             groupName,
-            bitsManager.createBitShapeElement.bind(bitsManager)
+            bitsManager.createBitShapeElement.bind(bitsManager),
+            { patternType }
         );
+    };
     // Keep bit insertion working even if another BitsManager instance refreshes the UI.
     window.__facadeOnDrawBitShape = (bit, groupName, managerInstance) =>
         drawBitShape(
             bit,
             groupName,
             managerInstance?.createBitShapeElement?.bind(managerInstance)
-                ?? bitsManager.createBitShapeElement.bind(bitsManager)
+                ?? bitsManager.createBitShapeElement.bind(bitsManager),
+            { patternType: "offset" }
         );
     bitsManager.onUpdateCanvasBits = (bitId) => updateCanvasBitsForBitId(bitId);
     bitsManager.onDeleteCanvasBits = (bitId) =>
@@ -2000,6 +2007,64 @@ function updatePhantomBits() {
         anchorCoords,
     });
 
+    const arrangeBits = getVisibleBits().filter(
+        (bit) => normalizePatternType(bit.patternType) === "arrange"
+    );
+    arrangeBits.forEach((bit) => {
+        const centers = Array.isArray(bit.arrangePhantomCenters)
+            ? bit.arrangePhantomCenters
+            : [];
+        centers.forEach((center, phantomIndex) => {
+            const absX = anchorCoords.x + (Number(center?.x) || 0);
+            const absY = anchorCoords.y + (Number(center?.y) || 0);
+            const phantomGroup = document.createElementNS(svgNS, "g");
+            phantomGroup.classList.add("phantom-bit", "arrange-phantom-bit");
+            phantomGroup.setAttribute("data-arrange-phantom", "true");
+            phantomGroup.setAttribute("data-phantom-index", String(phantomIndex));
+
+            const shape = bitsManager.createBitShapeElement(
+                bit.bitData,
+                bit.groupName,
+                absX,
+                absY,
+                false
+            );
+            shape.style.opacity = "0.25";
+            phantomGroup.appendChild(shape);
+            phantomsLayer.appendChild(phantomGroup);
+        });
+    });
+
+    const offsetPatternBits = getVisibleBits().filter((bit) => {
+        if (normalizePatternType(bit.patternType) !== "offset") return false;
+        const operation = String(bit.operation || "").toUpperCase();
+        return operation !== "VC" && operation !== "PO";
+    });
+    offsetPatternBits.forEach((bit) => {
+        const centers = Array.isArray(bit.offsetPhantomCenters)
+            ? bit.offsetPhantomCenters
+            : [];
+        centers.forEach((center, phantomIndex) => {
+            const absX = anchorCoords.x + (Number(center?.x) || 0);
+            const absY = anchorCoords.y + (Number(center?.y) || 0);
+            const phantomGroup = document.createElementNS(svgNS, "g");
+            phantomGroup.classList.add("phantom-bit", "offset-phantom-bit");
+            phantomGroup.setAttribute("data-offset-phantom", "true");
+            phantomGroup.setAttribute("data-phantom-index", String(phantomIndex));
+
+            const shape = bitsManager.createBitShapeElement(
+                bit.bitData,
+                bit.groupName,
+                absX,
+                absY,
+                false
+            );
+            shape.style.opacity = "0.22";
+            phantomGroup.appendChild(shape);
+            phantomsLayer.appendChild(phantomGroup);
+        });
+    });
+
     updateBitExtensions();
     updatePocketWidthInputs(); // Update PO pocket width inputs
 }
@@ -2197,12 +2262,12 @@ function syncExternal3DState() {
 }
 
 function updateOffsetContours() {
-    if (!appState.is2DActive()) {
-        log.debug("Skip updateOffsetContours: 2D inactive");
-        return;
+    const previousOffsetContours = offsetContours;
+    const render2DOffsets = appState.is2DActive() && mainCanvasManager;
+    const offsetsLayer = render2DOffsets ? mainCanvasManager.getLayer("offsets") : null;
+    if (offsetsLayer) {
+        offsetsLayer.innerHTML = ""; // Clear all offset contours
     }
-    const offsetsLayer = mainCanvasManager.getLayer("offsets");
-    offsetsLayer.innerHTML = ""; // Clear all offset contours
 
     // Clear the offset contours array
     offsetContours = [];
@@ -2225,6 +2290,7 @@ function updateOffsetContours() {
 
     // Get ExportModule for arc approximation
     const exportModule = app.getModule("export");
+    const visibleBits = getVisibleBits();
 
     // Create offset calculator with arc approximation enabled for consistency with DXF export
     const forceReverseOutput = window.forceReverseOffset !== false;
@@ -2243,8 +2309,10 @@ function updateOffsetContours() {
     window.offsetCalculator = offsetCalculator;
     window.convertToTopAnchorCoordinates = convertToTopAnchorCoordinates;
 
-    getVisibleBits().forEach((bit, index) => {
+    visibleBits.forEach((bit, index) => {
+        bit.patternStats = null;
         if (bit.operation === "VC") {
+            bit.offsetPhantomCenters = [];
             // Convert bit coordinates to top anchor coordinates for calculations
             const topAnchorCoords = convertToTopAnchorCoordinates(bit);
             // V-Carve operation: multiple passes
@@ -2419,6 +2487,7 @@ function updateOffsetContours() {
                 `[VC] Created ${passes} intermediate contours${workOffsetMsg} for bit ${index} (displayed: base + work, 3D uses: intermediate only)`
             );
         } else if (bit.operation === "PO") {
+            bit.offsetPhantomCenters = [];
             // PO (Pocketing) operation: two offsets (main bit left edge, phantom bit right edge)
             const diameter = bit.bitData.diameter || 10;
             const pocketOffset = bit.pocketOffset || 0;
@@ -2460,11 +2529,12 @@ function updateOffsetContours() {
                     mainOffsetContour.setAttribute("stroke-dasharray", "5,5");
                     mainOffsetContour.classList.add("offset-contour");
                     mainOffsetContour.classList.add("offset-contour-po-main");
-                    offsetsLayer.appendChild(mainOffsetContour);
+                    if (offsetsLayer) offsetsLayer.appendChild(mainOffsetContour);
 
                     offsetContours.push({
                         element: mainOffsetContour,
                         bitIndex: index,
+                        bitId: bit.bitData?.id ?? bit.id ?? null,
                         offsetDistance: mainOffsetDistance,
                         operation: "PO",
                         isPOMain: true,
@@ -2518,11 +2588,12 @@ function updateOffsetContours() {
                     phantomOffsetContour.classList.add(
                         "offset-contour-po-phantom"
                     );
-                    offsetsLayer.appendChild(phantomOffsetContour);
+                    if (offsetsLayer) offsetsLayer.appendChild(phantomOffsetContour);
 
                     offsetContours.push({
                         element: phantomOffsetContour,
                         bitIndex: index,
+                        bitId: bit.bitData?.id ?? bit.id ?? null,
                         offsetDistance: phantomOffsetDistance,
                         operation: "PO",
                         isPOPhantom: true,
@@ -2548,8 +2619,269 @@ function updateOffsetContours() {
                     )}mm (phantom skipped: ${reason})`
                 );
             }
+        } else if (
+            normalizePatternType(bit.patternType) === "arrange" ||
+            bit.operation === "AR"
+        ) {
+            bit.offsetPhantomCenters = [];
+            const rawBBox = partFront?.getBBox?.();
+            const hasRenderableBBox = rawBBox
+                && Number.isFinite(rawBBox.width)
+                && Number.isFinite(rawBBox.height)
+                && rawBBox.width > 0
+                && rawBBox.height > 0;
+            const samplePath = String(partFront?.getAttribute("d") || "").trim();
+            const svgRoot = document.querySelector("svg");
+            const arrangeProbePath = !hasRenderableBBox && samplePath && svgRoot
+                ? document.createElementNS(svgNS, "path")
+                : null;
+            if (arrangeProbePath) {
+                arrangeProbePath.setAttribute("d", samplePath);
+                arrangeProbePath.setAttribute("visibility", "hidden");
+                svgRoot.appendChild(arrangeProbePath);
+            }
+            const probeBBox = arrangeProbePath ? (() => {
+                try {
+                    const bbox = arrangeProbePath.getBBox();
+                    return bbox && Number.isFinite(bbox.width) && Number.isFinite(bbox.height) && bbox.width > 0 && bbox.height > 0
+                        ? { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height }
+                        : null;
+                } catch (_) {
+                    return null;
+                }
+            })() : null;
+            const bbox = hasRenderableBBox
+                ? rawBBox
+                : (probeBBox || {
+                    x: 0,
+                    y: 0,
+                    width: Number(appConfig.panel.width) || panelWidth || 0,
+                    height: Number(appConfig.panel.height) || panelHeight || 0,
+                });
+            if (!bbox || !Number.isFinite(bbox.width) || !Number.isFinite(bbox.height) || bbox.width <= 0 || bbox.height <= 0) {
+                if (arrangeProbePath?.isConnected) arrangeProbePath.remove();
+                return;
+            }
+
+            const pointInContour = (() => {
+                if (hasRenderableBBox && samplePath && typeof partFront?.isPointInFill === "function") {
+                    return (x, y) => {
+                        try {
+                            return partFront.isPointInFill(new DOMPoint(x, y));
+                        } catch (_) {
+                            return x >= bbox.x && x <= bbox.x + bbox.width && y >= bbox.y && y <= bbox.y + bbox.height;
+                        }
+                    };
+                }
+                if (arrangeProbePath && typeof arrangeProbePath.isPointInFill === "function") {
+                    return (x, y) => {
+                        try {
+                            return arrangeProbePath.isPointInFill(new DOMPoint(x, y));
+                        } catch (_) {
+                            return x >= bbox.x && x <= bbox.x + bbox.width && y >= bbox.y && y <= bbox.y + bbox.height;
+                        }
+                    };
+                }
+                if (!samplePath) {
+                    return (x, y) =>
+                        x >= bbox.x && x <= bbox.x + bbox.width && y >= bbox.y && y <= bbox.y + bbox.height;
+                }
+                return (x, y) =>
+                    x >= bbox.x && x <= bbox.x + bbox.width && y >= bbox.y && y <= bbox.y + bbox.height;
+            })();
+
+            const buildVerticalSegments = (x) => {
+                const segments = [];
+                const sample = Math.max(0.8, bbox.height / 320);
+                let inside = false;
+                let startY = bbox.y;
+                for (let y = bbox.y; y <= bbox.y + bbox.height + sample * 0.5; y += sample) {
+                    const cy = Math.min(bbox.y + bbox.height, y);
+                    const hit = pointInContour(x, cy);
+                    if (hit && !inside) {
+                        inside = true;
+                        startY = cy;
+                    } else if (!hit && inside) {
+                        inside = false;
+                        segments.push([startY, cy]);
+                    }
+                }
+                if (inside) {
+                    segments.push([startY, bbox.y + bbox.height]);
+                }
+                return segments.filter(([y1, y2]) => y2 - y1 > 0.2);
+            };
+
+            const buildHorizontalSegments = (y) => {
+                const segments = [];
+                const sample = Math.max(0.8, bbox.width / 320);
+                let inside = false;
+                let startX = bbox.x;
+                for (let x = bbox.x; x <= bbox.x + bbox.width + sample * 0.5; x += sample) {
+                    const cx = Math.min(bbox.x + bbox.width, x);
+                    const hit = pointInContour(cx, y);
+                    if (hit && !inside) {
+                        inside = true;
+                        startX = cx;
+                    } else if (!hit && inside) {
+                        inside = false;
+                        segments.push([startX, cx]);
+                    }
+                }
+                if (inside) {
+                    segments.push([startX, bbox.x + bbox.width]);
+                }
+                return segments.filter(([x1, x2]) => x2 - x1 > 0.2);
+            };
+
+            const panelSectionEl = document.getElementById("panel-section");
+            const sectionX = parseFloat(panelSectionEl?.getAttribute("x")) || 0;
+            const sectionY = parseFloat(panelSectionEl?.getAttribute("y")) || 0;
+            const layout = bit.arrangeLayout || "vertical";
+            const requestedStep = Math.max(0, Number(bit.step) || 0);
+            const marginX = Math.max(0, Number(bit.x) || 0);
+
+            const arrangeCenters = [];
+
+            const buildAxisDistribution = (start, end, requested) => {
+                const span = Math.max(0, end - start);
+                if (span < 1e-6) {
+                    return {
+                        points: [start],
+                        actualStep: 0,
+                    };
+                }
+
+                if (requested <= 0) {
+                    return {
+                        points: [start, end],
+                        actualStep: span,
+                    };
+                }
+
+                const intervals = Math.max(1, Math.round(span / requested));
+                const step = span / intervals;
+                const points = [];
+                for (let i = 0; i <= intervals; i++) {
+                    points.push(start + i * step);
+                }
+                return {
+                    points,
+                    actualStep: step,
+                };
+            };
+
+            const verticalRange = {
+                start: bbox.x + marginX,
+                end: bbox.x + bbox.width - marginX,
+            };
+            const horizontalRange = {
+                start: bbox.y,
+                end: bbox.y + bbox.height,
+            };
+
+            const verticalDistribution = buildAxisDistribution(
+                verticalRange.start,
+                verticalRange.end,
+                requestedStep
+            );
+            const horizontalDistribution = buildAxisDistribution(
+                horizontalRange.start,
+                horizontalRange.end,
+                requestedStep
+            );
+
+            const addPathContour = (pathData, extra = {}) => {
+                const contour = document.createElementNS(svgNS, "path");
+                contour.setAttribute("d", pathData);
+                contour.setAttribute("fill", "none");
+                contour.setAttribute("stroke", bit.color || "#cccccc");
+                contour.setAttribute("stroke-width", getAdaptiveStrokeWidth());
+                contour.setAttribute("stroke-dasharray", "5,5");
+                contour.classList.add("offset-contour");
+                if (offsetsLayer) offsetsLayer.appendChild(contour);
+
+                offsetContours.push({
+                    element: contour,
+                    bitIndex: index,
+                        bitId: bit.bitData?.id ?? bit.id ?? null,
+                    offsetDistance: null,
+                    operation: "AR",
+                    pathData,
+                    offsetEngineContours: [],
+                    ...extra,
+                });
+            };
+
+            let passCount = 0;
+            if (layout === "vertical" || layout === "grid") {
+                for (const x of verticalDistribution.points) {
+                    const segments = buildVerticalSegments(x);
+                    if (segments.length === 0) continue;
+                    passCount += 1;
+                    arrangeCenters.push({ x: x - sectionX, y: Number(bit.y) || 0 });
+                    segments.forEach(([y1, y2]) => {
+                        addPathContour(`M ${x} ${y1} L ${x} ${y2}`, {
+                            arrangeLayout: "vertical",
+                        });
+                    });
+                }
+            }
+
+            if (layout === "horizontal" || layout === "grid") {
+                for (const y of horizontalDistribution.points) {
+                    const segments = buildHorizontalSegments(y);
+                    if (segments.length === 0) continue;
+                    passCount += 1;
+                    arrangeCenters.push({ x: Number(bit.x) || 0, y: y - sectionY });
+                    segments.forEach(([x1, x2]) => {
+                        addPathContour(`M ${x1} ${y} L ${x2} ${y}`, {
+                            arrangeLayout: "horizontal",
+                        });
+                    });
+                }
+            }
+
+            bit.patternStats = {
+                passes: passCount,
+                actualStep:
+                    layout === "horizontal"
+                        ? horizontalDistribution.actualStep
+                        : verticalDistribution.actualStep,
+            };
+            bit.arrangePhantomCenters = arrangeCenters;
+            if (arrangeProbePath?.isConnected) arrangeProbePath.remove();
         } else {
-            // Standard operations: AL, OU, IN
+            // Standard offset operations: AL, OU, IN (+ step multipass)
+            const collectSymmetricCenters = (centers, symmetryWidth) => {
+                const result = [];
+                const seen = new Set();
+                const pushCenter = (x, y) => {
+                    const nx = Number(x);
+                    const ny = Number(y);
+                    if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
+                    const key = `${nx.toFixed(4)}:${ny.toFixed(4)}`;
+                    if (seen.has(key)) return;
+                    seen.add(key);
+                    result.push({ x: nx, y: ny });
+                };
+
+                centers.forEach((center) => {
+                    const cx = Number(center?.x);
+                    const cy = Number(center?.y);
+                    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+                    const mirrorX = Number.isFinite(symmetryWidth)
+                        ? symmetryWidth - cx
+                        : NaN;
+                    pushCenter(cx, cy);
+                    if (Number.isFinite(mirrorX)) {
+                        pushCenter(mirrorX, cy);
+                    }
+                });
+
+                return result;
+            };
+
             const resolveOffsetDetailForDistance = (distance) => {
                 const isZeroOffset = Math.abs(Number(distance) || 0) < ARC_RADIUS_TOLERANCE;
                 if (isZeroOffset) {
@@ -2561,85 +2893,141 @@ function updateOffsetContours() {
                 return offsetCalculator.calculateOffsetDetailedFromSVG(partFront, distance);
             };
 
-            let offsetDistance = bit.x;
-            if (bit.operation === "OU") {
-                offsetDistance = bit.x + (bit.bitData.diameter || 0) / 2;
-            } else if (bit.operation === "IN") {
-                offsetDistance = bit.x - (bit.bitData.diameter || 0) / 2;
-            }
-            // AL uses bit.x as is
+            const drawOffsetPass = (distance, passIndex = 0) => {
+                const offsetDetail = resolveOffsetDetailForDistance(distance);
+                const pathData =
+                    typeof offsetDetail?.pathData === "string"
+                        ? offsetDetail.pathData
+                        : "";
+                if (!pathData) return false;
 
-            // Use offset calculator (preserves Bezier curves)
-            const offsetDetail = resolveOffsetDetailForDistance(offsetDistance);
-            const pathData =
-                typeof offsetDetail?.pathData === "string"
-                    ? offsetDetail.pathData
-                    : "";
-            const offsetEngineContours = Array.isArray(offsetDetail?.contours)
-                ? offsetDetail.contours
-                : [];
-
-            if (pathData) {
+                const offsetEngineContours = Array.isArray(offsetDetail?.contours)
+                    ? offsetDetail.contours
+                    : [];
 
                 const offsetContour = document.createElementNS(svgNS, "path");
                 offsetContour.setAttribute("d", pathData);
                 offsetContour.setAttribute("fill", "none");
                 offsetContour.setAttribute("stroke", bit.color || "#cccccc");
-                offsetContour.setAttribute(
-                    "stroke-width",
-                    getAdaptiveStrokeWidth()
-                );
+                offsetContour.setAttribute("stroke-width", getAdaptiveStrokeWidth());
                 offsetContour.setAttribute("stroke-dasharray", "5,5");
                 offsetContour.classList.add("offset-contour");
-                offsetsLayer.appendChild(offsetContour);
+                if (offsetsLayer) offsetsLayer.appendChild(offsetContour);
 
                 offsetContours.push({
                     element: offsetContour,
                     bitIndex: index,
-                    offsetDistance: offsetDistance,
+                    bitId: bit.bitData?.id ?? bit.id ?? null,
+                    offsetDistance: distance,
                     operation: bit.operation,
-                    pathData: pathData,
+                    pathData,
                     offsetEngineContours,
+                    stepPass: passIndex,
                 });
+                return true;
+            };
 
-                // For OU/IN operations: create additional centered contour for 3D rendering
-                // (3D should use center path like AL, not offset path)
-                if (bit.operation === "OU" || bit.operation === "IN") {
-                    const centerOffsetDistance = bit.x; // Always use center for 3D
-                    const centerOffsetDetail = resolveOffsetDetailForDistance(centerOffsetDistance);
-                    const centerPathData =
-                        typeof centerOffsetDetail?.pathData === "string"
-                            ? centerOffsetDetail.pathData
-                            : "";
-                    const centerOffsetEngineContours = Array.isArray(centerOffsetDetail?.contours)
-                        ? centerOffsetDetail.contours
-                        : [];
+            const centerXByDistance = (distance) => {
+                const diameter = Number(bit.bitData?.diameter) || 0;
+                if (bit.operation === "OU") return distance + diameter / 2;
+                if (bit.operation === "IN") return distance - diameter / 2;
+                return distance;
+            };
 
-                    if (centerPathData) {
+            const centerY = Number.isFinite(Number(bit.y)) ? Number(bit.y) : 0;
+            let baseOffsetDistance = bit.x;
+            if (bit.operation === "OU") {
+                baseOffsetDistance = bit.x - (bit.bitData.diameter || 0) / 2;
+            } else if (bit.operation === "IN") {
+                baseOffsetDistance = bit.x + (bit.bitData.diameter || 0) / 2;
+            }
 
-                        // Create invisible element (not added to DOM)
-                        const centerContour = document.createElementNS(
-                            svgNS,
-                            "path"
-                        );
-                        centerContour.setAttribute("d", centerPathData);
-                        centerContour.setAttribute("fill", "none");
+            const requestedStep = Math.max(0, Number(bit.step) || 0);
+            let passes = 0;
+            let plannedPasses = 1;
+            const contourSpanMin = 0;
+            const contourSpanMax = panelWidth;
+            const renderedOffsetCenters = [];
 
-                        // Add to offsetContours with flag for 3D use
-                        offsetContours.push({
-                            element: centerContour,
-                            bitIndex: index,
-                            offsetDistance: centerOffsetDistance,
-                            operation: bit.operation,
-                            for3D: true, // Flag: use this contour for 3D rendering
-                            pathData: centerPathData,
-                            offsetEngineContours: centerOffsetEngineContours,
-                        });
+            const registerRenderedCenter = (distance, passIndex) => {
+                if (!Number.isFinite(passIndex) || passIndex <= 0) return;
+                renderedOffsetCenters.push({
+                    x: centerXByDistance(distance),
+                    y: centerY,
+                });
+            };
+
+            if (drawOffsetPass(baseOffsetDistance, 0)) {
+                passes += 1;
+            }
+
+            if (requestedStep > 0) {
+                if (bit.operation === "AL") {
+                    const maxPlus = Math.max(
+                        0,
+                        Math.floor((contourSpanMax - baseOffsetDistance) / requestedStep)
+                    );
+                    const maxMinus = Math.max(
+                        0,
+                        Math.floor((baseOffsetDistance - contourSpanMin) / requestedStep)
+                    );
+                    plannedPasses = 1 + maxPlus + maxMinus;
+                    const maxK = Math.max(maxPlus, maxMinus);
+                    for (let k = 1; k <= maxK; k++) {
+                        if (k <= maxPlus && drawOffsetPass(baseOffsetDistance + k * requestedStep, k)) {
+                            passes += 1;
+                            registerRenderedCenter(baseOffsetDistance + k * requestedStep, k);
+                        }
+                        if (k <= maxMinus && drawOffsetPass(baseOffsetDistance - k * requestedStep, k)) {
+                            passes += 1;
+                            registerRenderedCenter(baseOffsetDistance - k * requestedStep, k);
+                        }
+                    }
+                } else {
+                    const direction = bit.operation === "IN" ? 1 : -1;
+                    const maxDirectional = direction > 0
+                        ? Math.max(0, Math.floor((contourSpanMax - baseOffsetDistance) / requestedStep))
+                        : Math.max(0, Math.floor((baseOffsetDistance - contourSpanMin) / requestedStep));
+                    plannedPasses = 1 + maxDirectional;
+
+                    for (let k = 1; k <= maxDirectional; k++) {
+                        if (drawOffsetPass(baseOffsetDistance + direction * k * requestedStep, k)) {
+                            passes += 1;
+                            registerRenderedCenter(baseOffsetDistance + direction * k * requestedStep, k);
+                        }
                     }
                 }
             }
+
+            const panelSectionEl = document.getElementById("panel-section");
+            const panelSectionWidth = Number(panelSectionEl?.getAttribute("width"));
+            const symmetryWidth = Number.isFinite(panelSectionWidth)
+                ? panelSectionWidth
+                : Number(panelWidth);
+            const mainCenter = {
+                x: centerXByDistance(baseOffsetDistance),
+                y: centerY,
+            };
+            bit.offsetPhantomCenters = collectSymmetricCenters(
+                [mainCenter, ...renderedOffsetCenters],
+                symmetryWidth,
+            );
+
+            bit.patternStats = {
+                passes: plannedPasses,
+                renderedPasses: passes,
+                actualStep: requestedStep > 0 ? requestedStep : 0,
+            };
+
+            bit.arrangePhantomCenters = [];
         }
     });
+
+    if (offsetContours.length === 0 && previousOffsetContours.length > 0 && visibleBits.length > 0) {
+        offsetContours = previousOffsetContours;
+        window.offsetContours = offsetContours;
+        syncExternal3DState();
+    }
 
     // Update BREP view if it's active
     updateReplicadIfActive();
@@ -2647,11 +3035,63 @@ function updateOffsetContours() {
 
 // Alignment states: 'center', 'left', 'right'
 const alignmentStates = ["center", "left", "right"];
+const ARRANGE_OPERATION_CODES = ["AR-V", "AR-H", "AR-G"];
+
+function normalizePatternType(patternType) {
+    return patternType === "arrange" ? "arrange" : "offset";
+}
+
+function getOperationUiValue(bit) {
+    if (normalizePatternType(bit?.patternType) === "arrange") {
+        const layout = bit?.arrangeLayout || "vertical";
+        if (layout === "horizontal") return "AR-H";
+        if (layout === "grid") return "AR-G";
+        return "AR-V";
+    }
+    return bit?.operation || "AL";
+}
+
+function decodeOperationSelection(newValue, bit) {
+    if (ARRANGE_OPERATION_CODES.includes(newValue)) {
+        const layout =
+            newValue === "AR-H"
+                ? "horizontal"
+                : newValue === "AR-G"
+                    ? "grid"
+                    : "vertical";
+        return {
+            patternType: "arrange",
+            operation: "AR",
+            arrangeLayout: layout,
+            operationUiValue: newValue,
+        };
+    }
+
+    return {
+        patternType: "offset",
+        operation: newValue,
+        arrangeLayout: null,
+        operationUiValue: newValue,
+    };
+}
+
+function getOperationOptionsForBit(bit, groupOperations = []) {
+    if (normalizePatternType(bit?.patternType) === "arrange") {
+        return [
+            { value: "AR-V", label: "AR-V" },
+            { value: "AR-H", label: "AR-H" },
+            { value: "AR-G", label: "AR-G" },
+        ];
+    }
+
+    return groupOperations.map((value) => ({ value }));
+}
 
 function resolveOperationAlignment(operation, fallback = "center") {
     switch (operation) {
         case "AL":
         case "VC":
+        case "AR":
             return "center";
         case "OU":
             return "right";
@@ -2928,7 +3368,78 @@ function deleteCanvasBitsByLibraryBitId(bitId) {
 }
 
 // Draw bit shape
-function drawBitShape(bit, groupName, createBitShapeElementFn) {
+async function pickPatternTypeForBitInsert(sourceEvent) {
+    if (!sourceEvent || !Number.isFinite(sourceEvent.clientX) || !Number.isFinite(sourceEvent.clientY)) {
+        return "offset";
+    }
+
+    const menu = document.createElement("div");
+    menu.className = "pattern-picker-menu";
+    menu.innerHTML = `
+        <button type="button" data-pattern="offset" class="pattern-picker-option">
+            <span class="pattern-picker-icon">◉</span>
+            <span>Offset</span>
+        </button>
+        <button type="button" data-pattern="arrange" class="pattern-picker-option">
+            <span class="pattern-picker-icon">☰</span>
+            <span>Arrange</span>
+        </button>
+    `;
+
+    const viewportPad = 8;
+    menu.style.position = "fixed";
+    menu.style.left = `${Math.max(viewportPad, sourceEvent.clientX)}px`;
+    menu.style.top = `${Math.max(viewportPad, sourceEvent.clientY)}px`;
+    menu.style.zIndex = "1200";
+    document.body.appendChild(menu);
+
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth - viewportPad) {
+        menu.style.left = `${Math.max(viewportPad, window.innerWidth - rect.width - viewportPad)}px`;
+    }
+    if (rect.bottom > window.innerHeight - viewportPad) {
+        menu.style.top = `${Math.max(viewportPad, window.innerHeight - rect.height - viewportPad)}px`;
+    }
+
+    return new Promise((resolve) => {
+        let resolved = false;
+
+        const cleanup = (value) => {
+            if (resolved) return;
+            resolved = true;
+            document.removeEventListener("mousedown", handleOutsideClick, true);
+            document.removeEventListener("keydown", handleKeydown, true);
+            menu.remove();
+            resolve(value);
+        };
+
+        const handleOutsideClick = (event) => {
+            if (!menu.contains(event.target)) {
+                cleanup("offset");
+            }
+        };
+
+        const handleKeydown = (event) => {
+            if (event.key === "Escape") {
+                cleanup("offset");
+            }
+        };
+
+        menu.querySelectorAll("[data-pattern]").forEach((button) => {
+            button.addEventListener("click", (event) => {
+                event.preventDefault();
+                const pattern = button.getAttribute("data-pattern");
+                cleanup(pattern || "offset");
+            });
+        });
+
+        document.addEventListener("mousedown", handleOutsideClick, true);
+        document.addEventListener("keydown", handleKeydown, true);
+    });
+}
+
+function drawBitShape(bit, groupName, createBitShapeElementFn, options = {}) {
+    const patternType = normalizePatternType(options.patternType || "offset");
     updatePanelParams();
     const anchorCoords = getPanelAnchorCoords();
     const activeLcs = getActiveLcsForInsert();
@@ -2956,8 +3467,12 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
         name: bit.name,
         x: x,
         y: y,
-        alignment: resolveOperationAlignment("AL", "center"),
-        operation: "AL", // default operation
+        patternType,
+        arrangeLayout: patternType === "arrange" ? "vertical" : null,
+        operation: patternType === "arrange" ? "AR" : "AL",
+        operationUiValue: patternType === "arrange" ? "AR-V" : "AL",
+        step: 0,
+        alignment: resolveOperationAlignment(patternType === "arrange" ? "AR" : "AL", "center"),
         color: bit.fillColor || "#cccccc", // default color from bit data
         group: g, // group that contains the shape
         baseAbsX: centerX, // absolute coords where shape was created
@@ -3006,18 +3521,41 @@ async function handleOperationChange(index, newOperation) {
     const bit = bitsOnCanvas[index];
     if (!bit) return;
 
-    bit.operation = newOperation;
-    bit.alignment = resolveOperationAlignment(newOperation, bit.alignment);
-    // Keep table coordinates and selected anchor cross in sync with operation-driven origin.
-    updateBitsSheet();
+    const nextOperation = decodeOperationSelection(newOperation, bit);
+    bit.patternType = nextOperation.patternType;
+    bit.operation = nextOperation.operation;
+    bit.arrangeLayout = nextOperation.arrangeLayout;
+    bit.operationUiValue = nextOperation.operationUiValue;
+    bit.alignment = resolveOperationAlignment(bit.operation, bit.alignment);
+    // Keep selected anchor cross in sync with operation-driven origin.
     redrawBitsOnCanvas();
     updateOffsetContours();
     updatePhantomBits();
+    updateBitsSheet();
 
     // Update 2D boolean operations if part is shown
     if (showPart) {
         updatePartShape();
     }
+
+    if (window.threeModule) {
+        const didUpdate = await updateThreeView(bit.bitData?.id);
+        if (showPart && didUpdate) {
+            window.threeModule.showBasePanel();
+            scheduleCsgIfNeeded(bit.bitData?.id);
+        }
+    }
+}
+
+async function handleStepChange(index, newStep) {
+    const bit = bitsOnCanvas[index];
+    if (!bit) return;
+
+    bit.step = Math.max(0, Number(newStep) || 0);
+    updateOffsetContours();
+    updatePhantomBits();
+    updateBitsSheet();
+    if (showPart) updatePartShape();
 
     if (window.threeModule) {
         const didUpdate = await updateThreeView(bit.bitData?.id);
@@ -3254,8 +3792,12 @@ function buildSavePayload() {
         id: bit.bitData.id,
         x: bit.x,
         y: bit.y,
+        patternType: normalizePatternType(bit.patternType),
+        arrangeLayout: bit.arrangeLayout || null,
+        step: bit.step || 0,
         alignment: bit.alignment,
         operation: bit.operation,
+        operationUiValue: bit.operationUiValue || getOperationUiValue(bit),
         color: bit.color,
         operationNumber: bit.operationNumber,
         isVisible: bit.isVisible !== false,
@@ -3280,7 +3822,7 @@ function buildSavePayload() {
     });
 
     return {
-        version: 2,
+        version: 3,
         bits: savedPositions,
         lcsRows: savedLcs,
         rowOrder: rowOrder,
@@ -3316,6 +3858,10 @@ function createBitCopy(sourceBit) {
         name: sourceBit.name,
         x: sourceBit.x,
         y: sourceBit.y,
+        patternType: normalizePatternType(sourceBit.patternType),
+        arrangeLayout: sourceBit.arrangeLayout || null,
+        operationUiValue: sourceBit.operationUiValue || getOperationUiValue(sourceBit),
+        step: sourceBit.step || 0,
         alignment: resolveOperationAlignment(sourceBit.operation, sourceBit.alignment),
         operation: sourceBit.operation,
         color: sourceBit.color,
@@ -4477,7 +5023,10 @@ async function restoreBitPositions(positionsData) {
                 // Ensure operation is valid for the group
                 const validOperations = getOperationsForGroup(groupName);
                 let operation = pos.operation || "AL";
-                if (!validOperations.includes(operation)) {
+                const restoredPatternType = normalizePatternType(pos.patternType);
+                if (restoredPatternType === "arrange") {
+                    operation = "AR";
+                } else if (!validOperations.includes(operation)) {
                     operation = "AL"; // Fallback to default
                 }
 
@@ -4487,6 +5036,22 @@ async function restoreBitPositions(positionsData) {
                     name: bitData.name,
                     x: pos.x,
                     y: pos.y,
+                    patternType: normalizePatternType(pos.patternType),
+                    arrangeLayout:
+                        normalizePatternType(pos.patternType) === "arrange"
+                            ? pos.arrangeLayout || "vertical"
+                            : null,
+                    operationUiValue:
+                        normalizePatternType(pos.patternType) === "arrange"
+                            ? ARRANGE_OPERATION_CODES.includes(pos.operationUiValue)
+                                ? pos.operationUiValue
+                                : pos.arrangeLayout === "horizontal"
+                                    ? "AR-H"
+                                    : pos.arrangeLayout === "grid"
+                                        ? "AR-G"
+                                        : "AR-V"
+                            : pos.operationUiValue || pos.operation || "AL",
+                    step: Math.max(0, Number(pos.step) || 0),
                     alignment: resolveOperationAlignment(
                         operation,
                         pos.alignment || "center"

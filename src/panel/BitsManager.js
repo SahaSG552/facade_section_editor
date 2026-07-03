@@ -1108,8 +1108,8 @@ export default class BitsManager {
                 });
                 bitDiv.appendChild(actionIcons);
 
-                bitDiv.addEventListener("click", () =>
-                    this.drawBitShape(bit, groupName),
+                bitDiv.addEventListener("click", (event) =>
+                    this.drawBitShape(bit, groupName, event),
                 );
                 bitList.appendChild(bitDiv);
             });
@@ -3218,11 +3218,11 @@ export default class BitsManager {
     }
 
     // Method that will be called from main script to draw bit shape on canvas
-    drawBitShape(bit, groupName) {
+    drawBitShape(bit, groupName, sourceEvent = null) {
         // This method will need to be implemented by delegating to the main canvas manager
         // For now, we'll need to pass a callback or reference to the main drawing function
         if (this.onDrawBitShape) {
-            this.onDrawBitShape(bit, groupName);
+            this.onDrawBitShape(bit, groupName, sourceEvent);
         }
     }
 

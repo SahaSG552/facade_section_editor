@@ -56,6 +56,7 @@ class BitsTableManager {
         this.evaluateMathExpression = config.evaluateMathExpression;
         this.createAlignmentButton = config.createAlignmentButton;
         this.getOperationsForGroup = config.getOperationsForGroup;
+        this.getOperationOptions = config.getOperationOptions || null;
         this.convertToTopAnchorCoordinates =
             config.convertToTopAnchorCoordinates;
         this.getPanelThickness = config.getPanelThickness;
@@ -66,6 +67,7 @@ class BitsTableManager {
             onChangePosition: () => {},
             onCycleAlignment: () => {},
             onChangeOperation: () => {},
+            onChangeStep: () => {},
             onChangeColor: () => {},
             onDeleteBit: () => {},
             onCopyBit: () => {},
@@ -163,6 +165,40 @@ class BitsTableManager {
     generateWarnings(bit) {
         const builder = new BitWarningsBuilder();
 
+        const stats = bit.patternStats || {};
+        const hasPatternStats = Number.isFinite(Number(stats.passes));
+        const isArrange = (bit.operation || "").toUpperCase() === "AR";
+        if (Number(bit.step) > 0 || (isArrange && hasPatternStats)) {
+            const requested = Number(bit.step);
+            const actualStep = Number.isFinite(Number(stats.actualStep))
+                ? Number(stats.actualStep)
+                : requested;
+            const passes = Number.isFinite(Number(stats.passes))
+                ? Number(stats.passes)
+                : 1;
+            builder.add(
+                `Step: ${parseFloat(actualStep.toFixed(3))}mm, Passes: ${passes}`
+            );
+        }
+
+        if (isArrange) {
+            const topAnchorCoords = this.convertToTopAnchorCoordinates
+                ? this.convertToTopAnchorCoordinates(bit)
+                : { y: bit.y || 0 };
+            const depth = Math.max(0, Number(topAnchorCoords?.y) || 0);
+            const angle = Number(bit.bitData?.angle) || 0;
+            const diameter = Number(bit.bitData?.diameter) || 0;
+
+            let actualWidth = diameter > 0 ? diameter : 0;
+            if (angle > 0 && depth > 0) {
+                const coneWidth = 2 * depth * Math.tan(this.angleToRad(angle / 2));
+                actualWidth = diameter > 0 ? Math.min(coneWidth, diameter) : coneWidth;
+            }
+            if (actualWidth > 0) {
+                builder.add(`Actual width: ${parseFloat(actualWidth.toFixed(3))}mm`);
+            }
+        }
+
         // Check if bit has VC operation
         if (bit.operation === "VC" && bit.bitData) {
             // Convert to top anchor coordinates to get depth
@@ -218,6 +254,13 @@ class BitsTableManager {
         }
 
         return builder.build();
+    }
+
+    createPatternDragIcon(patternType = "offset") {
+        if (patternType === "arrange") {
+            return '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>';
+        }
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/></svg>';
     }
 
     render(rows = [], selectedIndices = []) {
@@ -309,8 +352,8 @@ class BitsTableManager {
         const dragCell = document.createElement("td");
         dragCell.className = "drag-handle";
         dragCell.draggable = true;
-        dragCell.innerHTML =
-            '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="18" x2="16" y2="18"/></svg>';
+        dragCell.innerHTML = this.createPatternDragIcon(bit.patternType || "offset");
+        dragCell.title = bit.patternType === "arrange" ? "Arrange pattern" : "Offset pattern";
         dragCell.addEventListener("dragstart", (e) =>
             this.handleDragStart(e, row)
         );
@@ -369,6 +412,19 @@ class BitsTableManager {
         yCell.appendChild(yInput);
         row.appendChild(yCell);
 
+        const stepCell = document.createElement("td");
+        const stepInput = document.createElement("input");
+        stepInput.type = "text";
+        stepInput.value = Number(bit.step) || 0;
+        stepInput.addEventListener("change", async () => {
+            const val = this.evaluateMathExpression(stepInput.value);
+            stepInput.value = val;
+            const newStep = Math.max(0, parseFloat(val) || 0);
+            await this.callbacks.onChangeStep(bitIndex, newStep);
+        });
+        stepCell.appendChild(stepInput);
+        row.appendChild(stepCell);
+
         const alignCell = document.createElement("td");
         const alignBtn = document.createElement("button");
         alignBtn.type = "button";
@@ -387,24 +443,37 @@ class BitsTableManager {
         const opSelect = document.createElement("select");
         opSelect.className = "bits-table-select";
 
-        const groupOperations = this.getOperationsForGroup(bit.groupName);
-        const operationLabels = {
+        const defaultOperationLabels = {
             AL: "Profile Along",
             OU: "Profile Outside",
             IN: "Profile Inside",
             VC: "V-Carve",
             PO: "Pocketing",
+            "AR-V": "AR-V",
+            "AR-H": "AR-H",
+            "AR-G": "AR-G",
             RE: "Re-Machining",
             TS: "T-Slotting",
             DR: "Drill",
         };
 
-        groupOperations.forEach((opValue) => {
-            const option = document.createElement("option");
-            option.value = opValue;
-            option.textContent = operationLabels[opValue] || opValue;
+        const groupOperations = this.getOperationsForGroup(bit.groupName);
+        const operationOptions = this.getOperationOptions
+            ? this.getOperationOptions(bit, groupOperations)
+            : groupOperations.map((value) => ({ value, label: defaultOperationLabels[value] || value }));
 
-            if (bit.operation === opValue) {
+        operationOptions.forEach((opOption) => {
+            const optionValue =
+                typeof opOption === "string" ? opOption : opOption.value;
+            const optionLabel =
+                typeof opOption === "string"
+                    ? defaultOperationLabels[opOption] || opOption
+                    : opOption.label || defaultOperationLabels[optionValue] || optionValue;
+            const option = document.createElement("option");
+            option.value = optionValue;
+            option.textContent = optionLabel;
+
+            if ((bit.operationUiValue || bit.operation) === optionValue) {
                 option.selected = true;
             }
             opSelect.appendChild(option);
@@ -543,6 +612,10 @@ class BitsTableManager {
         });
         yCell.appendChild(yInput);
         row.appendChild(yCell);
+
+        const stepCell = document.createElement("td");
+        stepCell.textContent = "";
+        row.appendChild(stepCell);
 
         const alignCell = document.createElement("td");
         alignCell.textContent = "";

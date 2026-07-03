@@ -647,6 +647,9 @@ export default class ThreeModule extends BaseModule {
             x: b.x,
             y: b.y,
             op: b.operation,
+            patternType: b.patternType || "offset",
+            arrangeLayout: b.arrangeLayout || null,
+            step: b.step || 0,
             profile:
                 b.bitData?.profileSvg ||
                 b.bitData?.profilePath ||
@@ -882,18 +885,14 @@ export default class ThreeModule extends BaseModule {
                                 const shapes = path.toShapes(true);
 
                                 if (shapes && shapes.length > 0) {
-                                    // Get partFront bbox to center and scale
-                                    const centerX =
-                                        partFrontBBox.x + partFrontBBox.width / 2;
-                                    const centerY =
-                                        partFrontBBox.y + partFrontBBox.height / 2;
-
-                                    // Use real dimensions from bbox (source of truth)
-                                    const realWidth = partFrontBBox.width;
-                                    const realHeight = partFrontBBox.height;
-
                                     // Use first shape
                                     const shape = shapes[0];
+
+                                    // Anchor to the panel bbox so cutters stay aligned with the detail.
+                                    const centerX = partFrontBBox.x + partFrontBBox.width / 2;
+                                    const centerY = partFrontBBox.y + partFrontBBox.height / 2;
+                                    const realWidth = Math.max(1e-6, partFrontBBox.width);
+                                    const realHeight = Math.max(1e-6, partFrontBBox.height);
 
                                     // Calculate curveSegments based on total arc length
                                     let totalArcLength = 0;
@@ -2180,8 +2179,7 @@ export default class ThreeModule extends BaseModule {
                 continue; // Skip normal processing for PO bits
             }
 
-            // Standard operations: AL, OU, IN
-            // Find offset contour for this bit
+            // Standard/arrange operations: process each contour independently.
             const bitContours = offsetContours.filter(
                 (c) => c.bitIndex === bitIndex,
             );
@@ -2191,45 +2189,14 @@ export default class ThreeModule extends BaseModule {
                 continue;
             }
 
-            // For 3D: prefer centered contour (for3D flag) if available (OU/IN operations)
-            // Otherwise use the main contour (AL operation)
-            let contour = bitContours.find((c) => c.for3D === true);
-            if (!contour) {
-                // Fallback: use main contour (not base offset)
-                contour = bitContours.find((c) => c.pass !== 0);
-            }
-            if (!contour) {
-                // Final fallback: any contour
-                contour = bitContours[0];
-            }
-            if (!contour || !contour.element) {
-                this.log.debug(`No valid contour element for bit ${bitIndex}`);
-                continue;
-            }
-
-            // Get path data from SVG path element
-            const pathElement = contour.element;
-            const pathData = pathElement.getAttribute("d");
-
-            if (!pathData) {
-                this.log.debug(`No path data for bit ${bitIndex}`);
-                continue;
-            }
-
-            this.log.debug(
-                `Path data for bit ${bitIndex}:`,
-                pathData.substring(0, 100) + "...",
+            const contoursFor3D = bitContours.filter(
+                (contour) => contour && contour.element && !contour.isWorkOffset,
             );
+            if (contoursFor3D.length === 0) {
+                this.log.debug(`No 3D-eligible contours for bit ${bitIndex}`);
+                continue;
+            }
 
-            // Get bit depth for z offset (needed for path visualization)
-            const bitDepth = bit.y || 0;
-
-            // Parse path to curves for visualization
-            const pathCurves =
-                this.extrusionBuilder.parsePathToCurves(pathData);
-            // Path visualization is now handled by extrudeAlongPath with pathVisual=true by default
-
-            // Create bit profile shape
             const bitProfile = await this.extrusionBuilder.createBitProfile(
                 bit.bitData,
             );
@@ -2244,6 +2211,7 @@ export default class ThreeModule extends BaseModule {
                 bit.bitData?.extension ||
                 bit.extension ||
                 (bit.group && bit.group.__extension);
+            const bitDepth = Number(bit.y) || 0;
 
             // Transformation options for coordinate conversion
             const transformOptions = {
@@ -2256,156 +2224,119 @@ export default class ThreeModule extends BaseModule {
                 panelAnchor,
             };
 
-            // Create bit using unified constructor
-            // extrudeAlongPath returns: [pathLine (if enabled), ...meshes]
-            const bitResult = this.extrusionBuilder.extrudeAlongPath(
-                bitProfile,
-                pathData, // SVG path string (already with approximated arcs)
-                bit.color,
-                0, // zOffset = 0 for main bit
-                "round", // Half-profile with lathe corners
-                                "top", // Always use top panel side - bottom removed
-                transformOptions,
-            );
+            for (let contourIndex = 0; contourIndex < contoursFor3D.length; contourIndex += 1) {
+                const contour = contoursFor3D[contourIndex];
+                const pathData =
+                    contour.pathData || contour.element?.getAttribute("d") || "";
+                if (!pathData) continue;
 
-            // Separate path line from meshes
-            let bitMeshes = [];
-            if (bitResult?.length > 0) {
-                const firstItem = bitResult[0];
-                if (
-                    firstItem instanceof THREE.Line ||
-                    firstItem.type === "Line"
-                ) {
-                    const pathLine = firstItem;
-                    bitMeshes = bitResult.slice(1);
-                    pathLine.userData.bitIndex = bitIndex;
-                    pathLine.userData.bitId = bit.bitData?.id;
-                    this.bitPathMeshes.push(pathLine);
-                } else {
-                    bitMeshes = bitResult;
+                const bitResult = this.extrusionBuilder.extrudeAlongPath(
+                    bitProfile,
+                    pathData,
+                    bit.color,
+                    bitDepth,
+                    "round",
+                    "top",
+                    transformOptions,
+                );
+
+                let bitMeshes = [];
+                if (bitResult?.length > 0) {
+                    const firstItem = bitResult[0];
+                    if (firstItem instanceof THREE.Line || firstItem.type === "Line") {
+                        const pathLine = firstItem;
+                        bitMeshes = bitResult.slice(1);
+                        pathLine.userData.bitIndex = bitIndex;
+                        pathLine.userData.bitId = bit.bitData?.id;
+                        pathLine.userData.contourIndex = contourIndex;
+                        this.bitPathMeshes.push(pathLine);
+                    } else {
+                        bitMeshes = bitResult;
+                    }
                 }
-            }
 
-            // Create extension if needed
-            let extensionMeshes = [];
-            if (
-                passExtensionInfo &&
-                pickPositiveNumber(
-                    passExtensionInfo?.height,
-                    bit?.extension?.height,
-                    bit?.bitData?.extension?.height,
-                )
-            ) {
-                const extensionWidth =
-                    pickPositiveNumber(
-                        passExtensionInfo?.width,
-                        bit?.extension?.width,
-                        bit?.bitData?.extension?.width,
-                        bit?.bitData?.shankDiameter,
-                        bit?.bitData?.diameter,
-                        10,
-                    ) || 10;
-                const extensionHeight =
+                let extensionMeshes = [];
+                if (
+                    passExtensionInfo &&
                     pickPositiveNumber(
                         passExtensionInfo?.height,
                         bit?.extension?.height,
                         bit?.bitData?.extension?.height,
-                    ) || 0;
-                const signedExtensionHeight = -extensionHeight;
+                    )
+                ) {
+                    const extensionWidth =
+                        pickPositiveNumber(
+                            passExtensionInfo?.width,
+                            bit?.extension?.width,
+                            bit?.bitData?.extension?.width,
+                            bit?.bitData?.shankDiameter,
+                            bit?.bitData?.diameter,
+                            10,
+                        ) || 10;
+                    const extensionHeight =
+                        pickPositiveNumber(
+                            passExtensionInfo?.height,
+                            bit?.extension?.height,
+                            bit?.bitData?.extension?.height,
+                        ) || 0;
+                    const extensionProfile =
+                        this.extrusionBuilder.createExtensionProfile(
+                            extensionWidth,
+                            -extensionHeight,
+                        );
 
-                const extensionProfile =
-                    this.extrusionBuilder.createExtensionProfile(
-                        extensionWidth,
-                        signedExtensionHeight,
+                    const extensionResult = this.extrusionBuilder.extrudeAlongPath(
+                        extensionProfile,
+                        pathData,
+                        "#FF0000",
+                        (bit.y || 0) + 1,
+                        "round",
+                        "top",
+                        { ...transformOptions, pathVisual: false, isExtension: true },
                     );
 
-                const extensionResult = this.extrusionBuilder.extrudeAlongPath(
-                    extensionProfile,
-                    pathData,
-                    "#FF0000", // Red color for extensions
-                    bitDepth + 1, // zOffset = bit depth (shifts extension above bit)
-                    "round",
-                                    "top", // Always use top panel side - bottom removed
-                    { ...transformOptions, pathVisual: false, isExtension: true }, // Disable path visualization for extensions
-                );
-
-                // Separate path line from meshes (though pathVisual is false)
-                if (extensionResult?.length > 0) {
-                    const firstItem = extensionResult[0];
-                    if (
-                        firstItem instanceof THREE.Line ||
-                        firstItem.type === "Line"
-                    ) {
-                        extensionMeshes = extensionResult.slice(1);
-                    } else {
-                        extensionMeshes = extensionResult;
+                    if (extensionResult?.length > 0) {
+                        const firstItem = extensionResult[0];
+                        extensionMeshes =
+                            firstItem instanceof THREE.Line || firstItem.type === "Line"
+                                ? extensionResult.slice(1)
+                                : extensionResult;
                     }
+
+                    extensionMeshes.forEach((mesh) => {
+                        mesh.userData.isExtension = true;
+                        mesh.material = mesh.material.clone();
+                        mesh.material.transparent = true;
+                        mesh.material.opacity = 0.4;
+                        mesh.material.color.set(
+                            passExtensionInfo.hasShankCollision
+                                ? "#8B0000"
+                                : "#FF0000",
+                        );
+                    });
                 }
 
-                // Style extension meshes
-                extensionMeshes.forEach((mesh) => {
-                    mesh.userData.isExtension = true;
-                    mesh.material = mesh.material.clone();
-                    mesh.material.transparent = true;
-                    mesh.material.opacity = 0.4;
-                    mesh.material.color.set(
-                        passExtensionInfo.hasShankCollision
-                            ? "#8B0000"
-                            : "#FF0000",
-                    );
-                });
-            }
-
-            // Process bit meshes
-            if (bitMeshes && bitMeshes.length > 0) {
                 bitMeshes.forEach((mesh) => {
                     mesh.userData.operation = bit.operation || "subtract";
                     mesh.userData.bitIndex = bitIndex;
                     mesh.userData.bitId = bit.bitData?.id;
+                    mesh.userData.contourIndex = contourIndex;
                     this.bitExtrudeMeshes.push(mesh);
-                    this.log.debug(
-                        `[SCENE] Added mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`,
-                    );
-
-                    // Add edge visualization to bit extrusions
-                    if (
-                        this.materialManager &&
-                        this.materialManager.isEdgesEnabled()
-                    ) {
+                    if (this.materialManager && this.materialManager.isEdgesEnabled()) {
                         this.materialManager.addEdgeVisualization(mesh);
                     }
                 });
-                this.log.debug(
-                    `Created ${bitMeshes.length} extrude mesh(es) for bit ${bitIndex}`,
-                );
 
-                // Process extension meshes (if any)
-                if (extensionMeshes && extensionMeshes.length > 0) {
-                    extensionMeshes.forEach((mesh) => {
-                        mesh.userData.operation = "extension";
-                        mesh.userData.bitIndex = bitIndex;
-                        mesh.userData.bitId = bit.bitData?.id;
-                        this.bitExtrudeMeshes.push(mesh);
-                        this.log.debug(
-                            `[SCENE] Added extension mesh for bit ${bitIndex}: ${mesh.geometry.attributes.position.count} vertices`,
-                        );
-
-                        // Add edge visualization to extensions
-                        if (
-                            this.materialManager &&
-                            this.materialManager.isEdgesEnabled()
-                        ) {
-                            this.materialManager.addEdgeVisualization(mesh);
-                        }
-                    });
-                    this.log.debug(
-                        `Created ${extensionMeshes.length} extension mesh(es) for bit ${bitIndex}`,
-                    );
-                }
-            } else {
-                this.log.debug(
-                    `Failed to create extrude mesh for bit ${bitIndex}`,
-                );
+                extensionMeshes.forEach((mesh) => {
+                    mesh.userData.operation = "extension";
+                    mesh.userData.bitIndex = bitIndex;
+                    mesh.userData.bitId = bit.bitData?.id;
+                    mesh.userData.contourIndex = contourIndex;
+                    this.bitExtrudeMeshes.push(mesh);
+                    if (this.materialManager && this.materialManager.isEdgesEnabled()) {
+                        this.materialManager.addEdgeVisualization(mesh);
+                    }
+                });
             }
         }
     }
@@ -2771,13 +2702,43 @@ export default class ThreeModule extends BaseModule {
             return this.lastValidPartFrontBBox;
         }
 
+        const panelManager = window.panelManager;
+        if (panelManager?.getPartFrontOrigin) {
+            const frontOrigin = panelManager.getPartFrontOrigin();
+            const frontWidth = Number(panelManager?.panelWidth);
+            const frontHeight = Number(panelManager?.panelHeight);
+            if (
+                frontOrigin &&
+                Number.isFinite(frontOrigin.x) &&
+                Number.isFinite(frontOrigin.y) &&
+                Number.isFinite(frontWidth) &&
+                Number.isFinite(frontHeight) &&
+                frontWidth > 0 &&
+                frontHeight > 0
+            ) {
+                const fallbackBBox = {
+                    x: frontOrigin.x,
+                    y: frontOrigin.y,
+                    width: frontWidth,
+                    height: frontHeight,
+                };
+                this.lastValidPartFrontBBox = fallbackBBox;
+                this.log.warn("Using PanelManager fallback partFront bbox", {
+                    fallbackBBox,
+                });
+                return fallbackBBox;
+            }
+        }
+
         const canvasParams = window.mainCanvasManager?.canvasParameters;
         if (canvasParams?.width && canvasParams?.height) {
             const panelX = (canvasParams.width - fallbackWidth) / 2;
             const panelY = (canvasParams.height - panelThickness) / 2;
+            const frontGap = Number(panelManager?.frontGap);
+            const resolvedGap = Number.isFinite(frontGap) ? frontGap : 100;
             const fallbackBBox = {
                 x: panelX,
-                y: panelY - fallbackHeight - 100,
+                y: panelY - fallbackHeight - resolvedGap,
                 width: fallbackWidth,
                 height: fallbackHeight,
             };

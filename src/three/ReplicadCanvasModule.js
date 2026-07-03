@@ -2990,7 +2990,13 @@ export default class ReplicadCanvasModule extends BaseModule {
             const tBitStart = perfTrace ? performance.now() : 0;
             try {
                 // Contours for this specific bit only
-                const contours = offsetContours.filter((c) => c.bitIndex === i);
+                const bitId = this._getBitId(bit, i);
+                const contours = offsetContours.filter((c) => {
+                    if (!c) return false;
+                    const contourBitId = c.bitId !== undefined && c.bitId !== null ? String(c.bitId) : null;
+                    if (contourBitId && contourBitId === bitId) return true;
+                    return c.bitIndex === i;
+                });
                 if (!contours.length) {
                     skippedCount += 1;
                     continue;
@@ -3024,7 +3030,6 @@ export default class ReplicadCanvasModule extends BaseModule {
                         includeContourDepth: true,
                     }
                 );
-                const bitId = this._getBitId(bit, i);
                 const libraryBitId = bit?.bitData?.id !== undefined && bit?.bitData?.id !== null
                     ? String(bit.bitData.id)
                     : null;
@@ -3127,6 +3132,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                     shape = this._buildVC(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor);
                 } else if (op === "PO") {
                     shape = this._buildPO(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor);
+                } else if (op === "AR") {
+                    shape = this._buildAR(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor);
                 } else {
                     shape = this._buildAL(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor);
                 }
@@ -3311,6 +3318,25 @@ export default class ReplicadCanvasModule extends BaseModule {
         return best?.segments || null;
     }
 
+    _isContourClosed(contour, pathData = "") {
+        const explicitClosed = contour?.closed;
+        if (typeof explicitClosed === "boolean") return explicitClosed;
+
+        const candidates = Array.isArray(contour?.offsetEngineContours)
+            ? contour.offsetEngineContours.filter((entry) => Array.isArray(entry?.segments) && entry.segments.length > 0)
+            : [];
+        if (candidates.length > 0) {
+            const closedCandidate = candidates.find((entry) => typeof entry?.closed === "boolean");
+            if (closedCandidate && typeof closedCandidate.closed === "boolean") {
+                return closedCandidate.closed;
+            }
+        }
+
+        const normalizedPath = String(pathData || contour?.pathData || "").trim();
+        if (!normalizedPath) return false;
+        return /[Zz]\s*$/.test(normalizedPath);
+    }
+
     _getSurfaceDepthZ(depth, panelAnchor = "top-left", panelThickness = appConfig.panel.thickness) {
         const halfThickness = panelThickness / 2;
         if (panelAnchor === "top-left") return halfThickness - depth;
@@ -3449,6 +3475,7 @@ export default class ReplicadCanvasModule extends BaseModule {
         const { Sketcher, genericSweep } = _replicad;
         try {
             const normalizedPathData = pickPrimarySubpath(pathData);
+            const contourClosed = this._isContourClosed(contour, normalizedPathData);
             const normalizedSummary = summarizeSvgPath(normalizedPathData);
             const contourSegments = this._getContourSegments(contour);
             const contourOffsetDistance = Number(contour?.offsetDistance);
@@ -3457,7 +3484,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                 : false;
             const useCsgZeroOffsetOutset = Boolean(this._showPart && isZeroOffsetContour);
             const commandSketchOptions = {
-                close: true,
+                close: contourClosed,
                 plane: "XY",
                 panelAnchor,
                 depth,
@@ -3537,7 +3564,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                             bboxRef,
                             Sketcher,
                             {
-                                close: true,
+                                close: contourClosed,
                                 plane: "XY",
                                 panelAnchor,
                                 depth,
@@ -3573,7 +3600,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                             bboxRef,
                             Sketcher,
                             {
-                                close: true,
+                                close: contourClosed,
                                 plane: "XY",
                                 panelAnchor,
                                 depth,
@@ -3607,7 +3634,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                         bboxRef,
                         Sketcher,
                         {
-                            close: true,
+                            close: contourClosed,
                             plane: "XY",
                             panelAnchor,
                             depth,
@@ -3644,7 +3671,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                             bboxRef,
                             Sketcher,
                             {
-                                close: true,
+                                close: contourClosed,
                                 plane: "XY",
                                 panelAnchor,
                                 depth,
@@ -3693,7 +3720,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                             bboxRef,
                             Sketcher,
                             {
-                                forceTopologicalClose: true,
+                                forceTopologicalClose: contourClosed,
                                 ...commandSketchOptions,
                             }
                         );
@@ -3705,8 +3732,66 @@ export default class ReplicadCanvasModule extends BaseModule {
                         hasWire: Boolean(commandSketch?.wire),
                     });
                     pathSketchCandidates.push({ mode: "commands-corner-closed", sketch: commandSketch });
+
+                    let sampledSketch = null;
+                    try {
+                        sampledSketch = buildSketchFromSvgPath(
+                            normalizedPathData,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: contourClosed,
+                                sampleStep: 1.0,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                            }
+                        );
+                    } catch {
+                        sampledSketch = null;
+                    }
+                    sweepDiag.candidates.push({
+                        mode: contourClosed ? "sampled-corner-closed" : "sampled-corner-open",
+                        hasWire: Boolean(sampledSketch?.wire),
+                    });
+                    pathSketchCandidates.push({
+                        mode: contourClosed ? "sampled-corner-closed" : "sampled-corner-open",
+                        sketch: sampledSketch,
+                    });
                 }
             } else {
+                let sampledSketch = null;
+                if (normalizedPathData) {
+                    try {
+                        sampledSketch = buildSketchFromSvgPath(
+                            normalizedPathData,
+                            bboxRef,
+                            Sketcher,
+                            {
+                                close: contourClosed,
+                                sampleStep: 1.0,
+                                plane: "XY",
+                                panelAnchor,
+                                depth,
+                                panelThickness: panelT,
+                                applyDepthForXY: true,
+                            }
+                        );
+                    } catch {
+                        sampledSketch = null;
+                    }
+                    sweepDiag.candidates.push({
+                        mode: contourClosed ? "sampled-closed" : "sampled-open",
+                        hasWire: Boolean(sampledSketch?.wire),
+                    });
+                    pathSketchCandidates.push({
+                        mode: contourClosed ? "sampled-closed" : "sampled-open",
+                        sketch: sampledSketch,
+                    });
+                }
+
                 let commandSketch = null;
                 try {
                     commandSketch = buildSketchFromSvgPathCommands(
@@ -3922,9 +4007,82 @@ export default class ReplicadCanvasModule extends BaseModule {
      */
     _buildAL(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor) {
         const depth = bit.y ?? 0;
-        const contour = this._selectStandardContour(contours);
-        const pathData = this._getContourPathData(contour);
-        return this._sweepRoundProfile(bit, depth, pathData, bboxRef, panelAnchor, panelT, "round", contour);
+        const contourCandidates = Array.isArray(contours)
+            ? contours.filter((contour) => contour && !contour?.isWorkOffset)
+            : [];
+        const selectedContours = contourCandidates.length > 0
+            ? contourCandidates
+            : (Array.isArray(contours) ? contours : []);
+
+        const shapes = [];
+        const seenPaths = new Set();
+        for (const contour of selectedContours) {
+            const pathData = this._getContourPathData(contour);
+            if (!pathData) continue;
+            if (seenPaths.has(pathData)) continue;
+            seenPaths.add(pathData);
+
+            const shape = this._sweepRoundProfile(
+                bit,
+                depth,
+                pathData,
+                bboxRef,
+                panelAnchor,
+                panelT,
+                "round",
+                contour
+            );
+            if (shape) shapes.push(shape);
+        }
+
+        if (shapes.length === 0) return null;
+        return shapes.length === 1 ? shapes[0] : shapes;
+    }
+
+    /**
+     * AR (Arrange) – layout-specific sweep path.
+     * Keep it separate from AL so arrange routing can evolve without affecting
+     * the general offset pipeline.
+     */
+    _buildAR(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor) {
+        const depth = bit.y ?? 0;
+        const contourCandidates = Array.isArray(contours)
+            ? contours.filter((contour) => contour && !contour?.isWorkOffset)
+            : [];
+        const selectedContours = contourCandidates.length > 0
+            ? contourCandidates.slice().sort((left, right) => {
+                const leftLayout = String(left?.arrangeLayout || "vertical");
+                const rightLayout = String(right?.arrangeLayout || "vertical");
+                if (leftLayout !== rightLayout) return leftLayout.localeCompare(rightLayout);
+                const leftIndex = Number.isFinite(left?.bitIndex) ? left.bitIndex : 0;
+                const rightIndex = Number.isFinite(right?.bitIndex) ? right.bitIndex : 0;
+                return leftIndex - rightIndex;
+            })
+            : (Array.isArray(contours) ? contours : []);
+
+        const shapes = [];
+        const seenPaths = new Set();
+        for (const contour of selectedContours) {
+            const pathData = this._getContourPathData(contour);
+            if (!pathData) continue;
+            if (seenPaths.has(pathData)) continue;
+            seenPaths.add(pathData);
+
+            const shape = this._sweepRoundProfile(
+                bit,
+                depth,
+                pathData,
+                bboxRef,
+                panelAnchor,
+                panelT,
+                "round",
+                contour
+            );
+            if (shape) shapes.push(shape);
+        }
+
+        if (shapes.length === 0) return null;
+        return shapes.length === 1 ? shapes[0] : shapes;
     }
 
     /**
@@ -3933,10 +4091,42 @@ export default class ReplicadCanvasModule extends BaseModule {
      */
     _buildPO(bit, contours, bboxRef, panelW, panelH, panelT, panelAnchor) {
         const depth = bit.y ?? 0;
-        // Prefer the explicitly-marked main contour, fall back to first
-        const mainContour = contours.find((c) => c.isPOMain) ?? contours[0];
-        const pathData = this._getContourPathData(mainContour);
-        return this._sweepRoundProfile(bit, depth, pathData, bboxRef, panelAnchor, panelT, "round", mainContour);
+        const contourCandidates = Array.isArray(contours)
+            ? contours.filter((contour) => contour && !contour?.isWorkOffset)
+            : [];
+        const selectedContours = contourCandidates.length > 0
+            ? contourCandidates
+            : (Array.isArray(contours) ? contours : []);
+
+        const sortedContours = selectedContours.slice().sort((left, right) => {
+            const leftRank = left?.isPOMain ? 0 : 1;
+            const rightRank = right?.isPOMain ? 0 : 1;
+            return leftRank - rightRank;
+        });
+
+        const shapes = [];
+        const seenPaths = new Set();
+        for (const contour of sortedContours) {
+            const pathData = this._getContourPathData(contour);
+            if (!pathData) continue;
+            if (seenPaths.has(pathData)) continue;
+            seenPaths.add(pathData);
+
+            const shape = this._sweepRoundProfile(
+                bit,
+                depth,
+                pathData,
+                bboxRef,
+                panelAnchor,
+                panelT,
+                "round",
+                contour
+            );
+            if (shape) shapes.push(shape);
+        }
+
+        if (shapes.length === 0) return null;
+        return shapes.length === 1 ? shapes[0] : shapes;
     }
 
     /**
@@ -4799,7 +4989,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                 const bit = bits?.[contour.bitIndex];
                 const pathColor = bit?.color || "#808080";
                 const contourDepth = Number.isFinite(contour?.depth) ? contour.depth : (bit?.y ?? 0);
-                this._addWirePath(contour.pathData, bboxRef, pathColor, panelAnchor, contourDepth, true);
+                const contourClosed = this._isContourClosed(contour, contour.pathData);
+                this._addWirePath(contour.pathData, bboxRef, pathColor, panelAnchor, contourDepth, contourClosed);
             }
 
             this._applyRenderStyle(this.displayMode);

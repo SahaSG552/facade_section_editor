@@ -2087,6 +2087,8 @@ export default class ExtrusionBuilder {
 
             // Check if path is closed
             const isClosedPath = this._isPathClosed(path);
+            const useRoundTerminalCaps =
+                !isClosedPath && options.revolveEndCaps !== false;
 
             const allMeshes = [];
             const junctionPoints = [];
@@ -2336,7 +2338,7 @@ export default class ExtrusionBuilder {
                     profile,
                     extrudeContourOuter,
                     chunkClosed,
-                    options.openCaps === true,
+                    options.openCaps === true || useRoundTerminalCaps,
                     curveSegments,
                     flags.invertExtrusionCaps,
                     side,
@@ -2425,6 +2427,82 @@ export default class ExtrusionBuilder {
                 }
             }
 
+            const addTerminalRoundCaps = (halfProfileName, latheProfilePoints) => {
+                if (!useRoundTerminalCaps) return;
+                if (!Array.isArray(latheProfilePoints) || latheProfilePoints.length < 2) return;
+
+                const flattenedContour = sampleCurvesToContour(path.curves || []);
+                if (!Array.isArray(flattenedContour) || flattenedContour.length < 2) return;
+
+                const firstPoint = flattenedContour[0];
+                const secondPoint = flattenedContour[1];
+                const beforeLastPoint = flattenedContour[flattenedContour.length - 2];
+                const lastPoint = flattenedContour[flattenedContour.length - 1];
+
+                const startDir = new THREE.Vector3().subVectors(secondPoint, firstPoint);
+                const endDir = new THREE.Vector3().subVectors(lastPoint, beforeLastPoint);
+                if (startDir.lengthSq() < 1e-10 || endDir.lengthSq() < 1e-10) return;
+
+                startDir.normalize();
+                endDir.normalize();
+
+                let extensionHeight = 0;
+                if (options.zOffset && options.zOffset !== 0) {
+                    const yCoords = latheProfilePoints.map((p) => p.y);
+                    const minY = Math.min(...yCoords);
+                    const maxY = Math.max(...yCoords);
+                    extensionHeight = Math.abs(maxY - minY);
+                }
+
+                const terminals = [
+                    {
+                        point: firstPoint,
+                        prevDir: startDir.clone().multiplyScalar(-1),
+                        nextDir: startDir.clone(),
+                        tag: "start",
+                    },
+                    {
+                        point: lastPoint,
+                        prevDir: endDir.clone(),
+                        nextDir: endDir.clone().multiplyScalar(-1),
+                        tag: "end",
+                    },
+                ];
+
+                for (const terminal of terminals) {
+                    const latheResult = this.createPartialLatheAtJunction(
+                        profile,
+                        terminal.point,
+                        terminal.prevDir,
+                        terminal.nextDir,
+                        color,
+                        `terminal-${halfProfileName}-${terminal.tag}`,
+                        true,
+                        null,
+                        false,
+                        side,
+                        !!options.isExtension,
+                        extensionHeight,
+                        latheProfilePoints,
+                        0,
+                        false,
+                    );
+
+                    if (latheResult?.mesh) {
+                        const terminalMesh = latheResult.mesh;
+                        terminalMesh.userData.isBitPart = true;
+                        terminalMesh.userData.isLatheCorner = true;
+                        terminalMesh.userData.isPartialLathe = true;
+                        terminalMesh.userData.isTerminalRoundCap = true;
+                        terminalMesh.userData.terminalTag = terminal.tag;
+                        terminalMesh.userData.halfProfile = halfProfileName;
+                        allMeshes.push(terminalMesh);
+                    }
+                }
+            };
+
+            addTerminalRoundCaps(outsideHalf, lathePoints);
+
             // Inside half extrusion: same convex/concave split logic as outside,
             // but with corner classification for inner half.
             const chunkGroupIndicesInner = buildChunksFromSplitBoundaries(
@@ -2436,6 +2514,9 @@ export default class ExtrusionBuilder {
             const extrudeInnerProfilePoints = innerProfilePoints
                 .slice()
                 .reverse();
+            const lathePointsInner = innerProfilePoints.map(
+                (p) => new THREE.Vector2(Math.abs(p.x), p.y),
+            );
 
             // Compute a miter limit for the inner sweep based on the profile
             // height.  When an arc is tessellated into many short sub-segments
@@ -2509,7 +2590,7 @@ export default class ExtrusionBuilder {
                     profile,
                     extrudeContourInner,
                     chunkClosed,
-                    options.openCaps === true,
+                    options.openCaps === true || useRoundTerminalCaps,
                     curveSegments,
                     flags.invertExtrusionCaps,
                     side,
@@ -2565,10 +2646,6 @@ export default class ExtrusionBuilder {
                     extensionHeight = Math.abs(maxY - minY);
                 }
 
-                const lathePointsInner = innerProfilePoints.map(
-                    (p) => new THREE.Vector2(Math.abs(p.x), p.y),
-                );
-
                 for (let i = 0; i < junctionPointsInner.length; i++) {
                     const junction = junctionPointsInner[i];
 
@@ -2604,6 +2681,8 @@ export default class ExtrusionBuilder {
                     }
                 }
             }
+
+            addTerminalRoundCaps(innerHalf, lathePointsInner);
 
             // Merge all OUTSIDE half parts, then merge with INSIDE
             const outsideMeshes = allMeshes.filter(
