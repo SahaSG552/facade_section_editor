@@ -19,6 +19,7 @@ class PanelManager {
         this.panelHeight = config.panelHeight || 600;
         this.panelThickness = config.panelThickness || 19;
         this.panelAnchor = config.panelAnchor || "top-left"; // "top-left" or "bottom-left"
+        this.frontGap = config.frontGap ?? 100; // Vertical gap between part section top and part front bottom
         this.gridSize = config.gridSize || 1;
 
         // Anchor position in scene coordinates (fixed, not recalculated on resize)
@@ -168,6 +169,32 @@ class PanelManager {
     }
 
     /**
+     * Get part front top-left origin in canvas space.
+     * Single source of truth for where the front path is drawn —
+     * keeps updatePartFront() and editor frame in sync.
+     */
+    getPartFrontOrigin() {
+        const panelOrigin = this.getPanelOrigin();
+        return {
+            x: panelOrigin.x,
+            y: panelOrigin.y - this.panelHeight - this.frontGap,
+        };
+    }
+
+    /**
+     * Get part front bottom-left point in canvas space.
+     * Used as editor frame origin so the editor coordinate system
+     * has its origin at the front bottom-left corner.
+     */
+    getPartFrontEditorOrigin() {
+        const panelOrigin = this.getPanelOrigin();
+        return {
+            x: panelOrigin.x,
+            y: panelOrigin.y - this.frontGap,
+        };
+    }
+
+    /**
      * Update bit logical positions after anchor change
      */
     updateBitsForNewAnchor(bits = []) {
@@ -291,6 +318,7 @@ class PanelManager {
         // Preserve user-edited contour and only keep style/stroke in sync.
         const existingPath = String(this.partFront?.getAttribute("d") ?? "").trim();
         if (this.partFrontManuallyEdited && existingPath) {
+            this.alignManualPartFront(existingPath, panelOrigin);
             SVGThemeHelper.setFillFromVariable(this.partFront, "--color-bg-surface");
             SVGThemeHelper.setStrokeFromVariable(this.partFront, "--color-text-primary");
             this.partFront.setAttribute("fill-opacity", "0.28");
@@ -301,8 +329,9 @@ class PanelManager {
             return;
         }
 
-        const frontX = panelOrigin.x;
-        const frontY = panelOrigin.y - this.panelHeight - 100;
+        const frontOrigin = this.getPartFrontOrigin();
+        const frontX = frontOrigin.x;
+        const frontY = frontOrigin.y;
         const frontWidth = this.panelWidth;
         const frontHeight = this.panelHeight;
 
@@ -332,6 +361,110 @@ class PanelManager {
         // Note: Do NOT sync params here during initialization
         // Parameters are the source for creating the shape
         // Only sync when shape is manually edited (partFrontManuallyEdited = true)
+    }
+
+    /**
+     * Keep manually edited part-front anchored to the panel:
+     * centered horizontally and placed above panel-section with frontGap.
+     */
+    alignManualPartFront(pathData, panelOrigin) {
+        if (!pathData || !this.partFront || !panelOrigin) return;
+
+        let bbox;
+        try {
+            bbox = this.partFront.getBBox();
+        } catch (_) {
+            return;
+        }
+
+        if (!bbox || !Number.isFinite(bbox.width) || !Number.isFinite(bbox.height)) {
+            return;
+        }
+
+        const targetLeftX = panelOrigin.x + (this.panelWidth - bbox.width) / 2;
+        const targetBottomY = panelOrigin.y - this.frontGap;
+        const targetTopY = targetBottomY - bbox.height;
+        const dx = targetLeftX - bbox.x;
+        const dy = targetTopY - bbox.y;
+
+        if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
+            return;
+        }
+
+        const translated = this.translatePathData(pathData, dx, dy);
+        if (translated) {
+            this.partFront.setAttribute("d", translated);
+        }
+    }
+
+    /**
+     * Translate SVG path data by dx/dy.
+     * Relative commands stay unchanged because they are already local deltas.
+     */
+    translatePathData(pathData, dx, dy) {
+        const normalized = String(pathData ?? "").trim();
+        if (!normalized) return "";
+        if (!Number.isFinite(dx) || !Number.isFinite(dy)) return normalized;
+
+        const commandRe = /([MmLlHhVvZzCcSsQqTtAa])([^MmLlHhVvZzCcSsQqTtAa]*)/g;
+        const parts = [];
+        let match;
+
+        while ((match = commandRe.exec(normalized)) !== null) {
+            const cmd = match[1];
+            const upper = cmd.toUpperCase();
+            const isRelative = cmd !== upper;
+            const args = match[2].trim();
+
+            if (!args) {
+                parts.push(cmd);
+                continue;
+            }
+
+            const nums = args
+                .split(/[\s,]+/)
+                .filter(Boolean)
+                .map(Number);
+
+            if (nums.length === 0 || nums.some((n) => !Number.isFinite(n))) {
+                parts.push(`${cmd}${args ? ` ${args}` : ""}`);
+                continue;
+            }
+
+            let transformed = [...nums];
+            if (!isRelative) {
+                if (upper === "M" || upper === "L" || upper === "T") {
+                    transformed = nums.map((value, index) =>
+                        index % 2 === 0 ? value + dx : value + dy
+                    );
+                } else if (upper === "H") {
+                    transformed = nums.map((value) => value + dx);
+                } else if (upper === "V") {
+                    transformed = nums.map((value) => value + dy);
+                } else if (upper === "C") {
+                    transformed = nums.map((value, index) =>
+                        index % 2 === 0 ? value + dx : value + dy
+                    );
+                } else if (upper === "S" || upper === "Q") {
+                    transformed = nums.map((value, index) =>
+                        index % 2 === 0 ? value + dx : value + dy
+                    );
+                } else if (upper === "A") {
+                    transformed = [...nums];
+                    for (let i = 0; i + 6 < transformed.length; i += 7) {
+                        transformed[i + 5] += dx;
+                        transformed[i + 6] += dy;
+                    }
+                }
+            }
+
+            const argsText = transformed
+                .map((value) => Number(value.toFixed(6)))
+                .join(" ");
+            parts.push(argsText ? `${cmd} ${argsText}` : cmd);
+        }
+
+        return parts.join(" ").replace(/\s+/g, " ").trim();
     }
 
     /**

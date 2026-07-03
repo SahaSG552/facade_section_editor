@@ -273,20 +273,10 @@ function initializeSVG() {
 
     // Check if CanvasManager already exists (from modular system)
     if (!mainCanvasManager) {
-        // Calculate panel anchor position for grid alignment
-        const canvasRect = canvas.getBoundingClientRect();
-        const canvasWidth = canvasRect.width || 800;
-        const canvasHeight = canvasRect.height || 600;
-        const panelX = (canvasWidth - panelWidth) / 2;
-        const panelY = (canvasHeight - panelThickness) / 2;
-        const anchorOffset = getPanelAnchorOffset();
-        // Grid anchor = panel anchor point (no gridSize/2 offset)
-        const gridAnchorX = panelX + anchorOffset.x;
-        const gridAnchorY = panelY + anchorOffset.y;
-
-        // Store anchor position in scene coordinates (fixed, not recalculated on resize)
-        sceneAnchorX = gridAnchorX;
-        sceneAnchorY = gridAnchorY;
+        // Fixed scene anchor at origin — all objects positioned relative to (0,0)
+        // fitToScale() handles viewport centering regardless of screen size
+        sceneAnchorX = 0;
+        sceneAnchorY = 0;
 
         // Create main canvas manager instance only if it doesn't exist
         mainCanvasManager = new CanvasManager({
@@ -296,8 +286,8 @@ function initializeSVG() {
             enableGrid: true,
             enableMouseEvents: true,
             gridSize: gridSize,
-            gridAnchorX: gridAnchorX,
-            gridAnchorY: gridAnchorY,
+            gridAnchorX: 0,
+            gridAnchorY: 0,
             initialZoom: 1,
             layers: ["grid", "panel", "offsets", "bits", "phantoms", "overlay"],
             onZoom: (zoomLevel, panX, panY) => {
@@ -329,6 +319,7 @@ function initializeSVG() {
                     currentWidth,
                     currentHeight,
                 });
+                updatePanelShape();
                 updateOffsetContours();
                 updatePhantomBits();
             }
@@ -767,6 +758,7 @@ function initializeSVG() {
     if (_restoredPartFrontCanvasPath && partFront) {
         partFront.setAttribute("d", _restoredPartFrontCanvasPath);
         panelManager.markPartFrontAsEdited();
+        panelManager.updatePartFront();
         _restoredPartFrontCanvasPath = null;
     }
 
@@ -1171,12 +1163,12 @@ function buildPartFrontPathElements(pathData) {
 }
 
 function getPartFrontEditorFrame() {
-    const panelOrigin = panelManager?.getPanelOrigin?.() ?? { x: 0, y: 0 };
+    const editorOrigin = panelManager?.getPartFrontEditorOrigin?.() ?? { x: 0, y: 0 };
     const width = panelManager?.getWidth?.() ?? panelWidth;
     const height = panelManager?.getHeight?.() ?? panelHeight;
     return {
-        originX: panelOrigin.x,
-        originY: panelOrigin.y - 100,
+        originX: editorOrigin.x,
+        originY: editorOrigin.y,
         width,
         height,
     };
@@ -2656,6 +2648,21 @@ function updateOffsetContours() {
 // Alignment states: 'center', 'left', 'right'
 const alignmentStates = ["center", "left", "right"];
 
+function resolveOperationAlignment(operation, fallback = "center") {
+    switch (operation) {
+        case "AL":
+        case "VC":
+            return "center";
+        case "OU":
+            return "right";
+        case "IN":
+        case "PO":
+            return "left";
+        default:
+            return fallback || "center";
+    }
+}
+
 // Create alignment button SVG
 function createAlignmentButton(alignment) {
     const svg = document.createElementNS(svgNS, "svg");
@@ -2949,7 +2956,7 @@ function drawBitShape(bit, groupName, createBitShapeElementFn) {
         name: bit.name,
         x: x,
         y: y,
-        alignment: "center", // default alignment
+        alignment: resolveOperationAlignment("AL", "center"),
         operation: "AL", // default operation
         color: bit.fillColor || "#cccccc", // default color from bit data
         group: g, // group that contains the shape
@@ -3000,6 +3007,10 @@ async function handleOperationChange(index, newOperation) {
     if (!bit) return;
 
     bit.operation = newOperation;
+    bit.alignment = resolveOperationAlignment(newOperation, bit.alignment);
+    // Keep table coordinates and selected anchor cross in sync with operation-driven origin.
+    updateBitsSheet();
+    redrawBitsOnCanvas();
     updateOffsetContours();
     updatePhantomBits();
 
@@ -3305,7 +3316,7 @@ function createBitCopy(sourceBit) {
         name: sourceBit.name,
         x: sourceBit.x,
         y: sourceBit.y,
-        alignment: sourceBit.alignment,
+        alignment: resolveOperationAlignment(sourceBit.operation, sourceBit.alignment),
         operation: sourceBit.operation,
         color: sourceBit.color,
         group: g,
@@ -3937,8 +3948,9 @@ function getPanelAnchorCoords() {
 function getAnchorOffset(bit) {
     const bitData = bit.bitData;
     const halfDiameter = (bitData.diameter || 0) / 2;
+    const alignment = resolveOperationAlignment(bit.operation, bit.alignment);
 
-    switch (bit.alignment) {
+    switch (alignment) {
         case "left":
             return { x: -halfDiameter, y: 0 };
         case "right":
@@ -4475,7 +4487,10 @@ async function restoreBitPositions(positionsData) {
                     name: bitData.name,
                     x: pos.x,
                     y: pos.y,
-                    alignment: pos.alignment || "center",
+                    alignment: resolveOperationAlignment(
+                        operation,
+                        pos.alignment || "center"
+                    ),
                     operation: operation,
                     color: pos.color || bitData.fillColor || "#cccccc",
                     group: g,

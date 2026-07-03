@@ -310,6 +310,12 @@
     padding-right: 6px;
 }
 
+/* Alignment column is auto-derived from operation (AL/VC=center, OU=right, IN/PO=left). */
+#operations thead th:nth-child(6),
+#operations tbody td:nth-child(6) {
+    display: none;
+}
+
 /* Header action buttons (Cop / Hid / Del) */
 .table-header-btn {
     background: none;
