@@ -1,0 +1,9 @@
+[     209ms] [INFO] [14:14:59] [ReplicadCanvasModule:INFO] Replicad bit build summary {bits: 0, builtCount: 0, reusedPrevCount: 0, cacheHitCount: 0, cacheMissCount: 0} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     217ms] [INFO] [14:14:59] [ReplicadCanvasModule:INFO] Replicad mesh {isCutterPreview: false, vertexCount: 304, triangleCount: 292, meshMs: 8, tessellationAttempts: Array(1)} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     239ms] [INFO] [14:14:59] [ReplicadCanvasModule:INFO] Replicad perf {changedBitIds: null, lazyInitMs: 0, panelMs: 3, bitsMs: 1, renderOrCsgMs: 31} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     242ms] [INFO] [14:14:59] [ReplicadCanvasModule:INFO] Replicad bit build summary {bits: 0, builtCount: 0, reusedPrevCount: 0, cacheHitCount: 0, cacheMissCount: 0} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     247ms] [INFO] [14:14:59] [ReplicadCanvasModule:INFO] Replicad mesh {isCutterPreview: false, vertexCount: 304, triangleCount: 292, meshMs: 5, tessellationAttempts: Array(1)} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     268ms] [INFO] [14:14:59] [ReplicadCanvasModule:INFO] Replicad perf {changedBitIds: null, lazyInitMs: 0, panelMs: 2, bitsMs: 0, renderOrCsgMs: 26} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    9416ms] [INFO] [14:15:08] [ReplicadCanvasModule:INFO] Replicad bit build summary {bits: 0, builtCount: 0, reusedPrevCount: 0, cacheHitCount: 0, cacheMissCount: 0} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    9422ms] [INFO] [14:15:08] [ReplicadCanvasModule:INFO] Replicad mesh {isCutterPreview: false, vertexCount: 304, triangleCount: 292, meshMs: 6, tessellationAttempts: Array(1)} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    9444ms] [INFO] [14:15:08] [ReplicadCanvasModule:INFO] Replicad perf {changedBitIds: null, lazyInitMs: 0, panelMs: 2, bitsMs: 0, renderOrCsgMs: 28} @ http://localhost:5173/src/core/LoggerFactory.js:56

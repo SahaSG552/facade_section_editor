@@ -2388,6 +2388,154 @@ function getFirstSegmentPointInWorldXY(segments, bboxRef, panelAnchor = "top-lef
     return [worldX, worldY, worldZ];
 }
 
+function mapSvgPointToWorldXY(point, bboxRef, panelAnchor = "top-left", depth = 0, panelThickness = appConfig.panel.thickness) {
+    if (!point || !bboxRef) return null;
+    const px = Number(point.x);
+    const py = Number(point.y);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+
+    const centerX = bboxRef.x + bboxRef.width / 2;
+    const topY = bboxRef.y;
+    const bottomY = bboxRef.y + bboxRef.height;
+    const flipY = panelAnchor !== "bottom-left";
+
+    const worldX = px - centerX;
+    const worldY = flipY ? (bottomY - py) : (py - topY);
+    const halfThickness = panelThickness / 2;
+    const worldZ = panelAnchor === "top-left"
+        ? halfThickness - depth
+        : panelAnchor === "bottom-left"
+            ? -halfThickness - depth
+            : 0;
+
+    return [worldX, worldY, worldZ];
+}
+
+function normalizeWorldVector3(vec, eps = 1e-8) {
+    if (!Array.isArray(vec) || vec.length < 3) return null;
+    const x = Number(vec[0]);
+    const y = Number(vec[1]);
+    const z = Number(vec[2]);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+    const len = Math.hypot(x, y, z);
+    if (!Number.isFinite(len) || len <= eps) return null;
+    return [x / len, y / len, z / len];
+}
+
+function getPerpendicularAxisFromTangentXY(tangent, eps = 1e-8) {
+    const normTangent = normalizeWorldVector3(tangent, eps);
+    if (!normTangent) return null;
+
+    const tx = Number(normTangent[0]);
+    const ty = Number(normTangent[1]);
+    if (!Number.isFinite(tx) || !Number.isFinite(ty)) return null;
+
+    const perp = [-ty, tx, 0];
+    return normalizeWorldVector3(perp, eps);
+}
+
+function dot3(a, b) {
+    return Number(a?.[0] ?? 0) * Number(b?.[0] ?? 0)
+        + Number(a?.[1] ?? 0) * Number(b?.[1] ?? 0)
+        + Number(a?.[2] ?? 0) * Number(b?.[2] ?? 0);
+}
+
+function cross3(a, b) {
+    return [
+        Number(a?.[1] ?? 0) * Number(b?.[2] ?? 0) - Number(a?.[2] ?? 0) * Number(b?.[1] ?? 0),
+        Number(a?.[2] ?? 0) * Number(b?.[0] ?? 0) - Number(a?.[0] ?? 0) * Number(b?.[2] ?? 0),
+        Number(a?.[0] ?? 0) * Number(b?.[1] ?? 0) - Number(a?.[1] ?? 0) * Number(b?.[0] ?? 0),
+    ];
+}
+
+function rotateVectorAroundAxis(v, axis, angleRad) {
+    const k = normalizeWorldVector3(axis);
+    if (!k) return normalizeWorldVector3(v);
+    const vec = normalizeWorldVector3(v);
+    if (!vec) return null;
+
+    const cosA = Math.cos(angleRad);
+    const sinA = Math.sin(angleRad);
+    const kDotV = dot3(k, vec);
+    const kCrossV = cross3(k, vec);
+
+    return normalizeWorldVector3([
+        vec[0] * cosA + kCrossV[0] * sinA + k[0] * kDotV * (1 - cosA),
+        vec[1] * cosA + kCrossV[1] * sinA + k[1] * kDotV * (1 - cosA),
+        vec[2] * cosA + kCrossV[2] * sinA + k[2] * kDotV * (1 - cosA),
+    ]);
+}
+
+function getOpenContourTerminalFramesWorld(segments, pathData, bboxRef, panelAnchor = "top-left", depth = 0, panelThickness = appConfig.panel.thickness) {
+    const eps = 1e-8;
+
+    const toFrame = (startPoint, endPoint, reverseTangent = false) => {
+        const startWorld = mapSvgPointToWorldXY(startPoint, bboxRef, panelAnchor, depth, panelThickness);
+        const endWorld = mapSvgPointToWorldXY(endPoint, bboxRef, panelAnchor, depth, panelThickness);
+        if (!startWorld || !endWorld) return null;
+        const dir = reverseTangent
+            ? [startWorld[0] - endWorld[0], startWorld[1] - endWorld[1], 0]
+            : [endWorld[0] - startWorld[0], endWorld[1] - startWorld[1], 0];
+        const tangent = normalizeWorldVector3(dir, eps);
+        if (!tangent) return null;
+        return { point: reverseTangent ? endWorld : startWorld, tangent };
+    };
+
+    if (Array.isArray(segments) && segments.length > 0) {
+        let firstSeg = null;
+        for (const seg of segments) {
+            const sx = Number(seg?.start?.x);
+            const sy = Number(seg?.start?.y);
+            const ex = Number(seg?.end?.x);
+            const ey = Number(seg?.end?.y);
+            if (!Number.isFinite(sx) || !Number.isFinite(sy) || !Number.isFinite(ex) || !Number.isFinite(ey)) continue;
+            if (Math.hypot(ex - sx, ey - sy) <= eps) continue;
+            firstSeg = seg;
+            break;
+        }
+
+        let lastSeg = null;
+        for (let i = segments.length - 1; i >= 0; i -= 1) {
+            const seg = segments[i];
+            const sx = Number(seg?.start?.x);
+            const sy = Number(seg?.start?.y);
+            const ex = Number(seg?.end?.x);
+            const ey = Number(seg?.end?.y);
+            if (!Number.isFinite(sx) || !Number.isFinite(sy) || !Number.isFinite(ex) || !Number.isFinite(ey)) continue;
+            if (Math.hypot(ex - sx, ey - sy) <= eps) continue;
+            lastSeg = seg;
+            break;
+        }
+
+        if (firstSeg && lastSeg) {
+            const startFrame = toFrame(firstSeg.start, firstSeg.end, false);
+            const endFrame = toFrame(lastSeg.start, lastSeg.end, true);
+            if (startFrame && endFrame) {
+                return {
+                    startPoint: startFrame.point,
+                    startTangent: startFrame.tangent,
+                    endPoint: endFrame.point,
+                    endTangent: endFrame.tangent,
+                };
+            }
+        }
+    }
+
+    const sampled = sampleSvgPathPoints(pathData, getAdaptiveSvgPathSampleStep(pathData, 5));
+    if (!Array.isArray(sampled) || sampled.length < 2) return null;
+
+    const startFrame = toFrame(sampled[0], sampled[1], false);
+    const endFrame = toFrame(sampled[sampled.length - 2], sampled[sampled.length - 1], true);
+    if (!startFrame || !endFrame) return null;
+
+    return {
+        startPoint: startFrame.point,
+        startTangent: startFrame.tangent,
+        endPoint: endFrame.point,
+        endTangent: endFrame.tangent,
+    };
+}
+
 // ---------------------------------------------------------------------------
 // ReplicadCanvasModule
 // ---------------------------------------------------------------------------
@@ -3043,8 +3191,19 @@ export default class ReplicadCanvasModule extends BaseModule {
                     ? (changedSet.has(bitId) || (libraryBitId ? changedSet.has(libraryBitId) : false))
                     : false;
 
+                // Reuse previous shape only when BOTH conditions are met:
+                //  a) The bit was not explicitly flagged as changed (changedSet path), AND
+                //  b) Its computed signature matches the last-known signature (geometry/position
+                //     didn't change since the last build).
+                //
+                // The second condition prevents a "phantom stale shape" bug: if a concurrent
+                // update modifies a bit while a changedBitIds-scoped build is in flight, that
+                // bit would be excluded from changedSet (not in the list). Without the
+                // signature guard we would push the NEW signature into _lastBitSignatureById
+                // for an OLD shape, causing the subsequent full-rebuild (pending update) to
+                // also see "unchanged signature" and skip the rebuild permanently.
                 const shouldReusePreviousDirectly =
-                    (changedSet && !changedById)
+                    (changedSet && !changedById && unchangedBySignature)
                     || (!changedSet && unchangedBySignature);
 
                 if (shouldReusePreviousDirectly && Array.isArray(prevEntries) && prevEntries.length > 0) {
@@ -3344,7 +3503,7 @@ export default class ReplicadCanvasModule extends BaseModule {
         return 0;
     }
 
-    _buildProfileWire(bitData, pathZ, profileOrigin = null) {
+    _buildProfileSketch(bitData, pathZ, profileOrigin = null) {
         const { Sketcher } = _replicad;
         let profilePath = String(bitData?.profilePath || "").trim();
         const origin = Array.isArray(profileOrigin) && profileOrigin.length === 3
@@ -3384,7 +3543,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                         console.warn("[ReplicadCanvasModule] Failed to reverse CW SVG profile path", errRev);
                     }
                 }
-                return profileSketch.wire;
+                return profileSketch;
             }
         }
 
@@ -3397,7 +3556,7 @@ export default class ReplicadCanvasModule extends BaseModule {
                 .movePointerTo([0, 0])
                 .threePointsArcTo([0, 2 * radius], [-radius, radius])
                 .threePointsArcTo([0, 0], [radius, radius]);
-            return prof.done().wire;
+            return prof.done();
         }
 
         let minX = Infinity;
@@ -3421,7 +3580,398 @@ export default class ReplicadCanvasModule extends BaseModule {
             profile = profile.lineTo(toXZ(points[i]));
         }
 
-        return profile.close().wire;
+        return profile.close();
+    }
+
+    _buildProfileWire(bitData, pathZ, profileOrigin = null) {
+        const profileSketch = this._buildProfileSketch(bitData, pathZ, profileOrigin);
+        return profileSketch?.wire || null;
+    }
+
+    _buildHalfProfileSketchForRevolve(bitData, pathZ, profileOrigin = null) {
+        const { Sketcher } = _replicad;
+        const origin = Array.isArray(profileOrigin) && profileOrigin.length === 3
+            ? profileOrigin
+            : [0, 0, pathZ];
+
+        const profileSource = String(bitData?.profileSvg || bitData?.profilePath || "").trim();
+        const fallbackRadius = Math.max(0.1, Number(bitData?.diameter ?? 10) / 2);
+
+        const _makeFallback = () =>
+            new Sketcher("XZ", origin)
+                .movePointerTo([0, 0])
+                .lineTo([fallbackRadius, 0])
+                .lineTo([fallbackRadius, fallbackRadius])
+                .lineTo([0, fallbackRadius])
+                .close();
+
+        if (!profileSource) return _makeFallback();
+
+        // ── Compute bounding box via sampling ──────────────────────────────
+        const sampledCloud = parseProfilePointsFromPathData(profileSource);
+        if (sampledCloud.length < 3) return _makeFallback();
+
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const p of sampledCloud) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        const cx      = (minX + maxX) / 2;   // profile horizontal centre in SVG space
+        const anchorY = minY;                  // bottom reference
+        const yMaxLoc = maxY - anchorY;        // top in local coords
+
+        // Transform SVG → local XZ:  x_local = cx − x,  y_local = y − anchorY
+        // Points with x_local ≥ 0 (x ≤ cx) form the RIGHT HALF for revolve.
+        const toXZ  = (x, y) => [cx - Number(x), Number(y) - anchorY];
+        const xLoc  = (x)    => cx - Number(x);   // scalar helper
+        const yLoc  = (y)    => Number(y) - anchorY;
+        const isNear = (ax, ay, bx, by, eps = 1e-6) =>
+            Math.abs(ax - bx) <= eps && Math.abs(ay - by) <= eps;
+
+        // ── Parse SVG commands ─────────────────────────────────────────────
+        const commands = parseSvgCommands(profileSource);
+        if (!commands.length) return _makeFallback();
+
+        // ──────────────────────────────────────────────────────────────────
+        // Build a half-profile sketch from the LEFT HALF of the original SVG
+        // profile (x ≤ cx in SVG ↔ x_local ≥ 0 after mirror).
+        //
+        // The tricky part: the M command often starts on the RIGHT side, and
+        // straight segments frequently cross the centrelinex = cx.  We handle
+        // this with per-segment clipping:
+        //
+        //  ① outside→inside crossing: initialise sketch at [0, y_cross],
+        //    then lineTo the clipped endpoint.
+        //  ② inside→outside crossing: lineTo [0, y_cross], then stop
+        //    accumulating until we re-enter.
+        //  ③ entirely inside: use the native curve command (arc / bezier).
+        //  ④ entirely outside: skip.
+        // ──────────────────────────────────────────────────────────────────
+
+        let sketch = null;
+        // Local coordinates of the sketch cursor (mirrors curX/curY in local space)
+        let sketchXLoc = null;
+        let sketchYLoc = null;
+
+        // SVG cursor in original SVG space
+        let curX = 0, curY = 0, startX = 0, startY = 0;
+        let prevC2X = null, prevC2Y = null, prevQX = null, prevQY = null;
+
+        // Clamp a value to the half-open range [0, ∞)
+        const EPS = 1e-5;
+        const inside  = (x) => xLoc(x) >= -EPS;   // x ≤ cx  (right half in local)
+
+        // Linear clip: find intersection of line (x0,y0)→(x1,y1) with x_local=0
+        // i.e. x_original = cx. Returns {x:cx, y:interp} or null.
+        const lineClipAtCentre = (x0, y0, x1, y1) => {
+            const dx = x1 - x0;
+            if (Math.abs(dx) < 1e-10) return null; // vertical or degenerate
+            const t = (cx - x0) / dx;              // t where x = cx
+            if (t < -EPS || t > 1 + EPS) return null;
+            return { x: cx, y: y0 + t * (y1 - y0) };
+        };
+
+        // Ensure sketch is initialised at a given local position.
+        // If sketch exists, add a lineTo; otherwise open it with movePointerTo.
+        const ensureAt = (xloc, yloc) => {
+            if (sketch === null) {
+                sketch       = new Sketcher("XZ", origin).movePointerTo([xloc, yloc]);
+                sketchXLoc   = xloc;
+                sketchYLoc   = yloc;
+            } else if (!isNear(sketchXLoc, sketchYLoc, xloc, yloc)) {
+                sketch       = sketch.lineTo([xloc, yloc]);
+                sketchXLoc   = xloc;
+                sketchYLoc   = yloc;
+            }
+        };
+
+        for (const entry of commands) {
+            const raw = entry.cmd;
+            const up  = raw.toUpperCase();
+            const rel = raw !== up;
+            const v   = entry.values;
+
+            if (up === "Z") {
+                curX = startX; curY = startY;
+                prevC2X = prevC2Y = prevQX = prevQY = null;
+                continue;
+            }
+
+            if (up === "M") {
+                const x = rel ? curX + v[0] : v[0];
+                const y = rel ? curY + v[1] : v[1];
+                if (inside(x)) {
+                    // If inside, also handle the line from previous cursor position
+                    // crossing the centre (so we pick up the enter point if needed).
+                    if (sketch === null && !isNear(xLoc(x), 0, 0, 0)) {
+                        const clip = lineClipAtCentre(curX, curY, x, y);
+                        if (clip) ensureAt(0, yLoc(clip.y));
+                    }
+                    ensureAt(xLoc(x), yLoc(y));
+                }
+                curX = x; curY = y; startX = x; startY = y;
+                prevC2X = prevC2Y = prevQX = prevQY = null;
+                continue;
+            }
+
+            // ──────── STRAIGHT LINES ────────────────────────────────────
+            if (up === "L" || up === "H" || up === "V") {
+                let x = curX, y = curY;
+                if (up === "L") { x = rel ? curX + v[0] : v[0]; y = rel ? curY + v[1] : v[1]; }
+                else if (up === "H") { x = rel ? curX + v[0] : v[0]; }
+                else              { y = rel ? curY + v[0] : v[0]; }
+
+                const wasIn = inside(curX);
+                const nowIn = inside(x);
+
+                if (!wasIn && nowIn) {
+                    // Entering the valid region — clip at centre
+                    const clip = lineClipAtCentre(curX, curY, x, y);
+                    const enterX = clip ? 0 : xLoc(x);
+                    const enterY = clip ? yLoc(clip.y) : yLoc(y);
+                    ensureAt(enterX, enterY);
+                    if (!isNear(enterX, enterY, xLoc(x), yLoc(y))) {
+                        sketch = sketch.lineTo([xLoc(x), yLoc(y)]);
+                        sketchXLoc = xLoc(x); sketchYLoc = yLoc(y);
+                    }
+                } else if (wasIn && nowIn) {
+                    // Staying inside
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    if (!isNear(sketchXLoc, sketchYLoc, xLoc(x), yLoc(y))) {
+                        sketch = sketch.lineTo([xLoc(x), yLoc(y)]);
+                        sketchXLoc = xLoc(x); sketchYLoc = yLoc(y);
+                    }
+                } else if (wasIn && !nowIn) {
+                    // Leaving the valid region — clip at centre
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    const clip = lineClipAtCentre(curX, curY, x, y);
+                    if (clip && !isNear(sketchXLoc, sketchYLoc, 0, yLoc(clip.y))) {
+                        sketch = sketch.lineTo([0, yLoc(clip.y)]);
+                        sketchXLoc = 0; sketchYLoc = yLoc(clip.y);
+                    }
+                }
+                // else: was outside and stays outside → skip
+
+                curX = x; curY = y;
+                continue;
+            }
+
+            // ──────── CURVES (arcs / beziers) ───────────────────────────
+            // For curves we only process them when both the start AND end are
+            // inside the valid region (x ≤ cx).  Curves that cross the centre
+            // are uncommon in standard bit profiles; when they do occur the
+            // missing piece is small and the auto-added centre segments below
+            // fill in any visible gap.
+
+            if (up === "C") {
+                const c1x = rel ? curX + v[0] : v[0]; const c1y = rel ? curY + v[1] : v[1];
+                const c2x = rel ? curX + v[2] : v[2]; const c2y = rel ? curY + v[3] : v[3];
+                const x   = rel ? curX + v[4] : v[4]; const y   = rel ? curY + v[5] : v[5];
+                if (inside(curX) && inside(x)) {
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    sketch = sketch.cubicBezierCurveTo(toXZ(x, y), toXZ(c1x, c1y), toXZ(c2x, c2y));
+                    sketchXLoc = xLoc(x); sketchYLoc = yLoc(y);
+                }
+                prevC2X = c2x; prevC2Y = c2y; prevQX = prevQY = null;
+                curX = x; curY = y;
+            } else if (up === "S") {
+                const c1x = prevC2X !== null ? 2 * curX - prevC2X : curX;
+                const c1y = prevC2Y !== null ? 2 * curY - prevC2Y : curY;
+                const c2x = rel ? curX + v[0] : v[0]; const c2y = rel ? curY + v[1] : v[1];
+                const x   = rel ? curX + v[2] : v[2]; const y   = rel ? curY + v[3] : v[3];
+                if (inside(curX) && inside(x)) {
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    sketch = sketch.cubicBezierCurveTo(toXZ(x, y), toXZ(c1x, c1y), toXZ(c2x, c2y));
+                    sketchXLoc = xLoc(x); sketchYLoc = yLoc(y);
+                }
+                prevC2X = c2x; prevC2Y = c2y; prevQX = prevQY = null;
+                curX = x; curY = y;
+            } else if (up === "Q") {
+                const qx = rel ? curX + v[0] : v[0]; const qy = rel ? curY + v[1] : v[1];
+                const x  = rel ? curX + v[2] : v[2]; const y  = rel ? curY + v[3] : v[3];
+                if (inside(curX) && inside(x)) {
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    sketch = sketch.quadraticBezierCurveTo(toXZ(x, y), toXZ(qx, qy));
+                    sketchXLoc = xLoc(x); sketchYLoc = yLoc(y);
+                }
+                prevQX = qx; prevQY = qy; prevC2X = prevC2Y = null;
+                curX = x; curY = y;
+            } else if (up === "T") {
+                const qx = prevQX !== null ? 2 * curX - prevQX : curX;
+                const qy = prevQY !== null ? 2 * curY - prevQY : curY;
+                const x  = rel ? curX + v[0] : v[0]; const y  = rel ? curY + v[1] : v[1];
+                if (inside(curX) && inside(x)) {
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    sketch = sketch.quadraticBezierCurveTo(toXZ(x, y), toXZ(qx, qy));
+                    sketchXLoc = xLoc(x); sketchYLoc = yLoc(y);
+                }
+                prevQX = qx; prevQY = qy; prevC2X = prevC2Y = null;
+                curX = x; curY = y;
+            } else if (up === "A") {
+                const rx = v[0], ry = v[1];
+                const rot      = -v[2];   // mirror X flips rotation sign
+                const largeArc = !!v[3];
+                const sweep    = !v[4];   // mirror X flips sweep direction
+                const x        = rel ? curX + v[5] : v[5];
+                const y        = rel ? curY + v[6] : v[6];
+                if (inside(curX) && inside(x) && !isNear(curX, curY, x, y)) {
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    // Split exact 180° arcs to avoid OCC pole degeneracy
+                    const dist = Math.hypot(x - curX, y - curY);
+                    if (Math.abs(dist - 2 * rx) < 1e-3 && Math.abs(rx - ry) < 1e-3) {
+                        const cxArc = (curX + x) / 2, cyArc = (curY + y) / 2;
+                        const v1x = curX - cxArc, v1y = curY - cyArc;
+                        const origSweep = v[4];
+                        const midX = cxArc + (origSweep === 1 ? -v1y : v1y);
+                        const midY = cyArc + (origSweep === 1 ? v1x : -v1x);
+                        sketch = sketch.ellipseTo(toXZ(midX, midY), rx, ry, rot, false, sweep);
+                        sketch = sketch.ellipseTo(toXZ(x, y),        rx, ry, rot, false, sweep);
+                    } else {
+                        sketch = sketch.ellipseTo(toXZ(x, y), rx, ry, rot, largeArc, sweep);
+                    }
+                    sketchXLoc = xLoc(x); sketchYLoc = yLoc(y);
+                } else if (inside(curX) && !inside(x)) {
+                    // Arc starts inside, ends outside — treat as line-segment exit
+                    if (sketch === null) ensureAt(xLoc(curX), yLoc(curY));
+                    // Approximate by clipping to centre line at current y (conservative)
+                    if (sketchXLoc > EPS) {
+                        sketch = sketch.lineTo([0, sketchYLoc]);
+                        sketchXLoc = 0;
+                    }
+                } else if (!inside(curX) && inside(x)) {
+                    // Arc starts outside, ends inside — initialise at entrance
+                    ensureAt(0, yLoc(y));  // approximate: enter at centreline at y of endpoint
+                }
+                prevC2X = prevC2Y = prevQX = prevQY = null;
+                curX = x; curY = y;
+            }
+        }
+
+        if (!sketch) return _makeFallback();
+
+        // ── Ensure the half-profile is properly closed with centreline segments ──
+        // The revolve axis is at x_local = 0.  The sketch must start and end on
+        // this axis so that the revolved solid has flat faces at the terminals.
+        //
+        // If the last traced point is not on the centreline, clip there first.
+        if (sketchXLoc !== null && sketchXLoc > EPS) {
+            sketch = sketch.lineTo([0, sketchYLoc]);
+            sketchXLoc = 0;
+        }
+        // If not back at y_local = 0, walk down the centreline.
+        if (sketchYLoc !== null && Math.abs(sketchYLoc) > EPS) {
+            sketch = sketch.lineTo([0, 0]);
+            sketchYLoc = 0;
+        }
+
+        try {
+            return sketch.close();
+        } catch {
+            return _makeFallback();
+        }
+    }
+
+    _buildFullRevolveCapAtTerminal(bitData, pathZ, point, tangent, capAngleDeg = 180) {
+        const tangentDir = normalizeWorldVector3(tangent);
+        if (!tangentDir) return null;
+
+        const tx = Number(tangentDir[0]);
+        const ty = Number(tangentDir[1]);
+
+        // Build the half-profile origin 1mm INSIDE the sweep body so that the resulting
+        // revolved solid has guaranteed volumetric overlap with the sweep — not just
+        // coincident-face touch. OCC fuse is unreliable when shapes merely touch at a plane.
+        const overlapMm = 0.01;
+        const overlapOrigin = [
+            Number(point[0]) + tx * overlapMm,
+            Number(point[1]) + ty * overlapMm,
+            Number(point[2]),
+        ];
+
+        const profileSketch = this._buildHalfProfileSketchForRevolve(bitData, pathZ, overlapOrigin);
+        if (!profileSketch) {
+            this._logWarnThrottled("Full revolve cap skipped: profile sketch missing", {
+                bitName: bitData?.name || null,
+            });
+            return null;
+        }
+
+        let cap = null;
+        try {
+            const angleNum = Number(capAngleDeg);
+            const safeAngle = Number.isFinite(angleNum) && angleNum > 0 && angleNum <= 360
+                ? angleNum
+                : 180;
+            cap = profileSketch.revolve([0, 0, 1], { angle: safeAngle });
+        } catch (err) {
+            this._logWarnThrottled("Full revolve cap revolve() failed", {
+                bitName: bitData?.name || null,
+                message: err?.message || String(err),
+            });
+            cap = null;
+        }
+        if (!cap) return null;
+
+        // Single-rotation alignment around Z-axis:
+        // Maps flat-face normal Y=[0,1,0] → +tangentDir (section plane of terminal).
+        // +180° places the dome OUTWARD from the terminal (away from sweep body).
+        // The 1mm origin offset guarantees overlap with the sweep for reliable OCC fuse.
+        const angleDeg = (Math.atan2(-tx, ty) * 180) / Math.PI + 180;
+        return cap.rotate(angleDeg, overlapOrigin, [0, 0, 1]);
+    }
+
+    _buildOpenSweepFullRevolveCaps(bit, depth, pathData, segments, bboxRef, panelAnchor, panelT) {
+        const terminalFrames = getOpenContourTerminalFramesWorld(
+            segments,
+            pathData,
+            bboxRef,
+            panelAnchor,
+            depth,
+            panelT
+        );
+        if (!terminalFrames) {
+            this._logWarnThrottled("Full revolve caps skipped: no terminal frames", {
+                bit: bit?.name || bit?.bitData?.name || null,
+                depth,
+            });
+            return [];
+        }
+
+        const pathZ = this._getSurfaceDepthZ(depth, panelAnchor, panelT);
+        const configuredAngle = Number(window?.__replicadOpenSweepCapAngleDeg);
+        const capAngleDeg = Number.isFinite(configuredAngle) && configuredAngle > 0 && configuredAngle <= 360
+            ? configuredAngle
+            : 180;
+        const caps = [];
+
+        const startCap = this._buildFullRevolveCapAtTerminal(
+            bit?.bitData,
+            pathZ,
+            terminalFrames.startPoint,
+            terminalFrames.startTangent,
+            capAngleDeg
+        );
+        if (startCap) caps.push(startCap);
+
+        const endCap = this._buildFullRevolveCapAtTerminal(
+            bit?.bitData,
+            pathZ,
+            terminalFrames.endPoint,
+            terminalFrames.endTangent,
+            capAngleDeg
+        );
+        if (endCap) caps.push(endCap);
+
+        if (caps.length === 0) {
+            this._logWarnThrottled("Full revolve caps built: none", {
+                bit: bit?.name || bit?.bitData?.name || null,
+                depth,
+            });
+        }
+
+        return caps;
     }
 
     _buildVCProfileWire(bitData, depth, pathZ, profileOrigin = null) {
@@ -3995,6 +4545,35 @@ export default class ReplicadCanvasModule extends BaseModule {
                 });
             }
 
+            if (!contourClosed) {
+                // Use normalizedContourSegments so terminal points match the sweep path endpoints.
+                const capSegments = (Array.isArray(normalizedContourSegments) && normalizedContourSegments.length > 0)
+                    ? normalizedContourSegments
+                    : contourSegments;
+                const terminalCaps = this._buildOpenSweepFullRevolveCaps(
+                    bit,
+                    depth,
+                    normalizedPathData,
+                    capSegments,
+                    bboxRef,
+                    panelAnchor,
+                    panelT
+                );
+
+                if (terminalCaps.length > 0) {
+                    this.log.info("Open sweep full revolve terminal caps", {
+                        bit: sweepDiag.bit,
+                        depth,
+                        caps: terminalCaps.length,
+                    });
+                    // Keep sweep and revolve caps as separate CSG cutters so each is
+                    // subtracted independently from the panel.  This avoids OCC fuse
+                    // hangs that occur when the new smooth-curve revolve cap is joined
+                    // to the sweep before the CSG step.
+                    return [result, ...terminalCaps];
+                }
+            }
+
             return result;
         } catch (err) {
             this.log.error(`_sweepRoundProfile failed (bit=${bit?.name || bit?.bitData?.name || "unknown"}, d=${depth}):`, err);
@@ -4032,7 +4611,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                 "round",
                 contour
             );
-            if (shape) shapes.push(shape);
+            if (Array.isArray(shape)) shapes.push(...shape.filter(Boolean));
+            else if (shape) shapes.push(shape);
         }
 
         if (shapes.length === 0) return null;
@@ -4078,7 +4658,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                 "round",
                 contour
             );
-            if (shape) shapes.push(shape);
+            if (Array.isArray(shape)) shapes.push(...shape.filter(Boolean));
+            else if (shape) shapes.push(shape);
         }
 
         if (shapes.length === 0) return null;
@@ -4122,7 +4703,8 @@ export default class ReplicadCanvasModule extends BaseModule {
                 "round",
                 contour
             );
-            if (shape) shapes.push(shape);
+            if (Array.isArray(shape)) shapes.push(...shape.filter(Boolean));
+            else if (shape) shapes.push(shape);
         }
 
         if (shapes.length === 0) return null;
@@ -4784,10 +5366,60 @@ export default class ReplicadCanvasModule extends BaseModule {
                 }
             };
 
+            const panelBBox = (() => {
+                try { return result?.boundingBox; } catch { return null; }
+            })();
+            // Expand panel bbox by 30mm to avoid false-rejecting terminal revolve caps
+            // that extend slightly beyond the panel face (their bbox may only touch the
+            // panel bbox at the boundary face — OCC IsOut treats touching as "outside").
+            const panelBBoxExpanded = (() => {
+                try {
+                    if (!panelBBox) return null;
+                    const b = panelBBox.bounds;
+                    // b = [[xmin,ymin,zmin],[xmax,ymax,zmax]]
+                    if (!Array.isArray(b) || b.length < 2) return null;
+                    const pad = 35; // generous: max typical profile height ~20mm
+                    return {
+                        isOut: (otherBBox) => {
+                            try {
+                                const ob = otherBBox.bounds;
+                                if (!Array.isArray(ob) || ob.length < 2) return false;
+                                // Manual AABB overlap with padding on panel side
+                                const pxmin = b[0][0] - pad, pxmax = b[1][0] + pad;
+                                const pymin = b[0][1] - pad, pymax = b[1][1] + pad;
+                                const pzmin = b[0][2] - pad, pzmax = b[1][2] + pad;
+                                const cxmin = ob[0][0], cxmax = ob[1][0];
+                                const cymin = ob[0][1], cymax = ob[1][1];
+                                const czmin = ob[0][2], czmax = ob[1][2];
+                                // "isOut" = no overlap in any axis
+                                return (cxmax < pxmin || cxmin > pxmax ||
+                                        cymax < pymin || cymin > pymax ||
+                                        czmax < pzmin || czmin > pzmax);
+                            } catch { return false; }
+                        },
+                    };
+                } catch { return null; }
+            })();
+
             for (const { shape, bit } of this.bitShapes) {
                 if (!shape) continue;
                 if (seenShapes.has(shape)) continue;
                 seenShapes.add(shape);
+
+                // Cheap bbox pre-filter: skip cutters that don't intersect the
+                // current panel solid at all.  The panel bbox is pre-expanded by 35mm
+                // so terminal revolve caps that extend beyond the panel face are not
+                // incorrectly excluded.
+                if (panelBBoxExpanded) {
+                    try {
+                        const cutterBBox = shape.boundingBox;
+                        if (cutterBBox && panelBBoxExpanded.isOut(cutterBBox)) {
+                            cutIndex += 1;
+                            continue;
+                        }
+                    } catch { /* non-fatal – fall through to normal cut */ }
+                }
+
                 const cutResult = tryCut(shape, bit, cutIndex, "primary");
                 if (cutResult !== true) {
                     retryQueue.push({ shape, bit, cutIndex, firstFailure: cutResult });
@@ -4837,8 +5469,16 @@ export default class ReplicadCanvasModule extends BaseModule {
             }
 
             this.currentShape = result;
-            this._lastCsgShape = result;
-            this._lastCsgSignature = csgSignature;
+            // Only cache a result that had zero failures; if any cut was skipped, leave
+            // the cache empty so the next updateView() retries CSG from scratch instead of
+            // permanently serving the partial result.
+            if (failedCuts === 0) {
+                this._lastCsgShape = result;
+                this._lastCsgSignature = csgSignature;
+            } else {
+                this._lastCsgShape = null;
+                this._lastCsgSignature = null;
+            }
             this._renderShape(result, { highQuality: true });
             this.log.info("CSG complete", { cutters: this.bitShapes.length, failedCuts });
             if (perfTrace) {

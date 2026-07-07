@@ -1,0 +1,109 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - button "Toggle Bits Panel" [ref=e3] [cursor=pointer]:
+      - img [ref=e4]
+    - heading "Facade Section Editor" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - generic [ref=e7]:
+        - button "2D" [ref=e8] [cursor=pointer]
+        - button "3D" [ref=e9] [cursor=pointer]
+        - button "2D/3D" [ref=e10] [cursor=pointer]
+        - button "BREP" [ref=e11] [cursor=pointer]
+      - button "Toggle Theme" [ref=e12] [cursor=pointer]:
+        - img [ref=e13]
+      - button "Toggle Settings Panel" [ref=e19] [cursor=pointer]:
+        - img [ref=e20]
+  - generic [ref=e22]:
+    - generic [ref=e23]:
+      - heading "Bits Database" [level=3] [ref=e24]
+      - generic [ref=e25]:
+        - button "Exp" [ref=e26] [cursor=pointer]
+        - button "Imp" [ref=e27] [cursor=pointer]
+    - generic [ref=e29]:
+      - img [ref=e30]
+      - generic [ref=e31]:
+        - button "Zoom In" [ref=e32] [cursor=pointer]:
+          - img [ref=e33]
+        - button "Zoom Out" [ref=e37] [cursor=pointer]:
+          - img [ref=e38]
+        - button "Fit to Scale" [ref=e42] [cursor=pointer]:
+          - img [ref=e43]
+        - button "Zoom to Selected" [ref=e47] [cursor=pointer]:
+          - img [ref=e48]
+        - button "Show Part" [ref=e53] [cursor=pointer]:
+          - img [ref=e54]
+        - button "Toggle Bits Visibility" [ref=e57] [cursor=pointer]:
+          - img [ref=e58]
+        - button "Toggle Shank Visibility" [ref=e63] [cursor=pointer]:
+          - img [ref=e64]
+        - button "Export to DXF" [ref=e67] [cursor=pointer]:
+          - img [ref=e68]
+        - generic [ref=e71]: "Grid:"
+        - combobox "Grid:" [ref=e72]:
+          - option "10"
+          - option "5"
+          - option "1" [selected]
+          - option "0.5"
+          - option "0.1"
+          - option "0.01"
+        - button "Toggle Grid" [ref=e73] [cursor=pointer]:
+          - img [ref=e74]
+    - generic [ref=e79]:
+      - generic [ref=e80]:
+        - heading "Part Parameters" [level=3] [ref=e81]
+        - generic [ref=e82]:
+          - generic [ref=e83]:
+            - generic [ref=e84]: "Width:"
+            - textbox "Width:" [ref=e85]: "400"
+          - generic [ref=e86]:
+            - generic [ref=e87]: "Height:"
+            - textbox "Height:" [ref=e88]: "600"
+          - generic [ref=e89]:
+            - generic [ref=e90]: "Thickness:"
+            - textbox "Thickness:" [ref=e91]: "19"
+        - generic [ref=e92]: "Anchor:"
+        - button [ref=e93] [cursor=pointer]
+        - button "LCS" [ref=e94] [cursor=pointer]
+        - button "Edit" [ref=e95] [cursor=pointer]
+        - button "Save" [disabled] [ref=e96]
+      - button "+ Add Custom Field" [ref=e98] [cursor=pointer]
+      - generic [ref=e99]:
+        - textbox "Editor logs will appear here in part edit mode." [ref=e100]
+        - generic [ref=e101]: "Profile Path:"
+        - textbox [ref=e102]
+        - generic [ref=e103]: "Raw Profile Path:"
+        - textbox [ref=e104]
+        - generic [ref=e105]: "Transforms:"
+        - textbox [ref=e106]: "[]"
+        - generic [ref=e107]: "Elements:"
+        - textbox [ref=e108]: "[]"
+      - generic [ref=e109]:
+        - generic [ref=e110]:
+          - heading "Operations" [level=3] [ref=e111]
+          - generic [ref=e112]:
+            - button "Save current bit positions" [ref=e113] [cursor=pointer]:
+              - img [ref=e114]
+            - button "Save bit positions to JSON file" [ref=e119] [cursor=pointer]:
+              - img [ref=e120]
+            - button "Load bit positions from JSON file" [ref=e127] [cursor=pointer]:
+              - img [ref=e128]
+            - button "🗑" [ref=e132] [cursor=pointer]:
+              - generic [ref=e133]: 🗑
+        - table [ref=e135]:
+          - rowgroup [ref=e136]:
+            - row "№ Name X Y S OP Col Cop Hid Del" [ref=e137]:
+              - columnheader [ref=e138]
+              - columnheader "№" [ref=e139]
+              - columnheader "Name" [ref=e140] [cursor=pointer]
+              - columnheader "X" [ref=e141]
+              - columnheader "Y" [ref=e142]
+              - columnheader "S" [ref=e143]
+              - columnheader "OP" [ref=e144]
+              - columnheader "Col" [ref=e145]
+              - columnheader "Cop" [ref=e146]:
+                - button "Cop" [ref=e147] [cursor=pointer]
+              - columnheader "Hid" [ref=e148]:
+                - button "Hid" [ref=e149] [cursor=pointer]
+              - columnheader "Del" [ref=e150]:
+                - button "Del" [ref=e151] [cursor=pointer]
+          - rowgroup

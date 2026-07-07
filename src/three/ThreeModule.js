@@ -2230,11 +2230,15 @@ export default class ThreeModule extends BaseModule {
                     contour.pathData || contour.element?.getAttribute("d") || "";
                 if (!pathData) continue;
 
+                // zOffset = 0: depth is already encoded in the 3D path coordinates
+                // via transformOptions.depth passed to createCurveFromCurves.
+                // Passing bitDepth here too would double-apply the offset (path at
+                // panelThickness/2 - bitDepth, then +bitDepth → back to front face).
                 const bitResult = this.extrusionBuilder.extrudeAlongPath(
                     bitProfile,
                     pathData,
                     bit.color,
-                    bitDepth,
+                    0,
                     "round",
                     "top",
                     transformOptions,

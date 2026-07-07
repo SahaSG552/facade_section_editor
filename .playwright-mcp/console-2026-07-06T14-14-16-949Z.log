@@ -1,0 +1,73 @@
+[     874ms] [INFO] [14:14:17] [AppState:INFO] Initialized {panelWidth: 400, panelHeight: 600, panelThickness: 19, panelAnchor: top-left, showPart: false} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     900ms] [INFO] [14:14:17] [Script:INFO] %c[Bit Logger] Helper functions available: color: #4CAF50; font-weight: bold; @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().all() - Get all logs @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().bitEvents() - Get all bit events @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().forBit(index) - Get events for specific bit @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().extensions() - Get all extension events @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().collisions() - Get all collision events @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().extrusions() - Get all 3D extrusion events @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().export() - Export events as JSON @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     901ms] [INFO] [14:14:17] [Script:INFO]   window.getBitLogs().clear() - Clear all bit events @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     903ms] [LOG] Initializing application... @ http://localhost:5173/src/core/app.js:38
+[     903ms] [LOG] Initializing module canvas... @ http://localhost:5173/src/core/BaseModule.js:22
+[     903ms] [LOG] Module canvas initialized @ http://localhost:5173/src/core/BaseModule.js:26
+[     903ms] [LOG] Module canvas initialized @ http://localhost:5173/src/core/app.js:46
+[     903ms] [LOG] Initializing module bits... @ http://localhost:5173/src/core/BaseModule.js:22
+[     903ms] [LOG] Module bits initialized @ http://localhost:5173/src/core/BaseModule.js:26
+[     903ms] [LOG] Module bits initialized @ http://localhost:5173/src/core/app.js:46
+[     903ms] [LOG] Initializing module export... @ http://localhost:5173/src/core/BaseModule.js:22
+[     903ms] [LOG] Module export initialized @ http://localhost:5173/src/core/BaseModule.js:26
+[     903ms] [INFO] [14:14:17] [ExportModule:INFO] ExportModule initialized @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     903ms] [LOG] Module export initialized @ http://localhost:5173/src/core/app.js:46
+[     903ms] [LOG] Initializing module ui... @ http://localhost:5173/src/core/BaseModule.js:22
+[     903ms] [LOG] Module ui initialized @ http://localhost:5173/src/core/BaseModule.js:26
+[     903ms] [LOG] UIModule initialized @ http://localhost:5173/src/ui/UIModule.js:15
+[     903ms] [LOG] Module ui initialized @ http://localhost:5173/src/core/app.js:46
+[     903ms] [INFO] [14:14:17] [SceneManager:INFO] Created @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     904ms] [INFO] [14:14:17] [ExtrusionBuilder:INFO] Created @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     904ms] [LOG] Initializing module undefined... @ http://localhost:5173/src/core/BaseModule.js:22
+[     904ms] [LOG] Module undefined initialized @ http://localhost:5173/src/core/BaseModule.js:26
+[     904ms] [LOG] Module three initialized @ http://localhost:5173/src/core/app.js:46
+[     904ms] [INFO] [14:14:17] [ReplicadCanvasModule:INFO] ReplicadCanvasModule created @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     904ms] [INFO] [14:14:17] [ReplicadCanvasModule:INFO] Initializing ReplicadCanvasModule... @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     904ms] [INFO] [14:14:17] [ReplicadCanvasModule:INFO] ReplicadCanvasModule initialized (lazy WASM) @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     904ms] [LOG] Module replicad initialized @ http://localhost:5173/src/core/app.js:46
+[     904ms] [LOG] App initialized, setting up canvas @ http://localhost:5173/src/canvas/CanvasModule.js:66
+[     904ms] [LOG] Application initialized successfully @ http://localhost:5173/src/core/app.js:59
+[     904ms] [LOG] Application started @ http://localhost:5173/src/core/app.js:71
+[     904ms] [INFO] [14:14:17] [Script:INFO] Modular system initialized successfully @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     904ms] [INFO] [14:14:17] [Script:INFO] Loading SVG icons... @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     939ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:5173/favicon.ico:0
+[     940ms] [INFO] [14:14:17] [Script:INFO] SVG icons loaded successfully @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO] ExtrusionBuilder available as window.extrusionBuilder @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO] Adjust curve segments from console: @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]   window.extrusionBuilder.curveSegmentCoefficient = 3 @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]   window.extrusionBuilder.curveSegmentMin = 20 @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]   window.extrusionBuilder.curveSegmentMax = 80 @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]  @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO] Arc approximation quality (same as panel): @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]   window.extrusionBuilder.arcDivisionCoefficient = 5 @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]   (Lower value = smoother, more samples. 100mm arc with coef=5 → 20 points) @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]   window.extrusionBuilder.getArcQualityInfo() @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     941ms] [INFO] [14:14:17] [Script:INFO]   window.extrusionBuilder.setArcQuality(3) // to change @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     946ms] [INFO] [14:14:17] [InteractionManager:INFO] InteractionManager initialized @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     946ms] [INFO] [14:14:17] [PanelManager:INFO] PanelManager initialized @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     958ms] [LOG] PhantomBitCalculator: Updating phantoms {bitsCount: 0, poBits: 0} @ http://localhost:5173/src/bits/PhantomBitCalculator.js:71
+[     958ms] [LOG] ExtensionCalculator: Updating pocket inputs {bitsCount: 0, selectedCount: 0, poBits: 0} @ http://localhost:5173/src/bits/ExtensionCalculator.js:391
+[     964ms] [INFO] [14:14:17] [ThreeModule:INFO] Initializing... @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     966ms] [INFO] [14:14:17] [SceneManager:INFO] Secure context detected — using WebGPURenderer @ http://localhost:5173/src/core/LoggerFactory.js:56
+[     970ms] [LOG] CanvasModule: Using existing CanvasManager from global scope @ http://localhost:5173/src/canvas/CanvasModule.js:31
+[     970ms] [LOG] Canvas is ready, initializing bits manager @ http://localhost:5173/src/bits/BitsModule.js?t=1783347220554:70
+[     970ms] [LOG] Canvas is ready, initializing bits manager @ http://localhost:5173/src/bits/BitsModule.js?t=1783347220554:70
+[     970ms] [LOG] BitsModule initialized with BitsManager and CanvasManager @ http://localhost:5173/src/bits/BitsModule.js?t=1783347220554:34
+[    1245ms] [INFO] [14:14:18] [SceneManager:INFO] Lighting setup complete @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1245ms] [INFO] [14:14:18] [SceneManager:INFO] Grid helper added @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1251ms] [INFO] [14:14:18] [SceneManager:INFO] Initialized successfully @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1251ms] [INFO] [14:14:18] [ExtrusionBuilder:INFO] Initialized @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1251ms] [INFO] [14:14:18] [ExtrusionBuilder:INFO] Arc approximation settings: {arcDivisionCoefficient: 5, description: samples = arcLength / coefficient, example: 100mm arc → 20 sample points, console: To change: window.extrusionBuilder.arcDivisionCoefficient = 5} @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1254ms] [INFO] [14:14:18] [SceneManager:INFO] Stats widget added @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1254ms] [INFO] [14:14:18] [ThreeModule:INFO] partFront observer setup complete @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1254ms] [INFO] [14:14:18] [ThreeModule:INFO] Initialized successfully @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1254ms] [INFO] [14:14:18] [CSGScheduler:INFO] Configured CSGScheduler @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1254ms] [INFO] [14:14:18] [ThreeModule:INFO] 3D disabled (mode) @ http://localhost:5173/src/core/LoggerFactory.js:56
+[    1255ms] [INFO] [14:14:18] [AppState:INFO] viewMode changed: 2d @ http://localhost:5173/src/core/LoggerFactory.js:56
